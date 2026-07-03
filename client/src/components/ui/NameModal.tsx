@@ -18,10 +18,10 @@ export function NameModal({ onSubmit }: NameModalProps) {
   };
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-gray-800 rounded-2xl p-8 w-full max-w-sm shadow-2xl border border-white/10">
-        <h2 className="text-white text-xl font-bold mb-2">Welcome to VirtualMeet</h2>
-        <p className="text-white/50 text-sm mb-6">Enter your display name to join the room.</p>
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl p-8 w-full max-w-sm shadow-xl shadow-purple-100/50 border border-purple-100">
+        <h2 className="text-gray-900 text-xl font-bold mb-2">Welcome to VirtualMeet</h2>
+        <p className="text-gray-500 text-sm mb-6">Enter your display name to join the room.</p>
 
         <input
           type="text"
@@ -31,12 +31,12 @@ export function NameModal({ onSubmit }: NameModalProps) {
           placeholder="Your name"
           autoFocus
           maxLength={20}
-          className="w-full bg-gray-700 text-white rounded-lg px-4 py-3 mb-4 outline-none border border-white/10 focus:border-blue-400 transition-colors"
+          className="w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 rounded-lg px-4 py-3 mb-4 outline-none border border-purple-100 focus:border-purple-500 transition-colors"
         />
 
         <button
           onClick={handleSubmit}
-          className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg py-3 transition-colors cursor-pointer"
+          className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg py-3 transition-colors cursor-pointer"
         >
           Join Room
         </button>

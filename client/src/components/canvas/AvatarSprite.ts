@@ -1,4 +1,5 @@
 import { Avatar, BodyShape, Accessory, Expression, Direction } from '@virtualmeet/shared';
+import { drawSpriteFrame } from '@/utils/spriteLoader';
 
 const AVATAR_RADIUS = 14;
 const GLOW_RADIUS = AVATAR_RADIUS + 4;
@@ -11,16 +12,18 @@ interface DrawAvatarOptions {
   y: number;
   isLocal: boolean;
   walkAnimOffset: number;
+  // Raw rAF timestamp, used to drive sprite frame cycling. Optional so
+  // existing call sites (e.g. the avatar editor preview) keep working.
+  timestamp?: number;
 }
 
 export function drawAvatar(
   ctx: CanvasRenderingContext2D,
   options: DrawAvatarOptions,
 ) {
-  const { avatar, x, y, isLocal, walkAnimOffset } = options;
+  const { avatar, x, y, isLocal, walkAnimOffset, timestamp = 0 } = options;
   const config = avatar.avatarConfig;
   const color = config?.color || avatar.color || DEFAULT_COLOR;
-  const bodyShape = config?.bodyShape || 'circle';
   const accessory = config?.accessory || 'none';
   const expression = config?.expression || 'neutral';
   const name = avatar.name;
@@ -45,18 +48,31 @@ export function drawAvatar(
     ctx.stroke();
   }
 
-  // ─── Body shape ─────────────────────────────────────────────
-  drawBodyShape(ctx, cx, cy, r, bodyShape, color);
+  // ─── Pixel-art sprite (falls back to shape below if the sprite images
+  // haven't finished loading yet, or none is configured) ──────────────
+  let renderedSprite = false;
+  if (config?.spriteMode === 'premade' && config.premadeId) {
+    renderedSprite = drawPremadeAvatar(ctx, cx, cy, config.premadeId, avatar.direction, avatar.isMoving, timestamp);
+  } else if (config?.spriteMode === 'layered' && config.bodyId) {
+    renderedSprite = drawLayeredAvatar(ctx, cx, cy, config, avatar.direction, avatar.isMoving, timestamp);
+  }
 
-  // ─── Direction indicator ────────────────────────────────────
-  drawDirectionIndicator(ctx, cx, cy, r, avatar.direction);
+  if (!renderedSprite) {
+    const bodyShape = config?.bodyShape || 'circle';
 
-  // ─── Expression (eyes + mouth) ──────────────────────────────
-  drawExpression(ctx, cx, cy, r, expression);
+    // ─── Body shape ─────────────────────────────────────────────
+    drawBodyShape(ctx, cx, cy, r, bodyShape, color);
 
-  // ─── Accessory ──────────────────────────────────────────────
-  if (accessory !== 'none') {
-    drawAccessory(ctx, cx, cy, r, accessory, color);
+    // ─── Direction indicator ────────────────────────────────────
+    drawDirectionIndicator(ctx, cx, cy, r, avatar.direction);
+
+    // ─── Expression (eyes + mouth) ──────────────────────────────
+    drawExpression(ctx, cx, cy, r, expression);
+
+    // ─── Accessory ──────────────────────────────────────────────
+    if (accessory !== 'none') {
+      drawAccessory(ctx, cx, cy, r, accessory, color);
+    }
   }
 
   ctx.restore();
@@ -68,6 +84,97 @@ export function drawAvatar(
   if (config?.statusTag) {
     drawStatusTag(ctx, cx, cy - r - 23, config.statusTag);
   }
+}
+
+// ─── Layered pixel-art sprite ──────────────────────────────────────
+//
+// Assets come from the LimeZu "Character Generator" pack
+// (client/public/assets/characters/generator/<Category>/*.png). Every file
+// in a category shares one 56x41-cell grid of 32x32 frames. Layout isn't
+// documented anywhere machine-readable, so this was reverse-engineered by
+// inspecting pixel occupancy per cell against Spritesheet_animations_GUIDE.png:
+//   - row 3  = idle animation, row 5 = walk animation, 24 cols wide each
+//   - the 24 cols split into 4 direction-groups of 6 frames; the group at
+//     columns 6-11 is the only one where the Eyes layer is fully blank in
+//     every frame, which only makes sense for the "facing away" pose — so
+//     direction order is down, up, left, right (not the more common
+//     down/left/right/up ordering).
+// If this ever looks wrong in-browser, adjust DIRECTION_COLUMN_ORDER below.
+const GENERATOR_BASE = '/assets/characters/generator';
+// generator-premade characters are ready-made exports from the same
+// Character Generator tool, so they share the identical 56x41 frame grid
+// (verified: 1792x1312px, same as every generator/<Category> file).
+const PREMADE_BASE = '/assets/characters/premade/generator-premade';
+const FRAME_SIZE = 32;
+const FRAMES_PER_DIRECTION = 6;
+const SPRITE_DISPLAY_SIZE = 40;
+const IDLE_ROW = 3;
+const WALK_ROW = 5;
+const IDLE_FRAME_MS = 400;
+const WALK_FRAME_MS = 110;
+
+const DIRECTION_COLUMN_ORDER: Direction[] = ['down', 'up', 'left', 'right'];
+
+const LAYER_CATEGORIES: Array<[string, keyof NonNullable<Avatar['avatarConfig']>]> = [
+  ['Bodies', 'bodyId'],
+  ['Eyes', 'eyesId'],
+  ['Outfits', 'outfitId'],
+  ['Hairstyles', 'hairId'],
+  ['Accessories', 'spriteAccessoryId'],
+];
+
+function spriteFrameCoords(direction: Direction, isMoving: boolean, timestamp: number) {
+  const dirIndex = Math.max(0, DIRECTION_COLUMN_ORDER.indexOf(direction));
+  const row = isMoving ? WALK_ROW : IDLE_ROW;
+  const frameMs = isMoving ? WALK_FRAME_MS : IDLE_FRAME_MS;
+  const frameInCycle = Math.floor(timestamp / frameMs) % FRAMES_PER_DIRECTION;
+  const col = dirIndex * FRAMES_PER_DIRECTION + frameInCycle;
+  return { col, row };
+}
+
+function drawLayeredAvatar(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  config: NonNullable<Avatar['avatarConfig']>,
+  direction: Direction,
+  isMoving: boolean,
+  timestamp: number,
+): boolean {
+  const { col, row } = spriteFrameCoords(direction, isMoving, timestamp);
+  const dx = cx - SPRITE_DISPLAY_SIZE / 2;
+  const dy = cy - SPRITE_DISPLAY_SIZE / 2;
+
+  let drewAny = false;
+  for (const [category, field] of LAYER_CATEGORIES) {
+    const fileName = config[field] as string | undefined;
+    if (!fileName) continue;
+    const drew = drawSpriteFrame(ctx, `${GENERATOR_BASE}/${category}/${fileName}`, {
+      col, row, cellWidth: FRAME_SIZE, cellHeight: FRAME_SIZE,
+      dx, dy, dWidth: SPRITE_DISPLAY_SIZE, dHeight: SPRITE_DISPLAY_SIZE,
+    });
+    drewAny = drewAny || drew;
+  }
+  return drewAny;
+}
+
+function drawPremadeAvatar(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  premadeId: string,
+  direction: Direction,
+  isMoving: boolean,
+  timestamp: number,
+): boolean {
+  const { col, row } = spriteFrameCoords(direction, isMoving, timestamp);
+  const dx = cx - SPRITE_DISPLAY_SIZE / 2;
+  const dy = cy - SPRITE_DISPLAY_SIZE / 2;
+
+  return drawSpriteFrame(ctx, `${PREMADE_BASE}/${premadeId}`, {
+    col, row, cellWidth: FRAME_SIZE, cellHeight: FRAME_SIZE,
+    dx, dy, dWidth: SPRITE_DISPLAY_SIZE, dHeight: SPRITE_DISPLAY_SIZE,
+  });
 }
 
 // ─── Body shapes ──────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { AvatarConfig, EmoteType, TileType } from '@virtualmeet/shared';
+import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, Furniture } from '@virtualmeet/shared';
+import { TILE_PALETTE_BY_ID } from './data/tilePaletteManifest';
 import { GameCanvas } from './components/canvas/GameCanvas';
 import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
 import { NameModal } from './components/ui/NameModal';
@@ -13,6 +14,7 @@ import { RoomEditor } from './components/ui/RoomEditor';
 import { AdminPanel } from './components/ui/AdminPanel';
 import { MicButton } from './components/hud/MicButton';
 import { CameraButton } from './components/hud/CameraButton';
+import { ScreenShareButton } from './components/hud/ScreenShareButton';
 import { Lobby } from './pages/Lobby';
 import { LoginPage } from './pages/LoginPage';
 import { useAuth } from './hooks/useAuth';
@@ -20,14 +22,14 @@ import { api } from './services/api';
 import { createDefaultRoom } from './utils/createDefaultRoom';
 import { useGameStore } from './stores/gameStore';
 import { useSocket } from './hooks/useSocket';
-import { useProximity } from './hooks/useProximity';
+import { useProximity, findZoneAt } from './hooks/useProximity';
 import { useWebRTC } from './hooks/useWebRTC';
 import { webrtcService } from './services/webrtcService';
 import { loadAvatarConfig, saveAvatarConfig } from './hooks/useAvatarConfig';
 
-function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeave: () => void; authDisplayName: string }) {
+function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName }: { roomSlug: string; onLeave: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitAvatarUpdate, socketRef, emitChat, emitBubble, emitEmote, emitRoomUpdate, emitAdminGrant, emitAdminRevoke } = useSocket(authDisplayName, roomSlug);
+  const { emitMove, emitStop, emitAvatarUpdate, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke } = useSocket(authDisplayName, roomSlug);
   const [showEditor, setShowEditor] = useState(false);
 
   // Media state from store
@@ -42,8 +44,10 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
     updateProximity,
     toggleMic,
     toggleCamera,
+    toggleScreenShare,
     isMicMuted,
     isCameraOn,
+    isScreenSharing,
     destroy,
   } = useWebRTC({ socketRef });
 
@@ -78,16 +82,29 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
   const localPlayer = useGameStore((s) => s.localPlayer);
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
+  const zones = useGameStore((s) => s.zones);
 
   const nearby = useProximity(
     { x: localPlayer.x, y: localPlayer.y, id: localPlayerId },
     playerRecords,
+    zones,
   );
 
   // Update WebRTC connections based on proximity
   useEffect(() => {
     updateProximity(nearby);
   }, [nearby, updateProximity]);
+
+  // Notify other players in the room when the local player enters/leaves a zone
+  const currentZoneIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const zone = findZoneAt(localPlayer, zones);
+    const zoneId = zone?.id ?? null;
+    if (zoneId === currentZoneIdRef.current) return;
+    if (currentZoneIdRef.current) emitZoneExit(currentZoneIdRef.current);
+    if (zoneId) emitZoneEnter(zoneId);
+    currentZoneIdRef.current = zoneId;
+  }, [localPlayer.x, localPlayer.y, zones, emitZoneEnter, emitZoneExit]);
 
   // Media toggles — single call, track is toggled directly in the hook
   const handleMicToggle = useCallback(() => {
@@ -98,6 +115,10 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
     toggleCamera();
   }, [toggleCamera]);
 
+  const handleScreenShareToggle = useCallback(() => {
+    toggleScreenShare();
+  }, [toggleScreenShare]);
+
   // Cleanup
   useEffect(() => () => destroy(), [destroy]);
 
@@ -106,6 +127,8 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
   const editorMode = useGameStore((s) => s.editorMode);
   const toggleEditorMode = useGameStore((s) => s.toggleEditorMode);
   const selectedTileType = useGameStore((s) => s.selectedTileType);
+  const selectedPaletteId = useGameStore((s) => s.selectedPaletteId);
+  const zoneDrawMode = useGameStore((s) => s.zoneDrawMode);
   const pushTileHistory = useGameStore((s) => s.pushTileHistory);
   const setTiles = useGameStore((s) => s.setTiles);
   const tiles = useGameStore((s) => s.tiles);
@@ -133,10 +156,18 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
   const handleTilePaint = useCallback((x: number, y: number, type: TileType) => {
     const state = useGameStore.getState();
     const currentTiles = state.tiles.map((row) => row.map((t) => ({ ...t })));
-    if (currentTiles[y]?.[x]) {
+    if (!currentTiles[y]?.[x]) return;
+
+    if (type === 'portal') {
+      const target = window.prompt('Target room code to travel to (from the room URL/share code):', '');
+      if (!target || !target.trim()) return;
       currentTiles[y][x].type = type;
-      setTiles(currentTiles);
+      currentTiles[y][x].portalTarget = target.trim();
+    } else {
+      currentTiles[y][x].type = type;
+      currentTiles[y][x].portalTarget = undefined;
     }
+    setTiles(currentTiles);
   }, [setTiles]);
 
   const handleTileHistoryPush = useCallback(() => {
@@ -144,10 +175,47 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
     pushTileHistory(state.tiles.map((row) => row.map((t) => t.type)));
   }, [pushTileHistory]);
 
+  const handleFloorPaint = useCallback((x: number, y: number, paletteId: string) => {
+    useGameStore.getState().setFloorPaletteId(x, y, paletteId);
+  }, []);
+
+  const handleFurniturePlace = useCallback((x: number, y: number, paletteId: string) => {
+    const entry = TILE_PALETTE_BY_ID[paletteId];
+    if (!entry || entry.category !== 'furniture') return;
+    const state = useGameStore.getState();
+    for (let dx = 0; dx < entry.tilesW; dx++) {
+      const tx = x + dx;
+      if (tx >= MAP_WIDTH - 1 || state.tiles[y]?.[tx]?.type !== 'floor') return;
+    }
+    const item: Furniture = { id: crypto.randomUUID(), paletteId, x, y, tilesW: entry.tilesW, tilesH: entry.tilesH };
+    state.addFurniture(item);
+  }, []);
+
+  const handleFurnitureErase = useCallback((x: number, y: number) => {
+    useGameStore.getState().removeFurnitureAt(x, y);
+  }, []);
+
+  const handleZoneDrawComplete = useCallback((x: number, y: number, width: number, height: number) => {
+    const name = window.prompt('Zone name (e.g. "Meeting Room A"):', 'Meeting Room');
+    const state = useGameStore.getState();
+    if (name && name.trim()) {
+      state.addZone({ id: crypto.randomUUID(), name: name.trim().slice(0, 30), x, y, width, height });
+    }
+    state.toggleZoneDrawMode();
+  }, []);
+
+  const portalTravelGuardRef = useRef(false);
+  const handlePortalEnter = useCallback((target: string) => {
+    if (target === roomSlug || portalTravelGuardRef.current) return;
+    portalTravelGuardRef.current = true;
+    onPortalTravel(target);
+    setTimeout(() => { portalTravelGuardRef.current = false; }, 1500);
+  }, [roomSlug, onPortalTravel]);
+
   const handleRoomSave = useCallback(() => {
     const state = useGameStore.getState();
-    const tileData = state.tiles.map((row) => row.map((t) => ({ type: t.type, x: t.x, y: t.y })));
-    emitRoomUpdate(tileData);
+    const tileData = state.tiles.map((row) => row.map((t) => ({ type: t.type, x: t.x, y: t.y, floorPaletteId: t.floorPaletteId, portalTarget: t.portalTarget })));
+    emitRoomUpdate({ tiles: tileData, furniture: state.furniture, zones: state.zones });
     setEditorToast('Room saved!');
     setTimeout(() => setEditorToast(''), 2000);
   }, [emitRoomUpdate]);
@@ -206,7 +274,7 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
   const allPlayers = { [localPlayerId]: useGameStore.getState().localPlayer, ...playerRecords };
 
   return (
-    <div className="w-screen h-screen overflow-hidden bg-gray-900">
+    <div className="w-screen h-screen overflow-hidden bg-purple-50">
       <GameCanvas
         emitMove={emitMove}
         emitStop={emitStop}
@@ -217,16 +285,23 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
         cameraOn={isCameraOn}
         editorMode={editorMode}
         selectedTileType={selectedTileType}
+        selectedPaletteId={selectedPaletteId}
         onTilePaint={handleTilePaint}
         onTileHistoryPush={handleTileHistoryPush}
+        onFloorPaint={handleFloorPaint}
+        onFurniturePlace={handleFurniturePlace}
+        onFurnitureErase={handleFurnitureErase}
+        zoneDrawMode={zoneDrawMode}
+        onZoneDrawComplete={handleZoneDrawComplete}
+        onPortalEnter={handlePortalEnter}
       />
 
       <div className="absolute top-4 left-28 pointer-events-none">
-        <p className="text-white/30 text-xs font-mono">WASD / Arrow keys to move</p>
+        <p className="text-gray-500 text-xs font-mono">WASD / Arrow keys to move</p>
       </div>
       <div className="absolute top-10 left-28 pointer-events-none">
-        <p className="text-white/30 text-xs font-mono">
-          Playing as: <span className="text-white/60">{playerName}</span>
+        <p className="text-gray-500 text-xs font-mono">
+          Playing as: <span className="text-gray-700">{playerName}</span>
         </p>
       </div>
 
@@ -237,7 +312,7 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
       {isAdmin && (
         <button
           onClick={toggleEditorMode}
-          className={`absolute bottom-4 left-28 z-30 px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer ${editorMode ? 'bg-orange-500 text-white border-orange-400' : 'bg-gray-800/80 text-white/60 hover:text-white border-white/10'}`}
+          className={`absolute bottom-4 left-28 z-30 px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer ${editorMode ? 'bg-purple-600 text-white border-purple-500' : 'bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm'}`}
         >
           🛠️ {editorMode ? 'Editing...' : 'Edit Room'}
         </button>
@@ -248,7 +323,7 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
       )}
 
       {editorMode && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-orange-500/90 text-white text-xs font-bold px-3 py-1 rounded-full pointer-events-none">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-purple-600/90 text-white text-xs font-bold px-3 py-1 rounded-full pointer-events-none">
           🔧 EDIT MODE
         </div>
       )}
@@ -276,7 +351,7 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
 
       <VideoGrid
         nearby={nearby}
-        localStream={webrtcService.getLocalStream()}
+        localStream={isScreenSharing ? webrtcService.getScreenStream() : webrtcService.getLocalStream()}
         remoteStreams={remoteStreams}
         micMuted={isMicMuted}
         cameraOff={!isCameraOn}
@@ -286,18 +361,19 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
       <div className="absolute bottom-24 left-1/2 -translate-x-1/2 flex gap-3 z-30">
         <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
         <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
+        <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
       </div>
 
       {/* Room name HUD + code */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 pointer-events-auto">
-        <p className="text-white/40 text-xs font-medium tracking-wider uppercase">MAIN OFFICE</p>
+        <p className="text-gray-500 text-xs font-medium tracking-wider uppercase">MAIN OFFICE</p>
         <button
           onClick={async () => {
             await navigator.clipboard.writeText(roomSlug);
             setRoomCodeCopied(true);
             setTimeout(() => setRoomCodeCopied(false), 2000);
           }}
-          className="text-white/30 hover:text-white/70 text-xs cursor-pointer transition-colors"
+          className="text-gray-400 hover:text-gray-700 text-xs cursor-pointer transition-colors"
           title="Copy room code"
         >
           📋 {roomSlug.slice(0, 12)}
@@ -305,7 +381,7 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
       </div>
 
       {roomCodeCopied && (
-        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 bg-white/10 text-white text-[10px] px-2 py-0.5 rounded-full pointer-events-none">
+        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 bg-purple-100 text-purple-700 text-[10px] px-2 py-0.5 rounded-full pointer-events-none">
           Code copied!
         </div>
       )}
@@ -314,20 +390,20 @@ function Game({ roomSlug, onLeave, authDisplayName }: { roomSlug: string; onLeav
       <div className="absolute top-4 left-4 pointer-events-auto">
         <button
           onClick={() => setShowLeaveConfirm(true)}
-          className="text-red-400/60 hover:text-red-400 text-xs font-medium cursor-pointer transition-colors"
+          className="text-red-500/70 hover:text-red-500 text-xs font-medium cursor-pointer transition-colors"
         >
           🚪 Leave
         </button>
       </div>
 
       {showLeaveConfirm && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-gray-800 rounded-xl p-6 shadow-2xl border border-white/10 text-center">
-            <p className="text-white text-sm mb-4">Leave this room?</p>
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-xl p-6 shadow-xl shadow-purple-100/50 border border-purple-100 text-center">
+            <p className="text-gray-900 text-sm mb-4">Leave this room?</p>
             <div className="flex gap-3">
               <button
                 onClick={() => setShowLeaveConfirm(false)}
-                className="px-4 py-2 rounded-lg bg-gray-700 text-white/70 hover:bg-gray-600 text-sm cursor-pointer"
+                className="px-4 py-2 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 text-sm cursor-pointer"
               >
                 Cancel
               </button>
@@ -425,8 +501,8 @@ export default function App() {
   // Loading
   if (loading) {
     return (
-      <div className="w-screen h-screen bg-gray-900 flex items-center justify-center">
-        <p className="text-white/40 text-sm">Loading VirtualMeet...</p>
+      <div className="w-screen h-screen bg-gradient-to-br from-white to-purple-50 flex items-center justify-center">
+        <p className="text-gray-500 text-sm">Loading VirtualMeet...</p>
       </div>
     );
   }
@@ -457,11 +533,11 @@ export default function App() {
 
   if (!isRoomReady) {
     return (
-      <div className="w-screen h-screen bg-gray-900 flex items-center justify-center">
-        <p className="text-white text-xl">Loading VirtualMeet…</p>
+      <div className="w-screen h-screen bg-gradient-to-br from-white to-purple-50 flex items-center justify-center">
+        <p className="text-gray-500 text-xl">Loading VirtualMeet…</p>
       </div>
     );
   }
 
-  return <Game roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} authDisplayName={user.displayName} />;
+  return <Game roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} />;
 }

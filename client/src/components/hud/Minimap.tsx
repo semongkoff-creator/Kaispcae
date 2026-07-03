@@ -29,10 +29,10 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
     canvas.style.height = `${MM_H}px`;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.fillRect(0, 0, MM_W, MM_H);
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.strokeStyle = 'rgba(124,58,237,0.25)';
     ctx.lineWidth = 1;
     ctx.strokeRect(1, 1, MM_W - 2, MM_H - 2);
 
@@ -43,10 +43,10 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
 
       ctx.beginPath();
       ctx.arc(mx, my, isLocal ? 3 : 2, 0, Math.PI * 2);
-      ctx.fillStyle = isLocal ? '#fff' : p.color;
+      ctx.fillStyle = isLocal ? '#7c3aed' : p.color;
       ctx.fill();
       if (isLocal) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+        ctx.strokeStyle = 'rgba(76,29,149,0.6)';
         ctx.lineWidth = 1;
         ctx.stroke();
       }
@@ -68,7 +68,7 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
       <canvas
         ref={canvasRef}
         onClick={handleClick}
-        className="rounded-lg border border-white/10 cursor-crosshair"
+        className="rounded-lg border border-purple-200 shadow-sm cursor-crosshair"
       />
     </div>
   );

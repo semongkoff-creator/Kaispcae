@@ -17,12 +17,20 @@ interface PeerConnection {
 class WebRTCService {
   private peers = new Map<string, PeerConnection>();
   private localStream: MediaStream | null = null;
+  private screenStream: MediaStream | null = null;
   private audioContext: AudioContext | null = null;
   private analyserNode: AnalyserNode | null = null;
   private socket: Socket | null = null;
   private onRemoteStream: ((id: string, stream: MediaStream) => void) | null = null;
   private onSpeakingChange: ((id: string, speaking: boolean) => void) | null = null;
+  private onScreenShareEnded: (() => void) | null = null;
   private analyserInterval: ReturnType<typeof setInterval> | null = null;
+
+  // The video track actually being sent to peers — the webcam track, or the
+  // screen-share track while one is active.
+  private getActiveVideoTrack(): MediaStreamTrack | null {
+    return this.screenStream?.getVideoTracks()[0] ?? this.localStream?.getVideoTracks()[0] ?? null;
+  }
 
   setSocket(socket: Socket) {
     this.socket = socket;
@@ -35,6 +43,10 @@ class WebRTCService {
 
   setOnSpeakingChange(cb: (id: string, speaking: boolean) => void) {
     this.onSpeakingChange = cb;
+  }
+
+  setOnScreenShareEnded(cb: () => void) {
+    this.onScreenShareEnded = cb;
   }
 
   async initLocalMedia(): Promise<{ success: boolean; error?: string }> {
@@ -63,6 +75,10 @@ class WebRTCService {
 
   getLocalStream(): MediaStream | null {
     return this.localStream;
+  }
+
+  getScreenStream(): MediaStream | null {
+    return this.screenStream;
   }
 
   setAudioVolume(id: string, volume: number) {
@@ -97,7 +113,10 @@ class WebRTCService {
       iceQueue: [],
     };
 
-    this.localStream.getTracks().forEach((track) => pc.addTrack(track, this.localStream!));
+    const audioTrack = this.localStream.getAudioTracks()[0];
+    if (audioTrack) pc.addTrack(audioTrack, this.localStream);
+    const videoTrack = this.getActiveVideoTrack();
+    if (videoTrack) pc.addTrack(videoTrack, this.screenStream ?? this.localStream);
 
     pc.onicecandidate = (event) => {
       if (event.candidate && this.socket) {
@@ -177,7 +196,10 @@ class WebRTCService {
         iceQueue: [],
       };
 
-      this.localStream.getTracks().forEach((track) => pc.addTrack(track, this.localStream!));
+      const audioTrack = this.localStream.getAudioTracks()[0];
+      if (audioTrack) pc.addTrack(audioTrack, this.localStream);
+      const videoTrack = this.getActiveVideoTrack();
+      if (videoTrack) pc.addTrack(videoTrack, this.screenStream ?? this.localStream);
 
       pc.onicecandidate = (event) => {
         if (event.candidate && this.socket) {
@@ -277,10 +299,55 @@ class WebRTCService {
     }
   }
 
+  isScreenSharing(): boolean {
+    return !!this.screenStream;
+  }
+
+  // Swaps the outgoing video track on every existing peer connection to the
+  // screen capture, and remembers it so new connections made mid-share pick
+  // it up too (see getActiveVideoTrack / connectToPlayer / handleOffer).
+  async startScreenShare(): Promise<{ success: boolean; error?: string }> {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      this.screenStream = stream;
+      const screenTrack = stream.getVideoTracks()[0];
+
+      // Browser's native "Stop sharing" control ends the track directly.
+      screenTrack.onended = () => this.stopScreenShare();
+
+      for (const peer of this.peers.values()) {
+        const sender = peer.pc.getSenders().find((s) => s.track?.kind === 'video');
+        if (sender) sender.replaceTrack(screenTrack).catch(() => {});
+      }
+      return { success: true };
+    } catch (err: unknown) {
+      const message = err instanceof DOMException && err.name === 'NotAllowedError'
+        ? 'Screen share permission denied'
+        : 'Failed to start screen share';
+      console.warn('[webrtc]', message);
+      return { success: false, error: message };
+    }
+  }
+
+  stopScreenShare() {
+    if (!this.screenStream) return;
+    this.screenStream.getTracks().forEach((t) => t.stop());
+    this.screenStream = null;
+
+    const camTrack = this.localStream?.getVideoTracks()[0] ?? null;
+    for (const peer of this.peers.values()) {
+      const sender = peer.pc.getSenders().find((s) => s.track?.kind === 'video');
+      if (sender && camTrack) sender.replaceTrack(camTrack).catch(() => {});
+    }
+    this.onScreenShareEnded?.();
+  }
+
   destroy() {
     this.disconnectAll();
     if (this.analyserInterval) clearInterval(this.analyserInterval);
     this.localStream?.getTracks().forEach((t) => t.stop());
+    this.screenStream?.getTracks().forEach((t) => t.stop());
+    this.screenStream = null;
     this.audioContext?.close();
     this.socket = null;
   }

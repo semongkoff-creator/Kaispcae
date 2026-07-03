@@ -39,7 +39,7 @@ export function EmoteWheel({ open, onSelect, onClose }: EmoteWheelProps) {
             <button
               key={emote}
               onClick={() => onSelect(emote)}
-              className="absolute w-9 h-9 rounded-full bg-gray-800/90 border border-white/10 flex items-center justify-center text-lg hover:bg-gray-700 hover:scale-110 transition-all cursor-pointer"
+              className="absolute w-9 h-9 rounded-full bg-white/90 border border-purple-200 shadow-sm flex items-center justify-center text-lg hover:bg-purple-50 hover:scale-110 transition-all cursor-pointer"
               style={{ left: bx, top: by }}
               title={EMOTE_LABELS[emote]}
             >
@@ -47,7 +47,7 @@ export function EmoteWheel({ open, onSelect, onClose }: EmoteWheelProps) {
             </button>
           );
         })}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white/30 text-xs">
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white/80 text-purple-700 text-xs px-2 py-1 rounded-full shadow-sm">
           Press Z
         </div>
       </div>

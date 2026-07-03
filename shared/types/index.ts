@@ -6,13 +6,33 @@ export type BodyShape = 'circle' | 'rounded-square' | 'hexagon';
 export type Accessory = 'none' | 'cap' | 'crown' | 'headphones' | 'halo' | 'bow';
 export type Expression = 'neutral' | 'happy' | 'cool' | 'thinking' | 'sleepy';
 
+// How the avatar is rendered on canvas. 'shape' is the original hand-drawn
+// canvas primitive avatar; 'layered' composites pixel-art PNG sprites
+// (body/eyes/outfit/hair/accessory) from the Character Generator asset pack;
+// 'premade' uses a ready-made character from the free 16x16 pack.
+export type SpriteMode = 'shape' | 'layered' | 'premade';
+
 export interface AvatarConfig {
+  // Legacy shape-drawn avatar (kept so old saved configs keep working)
   bodyShape: BodyShape;
   color: string;
   accessory: Accessory;
   expression: Expression;
   name: string;
   statusTag: string;
+
+  // Pixel-art sprite system. All optional so old configs without them fall
+  // back to the shape-drawn avatar until migrated (see useAvatarConfig).
+  spriteMode?: SpriteMode;
+  // Filenames within client/public/assets/characters/generator/<Category>/
+  bodyId?: string;
+  eyesId?: string;
+  outfitId?: string;
+  hairId?: string;
+  spriteAccessoryId?: string;
+  // Filename prefix within client/public/assets/characters/premade/free-pack-16x16/
+  // (used when spriteMode === 'premade')
+  premadeId?: string;
 }
 
 // Represents a player avatar in the virtual space
@@ -30,15 +50,22 @@ export interface Avatar {
   userId?: string;
 }
 
-// A single tile on the room grid
+// A single tile on the room grid. `type` stays authoritative for collision
+// (BLOCKED_TILES) so old saved rooms keep working unchanged. `floorPaletteId`
+// is optional and only overrides which floor texture is drawn — it never
+// affects walkability. `portalTarget` (only meaningful when type === 'portal')
+// is the slug of the room to travel to when a player steps on this tile.
 export interface RoomTile {
   x: number;
   y: number;
   type: TileType;
+  floorPaletteId?: string;
+  portalTarget?: string;
 }
 
-// Valid tile types and their visual/semantic meaning
-export type TileType = 'floor' | 'wall' | 'door' | 'desk' | 'chair';
+// Valid tile types and their visual/semantic meaning. 'portal' and 'spawn'
+// are always walkable (never added to BLOCKED_TILES).
+export type TileType = 'floor' | 'wall' | 'door' | 'desk' | 'chair' | 'portal' | 'spawn';
 
 // Full room state transmitted over the network
 export interface RoomState {
@@ -48,6 +75,8 @@ export interface RoomState {
   players: Avatar[];
   adminUserIds?: string[];
   masterAdminUserId?: string;
+  furniture?: Furniture[];
+  zones?: Zone[];
 }
 
 // All socket event names used between client and server
@@ -112,6 +141,10 @@ export interface ProximityPlayer {
   id: string;
   distanceTiles: number;
   inProximity: boolean;
+  // true when connected because both players share a private Zone (see
+  // useProximity.ts) rather than because they're within PROXIMITY_THRESHOLD
+  // tiles of each other — WebRTC uses this to skip distance-based audio falloff.
+  viaZone?: boolean;
 }
 
 // RTC signaling payloads
@@ -121,19 +154,20 @@ export interface RtcSignal {
   payload: unknown;
 }
 
-// Furniture / objects
-export type FurnitureType = 'desk_cluster' | 'meeting_table' | 'couch' | 'whiteboard' | 'plant';
-export type Rotation = 0 | 90 | 180 | 270;
-
+// A furniture piece placed on the map, referencing a visual palette entry
+// (client/src/data/tilePaletteManifest.ts) rather than a fixed enum, so any
+// curated tileset piece can be placed. Anchored at (x, y) as its BOTTOM-LEFT
+// tile: the bottom row occupies `tilesW` tiles wide and is where collision is
+// applied (see roomHandler/RoomEditor); any rows above that (tilesH > 1)
+// are purely visual "overhead" — drawn above avatars — so tall pieces like a
+// chair back or wardrobe let players walk visually behind them.
 export interface Furniture {
   id: string;
-  type: FurnitureType;
+  paletteId: string;
   x: number;
   y: number;
-  width: number;
-  height: number;
-  rotation: Rotation;
-  isInteractable: boolean;
+  tilesW: number;
+  tilesH: number;
 }
 
 // Zones
@@ -185,6 +219,14 @@ export interface SpeechBubble {
   playerId: string;
   text: string;
   expireAt: number;
+}
+
+// Payload for room:update — tile paint + furniture placement changes made in
+// the Room Editor, sent together so they stay consistent on save/reload.
+export interface RoomUpdatePayload {
+  tiles: RoomTile[][];
+  furniture: Furniture[];
+  zones: Zone[];
 }
 
 // Room save payload

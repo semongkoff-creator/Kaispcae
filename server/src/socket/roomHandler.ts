@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload } from '@virtualmeet/shared';
 import { addPlayer, removePlayer, getRoomState, updatePlayerAvatarConfig } from '../store/roomStore';
 import { PrismaClient } from '@prisma/client';
 
@@ -57,6 +57,22 @@ function findUserIdBySocket(socketId: string): string | undefined {
   }
 }
 
+// Scans a saved tilemap for a tile of type 'spawn' and returns its pixel
+// center. Falls back to null (caller uses the hardcoded default) if there's
+// no saved map yet, or no spawn tile was placed in it.
+function findSpawnPixel(tilemapData: unknown): { x: number; y: number } | null {
+  if (!Array.isArray(tilemapData)) return null;
+  for (const row of tilemapData as any[]) {
+    if (!Array.isArray(row)) continue;
+    for (const tile of row) {
+      if (tile?.type === 'spawn' && typeof tile.x === 'number' && typeof tile.y === 'number') {
+        return { x: tile.x * 32 + 16, y: tile.y * 32 + 16 };
+      }
+    }
+  }
+  return null;
+}
+
 function broadcastAdmin(io: Server, room: string, rs: RoomAdminState) {
   io.to(room).emit(SocketEvents.ADMIN_CHANGED, {
     adminUserIds: Array.from(rs.adminUserIds),
@@ -110,9 +126,18 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const isAdmin = rs.adminUserIds.has(uid);
     const isMasterAdmin = uid === rs.masterAdminUserId;
 
+    // Fetch the saved room once — reused for spawn point lookup below and
+    // for the tiles/furniture/zones sent in room:state once player data is ready.
+    let dbRoom: { tilemapData: unknown; furniture: unknown; zones: unknown } | null = null;
+    try {
+      dbRoom = await getPrisma().room.findUnique({ where: { slug: room } });
+    } catch (e) { console.warn('[room] failed to load room from db:', e); }
+
+    const spawn = findSpawnPixel(dbRoom?.tilemapData) ?? { x: 3 * 32 + 16, y: 3 * 32 + 16 };
+
     const newPlayer: Avatar = {
       id: socket.id, name: avatarConfig?.name || name,
-      x: 3 * 32 + 16, y: 3 * 32 + 16, direction: 'down',
+      x: spawn.x, y: spawn.y, direction: 'down',
       color, isMoving: false, avatarConfig: avatarConfig || undefined,
       isAdmin, userId: uid,
     };
@@ -126,15 +151,19 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       const state = await getRoomState(room, DEFAULT_ROOM_NAME);
 
       let savedTiles: RoomTile[][] | undefined;
-      try {
-        const prisma = getPrisma();
-        const dbRoom = await prisma.room.findUnique({ where: { slug: room } });
-        if (dbRoom?.tilemapData && Array.isArray(dbRoom.tilemapData) && (dbRoom.tilemapData as any[]).length > 0) {
-          savedTiles = (dbRoom.tilemapData as any[]).map((row: any[], y: number) =>
-            row.map((t: any, x: number) => ({ x, y, type: t.type || 'floor' }))
-          );
-        }
-      } catch (e) { console.warn('[room] failed to load tilemap:', e); }
+      let savedFurniture: any[] | undefined;
+      let savedZones: any[] | undefined;
+      if (dbRoom?.tilemapData && Array.isArray(dbRoom.tilemapData) && (dbRoom.tilemapData as any[]).length > 0) {
+        savedTiles = (dbRoom.tilemapData as any[]).map((row: any[], y: number) =>
+          row.map((t: any, x: number) => ({ ...t, x, y, type: t.type || 'floor' }))
+        );
+      }
+      if (dbRoom?.furniture && Array.isArray(dbRoom.furniture)) {
+        savedFurniture = dbRoom.furniture as any[];
+      }
+      if (dbRoom?.zones && Array.isArray(dbRoom.zones)) {
+        savedZones = dbRoom.zones as any[];
+      }
 
       const playersWithMeta = state.players.map((p) => {
         const puid = findUserIdBySocket(p.id) ?? p.id;
@@ -142,7 +171,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       });
 
       socket.emit(SocketEvents.ROOM_STATE, {
-        ...state, tiles: savedTiles || state.tiles, players: playersWithMeta,
+        ...state, tiles: savedTiles || state.tiles, furniture: savedFurniture || [], zones: savedZones || [], players: playersWithMeta,
         adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId,
       });
     });
@@ -182,12 +211,19 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     updatePlayerAvatarConfig(room, socket.id, avatarConfig);
   });
 
-  socket.on(SocketEvents.ROOM_UPDATE, (tileData: { type: string; x: number; y: number }[][]) => {
+  socket.on(SocketEvents.ROOM_UPDATE, (payload: RoomUpdatePayload) => {
     const room = currentRoom; if (!room) return;
-    socket.to(room).emit(SocketEvents.ROOM_UPDATED, tileData);
+    socket.to(room).emit(SocketEvents.ROOM_UPDATED, payload);
     try {
-      getPrisma().room.update({ where: { slug: room }, data: { tilemapData: tileData as any } })
-        .then(() => console.log('[room] tilemap saved to db'))
+      getPrisma().room.update({
+        where: { slug: room },
+        data: {
+          tilemapData: payload.tiles as any,
+          furniture: (payload.furniture ?? []) as any,
+          zones: (payload.zones ?? []) as any,
+        },
+      })
+        .then(() => console.log('[room] tilemap + furniture + zones saved to db'))
         .catch((e: any) => console.error('[room] tilemap save failed:', e));
     } catch (e) { /* ignore */ }
   });

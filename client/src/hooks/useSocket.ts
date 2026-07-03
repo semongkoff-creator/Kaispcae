@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, SpeechBubble, EmoteType } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, SpeechBubble, EmoteType, RoomUpdatePayload } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 
@@ -139,11 +139,13 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       if (data.zones) setZones(data.zones);
     });
 
-    socket.on(SocketEvents.ROOM_UPDATED, (data: { type: string; x: number; y: number }[][]) => {
-      const tiles = data.map((row, y) =>
-        row.map((t, x) => ({ x, y, type: t.type as any }))
+    socket.on(SocketEvents.ROOM_UPDATED, (data: RoomUpdatePayload) => {
+      const tiles = data.tiles.map((row, y) =>
+        row.map((t, x) => ({ ...t, x, y, type: t.type as any }))
       );
       setTilesFromData(tiles);
+      setFurniture(data.furniture || []);
+      setZones(data.zones || []);
     });
 
     socket.on(SocketEvents.ADMIN_CHANGED, (data: { adminUserIds: string[]; masterAdminUserId: string }) => {
@@ -222,12 +224,20 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.EMOTE_PLAY, { emote, x, y });
   }, []);
 
+  const emitZoneEnter = useCallback((zoneId: string) => {
+    socketRef.current?.emit(SocketEvents.ZONE_ENTER, zoneId);
+  }, []);
+
+  const emitZoneExit = useCallback((zoneId: string) => {
+    socketRef.current?.emit(SocketEvents.ZONE_EXIT, zoneId);
+  }, []);
+
   const emitRoomSave = useCallback((data: any) => {
     socketRef.current?.emit(SocketEvents.ROOM_SAVE, data);
   }, []);
 
-  const emitRoomUpdate = useCallback((tiles: any) => {
-    socketRef.current?.emit(SocketEvents.ROOM_UPDATE, tiles);
+  const emitRoomUpdate = useCallback((payload: RoomUpdatePayload) => {
+    socketRef.current?.emit(SocketEvents.ROOM_UPDATE, payload);
   }, []);
 
   const emitAdminGrant = useCallback((targetUserId: string) => {
@@ -244,5 +254,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.ROOM_DELETE);
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, socketRef, emitChat, emitBubble, emitEmote, emitRoomSave, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitRoomDelete };
+  return { emitMove, emitStop, emitAvatarUpdate, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomSave, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitRoomDelete };
 }

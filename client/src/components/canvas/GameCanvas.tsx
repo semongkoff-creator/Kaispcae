@@ -5,6 +5,8 @@ import {
   MAP_HEIGHT,
   Avatar,
   TileType,
+  RoomTile,
+  Furniture,
   Direction,
   ProximityPlayer,
   PROXIMITY_THRESHOLD_PX,
@@ -13,14 +15,105 @@ import {
 import { useGameStore } from '@/stores/gameStore';
 import { useMovement } from '@/hooks/useMovement';
 import { drawAvatar } from './AvatarSprite';
+import { drawSpriteFrame } from '@/utils/spriteLoader';
+import { TILE_PALETTE_BY_ID } from '@/data/tilePaletteManifest';
 
+// Fallback solid colors, used only while the real tileset image is still loading.
 const TILE_COLORS: Record<TileType, string> = {
   floor: '#e8d5b0',
   wall: '#4a3728',
   door: '#d4a056',
   desk: '#8B6914',
   chair: '#5b8dd9',
+  portal: '#e8d5b0',
+  spawn: '#e8d5b0',
 };
+
+// Real tileset art for each generic TileType, used when a tile has no
+// `floorPaletteId` / no matching Furniture entry (legacy rooms, or fallback
+// while richer data hasn't loaded). Modern_Office_Singles files are exported
+// on a padded 64x96 canvas with content bottom-anchored — srcX/srcY here
+// crop just the bottom-most 32x32 slice of that real content (see
+// tilePaletteManifest.ts for the full multi-cell-aware version of this data).
+const OFFICE_SINGLES = '/assets/tilesets/modern-office/Modern_Office_Singles_32x32';
+const ROOM_BUILDER_OFFICE = '/assets/tilesets/modern-office/Room_Builder_Office_32x32.png';
+
+interface TileSpriteDef {
+  src: string;
+  srcX: number;
+  srcY: number;
+}
+
+// portal/spawn render as plain floor — their special meaning is conveyed by
+// the pulsing ring markers drawn in the tile loop below, not a distinct sprite.
+const FLOOR_SPRITE: TileSpriteDef = { src: `${OFFICE_SINGLES}/Modern_Office_Singles_32x32_28.png`, srcX: 0, srcY: 64 };
+
+const TILE_SPRITES: Record<TileType, TileSpriteDef> = {
+  floor: FLOOR_SPRITE,
+  wall: { src: ROOM_BUILDER_OFFICE, srcX: 0, srcY: 0 },
+  door: { src: ROOM_BUILDER_OFFICE, srcX: 7 * TILE_SIZE, srcY: 1 * TILE_SIZE },
+  desk: { src: `${OFFICE_SINGLES}/Modern_Office_Singles_32x32_211.png`, srcX: 0, srcY: 64 },
+  chair: { src: `${OFFICE_SINGLES}/Modern_Office_Singles_32x32_101.png`, srcX: 0, srcY: 64 },
+  portal: FLOOR_SPRITE,
+  spawn: FLOOR_SPRITE,
+};
+
+function drawTile(ctx: CanvasRenderingContext2D, type: TileType, screenX: number, screenY: number) {
+  const sprite = TILE_SPRITES[type];
+  const drew = sprite && drawSpriteFrame(ctx, sprite.src, {
+    srcX: sprite.srcX, srcY: sprite.srcY, cellWidth: TILE_SIZE, cellHeight: TILE_SIZE,
+    dx: screenX, dy: screenY,
+  });
+  if (!drew) {
+    ctx.fillStyle = TILE_COLORS[type] || '#e8d5b0';
+    ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+  }
+}
+
+// Draws a floor tile, preferring its palette-picked texture (set via the
+// Room Editor's visual palette) and falling back to the generic floor sprite.
+function drawFloorTile(ctx: CanvasRenderingContext2D, tile: RoomTile, screenX: number, screenY: number) {
+  if (tile.floorPaletteId) {
+    const entry = TILE_PALETTE_BY_ID[tile.floorPaletteId];
+    if (entry && drawSpriteFrame(ctx, entry.src, {
+      srcX: entry.srcX, srcY: entry.srcY, cellWidth: TILE_SIZE, cellHeight: TILE_SIZE,
+      dx: screenX, dy: screenY,
+    })) return;
+  }
+  drawTile(ctx, 'floor', screenX, screenY);
+}
+
+// Furniture is anchored at its bottom-left tile. The bottom tile row (the
+// piece's "base") draws on the object layer, before avatars. Anything above
+// that (tilesH > 1) draws on the overhead layer, after avatars, so players
+// can walk visually behind tall pieces (a chair back, a wardrobe, etc).
+function drawFurnitureLayer(
+  ctx: CanvasRenderingContext2D,
+  item: Furniture,
+  cameraX: number,
+  cameraY: number,
+  layer: 'object' | 'overhead',
+) {
+  const entry = TILE_PALETTE_BY_ID[item.paletteId];
+  if (!entry) return;
+  const screenX = item.x * TILE_SIZE - cameraX;
+  const baseRowScreenY = item.y * TILE_SIZE - cameraY;
+  const pieceWidthPx = entry.tilesW * TILE_SIZE;
+
+  if (layer === 'object') {
+    const baseSrcY = entry.srcY + (entry.tilesH - 1) * TILE_SIZE;
+    drawSpriteFrame(ctx, entry.src, {
+      srcX: entry.srcX, srcY: baseSrcY, cellWidth: pieceWidthPx, cellHeight: TILE_SIZE,
+      dx: screenX, dy: baseRowScreenY,
+    });
+  } else if (entry.tilesH > 1) {
+    const overheadHeightPx = (entry.tilesH - 1) * TILE_SIZE;
+    drawSpriteFrame(ctx, entry.src, {
+      srcX: entry.srcX, srcY: entry.srcY, cellWidth: pieceWidthPx, cellHeight: overheadHeightPx,
+      dx: screenX, dy: baseRowScreenY - overheadHeightPx,
+    });
+  }
+}
 
 const AVATAR_RADIUS = 14;
 
@@ -53,11 +146,18 @@ interface GameCanvasProps {
   cameraOn: boolean;
   editorMode: boolean;
   selectedTileType: TileType;
+  selectedPaletteId?: string;
   onTilePaint: (x: number, y: number, type: TileType) => void;
   onTileHistoryPush: () => void;
+  onFloorPaint: (x: number, y: number, paletteId: string) => void;
+  onFurniturePlace: (x: number, y: number, paletteId: string) => void;
+  onFurnitureErase: (x: number, y: number) => void;
+  zoneDrawMode: boolean;
+  onZoneDrawComplete: (x: number, y: number, width: number, height: number) => void;
+  onPortalEnter: (target: string) => void;
 }
 
-export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, onTilePaint, onTileHistoryPush }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, onPortalEnter }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -78,6 +178,8 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
   const bubblesRef = useRef(useGameStore.getState().speechBubbles);
   const emotesRef = useRef(useGameStore.getState().emoteEvents);
   const zonesRef = useRef(useGameStore.getState().zones);
+  const furniture = useGameStore((s) => s.furniture);
+  const furnitureRef = useRef(furniture);
 
   useEffect(() => {
     tilesRef.current = tiles;
@@ -87,6 +189,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     bubblesRef.current = useGameStore.getState().speechBubbles;
     emotesRef.current = useGameStore.getState().emoteEvents;
     zonesRef.current = useGameStore.getState().zones;
+    furnitureRef.current = furniture;
   });
 
   const proximityRef = useRef(proximityData); proximityRef.current = proximityData;
@@ -97,10 +200,18 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
 
   const editorModeRef = useRef(editorMode); editorModeRef.current = editorMode;
   const selectedTileRef = useRef(selectedTileType); selectedTileRef.current = selectedTileType;
+  const selectedPaletteRef = useRef(selectedPaletteId); selectedPaletteRef.current = selectedPaletteId;
   const isPaintingRef = useRef(false);
   const hoverTileRef = useRef<{ x: number; y: number } | null>(null);
   const cameraXRef = useRef(0);
   const cameraYRef = useRef(0);
+
+  const zoneDrawModeRef = useRef(zoneDrawMode); zoneDrawModeRef.current = zoneDrawMode;
+  const onZoneDrawCompleteRef = useRef(onZoneDrawComplete); onZoneDrawCompleteRef.current = onZoneDrawComplete;
+  const onPortalEnterRef = useRef(onPortalEnter); onPortalEnterRef.current = onPortalEnter;
+  const zoneDragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const zoneDragCurrentRef = useRef<{ x: number; y: number } | null>(null);
+  const lastPortalTileRef = useRef<string | null>(null);
 
   const isBlocked = useCallback((tileX: number, tileY: number) => {
     if (tileX < 0 || tileX >= MAP_WIDTH || tileY < 0 || tileY >= MAP_HEIGHT) return true;
@@ -169,6 +280,24 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     cameraXRef.current = cameraX;
     cameraYRef.current = cameraY;
 
+    // Portal detection — travel when the local player's tile changes to a
+    // portal tile. Keyed by "x,y" so re-entering after leaving fires again,
+    // but standing still on the tile doesn't re-trigger every frame.
+    {
+      const pTileX = Math.floor(playerX / TILE_SIZE);
+      const pTileY = Math.floor(playerY / TILE_SIZE);
+      const pTile = tilesRef.current[pTileY]?.[pTileX];
+      const key = `${pTileX},${pTileY}`;
+      if (pTile?.type === 'portal' && pTile.portalTarget) {
+        if (lastPortalTileRef.current !== key) {
+          lastPortalTileRef.current = key;
+          onPortalEnterRef.current(pTile.portalTarget);
+        }
+      } else {
+        lastPortalTileRef.current = null;
+      }
+    }
+
     ctx.fillStyle = '#1a1a2e';
     ctx.fillRect(0, 0, logicalW, logicalH);
 
@@ -184,9 +313,38 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
         if (!tile) continue;
         const screenX = col * TILE_SIZE - cameraX;
         const screenY = row * TILE_SIZE - cameraY;
-        ctx.fillStyle = TILE_COLORS[tile.type] || '#e8d5b0';
-        ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+
+        // Furniture/wall tiles have transparent sprite margins, so paint the
+        // floor underneath first — otherwise gaps show the dark canvas backdrop.
+        drawFloorTile(ctx, tile, screenX, screenY);
+        if (tile.type !== 'floor' && tile.type !== 'portal' && tile.type !== 'spawn') {
+          drawTile(ctx, tile.type, screenX, screenY);
+        }
+
+        if (tile.type === 'portal') {
+          const pulse = Math.sin(timestamp * 0.005) * 0.3 + 0.7;
+          ctx.beginPath();
+          ctx.arc(screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2, TILE_SIZE / 2 - 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(124, 58, 237, ${pulse})`;
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+        } else if (tile.type === 'spawn') {
+          ctx.beginPath();
+          ctx.arc(screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2, TILE_SIZE / 2 - 5, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)';
+          ctx.setLineDash([3, 3]);
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
       }
+    }
+
+    // Furniture — object layer (base row, drawn before avatars)
+    const furnitureList = furnitureRef.current;
+    for (const item of furnitureList) {
+      if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
+      drawFurnitureLayer(ctx, item, cameraX, cameraY, 'object');
     }
 
     // Editor overlay
@@ -204,11 +362,15 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
       if (hover && hover.x >= 0 && hover.x < MAP_WIDTH && hover.y >= 0 && hover.y < MAP_HEIGHT) {
         const hsx = hover.x * TILE_SIZE - cameraX;
         const hsy = hover.y * TILE_SIZE - cameraY;
-        ctx.fillStyle = TILE_COLORS[selectedTileRef.current] + '80';
-        ctx.fillRect(hsx, hsy, TILE_SIZE, TILE_SIZE);
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        const activePaletteId = selectedPaletteRef.current;
+        const paletteEntry = activePaletteId ? TILE_PALETTE_BY_ID[activePaletteId] : undefined;
+        ctx.fillStyle = paletteEntry ? 'rgba(124,58,237,0.35)' : TILE_COLORS[selectedTileRef.current] + '80';
+        const hw = paletteEntry ? paletteEntry.tilesW * TILE_SIZE : TILE_SIZE;
+        const hh = paletteEntry ? TILE_SIZE : TILE_SIZE;
+        ctx.fillRect(hsx, hsy, hw, hh);
+        ctx.strokeStyle = 'rgba(124,58,237,0.7)';
         ctx.lineWidth = 1;
-        ctx.strokeRect(hsx, hsy, TILE_SIZE, TILE_SIZE);
+        ctx.strokeRect(hsx, hsy, hw, hh);
       }
     }
 
@@ -239,6 +401,23 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
       ctx.fillText(zone.name, zx + zone.width * TILE_SIZE / 2, zy + zone.height * TILE_SIZE / 2);
     }
 
+    // Zone draw preview (while dragging out a new zone rectangle)
+    if (zoneDragStartRef.current && zoneDragCurrentRef.current) {
+      const a = zoneDragStartRef.current;
+      const b = zoneDragCurrentRef.current;
+      const rx = Math.min(a.x, b.x);
+      const ry = Math.min(a.y, b.y);
+      const rw = Math.abs(b.x - a.x) + 1;
+      const rh = Math.abs(b.y - a.y) + 1;
+      const zx = rx * TILE_SIZE - cameraX;
+      const zy = ry * TILE_SIZE - cameraY;
+      ctx.fillStyle = 'rgba(124, 58, 237, 0.15)';
+      ctx.fillRect(zx, zy, rw * TILE_SIZE, rh * TILE_SIZE);
+      ctx.strokeStyle = 'rgba(124, 58, 237, 0.8)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(zx, zy, rw * TILE_SIZE, rh * TILE_SIZE);
+    }
+
     // Avatars
     const playerRecords = playerRecordsRef.current;
     const localPlayerId = localPlayerIdRef.current;
@@ -258,7 +437,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
           sy < -AVATAR_RADIUS - 40 || sy > logicalH + AVATAR_RADIUS + 30) continue;
 
       const isLocal = avatar.id === localPlayerId;
-      drawAvatar(ctx, { avatar, x: sx, y: sy, isLocal,
+      drawAvatar(ctx, { avatar, x: sx, y: sy, isLocal, timestamp,
         walkAnimOffset: isLocal ? walkOffset : avatar.isMoving ? Math.sin(timestamp * 0.008 + (avatar.id.charCodeAt(0) || 0) * 0.1) * 2 : 0,
       });
 
@@ -289,6 +468,13 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
         ctx.strokeStyle = `rgba(74, 222, 128, ${pulse * 0.6})`;
         ctx.lineWidth = 2; ctx.stroke();
       }
+    }
+
+    // Furniture — overhead layer (drawn after avatars, so tall pieces let
+    // players walk visually behind their upper portion)
+    for (const item of furnitureList) {
+      if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
+      drawFurnitureLayer(ctx, item, cameraX, cameraY, 'overhead');
     }
 
     // Speech bubbles
@@ -362,23 +548,68 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     const tile = getTileFromMouse(e.clientX, e.clientY);
     if (!tile) return;
     if (tile.x <= 0 || tile.x >= MAP_WIDTH - 1 || tile.y <= 0 || tile.y >= MAP_HEIGHT - 1) return;
-    isPaintingRef.current = true;
+
+    if (zoneDrawModeRef.current) {
+      zoneDragStartRef.current = tile;
+      zoneDragCurrentRef.current = tile;
+      return;
+    }
+
+    const paletteId = selectedPaletteRef.current;
+    if (paletteId) {
+      const entry = TILE_PALETTE_BY_ID[paletteId];
+      if (entry?.category === 'floor') {
+        isPaintingRef.current = true;
+        onFloorPaint(tile.x, tile.y, paletteId);
+      } else if (entry?.category === 'furniture') {
+        onFurniturePlace(tile.x, tile.y, paletteId);
+      }
+      return;
+    }
+
+    // Portal placement prompts for a target room — don't let a drag repeat it.
+    isPaintingRef.current = selectedTileRef.current !== 'portal';
     onTileHistoryPush();
     onTilePaint(tile.x, tile.y, selectedTileRef.current);
-  }, [getTileFromMouse, onTilePaint, onTileHistoryPush]);
+  }, [getTileFromMouse, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!editorModeRef.current) return;
     e.stopPropagation();
     const tile = getTileFromMouse(e.clientX, e.clientY);
     hoverTileRef.current = tile;
+
+    if (zoneDragStartRef.current && tile) {
+      zoneDragCurrentRef.current = tile;
+      return;
+    }
+
     if (isPaintingRef.current && tile) {
       if (tile.x <= 0 || tile.x >= MAP_WIDTH - 1 || tile.y <= 0 || tile.y >= MAP_HEIGHT - 1) return;
+      const paletteId = selectedPaletteRef.current;
+      if (paletteId) {
+        const entry = TILE_PALETTE_BY_ID[paletteId];
+        if (entry?.category === 'floor') onFloorPaint(tile.x, tile.y, paletteId);
+        return;
+      }
       onTilePaint(tile.x, tile.y, selectedTileRef.current);
     }
-  }, [getTileFromMouse, onTilePaint]);
+  }, [getTileFromMouse, onTilePaint, onFloorPaint]);
 
-  const handleMouseUp = useCallback(() => { isPaintingRef.current = false; }, []);
+  const handleMouseUp = useCallback(() => {
+    isPaintingRef.current = false;
+    if (zoneDragStartRef.current && zoneDragCurrentRef.current) {
+      const a = zoneDragStartRef.current;
+      const b = zoneDragCurrentRef.current;
+      const x = Math.min(a.x, b.x);
+      const y = Math.min(a.y, b.y);
+      const width = Math.abs(b.x - a.x) + 1;
+      const height = Math.abs(b.y - a.y) + 1;
+      onZoneDrawCompleteRef.current(x, y, width, height);
+    }
+    zoneDragStartRef.current = null;
+    zoneDragCurrentRef.current = null;
+  }, []);
   const handleMouseLeave = useCallback(() => { hoverTileRef.current = null; }, []);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -387,9 +618,10 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     const tile = getTileFromMouse(e.clientX, e.clientY);
     if (!tile) return;
     if (tile.x <= 0 || tile.x >= MAP_WIDTH - 1 || tile.y <= 0 || tile.y >= MAP_HEIGHT - 1) return;
+    onFurnitureErase(tile.x, tile.y);
     onTileHistoryPush();
     onTilePaint(tile.x, tile.y, 'floor');
-  }, [getTileFromMouse, onTilePaint, onTileHistoryPush]);
+  }, [getTileFromMouse, onTilePaint, onTileHistoryPush, onFurnitureErase]);
 
   useEffect(() => {
     resizeCanvas();

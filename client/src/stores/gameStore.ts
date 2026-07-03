@@ -67,8 +67,15 @@ export interface GameState {
   // Room editor
   furniture: Furniture[];
   setFurniture: (f: Furniture[]) => void;
+  addFurniture: (item: Furniture) => void;
+  removeFurnitureAt: (x: number, y: number) => void;
+  setFloorPaletteId: (x: number, y: number, paletteId: string | undefined) => void;
   zones: Zone[];
   setZones: (z: Zone[]) => void;
+  addZone: (zone: Zone) => void;
+  removeZone: (id: string) => void;
+  zoneDrawMode: boolean;
+  toggleZoneDrawMode: () => void;
 
   isAdmin: boolean;
   masterAdminUserId: string;
@@ -80,6 +87,8 @@ export interface GameState {
   toggleEditorMode: () => void;
   selectedTileType: TileType;
   setSelectedTileType: (t: TileType) => void;
+  selectedPaletteId?: string;
+  setSelectedPaletteId: (id: string | undefined) => void;
   tileHistory: TileType[][][];
   tileHistoryIndex: number;
   pushTileHistory: (tiles: TileType[][]) => void;
@@ -217,8 +226,39 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   furniture: [],
   setFurniture: (f) => set({ furniture: f }),
+  addFurniture: (item) =>
+    set((state) => {
+      const tiles = state.tiles.map((row) => row.map((t) => ({ ...t })));
+      for (let dx = 0; dx < item.tilesW; dx++) {
+        const tx = item.x + dx;
+        if (tiles[item.y]?.[tx]) tiles[item.y][tx].type = 'desk';
+      }
+      return { furniture: [...state.furniture, item], tiles };
+    }),
+  removeFurnitureAt: (x, y) =>
+    set((state) => {
+      const target = state.furniture.find((f) => f.y === y && x >= f.x && x < f.x + f.tilesW);
+      if (!target) return state;
+      const tiles = state.tiles.map((row) => row.map((t) => ({ ...t })));
+      for (let dx = 0; dx < target.tilesW; dx++) {
+        const tx = target.x + dx;
+        if (tiles[target.y]?.[tx]) tiles[target.y][tx].type = 'floor';
+      }
+      return { furniture: state.furniture.filter((f) => f.id !== target.id), tiles };
+    }),
+  setFloorPaletteId: (x, y, paletteId) =>
+    set((state) => {
+      if (!state.tiles[y]?.[x]) return state;
+      const tiles = state.tiles.map((row) => row.map((t) => ({ ...t })));
+      tiles[y][x].floorPaletteId = paletteId;
+      return { tiles };
+    }),
   zones: [],
   setZones: (z) => set({ zones: z }),
+  addZone: (zone) => set((state) => ({ zones: [...state.zones, zone] })),
+  removeZone: (id) => set((state) => ({ zones: state.zones.filter((z) => z.id !== id) })),
+  zoneDrawMode: false,
+  toggleZoneDrawMode: () => set((s) => ({ zoneDrawMode: !s.zoneDrawMode })),
 
   isAdmin: false,
   masterAdminUserId: '',
@@ -251,7 +291,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   editorMode: false,
   toggleEditorMode: () => set((s) => ({ editorMode: !s.editorMode })),
   selectedTileType: 'wall',
-  setSelectedTileType: (t: TileType) => set({ selectedTileType: t }),
+  setSelectedTileType: (t: TileType) => set({ selectedTileType: t, selectedPaletteId: undefined }),
+  selectedPaletteId: undefined,
+  setSelectedPaletteId: (id) => set({ selectedPaletteId: id }),
   tileHistory: [],
   tileHistoryIndex: -1,
   pushTileHistory: (tiles) =>
@@ -300,6 +342,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       roomId: roomState.id,
       roomName: roomState.name,
       tiles: roomState.tiles.length > 0 ? roomState.tiles : prev.tiles,
+      furniture: roomState.furniture ?? prev.furniture,
+      zones: roomState.zones ?? prev.zones,
       playerRecords: records,
       isAdmin: localIsAdmin,
       adminPlayerIds: adminIds,

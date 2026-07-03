@@ -20,7 +20,7 @@ export function CameraButton({ enabled, onToggle }: CameraButtonProps) {
   return (
     <button
       onClick={onToggle}
-      className="flex items-center justify-center w-12 h-12 rounded-full bg-gray-800/80 backdrop-blur-sm border border-white/10 shadow-lg transition-all hover:scale-105 cursor-pointer"
+      className="flex items-center justify-center w-12 h-12 rounded-full bg-white/90 backdrop-blur-sm border border-purple-200 shadow-lg transition-all hover:scale-105 cursor-pointer"
       title="Toggle Camera (V)"
     >
       <span className="text-xl">{enabled ? '📹' : '📷'}</span>

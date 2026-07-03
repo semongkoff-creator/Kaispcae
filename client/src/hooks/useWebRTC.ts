@@ -17,6 +17,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
 
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(true);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
 
   const initMedia = useCallback(async () => {
     if (initRef.current) return;
@@ -32,6 +33,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
       webrtcService.setOnRemoteStream((id, stream) => {
         onRemoteStream?.(id, stream);
       });
+      webrtcService.setOnScreenShareEnded(() => setIsScreenSharing(false));
     }
   }, [onRemoteStream]);
 
@@ -55,8 +57,8 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
           connectedIds.add(p.id);
         }
 
-        // Volume: gain = 1 - distanceTiles / 3, clamped 0-1
-        webrtcService.setAudioVolume(p.id, calcGain(p.distanceTiles));
+        // Zone-mates always get full volume; otherwise fall off with distance.
+        webrtcService.setAudioVolume(p.id, p.viaZone ? 1 : calcGain(p.distanceTiles));
       }
     }
 
@@ -90,6 +92,17 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     return track.enabled;
   }, []);
 
+  const toggleScreenShare = useCallback(async () => {
+    if (webrtcService.isScreenSharing()) {
+      webrtcService.stopScreenShare();
+      setIsScreenSharing(false);
+      return true;
+    }
+    const result = await webrtcService.startScreenShare();
+    setIsScreenSharing(result.success);
+    return result.success;
+  }, []);
+
   const destroy = useCallback(() => {
     for (const timer of disconnectTimers.current.values()) {
       clearTimeout(timer);
@@ -106,8 +119,10 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     updateProximity,
     toggleMic,
     toggleCamera,
+    toggleScreenShare,
     isMicMuted,
     isCameraOn,
+    isScreenSharing,
     destroy,
     getLocalStream: () => webrtcService.getLocalStream(),
   };

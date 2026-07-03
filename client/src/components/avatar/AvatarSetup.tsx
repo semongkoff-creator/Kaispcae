@@ -1,34 +1,47 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import {
-  BodyShape,
-  Accessory,
-  Expression,
-  AvatarConfig,
-} from '@virtualmeet/shared';
+import { AvatarConfig, SpriteMode } from '@virtualmeet/shared';
 import { drawAvatar } from '@/components/canvas/AvatarSprite';
 import { PALETTE } from '@/hooks/useAvatarConfig';
+import {
+  GENERATOR_BODIES,
+  GENERATOR_EYES,
+  GENERATOR_OUTFITS,
+  GENERATOR_HAIRSTYLES,
+  GENERATOR_ACCESSORIES,
+  PREMADE_CHARACTERS,
+} from '@/data/spriteManifest';
 
-const BODY_SHAPES: { value: BodyShape; label: string }[] = [
-  { value: 'circle', label: 'Circle' },
-  { value: 'rounded-square', label: 'Square' },
-  { value: 'hexagon', label: 'Hexagon' },
-];
+// Cycles through `options`, wrapping around. When `allowNone` is set, an
+// extra "no selection" (undefined) slot is inserted at the front — used for
+// optional layers like hair/accessory.
+function cycleOption(options: string[], current: string | undefined, dir: 1 | -1, allowNone: boolean): string | undefined {
+  const list: (string | undefined)[] = allowNone ? [undefined, ...options] : options;
+  const idx = list.findIndex((v) => v === current);
+  const from = idx === -1 ? 0 : idx;
+  const next = (from + dir + list.length) % list.length;
+  return list[next];
+}
 
-const ACCESSORIES: { value: Accessory; label: string }[] = [
-  { value: 'none', label: 'None' },
-  { value: 'cap', label: 'Cap' },
-  { value: 'crown', label: 'Crown' },
-  { value: 'headphones', label: 'Phones' },
-  { value: 'halo', label: 'Halo' },
-  { value: 'bow', label: 'Bow' },
-];
+function describeSelection(options: string[], current: string | undefined, allowNone: boolean): string {
+  if (allowNone && !current) return `None (0/${options.length})`;
+  const idx = options.indexOf(current || '');
+  const position = idx === -1 ? 1 : idx + 1;
+  return `${position}/${options.length}`;
+}
 
-const EXPRESSIONS: { value: Expression; label: string; emoji: string }[] = [
-  { value: 'neutral', label: 'Neutral', emoji: '😐' },
-  { value: 'happy', label: 'Happy', emoji: '😊' },
-  { value: 'cool', label: 'Cool', emoji: '😎' },
-  { value: 'thinking', label: 'Think', emoji: '🤔' },
-  { value: 'sleepy', label: 'Sleepy', emoji: '😴' },
+interface SpriteCategory {
+  key: 'bodyId' | 'eyesId' | 'outfitId' | 'hairId' | 'spriteAccessoryId';
+  label: string;
+  options: string[];
+  allowNone: boolean;
+}
+
+const SPRITE_CATEGORIES: SpriteCategory[] = [
+  { key: 'bodyId', label: 'Body', options: GENERATOR_BODIES, allowNone: false },
+  { key: 'eyesId', label: 'Eyes', options: GENERATOR_EYES, allowNone: false },
+  { key: 'outfitId', label: 'Outfit', options: GENERATOR_OUTFITS, allowNone: false },
+  { key: 'hairId', label: 'Hairstyle', options: GENERATOR_HAIRSTYLES, allowNone: true },
+  { key: 'spriteAccessoryId', label: 'Accessory', options: GENERATOR_ACCESSORIES, allowNone: true },
 ];
 
 interface AvatarSetupProps {
@@ -40,12 +53,17 @@ interface AvatarSetupProps {
 export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps) {
   const previewRef = useRef<HTMLCanvasElement>(null);
   const [config, setConfig] = useState<AvatarConfig>(() => ({
+    ...initialConfig,
     bodyShape: initialConfig?.bodyShape || 'circle',
     color: initialConfig?.color || PALETTE[0],
     accessory: initialConfig?.accessory || 'none',
     expression: initialConfig?.expression || 'neutral',
     name: initialConfig?.name || 'You',
     statusTag: initialConfig?.statusTag || '',
+    spriteMode: initialConfig?.spriteMode || 'layered',
+    bodyId: initialConfig?.bodyId || GENERATOR_BODIES[0],
+    eyesId: initialConfig?.eyesId || GENERATOR_EYES[0],
+    outfitId: initialConfig?.outfitId || GENERATOR_OUTFITS[0],
   }));
 
   const setField = useCallback(
@@ -54,6 +72,29 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
     },
     [],
   );
+
+  const setTab = useCallback((tab: SpriteMode) => {
+    setConfig((prev) => {
+      if (tab === 'premade' && !prev.premadeId) {
+        return { ...prev, spriteMode: tab, premadeId: PREMADE_CHARACTERS[0] };
+      }
+      return { ...prev, spriteMode: tab };
+    });
+  }, []);
+
+  const cycleCategory = useCallback((cat: SpriteCategory, dir: 1 | -1) => {
+    setConfig((prev) => ({
+      ...prev,
+      [cat.key]: cycleOption(cat.options, prev[cat.key] as string | undefined, dir, cat.allowNone),
+    }));
+  }, []);
+
+  const cyclePremade = useCallback((dir: 1 | -1) => {
+    setConfig((prev) => ({
+      ...prev,
+      premadeId: cycleOption(PREMADE_CHARACTERS, prev.premadeId, dir, false),
+    }));
+  }, []);
 
   const handleSave = () => {
     const trimmed = { ...config, name: config.name.trim() || 'You', statusTag: config.statusTag.trim().slice(0, 10) };
@@ -100,41 +141,68 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
   }, [config]);
 
   return (
-    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-gray-800 rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl border border-white/10">
+    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl shadow-purple-100/50 border border-purple-100">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-white text-xl font-bold">Customize Avatar</h2>
+          <h2 className="text-gray-900 text-xl font-bold">Customize Avatar</h2>
           {onClose && (
-            <button onClick={handleClose} className="text-white/50 hover:text-white text-lg leading-none">&times;</button>
+            <button onClick={handleClose} className="text-gray-400 hover:text-gray-700 text-lg leading-none">&times;</button>
           )}
         </div>
 
         {/* Live Preview */}
-        <div className="flex justify-center mb-6">
-          <canvas ref={previewRef} className="rounded-xl bg-gray-900/50" />
+        <div className="flex justify-center mb-4">
+          <canvas ref={previewRef} className="rounded-xl bg-purple-50" />
         </div>
 
-        {/* Body Shape */}
-        <Section label="Body Shape">
-          <div className="flex gap-2">
-            {BODY_SHAPES.map((bs) => (
-              <button
-                key={bs.value}
-                onClick={() => setField('bodyShape', bs.value)}
-                className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
-                  config.bodyShape === bs.value
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-gray-700 text-white/60 hover:bg-gray-600'
-                }`}
-              >
-                {bs.label}
-              </button>
-            ))}
-          </div>
-        </Section>
+        {/* Mode tabs */}
+        <div className="flex gap-2 mb-5 bg-purple-50 rounded-lg p-1">
+          <button
+            onClick={() => setTab('layered')}
+            className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${
+              config.spriteMode === 'layered' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            🛠️ Build Character
+          </button>
+          <button
+            onClick={() => setTab('premade')}
+            className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${
+              config.spriteMode === 'premade' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            ⚡ Quick Pick
+          </button>
+        </div>
 
-        {/* Color */}
-        <Section label="Color">
+        {config.spriteMode === 'premade' ? (
+          <Section label="Character">
+            <CyclePicker
+              label="Premade Character"
+              value={describeSelection(PREMADE_CHARACTERS, config.premadeId, false)}
+              onPrev={() => cyclePremade(-1)}
+              onNext={() => cyclePremade(1)}
+            />
+            <p className="text-gray-400 text-[10px] mt-2 leading-relaxed">
+              Ready-made character combos — no need to mix layers yourself.
+            </p>
+          </Section>
+        ) : (
+          <Section label="Appearance">
+            {SPRITE_CATEGORIES.map((cat) => (
+              <CyclePicker
+                key={cat.key}
+                label={cat.label}
+                value={describeSelection(cat.options, config[cat.key] as string | undefined, cat.allowNone)}
+                onPrev={() => cycleCategory(cat, -1)}
+                onNext={() => cycleCategory(cat, 1)}
+              />
+            ))}
+          </Section>
+        )}
+
+        {/* Identity Color — used for minimap dot, chat name dot, etc. */}
+        <Section label="Identity Color">
           <div className="flex flex-wrap gap-2">
             {PALETTE.map((color) => (
               <button
@@ -143,13 +211,13 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
                 className="w-8 h-8 rounded-full border-2 transition-transform hover:scale-110"
                 style={{
                   backgroundColor: color,
-                  borderColor: config.color === color ? '#fff' : 'transparent',
+                  borderColor: config.color === color ? '#7c3aed' : 'transparent',
                 }}
               />
             ))}
             {/* Custom color picker */}
-            <label className="w-8 h-8 rounded-full cursor-pointer flex items-center justify-center bg-gray-700 border-2 border-transparent hover:scale-110 transition-transform">
-              <span className="text-white/40 text-lg leading-none">+</span>
+            <label className="w-8 h-8 rounded-full cursor-pointer flex items-center justify-center bg-purple-50 border-2 border-transparent hover:scale-110 transition-transform">
+              <span className="text-gray-400 text-lg leading-none">+</span>
               <input
                 type="color"
                 value={config.color}
@@ -160,44 +228,6 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
           </div>
         </Section>
 
-        {/* Accessory */}
-        <Section label="Accessory">
-          <div className="flex flex-wrap gap-2">
-            {ACCESSORIES.map((acc) => (
-              <button
-                key={acc.value}
-                onClick={() => setField('accessory', acc.value)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  config.accessory === acc.value
-                    ? 'bg-purple-500 text-white'
-                    : 'bg-gray-700 text-white/60 hover:bg-gray-600'
-                }`}
-              >
-                {acc.label}
-              </button>
-            ))}
-          </div>
-        </Section>
-
-        {/* Expression */}
-        <Section label="Expression">
-          <div className="flex flex-wrap gap-2">
-            {EXPRESSIONS.map((exp) => (
-              <button
-                key={exp.value}
-                onClick={() => setField('expression', exp.value)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  config.expression === exp.value
-                    ? 'bg-emerald-500 text-white'
-                    : 'bg-gray-700 text-white/60 hover:bg-gray-600'
-                }`}
-              >
-                {exp.emoji} {exp.label}
-              </button>
-            ))}
-          </div>
-        </Section>
-
         {/* Display Name */}
         <Section label="Display Name">
           <input
@@ -205,10 +235,10 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
             value={config.name}
             onChange={(e) => setField('name', e.target.value.slice(0, 20))}
             maxLength={20}
-            className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-blue-400 transition-colors text-sm"
+            className="w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 rounded-lg px-3 py-2 outline-none border border-purple-100 focus:border-purple-500 transition-colors text-sm"
             placeholder="Your display name"
           />
-          <span className="text-white/30 text-xs mt-1 block">{config.name.length}/20</span>
+          <span className="text-gray-400 text-xs mt-1 block">{config.name.length}/20</span>
         </Section>
 
         {/* Status Tag */}
@@ -218,10 +248,10 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
             value={config.statusTag}
             onChange={(e) => setField('statusTag', e.target.value.slice(0, 10))}
             maxLength={10}
-            className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 outline-none border border-white/10 focus:border-blue-400 transition-colors text-sm"
+            className="w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 rounded-lg px-3 py-2 outline-none border border-purple-100 focus:border-purple-500 transition-colors text-sm"
             placeholder="e.g. dev, design, AFK"
           />
-          <span className="text-white/30 text-xs mt-1 block">{config.statusTag.length}/10</span>
+          <span className="text-gray-400 text-xs mt-1 block">{config.statusTag.length}/10</span>
         </Section>
 
         {/* Actions */}
@@ -229,14 +259,14 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
           {onClose && (
             <button
               onClick={handleClose}
-              className="flex-1 py-2.5 rounded-lg bg-gray-700 text-white/60 hover:bg-gray-600 font-medium text-sm transition-colors"
+              className="flex-1 py-2.5 rounded-lg bg-gray-100 text-gray-500 hover:bg-gray-200 font-medium text-sm transition-colors"
             >
               Cancel
             </button>
           )}
           <button
             onClick={handleSave}
-            className="flex-1 py-2.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-semibold text-sm transition-colors"
+            className="flex-1 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-semibold text-sm transition-colors"
           >
             {onClose ? 'Save & Apply' : 'Join Room'}
           </button>
@@ -246,10 +276,33 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
   );
 }
 
+function CyclePicker({ label, value, onPrev, onNext }: { label: string; value: string; onPrev: () => void; onNext: () => void }) {
+  return (
+    <div className="flex items-center justify-between bg-purple-50 rounded-lg px-2 py-2 mb-2">
+      <button
+        onClick={onPrev}
+        className="w-7 h-7 flex items-center justify-center rounded-md bg-white text-purple-600 hover:bg-purple-100 shadow-sm cursor-pointer text-sm"
+      >
+        ◀
+      </button>
+      <div className="text-center">
+        <p className="text-gray-900 text-xs font-medium">{label}</p>
+        <p className="text-gray-400 text-[10px] font-mono">{value}</p>
+      </div>
+      <button
+        onClick={onNext}
+        className="w-7 h-7 flex items-center justify-center rounded-md bg-white text-purple-600 hover:bg-purple-100 shadow-sm cursor-pointer text-sm"
+      >
+        ▶
+      </button>
+    </div>
+  );
+}
+
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-4">
-      <p className="text-white/70 text-xs font-semibold uppercase tracking-wider mb-2">{label}</p>
+      <p className="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-2">{label}</p>
       {children}
     </div>
   );

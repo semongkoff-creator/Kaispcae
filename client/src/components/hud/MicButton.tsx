@@ -25,15 +25,15 @@ export function MicButton({ muted, onToggle }: MicButtonProps) {
       onClick={onToggle}
       onMouseEnter={() => setShowLabel(true)}
       onMouseLeave={() => setShowLabel(false)}
-      className="relative flex items-center justify-center w-12 h-12 rounded-full bg-gray-800/80 backdrop-blur-sm border border-white/10 shadow-lg transition-all hover:scale-105 cursor-pointer"
+      className="relative flex items-center justify-center w-12 h-12 rounded-full bg-white/90 backdrop-blur-sm border border-purple-200 shadow-lg transition-all hover:scale-105 cursor-pointer"
       title="Toggle Microphone (M)"
     >
       <span className="text-xl">{muted ? '🔇' : '🎙️'}</span>
       {muted && (
-        <div className="absolute inset-0 rounded-full border-2 border-red-400 animate-pulse" />
+        <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-pulse" />
       )}
       {showLabel && (
-        <span className="absolute -top-8 whitespace-nowrap text-xs bg-black/70 text-white px-2 py-0.5 rounded">
+        <span className="absolute -top-8 whitespace-nowrap text-xs bg-white text-purple-700 border border-purple-100 shadow-sm px-2 py-0.5 rounded">
           Mic {muted ? 'OFF' : 'ON'} (M)
         </span>
       )}

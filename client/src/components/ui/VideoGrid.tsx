@@ -71,20 +71,20 @@ function VideoTile({
   }, [stream]);
 
   return (
-    <div className="pointer-events-auto bg-black/50 backdrop-blur-sm rounded-lg overflow-hidden w-40 border border-white/10 shadow-lg transition-all duration-300 animate-fade-in">
+    <div className="pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden w-40 border border-purple-200 shadow-lg transition-all duration-300 animate-fade-in">
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted={isLocal}
-        className="w-full h-24 object-cover bg-gray-800"
+        className="w-full h-24 object-cover bg-purple-100"
       />
       <div className="px-2 py-1 text-xs flex items-center justify-between">
-        <span className="text-white/80 truncate flex-1">{name}</span>
+        <span className="text-gray-700 truncate flex-1">{name}</span>
         {isLocal && (
           <span className="flex gap-1">
-            {micMuted && <span className="text-red-400">🔇</span>}
-            {cameraOff && <span className="text-red-400">📷</span>}
+            {micMuted && <span className="text-red-500">🔇</span>}
+            {cameraOff && <span className="text-red-500">📷</span>}
           </span>
         )}
       </div>

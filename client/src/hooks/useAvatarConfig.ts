@@ -16,6 +16,13 @@ const DEFAULT_CONFIG: AvatarConfig = {
   expression: 'neutral',
   name: 'You',
   statusTag: '',
+
+  // Default new (and silently migrate old) avatars to the pixel-art sprite
+  // system instead of the hand-drawn canvas shape.
+  spriteMode: 'layered',
+  bodyId: 'Body_32x32_01.png',
+  eyesId: 'Eyes_32x32_01.png',
+  outfitId: 'Outfit_01_32x32_01.png',
 };
 
 export function loadAvatarConfig(): AvatarConfig {

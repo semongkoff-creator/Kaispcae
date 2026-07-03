@@ -28,13 +28,13 @@ export function LoginPage({ onLogin, onRegister, error }: LoginPageProps) {
   };
 
   return (
-    <div className="w-screen h-screen bg-gray-900 flex items-center justify-center">
-      <div className="bg-gray-800 rounded-2xl p-8 w-full max-w-sm shadow-2xl border border-white/10">
-        <h1 className="text-white text-2xl font-bold mb-1">VirtualMeet</h1>
-        <p className="text-white/40 text-sm mb-6">{mode === 'login' ? 'Welcome back' : 'Create your account'}</p>
+    <div className="w-screen h-screen bg-gradient-to-br from-white to-purple-50 flex items-center justify-center">
+      <div className="bg-white rounded-2xl p-8 w-full max-w-sm shadow-xl shadow-purple-100/50 border border-purple-100">
+        <h1 className="text-gray-900 text-2xl font-bold mb-1">VirtualMeet</h1>
+        <p className="text-gray-500 text-sm mb-6">{mode === 'login' ? 'Welcome back' : 'Create your account'}</p>
 
         {error && (
-          <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs rounded-lg px-3 py-2 mb-4">
+          <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg px-3 py-2 mb-4">
             {error}
           </div>
         )}
@@ -43,33 +43,33 @@ export function LoginPage({ onLogin, onRegister, error }: LoginPageProps) {
           <input
             type="email" value={email} onChange={(e) => setEmail(e.target.value)}
             placeholder="Email" required autoFocus
-            className="w-full bg-gray-700 text-white rounded-lg px-3 py-2.5 outline-none border border-white/10 focus:border-blue-400 transition-colors text-sm"
+            className="w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 rounded-lg px-3 py-2.5 outline-none border border-purple-100 focus:border-purple-500 transition-colors text-sm"
           />
           <input
             type="password" value={password} onChange={(e) => setPassword(e.target.value)}
             placeholder="Password" required minLength={6}
-            className="w-full bg-gray-700 text-white rounded-lg px-3 py-2.5 outline-none border border-white/10 focus:border-blue-400 transition-colors text-sm"
+            className="w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 rounded-lg px-3 py-2.5 outline-none border border-purple-100 focus:border-purple-500 transition-colors text-sm"
           />
           {mode === 'register' && (
             <input
               type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)}
               placeholder="Display name" required maxLength={30}
-              className="w-full bg-gray-700 text-white rounded-lg px-3 py-2.5 outline-none border border-white/10 focus:border-blue-400 transition-colors text-sm"
+              className="w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 rounded-lg px-3 py-2.5 outline-none border border-purple-100 focus:border-purple-500 transition-colors text-sm"
             />
           )}
           <button
             type="submit" disabled={loading}
-            className="w-full bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white font-semibold rounded-lg py-2.5 transition-colors text-sm cursor-pointer"
+            className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-semibold rounded-lg py-2.5 transition-colors text-sm cursor-pointer"
           >
             {loading ? 'Please wait...' : mode === 'login' ? 'Sign In' : 'Create Account'}
           </button>
         </form>
 
-        <p className="text-white/30 text-xs text-center mt-5">
+        <p className="text-gray-500 text-xs text-center mt-5">
           {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
           <button
             onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-            className="text-blue-400 hover:text-blue-300 cursor-pointer"
+            className="text-purple-600 hover:text-purple-700 cursor-pointer"
           >
             {mode === 'login' ? 'Sign up' : 'Sign in'}
           </button>
