@@ -5,12 +5,15 @@ import {
   MAP_HEIGHT,
   Avatar,
   TileType,
-  RoomTile,
+  Direction,
+  ProximityPlayer,
+  PROXIMITY_THRESHOLD_PX,
+  EMOTE_EMOJI,
 } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useMovement } from '@/hooks/useMovement';
+import { drawAvatar } from './AvatarSprite';
 
-// Tile type → fill color
 const TILE_COLORS: Record<TileType, string> = {
   floor: '#e8d5b0',
   wall: '#4a3728',
@@ -19,236 +22,397 @@ const TILE_COLORS: Record<TileType, string> = {
   chair: '#5b8dd9',
 };
 
-// Tiles the player cannot walk on
+const AVATAR_RADIUS = 14;
+
 const BLOCKED_TILES: Set<TileType> = new Set(['wall', 'desk', 'chair']);
 
-const AVATAR_RADIUS = 14;
-const GLOW_RADIUS = AVATAR_RADIUS + 4;
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const test = current ? `${current} ${word}` : word;
+    if (ctx.measureText(test).width < maxWidth) {
+      current = test;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [text.slice(0, 30)];
+}
 
-/**
- * The main canvas component that renders the 2D virtual space.
- * Owns the requestAnimationFrame game loop, camera/viewport,
- * tile grid, avatar sprites, and local-player input handling.
- */
-export function GameCanvas() {
+interface GameCanvasProps {
+  emitMove: (x: number, y: number, direction: string) => void;
+  emitStop: (direction: string) => void;
+  proximityData: ProximityPlayer[];
+  localSpeaking: boolean;
+  speakingPlayers: Set<string>;
+  micMuted: boolean;
+  cameraOn: boolean;
+  editorMode: boolean;
+  selectedTileType: TileType;
+  onTilePaint: (x: number, y: number, type: TileType) => void;
+  onTileHistoryPush: () => void;
+}
+
+export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, onTilePaint, onTileHistoryPush }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
   const prevTimeRef = useRef<number>(0);
+  const wasMovingRef = useRef<boolean>(false);
+
+  const emitMoveRef = useRef(emitMove); emitMoveRef.current = emitMove;
+  const emitStopRef = useRef(emitStop); emitStopRef.current = emitStop;
 
   const tiles = useGameStore((s) => s.tiles);
-  const players = useGameStore((s) => s.players);
   const localPlayer = useGameStore((s) => s.localPlayer);
-  const setLocalPlayer = useGameStore((s) => s.setLocalPlayer);
+  const localPlayerId = useGameStore((s) => s.localPlayerId);
 
-  const isBlocked = useCallback(
-    (tileX: number, tileY: number) => {
-      if (tileX < 0 || tileX >= MAP_WIDTH || tileY < 0 || tileY >= MAP_HEIGHT) return true;
-      if (tiles.length === 0) return false;
-      return BLOCKED_TILES.has(tiles[tileY]?.[tileX]?.type);
-    },
-    [tiles],
-  );
+  const tilesRef = useRef(tiles);
+  const playerRecordsRef = useRef(useGameStore.getState().playerRecords);
+  const localPlayerRef = useRef(localPlayer);
+  const localPlayerIdRef = useRef(localPlayerId);
+  const bubblesRef = useRef(useGameStore.getState().speechBubbles);
+  const emotesRef = useRef(useGameStore.getState().emoteEvents);
+  const zonesRef = useRef(useGameStore.getState().zones);
+
+  useEffect(() => {
+    tilesRef.current = tiles;
+    playerRecordsRef.current = useGameStore.getState().playerRecords;
+    localPlayerRef.current = localPlayer;
+    localPlayerIdRef.current = localPlayerId;
+    bubblesRef.current = useGameStore.getState().speechBubbles;
+    emotesRef.current = useGameStore.getState().emoteEvents;
+    zonesRef.current = useGameStore.getState().zones;
+  });
+
+  const proximityRef = useRef(proximityData); proximityRef.current = proximityData;
+  const localSpeakingRef = useRef(localSpeaking); localSpeakingRef.current = localSpeaking;
+  const speakingPlayersRef = useRef(speakingPlayers); speakingPlayersRef.current = speakingPlayers;
+  const micMutedRef = useRef(micMuted); micMutedRef.current = micMuted;
+  const cameraOnRef = useRef(cameraOn); cameraOnRef.current = cameraOn;
+
+  const editorModeRef = useRef(editorMode); editorModeRef.current = editorMode;
+  const selectedTileRef = useRef(selectedTileType); selectedTileRef.current = selectedTileType;
+  const isPaintingRef = useRef(false);
+  const hoverTileRef = useRef<{ x: number; y: number } | null>(null);
+  const cameraXRef = useRef(0);
+  const cameraYRef = useRef(0);
+
+  const isBlocked = useCallback((tileX: number, tileY: number) => {
+    if (tileX < 0 || tileX >= MAP_WIDTH || tileY < 0 || tileY >= MAP_HEIGHT) return true;
+    const t = tilesRef.current;
+    if (t.length === 0) return false;
+    return BLOCKED_TILES.has(t[tileY]?.[tileX]?.type);
+  }, []);
+
+  const onMoveRef = useRef((x: number, y: number, direction: Direction) => {
+    useGameStore.getState().setLocalPlayer({ x, y, direction, isMoving: true });
+  });
 
   const { update, setPosition } = useMovement({
     isBlocked,
-    onMove: (x, y, direction) => {
-      setLocalPlayer({ x, y, direction, isMoving: true });
-    },
+    onMove: onMoveRef.current,
   });
 
-  // Sync the hook's internal position with the store
   useEffect(() => {
     setPosition(localPlayer.x, localPlayer.y);
   }, [localPlayer.x, localPlayer.y, setPosition]);
 
-  // Resize canvas to fill the container
   const resizeCanvas = useCallback(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
-
     const rect = container.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
-
     const ctx = canvas.getContext('2d');
     if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }, []);
 
-  // Draw everything
-  const draw = useCallback(
-    (timestamp: number) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+  const draw = useCallback((timestamp: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-      // Delta time in seconds, capped to avoid spiral-of-death after tab switch
-      if (prevTimeRef.current === 0) prevTimeRef.current = timestamp;
-      const rawDt = (timestamp - prevTimeRef.current) / 1000;
-      const dt = Math.min(rawDt, 0.05); // cap at 50ms
-      prevTimeRef.current = timestamp;
+    if (prevTimeRef.current === 0) prevTimeRef.current = timestamp;
+    const rawDt = (timestamp - prevTimeRef.current) / 1000;
+    const dt = Math.min(rawDt, 0.05);
+    prevTimeRef.current = timestamp;
 
-      const logicalW = canvas.width / (window.devicePixelRatio || 1);
-      const logicalH = canvas.height / (window.devicePixelRatio || 1);
+    const logicalW = canvas.width / (window.devicePixelRatio || 1);
+    const logicalH = canvas.height / (window.devicePixelRatio || 1);
 
-      // --- Update player position from input ---
-      const moveResult = update(dt);
+    const moveResult = update(dt);
 
-      // --- Compute camera offset so local player is centered ---
-      const playerX = moveResult.x;
-      const playerY = moveResult.y;
-      const cameraX = playerX - logicalW / 2;
-      const cameraY = playerY - logicalH / 2;
+    if (moveResult.isMoving) {
+      emitMoveRef.current(moveResult.x, moveResult.y, moveResult.direction);
+      wasMovingRef.current = true;
+    } else if (wasMovingRef.current) {
+      emitStopRef.current(moveResult.direction);
+      useGameStore.getState().setLocalPlayer({ isMoving: false });
+      wasMovingRef.current = false;
+    }
 
-      // --- Clear ---
-      ctx.fillStyle = '#1a1a2e';
-      ctx.fillRect(0, 0, logicalW, logicalH);
+    const playerX = moveResult.x;
+    const playerY = moveResult.y;
+    const cameraX = playerX - logicalW / 2;
+    const cameraY = playerY - logicalH / 2;
 
-      if (tiles.length === 0) {
-        ctx.fillStyle = '#888';
-        ctx.font = '20px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Loading room…', logicalW / 2, logicalH / 2);
-        rafRef.current = requestAnimationFrame(draw);
-        return;
+    cameraXRef.current = cameraX;
+    cameraYRef.current = cameraY;
+
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, logicalW, logicalH);
+
+    const tiles = tilesRef.current;
+    const startCol = Math.max(0, Math.floor(cameraX / TILE_SIZE));
+    const endCol = Math.min(MAP_WIDTH, Math.ceil((cameraX + logicalW) / TILE_SIZE) + 1);
+    const startRow = Math.max(0, Math.floor(cameraY / TILE_SIZE));
+    const endRow = Math.min(MAP_HEIGHT, Math.ceil((cameraY + logicalH) / TILE_SIZE) + 1);
+
+    for (let row = startRow; row < endRow; row++) {
+      for (let col = startCol; col < endCol; col++) {
+        const tile = tiles[row]?.[col];
+        if (!tile) continue;
+        const screenX = col * TILE_SIZE - cameraX;
+        const screenY = row * TILE_SIZE - cameraY;
+        ctx.fillStyle = TILE_COLORS[tile.type] || '#e8d5b0';
+        ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
       }
+    }
 
-      // --- Draw tiles (only visible tiles for perf) ---
-      const startCol = Math.max(0, Math.floor(cameraX / TILE_SIZE));
-      const endCol = Math.min(MAP_WIDTH, Math.ceil((cameraX + logicalW) / TILE_SIZE) + 1);
-      const startRow = Math.max(0, Math.floor(cameraY / TILE_SIZE));
-      const endRow = Math.min(MAP_HEIGHT, Math.ceil((cameraY + logicalH) / TILE_SIZE) + 1);
-
+    // Editor overlay
+    if (editorModeRef.current) {
       for (let row = startRow; row < endRow; row++) {
         for (let col = startCol; col < endCol; col++) {
-          const tile = tiles[row]?.[col];
-          if (!tile) continue;
-
-          const screenX = col * TILE_SIZE - cameraX;
-          const screenY = row * TILE_SIZE - cameraY;
-
-          ctx.fillStyle = TILE_COLORS[tile.type] || '#e8d5b0';
-          ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
-
-          // Subtle grid lines for floor tiles
-          if (tile.type === 'floor') {
-            ctx.strokeStyle = 'rgba(0,0,0,0.05)';
-            ctx.lineWidth = 0.5;
-            ctx.strokeRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
-          }
+          const sx = col * TILE_SIZE - cameraX;
+          const sy = row * TILE_SIZE - cameraY;
+          ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+          ctx.lineWidth = 0.5;
+          ctx.strokeRect(sx, sy, TILE_SIZE, TILE_SIZE);
         }
       }
+      const hover = hoverTileRef.current;
+      if (hover && hover.x >= 0 && hover.x < MAP_WIDTH && hover.y >= 0 && hover.y < MAP_HEIGHT) {
+        const hsx = hover.x * TILE_SIZE - cameraX;
+        const hsy = hover.y * TILE_SIZE - cameraY;
+        ctx.fillStyle = TILE_COLORS[selectedTileRef.current] + '80';
+        ctx.fillRect(hsx, hsy, TILE_SIZE, TILE_SIZE);
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(hsx, hsy, TILE_SIZE, TILE_SIZE);
+      }
+    }
 
-      // --- Draw all avatars ---
-      const allAvatars: Avatar[] = [
-        { ...localPlayer, x: playerX, y: playerY, isMoving: moveResult.isMoving, direction: moveResult.direction },
-        ...players,
-      ];
+    // Proximity ring
+    ctx.beginPath();
+    ctx.arc(playerX - cameraX, playerY - cameraY, PROXIMITY_THRESHOLD_PX, 0, Math.PI * 2);
+    ctx.setLineDash([6, 8]);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.setLineDash([]);
 
-      for (const avatar of allAvatars) {
-        const screenX = avatar.x - cameraX;
-        const screenY = avatar.y - cameraY;
+    // Zone overlays
+    const zones = zonesRef.current;
+    for (const zone of zones) {
+      const zx = zone.x * TILE_SIZE - cameraX;
+      const zy = zone.y * TILE_SIZE - cameraY;
+      ctx.fillStyle = 'rgba(100, 149, 237, 0.08)';
+      ctx.fillRect(zx, zy, zone.width * TILE_SIZE, zone.height * TILE_SIZE);
+      ctx.strokeStyle = 'rgba(100, 149, 237, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(zx, zy, zone.width * TILE_SIZE, zone.height * TILE_SIZE);
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(zone.name, zx + zone.width * TILE_SIZE / 2, zy + zone.height * TILE_SIZE / 2);
+    }
 
-        // Cull off-screen avatars
-        if (
-          screenX < -AVATAR_RADIUS || screenX > logicalW + AVATAR_RADIUS ||
-          screenY < -AVATAR_RADIUS || screenY > logicalH + AVATAR_RADIUS
-        ) continue;
+    // Avatars
+    const playerRecords = playerRecordsRef.current;
+    const localPlayerId = localPlayerIdRef.current;
+    const localPlayer = localPlayerRef.current;
+    const walkOffset = moveResult.isMoving ? Math.sin(timestamp * 0.008) * 2 : 0;
+    const localAvatar: Avatar = {
+      ...localPlayer, x: playerX, y: playerY, isMoving: moveResult.isMoving,
+      direction: moveResult.direction, id: localPlayerId,
+    };
+    const remoteAvatars = Object.values(playerRecords).filter((p) => p.id !== localPlayerId);
+    const allAvatars: Avatar[] = [localAvatar, ...remoteAvatars];
 
-        const isLocal = avatar.id === 'local';
+    for (const avatar of allAvatars) {
+      const sx = avatar.x - cameraX;
+      const sy = avatar.y - cameraY;
+      if (sx < -AVATAR_RADIUS - 30 || sx > logicalW + AVATAR_RADIUS + 30 ||
+          sy < -AVATAR_RADIUS - 40 || sy > logicalH + AVATAR_RADIUS + 30) continue;
 
-        // White glow ring for local player
-        if (isLocal) {
-          ctx.beginPath();
-          ctx.arc(screenX, screenY, GLOW_RADIUS, 0, Math.PI * 2);
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-          ctx.fill();
+      const isLocal = avatar.id === localPlayerId;
+      drawAvatar(ctx, { avatar, x: sx, y: sy, isLocal,
+        walkAnimOffset: isLocal ? walkOffset : avatar.isMoving ? Math.sin(timestamp * 0.008 + (avatar.id.charCodeAt(0) || 0) * 0.1) * 2 : 0,
+      });
 
-          ctx.beginPath();
-          ctx.arc(screenX, screenY, GLOW_RADIUS, 0, Math.PI * 2);
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-          ctx.lineWidth = 2;
-          ctx.stroke();
-        }
-
-        // Direction indicator (a small triangle pointing forward)
-        const eyeOffset = 6;
-        let eyeX = 0, eyeY = 0;
-        switch (avatar.direction) {
-          case 'up': eyeY = -eyeOffset; break;
-          case 'down': eyeY = eyeOffset; break;
-          case 'left': eyeX = -eyeOffset; break;
-          case 'right': eyeX = eyeOffset; break;
-        }
-
-        // Body circle
-        ctx.beginPath();
-        ctx.arc(screenX, screenY, AVATAR_RADIUS, 0, Math.PI * 2);
-        ctx.fillStyle = avatar.color;
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Direction dot
-        ctx.beginPath();
-        ctx.arc(screenX + eyeX, screenY + eyeY, 4, 0, Math.PI * 2);
-        ctx.fillStyle = '#fff';
-        ctx.fill();
-
-        // Name label
-        ctx.font = 'bold 11px sans-serif';
+      // Crown for admin players
+      if (avatar.isAdmin) {
+        ctx.font = '14px sans-serif';
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-
-        const labelY = screenY - AVATAR_RADIUS - 6;
-
-        // Label background
-        const textWidth = ctx.measureText(avatar.name).width;
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(screenX - textWidth / 2 - 4, labelY - 12, textWidth + 8, 16);
-
-        // Label text
-        ctx.fillStyle = isLocal ? '#ffdd57' : '#ffffff';
-        ctx.fillText(avatar.name, screenX, labelY);
+        ctx.fillText('👑', sx, sy - AVATAR_RADIUS - 24);
       }
 
-      rafRef.current = requestAnimationFrame(draw);
-    },
-    [tiles, players, localPlayer, update],
-  );
+      const sp = speakingPlayersRef.current;
+      const isSpeaking = isLocal ? localSpeakingRef.current : sp.has(avatar.id);
+      const isMuted = isLocal && micMutedRef.current;
+      const inProx = proximityRef.current.find((p) => p.id === avatar.id)?.inProximity ?? false;
 
-  // Set up resize observer and start the game loop
-  useEffect(() => {
-    resizeCanvas();
+      if (isMuted || isLocal) {
+        const iconY = sy + AVATAR_RADIUS + 18;
+        ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+        if (isMuted) ctx.fillText('🔇', sx, iconY);
+        else if (isSpeaking) ctx.fillText('🔊', sx, iconY);
+        if (inProx && cameraOnRef.current) ctx.fillText('📹', sx, iconY + 14);
+      }
 
-    const observer = new ResizeObserver(() => {
-      resizeCanvas();
-    });
+      if (isSpeaking) {
+        const pulse = Math.sin(timestamp * 0.01) * 0.3 + 0.7;
+        ctx.beginPath();
+        ctx.arc(sx, sy, AVATAR_RADIUS + 3, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(74, 222, 128, ${pulse * 0.6})`;
+        ctx.lineWidth = 2; ctx.stroke();
+      }
+    }
 
-    const container = containerRef.current;
-    if (container) observer.observe(container);
+    // Speech bubbles
+    const bubbles = bubblesRef.current;
+    const now = Date.now();
+    for (const [pid, bubble] of Object.entries(bubbles)) {
+      if (now > bubble.expireAt) continue;
+      const records = playerRecordsRef.current;
+      const p = pid === localPlayerId ? localPlayerRef.current : records[pid];
+      if (!p) continue;
+      const bsx = p.x - cameraX;
+      const bsy = p.y - cameraY;
+      const alpha = Math.max(0, 1 - (now - bubble.expireAt + 1000) / 1000);
+      ctx.save(); ctx.globalAlpha = alpha;
+      const lines = wrapText(ctx, bubble.text, 100);
+      const lineH = 13; const pad = 5;
+      const bw = Math.min(110, ctx.measureText(bubble.text).width + pad * 2);
+      const bh = lines.length * lineH + pad * 2;
+      const bx = bsx - bw / 2;
+      const by = bsy - AVATAR_RADIUS - 40 - bh;
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.beginPath();
+      ctx.moveTo(bx + 4, by); ctx.lineTo(bx + bw - 4, by);
+      ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + 4);
+      ctx.lineTo(bx + bw, by + bh - 4);
+      ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - 4, by + bh);
+      ctx.lineTo(bx + 4 + 6, by + bh); ctx.lineTo(bx + 6, by + bh + 6);
+      ctx.lineTo(bx + 2, by + bh); ctx.lineTo(bx + 4, by + bh);
+      ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - 4);
+      ctx.lineTo(bx, by + 4); ctx.quadraticCurveTo(bx, by, bx + 4, by);
+      ctx.fill();
+      ctx.fillStyle = '#333'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+      for (let li = 0; li < lines.length; li++) {
+        ctx.fillText(lines[li], bx + bw / 2, by + pad + lineH * (li + 1) - 2);
+      }
+      ctx.restore();
+    }
+
+    // Floating emotes
+    const emotes = emotesRef.current;
+    for (const ev of emotes) {
+      const elapsed = now - ev.timestamp;
+      if (elapsed > 3000) continue;
+      const alpha = 1 - elapsed / 3000;
+      const px = ev.x - cameraX;
+      const py = (ev.y - cameraY) - elapsed * 0.02;
+      ctx.save(); ctx.globalAlpha = alpha;
+      ctx.font = `${18 + elapsed * 0.01}px sans-serif`; ctx.textAlign = 'center';
+      ctx.fillText(EMOTE_EMOJI[ev.emote] || '👋', px, py);
+      ctx.restore();
+    }
 
     rafRef.current = requestAnimationFrame(draw);
+  }, []);
 
-    return () => {
-      cancelAnimationFrame(rafRef.current);
-      observer.disconnect();
-    };
-  }, [draw, resizeCanvas]);
+  // Editor mouse handlers
+  const getTileFromMouse = useCallback((clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const tileX = Math.floor((mx + cameraXRef.current) / TILE_SIZE);
+    const tileY = Math.floor((my + cameraYRef.current) / TILE_SIZE);
+    return { x: tileX, y: tileY };
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (!editorModeRef.current) return;
+    e.stopPropagation();
+    const tile = getTileFromMouse(e.clientX, e.clientY);
+    if (!tile) return;
+    if (tile.x <= 0 || tile.x >= MAP_WIDTH - 1 || tile.y <= 0 || tile.y >= MAP_HEIGHT - 1) return;
+    isPaintingRef.current = true;
+    onTileHistoryPush();
+    onTilePaint(tile.x, tile.y, selectedTileRef.current);
+  }, [getTileFromMouse, onTilePaint, onTileHistoryPush]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!editorModeRef.current) return;
+    e.stopPropagation();
+    const tile = getTileFromMouse(e.clientX, e.clientY);
+    hoverTileRef.current = tile;
+    if (isPaintingRef.current && tile) {
+      if (tile.x <= 0 || tile.x >= MAP_WIDTH - 1 || tile.y <= 0 || tile.y >= MAP_HEIGHT - 1) return;
+      onTilePaint(tile.x, tile.y, selectedTileRef.current);
+    }
+  }, [getTileFromMouse, onTilePaint]);
+
+  const handleMouseUp = useCallback(() => { isPaintingRef.current = false; }, []);
+  const handleMouseLeave = useCallback(() => { hoverTileRef.current = null; }, []);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    if (!editorModeRef.current) return;
+    e.preventDefault(); e.stopPropagation();
+    const tile = getTileFromMouse(e.clientX, e.clientY);
+    if (!tile) return;
+    if (tile.x <= 0 || tile.x >= MAP_WIDTH - 1 || tile.y <= 0 || tile.y >= MAP_HEIGHT - 1) return;
+    onTileHistoryPush();
+    onTilePaint(tile.x, tile.y, 'floor');
+  }, [getTileFromMouse, onTilePaint, onTileHistoryPush]);
+
+  useEffect(() => {
+    resizeCanvas();
+    const observer = new ResizeObserver(() => resizeCanvas());
+    const container = containerRef.current;
+    if (container) observer.observe(container);
+    prevTimeRef.current = 0;
+    rafRef.current = requestAnimationFrame(draw);
+    return () => { cancelAnimationFrame(rafRef.current); observer.disconnect(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
-    <div ref={containerRef} className="w-full h-full absolute inset-0">
+    <div ref={containerRef} className={`w-full h-full absolute inset-0 ${editorMode ? 'ring-2 ring-orange-500 ring-inset z-10' : ''}`}>
       <canvas
         ref={canvasRef}
-        className="block"
+        className={`block ${editorMode ? 'cursor-crosshair' : ''}`}
         style={{ imageRendering: 'pixelated' }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
+        onContextMenu={handleContextMenu}
       />
     </div>
   );

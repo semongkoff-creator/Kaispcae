@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  password     String
+  displayName  String
+  avatarConfig Json?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  roomMembers  RoomMember[]
+  ownedRooms   Room[]
+}
+
+model Room {
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique
+  tilemapData Json
+  furniture   Json?
+  zones       Json?
+  ownerId     String
+  owner       User         @relation(fields: [ownerId], references: [id])
+  isPublic    Boolean      @default(true)
+  maxPlayers  Int          @default(50)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  members     RoomMember[]
+}
+
+model RoomMember {
+  userId   String
+  roomId   String
+  role     String   @default("member")
+  joinedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@id([userId, roomId])
+}

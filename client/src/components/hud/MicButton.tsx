@@ -1,0 +1,42 @@
+import { useState, useCallback, useEffect } from 'react';
+
+interface MicButtonProps {
+  muted: boolean;
+  onToggle: () => void;
+}
+
+export function MicButton({ muted, onToggle }: MicButtonProps) {
+  const [showLabel, setShowLabel] = useState(false);
+
+  // M key shortcut
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'm' || e.key === 'M') {
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+        onToggle();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onToggle]);
+
+  return (
+    <button
+      onClick={onToggle}
+      onMouseEnter={() => setShowLabel(true)}
+      onMouseLeave={() => setShowLabel(false)}
+      className="relative flex items-center justify-center w-12 h-12 rounded-full bg-gray-800/80 backdrop-blur-sm border border-white/10 shadow-lg transition-all hover:scale-105 cursor-pointer"
+      title="Toggle Microphone (M)"
+    >
+      <span className="text-xl">{muted ? '🔇' : '🎙️'}</span>
+      {muted && (
+        <div className="absolute inset-0 rounded-full border-2 border-red-400 animate-pulse" />
+      )}
+      {showLabel && (
+        <span className="absolute -top-8 whitespace-nowrap text-xs bg-black/70 text-white px-2 py-0.5 rounded">
+          Mic {muted ? 'OFF' : 'ON'} (M)
+        </span>
+      )}
+    </button>
+  );
+}

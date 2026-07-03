@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { Direction, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, PLAYER_SPEED } from '@virtualmeet/shared';
+import { Direction, TILE_SIZE, PLAYER_SPEED } from '@virtualmeet/shared';
 
 interface UseMovementOptions {
   isBlocked: (tileX: number, tileY: number) => boolean;
@@ -13,23 +13,24 @@ interface MovementState {
   dy: number;
 }
 
-/**
- * Tracks keyboard input (WASD / arrow keys), computes direction and velocity,
- * and provides a collision-checked position update function.
- */
 export function useMovement({ isBlocked, onMove }: UseMovementOptions) {
   const keysRef = useRef<Set<string>>(new Set());
-  const lastTimeRef = useRef<number>(0);
   const currentXRef = useRef<number>(0);
   const currentYRef = useRef<number>(0);
 
-  // Set player's actual position (called by the renderer loop)
+  // Refs to keep callbacks stable across renders — prevents the dependency
+  // chain from cascading up to the rAF loop in GameCanvas.
+  const isBlockedRef = useRef(isBlocked);
+  isBlockedRef.current = isBlocked;
+
+  const onMoveRef = useRef(onMove);
+  onMoveRef.current = onMove;
+
   const setPosition = useCallback((x: number, y: number) => {
     currentXRef.current = x;
     currentYRef.current = y;
   }, []);
 
-  // Read the current input vector (direction + speed)
   const getInput = useCallback((): MovementState => {
     const keys = keysRef.current;
     let dx = 0;
@@ -53,52 +54,14 @@ export function useMovement({ isBlocked, onMove }: UseMovementOptions) {
       direction = 'right';
     }
 
-    // Diagonal movement: keep both components for smooth diagonal sliding
     const isMoving = dx !== 0 || dy !== 0;
-
     return { direction, isMoving, dx, dy };
   }, []);
 
-  /**
-   * Attempt to move the player by (dx, dy) pixels, respecting collision.
-   * Uses axis-aligned separation: checks X then Y independently so the
-   * player can slide along walls.
-   */
-  const tryMove = useCallback(
-    (dt: number) => {
-      const { dx, dy, direction, isMoving } = getInput();
-      if (!isMoving) return { x: currentXRef.current, y: currentYRef.current, direction, isMoving };
-
-      const stepX = dx * PLAYER_SPEED * dt;
-      const stepY = dy * PLAYER_SPEED * dt;
-
-      let newX = currentXRef.current;
-      let newY = currentYRef.current;
-
-      // Check X axis independently
-      const targetX = currentXRef.current + stepX;
-      if (!wouldCollide(targetX, currentYRef.current)) {
-        newX = targetX;
-      }
-
-      // Check Y axis independently
-      const targetY = currentYRef.current + stepY;
-      if (!wouldCollide(currentXRef.current, targetY)) {
-        newY = targetY;
-      }
-
-      return { x: newX, y: newY, direction, isMoving };
-    },
-    [getInput],
-  );
-
-  /**
-   * Returns true if a 32x32 box centered on (px, py) would overlap any blocked tile.
-   * The player occupies their current tile plus adjacent tiles based on overlap.
-   */
+  // Collision check reads isBlocked from ref — never changes identity
   const wouldCollide = useCallback(
     (px: number, py: number) => {
-      const half = TILE_SIZE / 2 - 2; // slight padding so players don't clip edges
+      const half = TILE_SIZE / 2 - 2;
       const left = px - half;
       const right = px + half;
       const top = py - half;
@@ -111,20 +74,61 @@ export function useMovement({ isBlocked, onMove }: UseMovementOptions) {
 
       for (let ty = minTileY; ty <= maxTileY; ty++) {
         for (let tx = minTileX; tx <= maxTileX; tx++) {
-          if (isBlocked(tx, ty)) {
+          if (isBlockedRef.current(tx, ty)) {
             return true;
           }
         }
       }
       return false;
     },
-    [isBlocked],
+    [], // stable — reads from ref
   );
 
-  // Keyboard event listeners
+  const tryMove = useCallback(
+    (dt: number) => {
+      const { dx, dy, direction, isMoving } = getInput();
+      if (!isMoving) return { x: currentXRef.current, y: currentYRef.current, direction, isMoving };
+
+      const stepX = dx * PLAYER_SPEED * dt;
+      const stepY = dy * PLAYER_SPEED * dt;
+
+      let newX = currentXRef.current;
+      let newY = currentYRef.current;
+
+      const targetX = currentXRef.current + stepX;
+      if (!wouldCollide(targetX, currentYRef.current)) {
+        newX = targetX;
+      }
+
+      const targetY = currentYRef.current + stepY;
+      if (!wouldCollide(currentXRef.current, targetY)) {
+        newY = targetY;
+      }
+
+      return { x: newX, y: newY, direction, isMoving };
+    },
+    [getInput, wouldCollide], // both stable — never recreates
+  );
+
+  const update = useCallback(
+    (dt: number) => {
+      const result = tryMove(dt);
+      if (result.x !== currentXRef.current || result.y !== currentYRef.current) {
+        currentXRef.current = result.x;
+        currentYRef.current = result.y;
+        onMoveRef.current(result.x, result.y, result.direction);
+      }
+      return result;
+    },
+    [tryMove], // tryMove is stable — update never recreates
+  );
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Prevent browser scrolling with arrow keys
+      // Don't process movement keys while user is typing in an input field
+      const tag = document.activeElement?.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || (document.activeElement as HTMLElement)?.isContentEditable) return;
+
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
       }
@@ -133,11 +137,13 @@ export function useMovement({ isBlocked, onMove }: UseMovementOptions) {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      const tag = document.activeElement?.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || (document.activeElement as HTMLElement)?.isContentEditable) return;
+
       keysRef.current.delete(e.key);
       if (e.code) keysRef.current.delete(e.code);
     };
 
-    // Reset keys if window loses focus
     const handleBlur = () => {
       keysRef.current.clear();
     };
@@ -152,20 +158,6 @@ export function useMovement({ isBlocked, onMove }: UseMovementOptions) {
       window.removeEventListener('blur', handleBlur);
     };
   }, []);
-
-  // The game loop calls this every frame with delta time
-  const update = useCallback(
-    (dt: number) => {
-      const result = tryMove(dt);
-      if (result.x !== currentXRef.current || result.y !== currentYRef.current) {
-        currentXRef.current = result.x;
-        currentYRef.current = result.y;
-        onMove(result.x, result.y, result.direction);
-      }
-      return result;
-    },
-    [tryMove, onMove],
-  );
 
   return { update, setPosition, getInput };
 }
