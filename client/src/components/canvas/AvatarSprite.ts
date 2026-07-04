@@ -81,8 +81,15 @@ export function drawAvatar(
   drawNameLabel(ctx, cx, cy - r - 9, name, isLocal);
 
   // ─── Status badge below name ────────────────────────────────
+  let nextBadgeY = cy - r - 23;
   if (config?.statusTag) {
-    drawStatusTag(ctx, cx, cy - r - 23, config.statusTag);
+    drawStatusTag(ctx, cx, nextBadgeY, config.statusTag);
+    nextBadgeY -= 14;
+  }
+
+  // ─── Custom status (e.g. "WFH", "In a meeting") above everything else ──
+  if (avatar.status) {
+    drawCustomStatus(ctx, cx, nextBadgeY, avatar.status);
   }
 }
 
@@ -582,6 +589,38 @@ function drawStatusTag(
 
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.fillText(tag, x, baseY);
+}
+
+// Free-text status set via StatusButton (e.g. "WFH", "In a meeting") —
+// solid purple pill, more prominent than the subtle avatarConfig.statusTag
+// above, since it's meant to be glanceable across the room.
+function drawCustomStatus(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  baseY: number,
+  status: string,
+) {
+  ctx.font = 'bold 9px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+
+  const metrics = ctx.measureText(status);
+  const tw = metrics.width;
+  const padX = 5;
+  const padY = 1;
+  const h = 13;
+
+  const bgX = x - tw / 2 - padX;
+  const bgY = baseY - h + padY;
+  const bgW = tw + padX * 2;
+
+  ctx.fillStyle = '#7c3aed';
+  ctx.beginPath();
+  roundRect(ctx, bgX, bgY, bgW, h, 5);
+  ctx.fill();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(status, x, baseY);
 }
 
 // ─── Color helpers ────────────────────────────────────────────────

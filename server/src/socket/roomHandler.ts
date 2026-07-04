@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload } from '@virtualmeet/shared';
-import { addPlayer, removePlayer, getRoomState, updatePlayerAvatarConfig } from '../store/roomStore';
+import { addPlayer, removePlayer, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus } from '../store/roomStore';
 import { PrismaClient } from '@prisma/client';
 
 function getPrisma(): PrismaClient {
@@ -135,8 +135,14 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
     const spawn = findSpawnPixel(dbRoom?.tilemapData) ?? { x: 3 * 32 + 16, y: 3 * 32 + 16 };
 
+    // `name` is already the resolved display name (real account name takes
+    // priority client-side in useSocket.ts). avatarConfig.name defaults to
+    // the placeholder 'You' used for the Avatar Editor's own live preview —
+    // it must not win over the real name just because a player never opened
+    // that editor, so it's only a fallback for the (unreachable in practice,
+    // since login is mandatory) case where `name` itself is empty.
     const newPlayer: Avatar = {
-      id: socket.id, name: avatarConfig?.name || name,
+      id: socket.id, name: name || avatarConfig?.name || 'Player',
       x: spawn.x, y: spawn.y, direction: 'down',
       color, isMoving: false, avatarConfig: avatarConfig || undefined,
       isAdmin, userId: uid,
@@ -209,6 +215,13 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const room = currentRoom; if (!room) return;
     socket.to(room).emit(SocketEvents.AVATAR_UPDATED, { id: socket.id, avatarConfig });
     updatePlayerAvatarConfig(room, socket.id, avatarConfig);
+  });
+
+  socket.on(SocketEvents.PLAYER_STATUS_UPDATE, (status: string) => {
+    const room = currentRoom; if (!room) return;
+    const trimmed = (status || '').slice(0, 24);
+    socket.to(room).emit(SocketEvents.PLAYER_STATUS_UPDATED, { id: socket.id, status: trimmed });
+    updatePlayerStatus(room, socket.id, trimmed);
   });
 
   socket.on(SocketEvents.ROOM_UPDATE, (payload: RoomUpdatePayload) => {

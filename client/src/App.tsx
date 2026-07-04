@@ -6,12 +6,14 @@ import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
 import { NameModal } from './components/ui/NameModal';
 import { AvatarSetup } from './components/avatar/AvatarSetup';
 import { AvatarEditorButton } from './components/avatar/AvatarEditorButton';
+import { StatusButton } from './components/avatar/StatusButton';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { ChatPanel } from './components/ui/ChatPanel';
 import { EmoteWheel } from './components/ui/EmoteWheel';
 import { Minimap } from './components/hud/Minimap';
 import { RoomEditor } from './components/ui/RoomEditor';
 import { AdminPanel } from './components/ui/AdminPanel';
+import { ParticipantPanel } from './components/ui/ParticipantPanel';
 import { MicButton } from './components/hud/MicButton';
 import { CameraButton } from './components/hud/CameraButton';
 import { ScreenShareButton } from './components/hud/ScreenShareButton';
@@ -27,9 +29,9 @@ import { useWebRTC } from './hooks/useWebRTC';
 import { webrtcService } from './services/webrtcService';
 import { loadAvatarConfig, saveAvatarConfig } from './hooks/useAvatarConfig';
 
-function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName }: { roomSlug: string; onLeave: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string }) {
+function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }: { roomSlug: string; onLeave: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitAvatarUpdate, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke } = useSocket(authDisplayName, roomSlug);
+  const { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke } = useSocket(authDisplayName, roomSlug, authUserId);
   const [showEditor, setShowEditor] = useState(false);
 
   // Media state from store
@@ -95,8 +97,11 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName }: { roomSlug
     updateProximity(nearby);
   }, [nearby, updateProximity]);
 
-  // Notify other players in the room when the local player enters/leaves a zone
+  // Track which zone (if any) the local player is standing in — drives the
+  // ChatPanel's "Private" tab, and notifies other players in the room when
+  // it changes. State (not a ref) so the Private tab can actually appear.
   const currentZoneIdRef = useRef<string | null>(null);
+  const [currentZone, setCurrentZone] = useState<{ id: string; name: string } | null>(null);
   useEffect(() => {
     const zone = findZoneAt(localPlayer, zones);
     const zoneId = zone?.id ?? null;
@@ -104,7 +109,13 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName }: { roomSlug
     if (currentZoneIdRef.current) emitZoneExit(currentZoneIdRef.current);
     if (zoneId) emitZoneEnter(zoneId);
     currentZoneIdRef.current = zoneId;
+    setCurrentZone(zone ? { id: zone.id, name: zone.name } : null);
   }, [localPlayer.x, localPlayer.y, zones, emitZoneEnter, emitZoneExit]);
+
+  const zoneChatHistory = useGameStore((s) => s.zoneChatHistory);
+  const handleSendZoneChat = useCallback((text: string, zoneId: string) => {
+    emitChat(text, false, zoneId);
+  }, [emitChat]);
 
   // Media toggles — single call, track is toggled directly in the hook
   const handleMicToggle = useCallback(() => {
@@ -196,11 +207,8 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName }: { roomSlug
   }, []);
 
   const handleZoneDrawComplete = useCallback((x: number, y: number, width: number, height: number) => {
-    const name = window.prompt('Zone name (e.g. "Meeting Room A"):', 'Meeting Room');
     const state = useGameStore.getState();
-    if (name && name.trim()) {
-      state.addZone({ id: crypto.randomUUID(), name: name.trim().slice(0, 30), x, y, width, height });
-    }
+    state.setPendingZoneRect({ x, y, width, height });
     state.toggleZoneDrawMode();
   }, []);
 
@@ -231,7 +239,16 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName }: { roomSlug
     setShowEditor(false);
   }, [emitAvatarUpdate]);
 
-  const savedConfig = loadAvatarConfig();
+  const handleStatusSave = useCallback((status: string) => {
+    useGameStore.getState().setLocalPlayer({ status: status || undefined });
+    emitPlayerStatus(status);
+  }, [emitPlayerStatus]);
+
+  // loadAvatarConfig()'s default `name` is the placeholder 'You' used for
+  // the editor's own live preview. Seed it with the real account name so
+  // opening the editor and saving without touching the name field doesn't
+  // broadcast "You" to every other player in the room.
+  const savedConfig = { ...loadAvatarConfig(), name: playerName || loadAvatarConfig().name };
 
   // Chat + emotes + minimap state
   const chatMessages = useGameStore((s) => s.chatMessages);
@@ -306,8 +323,10 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName }: { roomSlug
       </div>
 
       <ConnectionIndicator />
+      <ParticipantPanel remoteStreams={remoteStreams} />
 
       <AvatarEditorButton onClick={() => setShowEditor(true)} />
+      <StatusButton status={localPlayer.status || ''} onSave={handleStatusSave} />
 
       {isAdmin && (
         <button
@@ -424,6 +443,9 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName }: { roomSlug
         onSend={handleChatSend}
         onBubble={emitBubble}
         onEmote={handleEmoteSelect}
+        currentZone={currentZone}
+        zoneMessages={currentZone ? zoneChatHistory[currentZone.id] ?? [] : []}
+        onSendZone={handleSendZoneChat}
       />
 
       <EmoteWheel
@@ -543,5 +565,5 @@ export default function App() {
     );
   }
 
-  return <Game roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} />;
+  return <Game roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} />;
 }

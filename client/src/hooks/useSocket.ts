@@ -4,7 +4,7 @@ import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, SpeechBubb
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 
-export function useSocket(authUserName: string = '', roomSlug: string = 'main-office') {
+export function useSocket(authUserName: string = '', roomSlug: string = 'main-office', authUserId: string = '') {
   const socketRef = useRef<Socket | null>(null);
   const lastEmitRef = useRef<number>(0);
 
@@ -16,6 +16,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   const setPlayerTarget = useGameStore((s) => s.setPlayerTarget);
   const interpolatePlayers = useGameStore((s) => s.interpolatePlayers);
   const addChatMessage = useGameStore((s) => s.addChatMessage);
+  const addZoneChatMessage = useGameStore((s) => s.addZoneChatMessage);
   const setSpeechBubble = useGameStore((s) => s.setSpeechBubble);
   const addEmote = useGameStore((s) => s.addEmote);
   const setFurniture = useGameStore((s) => s.setFurniture);
@@ -24,15 +25,23 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   const applyAdminChanged = useGameStore((s) => s.applyAdminChanged);
   const setLocalUserId = useGameStore((s) => s.setLocalUserId);
 
-  // Generate/persist userId on init
+  // Identify this player by their real authenticated account id whenever one
+  // is available, so admin/ownership checks (which compare against
+  // Room.ownerId, a real DB user id) actually match. vm_userId is a random
+  // per-browser fallback for the (currently unreachable, since login is
+  // required before the Lobby) anonymous case — kept for backward compat.
   useEffect(() => {
+    if (authUserId) {
+      setLocalUserId(authUserId);
+      return;
+    }
     let uid = localStorage.getItem('vm_userId');
     if (!uid) {
       uid = crypto.randomUUID();
       localStorage.setItem('vm_userId', uid);
     }
     setLocalUserId(uid);
-  }, []);
+  }, [authUserId]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -56,7 +65,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       setConnected(true);
 
       const config = loadAvatarConfig();
-      const uid = localStorage.getItem('vm_userId') || socket.id;
+      const uid = authUserId || localStorage.getItem('vm_userId') || socket.id;
       const displayName = authUserName || config.name || 'Player';
       socket.emit(SocketEvents.JOIN_ROOM, roomSlug, displayName, config, uid);
     });
@@ -110,7 +119,17 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       } as Avatar);
     });
 
+    socket.on(SocketEvents.PLAYER_STATUS_UPDATED, (data: { id: string; status: string }) => {
+      const state = useGameStore.getState();
+      if (data.id === state.localPlayerId) return;
+      upsertPlayer({ id: data.id, status: data.status || undefined } as Avatar);
+    });
+
     socket.on(SocketEvents.CHAT_BROADCAST, (msg: ChatMessage) => {
+      if (msg.zoneId) {
+        addZoneChatMessage(msg.zoneId, msg);
+        return;
+      }
       addChatMessage(msg);
       // Also show speech bubble above sender for 4 seconds
       if (!msg.isProximity) {
@@ -178,7 +197,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       socket.removeAllListeners();
       socket.disconnect();
     };
-  }, [authUserName, roomSlug]);
+  }, [authUserName, roomSlug, authUserId]);
 
   const emitMove = useCallback(
     (x: number, y: number, direction: string) => {
@@ -212,8 +231,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     [],
   );
 
-  const emitChat = useCallback((text: string, isProximity?: boolean) => {
-    socketRef.current?.emit(SocketEvents.CHAT_MESSAGE, text, isProximity);
+  const emitPlayerStatus = useCallback((status: string) => {
+    socketRef.current?.emit(SocketEvents.PLAYER_STATUS_UPDATE, status);
+  }, []);
+
+  const emitChat = useCallback((text: string, isProximity?: boolean, zoneId?: string) => {
+    socketRef.current?.emit(SocketEvents.CHAT_MESSAGE, text, isProximity, zoneId);
   }, []);
 
   const emitBubble = useCallback((text: string) => {
@@ -254,5 +277,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.ROOM_DELETE);
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomSave, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitRoomDelete };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomSave, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitRoomDelete };
 }

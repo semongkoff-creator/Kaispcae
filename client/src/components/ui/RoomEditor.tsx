@@ -1,8 +1,88 @@
-import { useCallback } from 'react';
-import { TileType } from '@virtualmeet/shared';
+import { useCallback, useState } from 'react';
+import { TileType, Zone, ZoneType } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { createDefaultRoom } from '@/utils/createDefaultRoom';
 import { TILE_PALETTE, PaletteEntry } from '@/data/tilePaletteManifest';
+
+const ZONE_COLORS = ['#7c3aed', '#4d96ff', '#10b981', '#f59e0b', '#ef4444', '#64748b'];
+const ZONE_TYPES: { value: ZoneType; label: string }[] = [
+  { value: 'meeting', label: 'Meeting (big banner)' },
+  { value: 'desk', label: 'Desk (small label)' },
+  { value: 'focus', label: 'Focus (small label)' },
+  { value: 'general', label: 'General (no banner)' },
+];
+
+function ZoneForm({ rect, onCancel }: { rect: { x: number; y: number; width: number; height: number }; onCancel: () => void }) {
+  const [name, setName] = useState('Meeting Room');
+  const [label, setLabel] = useState('MEETING ROOM');
+  const [color, setColor] = useState(ZONE_COLORS[0]);
+  const [type, setType] = useState<ZoneType>('meeting');
+
+  const handleCreate = () => {
+    const zone: Zone = {
+      id: crypto.randomUUID(),
+      name: name.trim().slice(0, 30) || 'Zone',
+      x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+      type,
+      color,
+      label: type === 'general' ? undefined : (label.trim().slice(0, 24) || undefined),
+    };
+    useGameStore.getState().addZone(zone);
+    onCancel();
+  };
+
+  return (
+    <div className="mb-3 p-3 rounded-lg bg-purple-50 border border-purple-200">
+      <p className="text-purple-700 text-xs font-semibold mb-2">New Zone</p>
+      <label className="text-gray-500 text-[10px] block mb-1">Internal name</label>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        maxLength={30}
+        className="w-full bg-white text-gray-900 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 focus:border-purple-500"
+      />
+
+      <label className="text-gray-500 text-[10px] block mb-1">Type</label>
+      <select
+        value={type}
+        onChange={(e) => setType(e.target.value as ZoneType)}
+        className="w-full bg-white text-gray-900 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 focus:border-purple-500 cursor-pointer"
+      >
+        {ZONE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+      </select>
+
+      {type !== 'general' && (
+        <>
+          <label className="text-gray-500 text-[10px] block mb-1">Banner label</label>
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value.toUpperCase())}
+            maxLength={24}
+            placeholder="e.g. AI TEAM"
+            className="w-full bg-white text-gray-900 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 focus:border-purple-500"
+          />
+
+          <label className="text-gray-500 text-[10px] block mb-1">Color</label>
+          <div className="flex gap-1.5 mb-3">
+            {ZONE_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => setColor(c)}
+                className="w-6 h-6 rounded-full border-2 cursor-pointer"
+                style={{ backgroundColor: c, borderColor: color === c ? '#1f2937' : 'transparent' }}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="flex gap-2">
+        <button onClick={onCancel} className="flex-1 py-1.5 rounded bg-gray-100 text-gray-600 text-xs hover:bg-gray-200 cursor-pointer">Cancel</button>
+        <button onClick={handleCreate} className="flex-1 py-1.5 rounded bg-purple-600 text-white text-xs font-medium hover:bg-purple-700 cursor-pointer">Create</button>
+      </div>
+    </div>
+  );
+}
 
 const BASIC_TYPES: { type: TileType; label: string; color: string }[] = [
   { type: 'floor', label: 'Floor', color: '#e8d5b0' },
@@ -57,6 +137,8 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
   const removeZone = useGameStore((s) => s.removeZone);
   const zoneDrawMode = useGameStore((s) => s.zoneDrawMode);
   const toggleZoneDrawMode = useGameStore((s) => s.toggleZoneDrawMode);
+  const pendingZoneRect = useGameStore((s) => s.pendingZoneRect);
+  const setPendingZoneRect = useGameStore((s) => s.setPendingZoneRect);
 
   const handleReset = useCallback(() => {
     const room = createDefaultRoom('main-office', 'Main Office');
@@ -149,6 +231,9 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
       >
         🔒 {zoneDrawMode ? 'Drag on map to draw…' : 'Draw Zone'}
       </button>
+      {pendingZoneRect && (
+        <ZoneForm rect={pendingZoneRect} onCancel={() => setPendingZoneRect(null)} />
+      )}
       {zones.length > 0 && (
         <div className="space-y-1 mb-3">
           {zones.map((z) => (

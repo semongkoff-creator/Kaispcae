@@ -119,6 +119,7 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
     canvas.style.width = '120px';
     canvas.style.height = '120px';
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;
 
     ctx.clearRect(0, 0, 120, 120);
 

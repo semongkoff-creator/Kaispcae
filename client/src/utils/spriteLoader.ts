@@ -69,5 +69,6 @@ export function drawSpriteFrame(
     sx, sy, cellWidth, cellHeight,
     dx, dy, dWidth, dHeight,
   );
+
   return true;
 }

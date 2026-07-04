@@ -48,6 +48,9 @@ export interface Avatar {
   isAdmin?: boolean;
   isMasterAdmin?: boolean;
   userId?: string;
+  // Free-text custom status shown as a small badge above the name tag
+  // (e.g. "WFH", "In a meeting", "🎧 Focus") — independent of admin/online state.
+  status?: string;
 }
 
 // A single tile on the room grid. `type` stays authoritative for collision
@@ -101,6 +104,9 @@ export enum SocketEvents {
 
   AVATAR_UPDATE = 'avatar:update',
   AVATAR_UPDATED = 'avatar:updated',
+
+  PLAYER_STATUS_UPDATE = 'player:status_update',
+  PLAYER_STATUS_UPDATED = 'player:status_updated',
 
   RTC_OFFER = 'rtc:offer',
   RTC_ANSWER = 'rtc:answer',
@@ -170,7 +176,13 @@ export interface Furniture {
   tilesH: number;
 }
 
-// Zones
+// Zones. 'meeting' zones render a big banner across the top of the area
+// (label required to look right); 'desk'/'focus' render a small floating
+// pill label instead; 'general' (or no type, for zones created before this
+// field existed) keeps the plain dashed-outline + centered name that was
+// already there.
+export type ZoneType = 'meeting' | 'desk' | 'focus' | 'general';
+
 export interface Zone {
   id: string;
   name: string;
@@ -178,9 +190,15 @@ export interface Zone {
   y: number;
   width: number;
   height: number;
+  label?: string;
+  color?: string;
+  type?: ZoneType;
 }
 
-// Chat
+// Chat. When zoneId is set, the message is private to that zone — the
+// server only broadcasts it to sockets currently tracked as inside that
+// zone (see zoneHandler.ts getSocketIdsInZone), and the client keeps it in
+// a separate per-zone history instead of the general room chat.
 export interface ChatMessage {
   id: string;
   senderId: string;
@@ -189,6 +207,7 @@ export interface ChatMessage {
   text: string;
   timestamp: number;
   isProximity?: boolean;
+  zoneId?: string;
 }
 
 // Emotes

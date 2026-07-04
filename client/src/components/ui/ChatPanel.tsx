@@ -9,30 +9,46 @@ interface ChatPanelProps {
   onSend: (text: string, isProximity?: boolean) => void;
   onBubble: (text: string) => void;
   onEmote: (emote: EmoteType) => void;
+  // When set, the local player is standing inside a zone that has its own
+  // private chat — the "Private" tab appears automatically while true and
+  // disappears (falling back to "All") once they leave.
+  currentZone?: { id: string; name: string } | null;
+  zoneMessages?: ChatMessage[];
+  onSendZone?: (text: string, zoneId: string) => void;
 }
 
-export function ChatPanel({ messages, localPlayerName, onSend, onBubble, onEmote }: ChatPanelProps) {
+export function ChatPanel({ messages, localPlayerName, onSend, onBubble, onEmote, currentZone, zoneMessages = [], onSendZone }: ChatPanelProps) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [proximityMode, setProximityMode] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
+  const [activeTab, setActiveTab] = useState<'all' | 'private'>('all');
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Fall back to "All" the moment there's no zone chat to show anymore.
+  useEffect(() => {
+    if (!currentZone && activeTab === 'private') setActiveTab('all');
+  }, [currentZone, activeTab]);
+
+  const visibleMessages = activeTab === 'private' ? zoneMessages : messages;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [visibleMessages]);
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    if (proximityMode) {
+    if (activeTab === 'private' && currentZone && onSendZone) {
+      onSendZone(trimmed, currentZone.id);
+    } else if (proximityMode) {
       onBubble(trimmed);
     } else {
       onSend(trimmed);
     }
     setText('');
     setShowEmoji(false);
-  }, [text, proximityMode, onSend, onBubble]);
+  }, [text, proximityMode, onSend, onBubble, activeTab, currentZone, onSendZone]);
 
   const insertEmoji = (emoji: string) => {
     setText((prev) => prev + emoji);
@@ -61,8 +77,30 @@ export function ChatPanel({ messages, localPlayerName, onSend, onBubble, onEmote
             </label>
           </div>
 
+          {currentZone && (
+            <div className="flex gap-1 px-3 pt-2">
+              <button
+                onClick={() => setActiveTab('all')}
+                className={`flex-1 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                  activeTab === 'all' ? 'bg-purple-600 text-white' : 'bg-purple-50 text-gray-500 hover:bg-purple-100'
+                }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setActiveTab('private')}
+                className={`flex-1 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                  activeTab === 'private' ? 'bg-purple-600 text-white' : 'bg-purple-50 text-gray-500 hover:bg-purple-100'
+                }`}
+                title={`Private to ${currentZone.name}`}
+              >
+                🔒 {currentZone.name}
+              </button>
+            </div>
+          )}
+
           <div className="flex-1 overflow-y-auto p-3 space-y-1.5 text-xs">
-            {messages.slice(-50).map((m) => {
+            {visibleMessages.slice(-50).map((m) => {
               const isMentioned = m.text.includes(`@${localPlayerName}`);
               const isOwn = m.senderName === localPlayerName;
               return (
@@ -82,6 +120,11 @@ export function ChatPanel({ messages, localPlayerName, onSend, onBubble, onEmote
                 </div>
               );
             })}
+            {visibleMessages.length === 0 && (
+              <p className="text-gray-400 text-center mt-4">
+                {activeTab === 'private' ? `No messages in ${currentZone?.name} yet.` : 'No messages yet.'}
+              </p>
+            )}
             <div ref={bottomRef} />
           </div>
 
@@ -99,7 +142,7 @@ export function ChatPanel({ messages, localPlayerName, onSend, onBubble, onEmote
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder={proximityMode ? 'Say nearby...' : 'Type a message...'}
+              placeholder={activeTab === 'private' ? `Message ${currentZone?.name}...` : proximityMode ? 'Say nearby...' : 'Type a message...'}
               maxLength={200}
               className="flex-1 bg-purple-50/50 text-gray-900 placeholder-gray-400 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 focus:border-purple-500"
             />

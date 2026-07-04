@@ -56,6 +56,10 @@ export interface GameState {
   // Chat
   chatMessages: ChatMessage[];
   addChatMessage: (msg: ChatMessage) => void;
+  // Per-zone "Private" chat history, kept separate from the general room
+  // chat above — see ChatPanel.tsx's All/Private tabs.
+  zoneChatHistory: Record<string, ChatMessage[]>;
+  addZoneChatMessage: (zoneId: string, msg: ChatMessage) => void;
   speechBubbles: Record<string, SpeechBubble>;
   setSpeechBubble: (playerId: string, bubble: SpeechBubble | null) => void;
 
@@ -76,6 +80,10 @@ export interface GameState {
   removeZone: (id: string) => void;
   zoneDrawMode: boolean;
   toggleZoneDrawMode: () => void;
+  // Rect awaiting the "name this zone" form in RoomEditor, set once a drag
+  // finishes and cleared on confirm/cancel.
+  pendingZoneRect: { x: number; y: number; width: number; height: number } | null;
+  setPendingZoneRect: (rect: { x: number; y: number; width: number; height: number } | null) => void;
 
   isAdmin: boolean;
   masterAdminUserId: string;
@@ -202,6 +210,18 @@ export const useGameStore = create<GameState>((set, get) => ({
       chatMessages: [...state.chatMessages.slice(-99), msg],
     })),
 
+  zoneChatHistory: {},
+  addZoneChatMessage: (zoneId, msg) =>
+    set((state) => {
+      const existing = state.zoneChatHistory[zoneId] ?? [];
+      return {
+        zoneChatHistory: {
+          ...state.zoneChatHistory,
+          [zoneId]: [...existing.slice(-99), msg],
+        },
+      };
+    }),
+
   speechBubbles: {},
   setSpeechBubble: (playerId, bubble) =>
     set((state) => {
@@ -259,6 +279,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   removeZone: (id) => set((state) => ({ zones: state.zones.filter((z) => z.id !== id) })),
   zoneDrawMode: false,
   toggleZoneDrawMode: () => set((s) => ({ zoneDrawMode: !s.zoneDrawMode })),
+  pendingZoneRect: null,
+  setPendingZoneRect: (rect) => set({ pendingZoneRect: rect }),
 
   isAdmin: false,
   masterAdminUserId: '',

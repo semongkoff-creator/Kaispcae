@@ -36,11 +36,19 @@ function single(file: number): string {
 
 export const TILE_PALETTE: PaletteEntry[] = [
   // ── Floor textures (1x1) ──────────────────────────────────────────
-  { id: 'floor-tan', label: 'Tan Floor', category: 'floor', src: single(6), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
-  { id: 'floor-tan-plain', label: 'Tan Floor (plain)', category: 'floor', src: single(28), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
-  { id: 'floor-gray', label: 'Gray Floor', category: 'floor', src: single(36), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
-  { id: 'floor-gray-border', label: 'Gray Floor (border)', category: 'floor', src: single(40), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
-  { id: 'floor-lavender', label: 'Lavender Carpet', category: 'floor', src: single(70), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
+  // Only entries whose bounding box was verified (by rendering the crop
+  // against a magenta background) to fill the FULL 32x32 cell with no
+  // transparent margin are listed here. Singles_6/28/40 all looked like
+  // plausible floor swatches in a quick contact-sheet glance but turned out
+  // to have partial-cell content (a thin sliver, or a few px inset on one
+  // edge) that tiles into visible seams/gaps — dropped rather than shipping
+  // a texture that's subtly broken when repeated across a whole room.
+  // gray/lavender's own texture has an asymmetric left/right edge, so tiling
+  // them repeatedly (rendered a 4x4 block to confirm) draws a visible line
+  // down every tile boundary — a property of the source art, not the crop.
+  // Still usable if that grid look is wanted; olive/maroon tile seamlessly.
+  { id: 'floor-gray', label: 'Gray Floor (visible grid seam)', category: 'floor', src: single(36), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
+  { id: 'floor-lavender', label: 'Lavender Carpet (visible grid seam)', category: 'floor', src: single(70), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
   { id: 'floor-olive-carpet', label: 'Olive Carpet', category: 'floor', src: single(86), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
   { id: 'floor-maroon-carpet', label: 'Maroon Carpet', category: 'floor', src: single(90), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
 

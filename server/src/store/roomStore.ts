@@ -164,6 +164,19 @@ export async function updatePlayerAvatarConfig(
   }
 }
 
+export async function updatePlayerStatus(
+  roomId: string,
+  playerId: string,
+  status: string,
+): Promise<void> {
+  const players = await getPlayers(roomId);
+  const player = players.find((p) => p.id === playerId);
+  if (player) {
+    player.status = status || undefined;
+    await setPlayers(roomId, players);
+  }
+}
+
 // ─── Room state ────────────────────────────────────────────────────
 
 export async function getRoomState(roomId: string, roomName: string): Promise<RoomState> {

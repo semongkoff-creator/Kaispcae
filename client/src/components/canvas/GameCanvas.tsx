@@ -46,7 +46,23 @@ interface TileSpriteDef {
 
 // portal/spawn render as plain floor — their special meaning is conveyed by
 // the pulsing ring markers drawn in the tile loop below, not a distinct sprite.
-const FLOOR_SPRITE: TileSpriteDef = { src: `${OFFICE_SINGLES}/Modern_Office_Singles_32x32_28.png`, srcX: 0, srcY: 64 };
+//
+// BUG FIX: this used to point at Singles_28.png, whose actual opaque content
+// (verified by rendering the crop against a magenta background) is only a
+// 30x14px sliver at the bottom of its 32x32 cell — not a full tile. Drawing
+// that meant ~55% of every floor tile was transparent, so the dark canvas
+// background showed through as a "thin strip with gaps" for every row.
+// Singles_6.png looked right in a one-off crop check but turned out to have
+// a 2px transparent inset on its left edge (bbox x:[2,31] of 32) — invisible
+// in a single tile, but tiling it repeats that gap as a faint vertical seam
+// every 32px. Singles_36.png fixed that (full [0,31]x[0,31] bbox, no margin)
+// but rendering a 4x4 block of it revealed a DIFFERENT problem: its texture
+// itself isn't horizontally seamless, so repeating it draws a visible line
+// down every tile boundary regardless of crop correctness. Singles_86.png's
+// fine crosshatch pattern tiles cleanly in both directions (verified by
+// rendering a 4x4 repeat) — no code fix can make a non-tileable texture
+// tileable, so the fix here is picking a texture that actually is one.
+const FLOOR_SPRITE: TileSpriteDef = { src: `${OFFICE_SINGLES}/Modern_Office_Singles_32x32_86.png`, srcX: 0, srcY: 64 };
 
 const TILE_SPRITES: Record<TileType, TileSpriteDef> = {
   floor: FLOOR_SPRITE,
@@ -119,6 +135,14 @@ const AVATAR_RADIUS = 14;
 
 const BLOCKED_TILES: Set<TileType> = new Set(['wall', 'desk', 'chair']);
 
+function hexToRgb(hex: string | undefined): [number, number, number] | null {
+  if (!hex) return null;
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
   const words = text.split(' ');
   const lines: string[] = [];
@@ -177,7 +201,12 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
   const localPlayerIdRef = useRef(localPlayerId);
   const bubblesRef = useRef(useGameStore.getState().speechBubbles);
   const emotesRef = useRef(useGameStore.getState().emoteEvents);
-  const zonesRef = useRef(useGameStore.getState().zones);
+  const zones = useGameStore((s) => s.zones);
+  const zonesRef = useRef(zones);
+  // Labeled zones render a DOM banner positioned imperatively (via transform,
+  // inside the rAF loop below) instead of React state, so following the
+  // camera at 60fps doesn't trigger a re-render for every frame.
+  const zoneBannerRefs = useRef(new Map<string, HTMLDivElement>());
   const furniture = useGameStore((s) => s.furniture);
   const furnitureRef = useRef(furniture);
 
@@ -188,7 +217,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     localPlayerIdRef.current = localPlayerId;
     bubblesRef.current = useGameStore.getState().speechBubbles;
     emotesRef.current = useGameStore.getState().emoteEvents;
-    zonesRef.current = useGameStore.getState().zones;
+    zonesRef.current = zones;
     furnitureRef.current = furniture;
   });
 
@@ -244,7 +273,14 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
     const ctx = canvas.getContext('2d');
-    if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (ctx) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // Resizing canvas.width/height resets all context state, including this
+      // — must re-set every resize, not just once. Without it the browser's
+      // default bilinear smoothing blurs every scaled sprite drawImage() call
+      // (avatars drawn at 40px from a 32px source, in particular).
+      ctx.imageSmoothingEnabled = false;
+    }
   }, []);
 
   const draw = useCallback((timestamp: number) => {
@@ -252,6 +288,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    ctx.imageSmoothingEnabled = false;
 
     if (prevTimeRef.current === 0) prevTimeRef.current = timestamp;
     const rawDt = (timestamp - prevTimeRef.current) / 1000;
@@ -274,8 +311,12 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
 
     const playerX = moveResult.x;
     const playerY = moveResult.y;
-    const cameraX = playerX - logicalW / 2;
-    const cameraY = playerY - logicalH / 2;
+    // Rounded to whole CSS pixels — every tile/avatar screen position is
+    // `n * TILE_SIZE - camera`, so a fractional camera offset put every draw
+    // call at a fractional pixel, which the canvas antialiases into faint
+    // seams between adjacent tiles instead of a clean shared edge.
+    const cameraX = Math.round(playerX - logicalW / 2);
+    const cameraY = Math.round(playerY - logicalH / 2);
 
     cameraXRef.current = cameraX;
     cameraYRef.current = cameraY;
@@ -383,22 +424,48 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Zone overlays
+    // Zone overlays — boundary fill/outline only. The name/label text itself
+    // is a DOM overlay (see zoneBannerRefs below), not drawn on canvas, so it
+    // stays crisp and easy to restyle; zones without a `label` still get the
+    // plain centered canvas text they always had, for backward compatibility.
     const zones = zonesRef.current;
     for (const zone of zones) {
       const zx = zone.x * TILE_SIZE - cameraX;
       const zy = zone.y * TILE_SIZE - cameraY;
-      ctx.fillStyle = 'rgba(100, 149, 237, 0.08)';
-      ctx.fillRect(zx, zy, zone.width * TILE_SIZE, zone.height * TILE_SIZE);
-      ctx.strokeStyle = 'rgba(100, 149, 237, 0.3)';
+      const zw = zone.width * TILE_SIZE;
+      const zh = zone.height * TILE_SIZE;
+      const [zr, zg, zb] = hexToRgb(zone.color) ?? [100, 149, 237];
+      ctx.fillStyle = `rgba(${zr}, ${zg}, ${zb}, 0.08)`;
+      ctx.fillRect(zx, zy, zw, zh);
+      ctx.strokeStyle = `rgba(${zr}, ${zg}, ${zb}, 0.35)`;
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 4]);
-      ctx.strokeRect(zx, zy, zone.width * TILE_SIZE, zone.height * TILE_SIZE);
+      ctx.strokeRect(zx, zy, zw, zh);
       ctx.setLineDash([]);
-      ctx.fillStyle = 'rgba(255,255,255,0.4)';
-      ctx.font = '10px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(zone.name, zx + zone.width * TILE_SIZE / 2, zy + zone.height * TILE_SIZE / 2);
+      if (!zone.label) {
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(zone.name, zx + zw / 2, zy + zh / 2);
+      }
+    }
+
+    // Zone banners (DOM overlay) — position each labeled zone's floating
+    // element every frame via transform, matching the canvas camera exactly.
+    for (const zone of zones) {
+      if (!zone.label) continue;
+      const el = zoneBannerRefs.current.get(zone.id);
+      if (!el) continue;
+      const zx = zone.x * TILE_SIZE - cameraX;
+      const zy = zone.y * TILE_SIZE - cameraY;
+      const zw = zone.width * TILE_SIZE;
+      if (zone.type === 'meeting') {
+        el.style.transform = `translate(${zx}px, ${zy}px)`;
+        el.style.width = `${zw}px`;
+      } else {
+        el.style.transform = `translate(${zx + 6}px, ${zy - 12}px)`;
+        el.style.width = 'auto';
+      }
     }
 
     // Zone draw preview (while dragging out a new zone rectangle)
@@ -646,6 +713,37 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
         onMouseLeave={handleMouseLeave}
         onContextMenu={handleContextMenu}
       />
+      {/* Zone banners — positioned imperatively in the draw() loop above via
+          style.transform, not React state, so they track the camera at 60fps
+          without re-rendering. */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {zones.filter((z) => z.label).map((zone) => (
+          <div
+            key={zone.id}
+            ref={(el) => {
+              if (el) zoneBannerRefs.current.set(zone.id, el);
+              else zoneBannerRefs.current.delete(zone.id);
+            }}
+            className="absolute top-0 left-0 will-change-transform"
+          >
+            {zone.type === 'meeting' ? (
+              <div
+                className="px-3 py-1.5 text-center text-white font-bold text-sm tracking-wide shadow-md"
+                style={{ backgroundColor: zone.color || '#7c3aed' }}
+              >
+                {zone.label}
+              </div>
+            ) : (
+              <div
+                className="px-2 py-0.5 rounded-full text-[10px] font-semibold text-white shadow whitespace-nowrap"
+                style={{ backgroundColor: zone.color || '#7c3aed' }}
+              >
+                {zone.label}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

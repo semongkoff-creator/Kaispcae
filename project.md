@@ -24,6 +24,10 @@
 | 🌀 Portal & Multi-Room | Tile portal memindahkan avatar ke room lain (slug) secara real-time |
 | 👑 Admin System | Master admin (pemilik room) & admin biasa, grant/revoke lewat panel admin |
 | 👤 User Auth | Register/login (JWT + bcrypt), profil, avatar config tersimpan per user |
+| 🏷️ Zona Berlabel | Zona bisa punya label/warna/tipe (meeting/desk/focus/general) — banner besar untuk meeting, pill kecil untuk desk/focus, dirender sebagai DOM overlay di atas canvas |
+| 💬 Status Custom | Peserta bisa set status bebas (mis. "WFH", "In a meeting") lewat tombol cepat, tampil sebagai badge kecil di atas nametag |
+| 🔒 Chat Per-Zona | Tab "Private" otomatis muncul di Chat panel saat berada di dalam zona — pesan hanya terkirim ke peserta lain yang ada di zona yang sama |
+| 👥 Panel Peserta | Panel kolaps berisi semua peserta online (status masing-masing) + thumbnail video untuk 2-3 peserta yang sedang video call, dengan indikator "+N" untuk sisanya |
 
 ---
 
@@ -64,13 +68,15 @@ meetkai/
 │   │   │   │   └── AvatarSprite.ts         # Dispatcher shape/layered/premade + frame animasi
 │   │   │   ├── avatar/
 │   │   │   │   ├── AvatarSetup.tsx         # Character-creator UI (builder + quick-pick)
-│   │   │   │   └── AvatarEditorButton.tsx
+│   │   │   │   ├── AvatarEditorButton.tsx
+│   │   │   │   └── StatusButton.tsx        # Set status custom bebas (quick-pick + input), broadcast player:status_update
 │   │   │   ├── ui/
-│   │   │   │   ├── RoomEditor.tsx          # Palet visual, furniture, zona, basic types, undo/redo
-│   │   │   │   ├── ChatPanel.tsx
+│   │   │   │   ├── RoomEditor.tsx          # Palet visual, furniture, zona (+ form label/warna/tipe), basic types, undo/redo
+│   │   │   │   ├── ChatPanel.tsx           # Tab All/Private — Private muncul otomatis saat di dalam zona
 │   │   │   │   ├── VideoGrid.tsx
 │   │   │   │   ├── EmoteWheel.tsx
 │   │   │   │   ├── AdminPanel.tsx
+│   │   │   │   ├── ParticipantPanel.tsx    # Panel kolaps: daftar peserta + status + thumbnail video (reuse remoteStreams)
 │   │   │   │   ├── NameModal.tsx
 │   │   │   │   └── ConnectionIndicator.tsx
 │   │   │   └── hud/
@@ -183,14 +189,15 @@ player:move → player:moved   |   player:stop → player:stopped
 
 // Avatar
 avatar:update → avatar:updated
+player:status_update → player:status_updated   // status custom bebas, badge di atas nametag
 
 // Chat & emote
-chat:message → chat:broadcast
+chat:message → chat:broadcast    // chat:message bisa bawa zoneId opsional (private ke zona) → chat:broadcast hanya ke socket yang tercatat di zona itu + pengirim
 chat:bubble                      // speech bubble di atas avatar
 emote:play
 
 // Zona privat (proteksi A/V dihitung client-side; event ini cuma relay untuk UI lain)
-zone:enter / zone:exit           // di-scope per room di server
+zone:enter / zone:exit           // di-scope per room di server, juga dipakai untuk routing chat:message per-zona
 
 // WebRTC signaling (P2P, server cuma relay)
 rtc:offer / rtc:answer / rtc:ice-candidate
@@ -245,11 +252,21 @@ lobby:room_updated / lobby:room_removed   // player count & penghapusan room liv
 - [ ] Mobile-responsive UI (belum, layout saat ini didesain untuk desktop)
 - [ ] Performance optimization (large rooms) — belum diuji untuk banyak pemain sekaligus
 
+### Phase 6 — Fitur ala ZEP (Zona Berlabel, Status, Chat Per-Zona, Panel Peserta)
+- [x] Zona berlabel — `Zone.label/color/type`, banner DOM overlay (bukan canvas) untuk tipe `meeting`, pill kecil untuk `desk`/`focus`, form di RoomEditor saat membuat zona baru
+- [x] Status custom — `Avatar.status` (bebas, 24 char), tombol cepat dekat Edit Avatar, broadcast via `player:status_update`, badge ungu di atas nametag (terpisah dari `avatarConfig.statusTag` yang lama)
+- [x] Chat per-zona — `ChatMessage.zoneId`, tab All/Private di ChatPanel (Private muncul otomatis saat masuk zona), server rutekan pesan berzona hanya ke socket yang tercatat `zone:enter` di zona yang sama (`zoneHandler.getSocketIdsInZone`)
+- [x] Panel peserta — `ParticipantPanel.tsx` (komponen baru, terpisah dari `AdminPanel.tsx`), daftar semua peserta online + status, thumbnail video utk hingga 3 peserta yang sedang video call (reuse `remoteStreams`/`webrtcService`, tidak membuat koneksi WebRTC baru), indikator "+N" untuk sisa yang video-aktif, toggle kolaps/expand
+
 ### Belum dikerjakan / follow-up yang diketahui
 - [ ] Karakter premade bernama (Adam/Alex/Amelia/Bob dari `free-pack-16x16`) — dipakai `generator-premade` sebagai gantinya karena format frame-nya beda dan belum direverse-engineer
 - [ ] Undo/redo Room Editor belum mencakup furniture, `floorPaletteId`, atau `portalTarget` (hanya tipe tile dasar)
 - [ ] Belum ada rotate/drag-pindah furniture setelah ditempatkan
 - [ ] Belum ada notifikasi UI saat pemain lain masuk/keluar zona (event server sudah ada, tinggal disambung ke toast)
+- [ ] Panel Peserta belum ada tombol aksi per-peserta (mis. mute/pin) — murni display, sesuai lingkup fitur ini
+
+### Bug ditemukan & diperbaiki saat build Phase 6
+- Nama pemain lain tampil sebagai "You" alih-alih nama asli, untuk siapa pun yang belum pernah membuka Avatar Editor. Penyebab: `avatarConfig.name` (default placeholder `'You'` untuk live-preview editor) diprioritaskan di atas display name asli saat broadcast `player:joined` (`server/src/socket/roomHandler.ts`) dan saat seed `AvatarSetup` di `Game` (`client/src/App.tsx`). Ditemukan lewat test dua-user nyata untuk verifikasi Panel Peserta — baru pertama kali dua akun berbeda diuji bersamaan dalam sesi ini. Diperbaiki dengan membalik prioritas (nama akun asli menang).
 
 ---
 
@@ -305,4 +322,4 @@ export const DISCONNECT_DEBOUNCE_MS = 500      // delay sebelum diskoneksi WebRT
 
 ---
 
-*Last updated: 2026-07-03 | Status: Fitur inti (Phase 1–5) selesai — lihat "Belum dikerjakan / follow-up" untuk sisa pekerjaan diketahui*
+*Last updated: 2026-07-04 | Status: Fitur inti (Phase 1–5) + fitur ala ZEP (Phase 6) selesai — lihat "Belum dikerjakan / follow-up" untuk sisa pekerjaan diketahui*
