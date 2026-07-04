@@ -453,14 +453,18 @@ export default function App() {
   const setRoomState = useGameStore((s) => s.setRoomState);
   const setLocalPlayer = useGameStore((s) => s.setLocalPlayer);
 
-  // If authenticated, use user's displayName and avatarConfig
+  // If authenticated, use user's displayName and avatarConfig. New accounts
+  // have no avatarConfig saved yet (null from the DB) — fall back to
+  // loadAvatarConfig()'s defaults (sprite mode etc.) instead of leaving it
+  // undefined, which would silently drop back to the legacy shape avatar.
   useEffect(() => {
     if (user) {
+      const config = user.avatarConfig || loadAvatarConfig();
       setPlayerName(user.displayName);
       setLocalPlayer({
         name: user.displayName,
-        color: user.avatarConfig?.color || '#ff6b6b',
-        avatarConfig: user.avatarConfig || undefined,
+        color: config.color,
+        avatarConfig: config,
       });
     }
   }, [user, setLocalPlayer]);
