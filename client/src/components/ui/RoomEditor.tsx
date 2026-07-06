@@ -1,10 +1,12 @@
 import { useCallback, useState } from 'react';
-import { TileType, Zone, ZoneType } from '@virtualmeet/shared';
+import { LockFill, X, SaveFill, ArrowClockwise, MegaphoneFill } from 'react-bootstrap-icons';
+import { TileType, Zone, ZoneType, Furniture } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { createDefaultRoom } from '@/utils/createDefaultRoom';
 import { TILE_PALETTE, PaletteEntry } from '@/data/tilePaletteManifest';
 
 const ZONE_COLORS = ['#7c3aed', '#4d96ff', '#10b981', '#f59e0b', '#ef4444', '#64748b'];
+const BANNER_COLORS = ['#7c3aed', '#4d96ff', '#10b981', '#f59e0b', '#ef4444', '#1f2937'];
 const ZONE_TYPES: { value: ZoneType; label: string }[] = [
   { value: 'meeting', label: 'Meeting (big banner)' },
   { value: 'desk', label: 'Desk (small label)' },
@@ -84,6 +86,98 @@ function ZoneForm({ rect, onCancel }: { rect: { x: number; y: number; width: num
   );
 }
 
+function BannerForm({ pos, onCancel }: { pos: { x: number; y: number }; onCancel: () => void }) {
+  const [text, setText] = useState('Welcome to our office!');
+  const [bgColor, setBgColor] = useState(BANNER_COLORS[0]);
+  const [textColor, setTextColor] = useState('#ffffff');
+  const [width, setWidth] = useState(4);
+  const [imageUrl, setImageUrl] = useState('');
+
+  const handleCreate = () => {
+    const trimmedUrl = imageUrl.trim();
+    const banner: Furniture = {
+      id: crypto.randomUUID(),
+      paletteId: 'banner',
+      kind: 'banner',
+      x: pos.x, y: pos.y,
+      tilesW: Math.min(10, Math.max(1, width)),
+      tilesH: 1,
+      imageUrl: trimmedUrl || undefined,
+      text: trimmedUrl ? undefined : (text.trim().slice(0, 60) || 'Banner'),
+      textColor,
+      bgColor,
+    };
+    useGameStore.getState().addFurniture(banner);
+    onCancel();
+  };
+
+  return (
+    <div className="mb-3 p-3 rounded-lg bg-purple-50 border border-purple-200">
+      <p className="text-purple-700 text-xs font-semibold mb-2">New Banner</p>
+
+      <label className="text-gray-500 text-[10px] block mb-1">Image URL (optional — skips text below if set)</label>
+      <input
+        value={imageUrl}
+        onChange={(e) => setImageUrl(e.target.value)}
+        placeholder="https://..."
+        className="w-full bg-white text-gray-900 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 focus:border-purple-500"
+      />
+
+      {!imageUrl.trim() && (
+        <>
+          <label className="text-gray-500 text-[10px] block mb-1">Text</label>
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            maxLength={60}
+            placeholder="e.g. team name, tagline, announcement"
+            className="w-full bg-white text-gray-900 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 focus:border-purple-500"
+          />
+
+          <label className="text-gray-500 text-[10px] block mb-1">Background color</label>
+          <div className="flex gap-1.5 mb-2">
+            {BANNER_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => setBgColor(c)}
+                className="w-6 h-6 rounded-full border-2 cursor-pointer"
+                style={{ backgroundColor: c, borderColor: bgColor === c ? '#1f2937' : 'transparent' }}
+              />
+            ))}
+          </div>
+
+          <label className="text-gray-500 text-[10px] block mb-1">Text color</label>
+          <div className="flex gap-1.5 mb-2">
+            {['#ffffff', '#1f2937'].map((c) => (
+              <button
+                key={c}
+                onClick={() => setTextColor(c)}
+                className="w-6 h-6 rounded-full border-2 cursor-pointer"
+                style={{ backgroundColor: c, borderColor: textColor === c ? '#7c3aed' : '#d1d5db' }}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      <label className="text-gray-500 text-[10px] block mb-1">Width (tiles)</label>
+      <input
+        type="number"
+        min={1}
+        max={10}
+        value={width}
+        onChange={(e) => setWidth(Number(e.target.value) || 1)}
+        className="w-full bg-white text-gray-900 text-xs rounded px-2 py-1.5 mb-3 outline-none border border-purple-100 focus:border-purple-500"
+      />
+
+      <div className="flex gap-2">
+        <button onClick={onCancel} className="flex-1 py-1.5 rounded bg-gray-100 text-gray-600 text-xs hover:bg-gray-200 cursor-pointer">Cancel</button>
+        <button onClick={handleCreate} className="flex-1 py-1.5 rounded bg-purple-600 text-white text-xs font-medium hover:bg-purple-700 cursor-pointer">Create</button>
+      </div>
+    </div>
+  );
+}
+
 const BASIC_TYPES: { type: TileType; label: string; color: string }[] = [
   { type: 'floor', label: 'Floor', color: '#e8d5b0' },
   { type: 'wall', label: 'Wall', color: '#4a3728' },
@@ -139,6 +233,13 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
   const toggleZoneDrawMode = useGameStore((s) => s.toggleZoneDrawMode);
   const pendingZoneRect = useGameStore((s) => s.pendingZoneRect);
   const setPendingZoneRect = useGameStore((s) => s.setPendingZoneRect);
+  const furniture = useGameStore((s) => s.furniture);
+  const removeFurnitureAt = useGameStore((s) => s.removeFurnitureAt);
+  const bannerPlaceMode = useGameStore((s) => s.bannerPlaceMode);
+  const toggleBannerPlaceMode = useGameStore((s) => s.toggleBannerPlaceMode);
+  const pendingBannerPos = useGameStore((s) => s.pendingBannerPos);
+  const setPendingBannerPos = useGameStore((s) => s.setPendingBannerPos);
+  const banners = furniture.filter((f) => f.kind === 'banner');
 
   const handleReset = useCallback(() => {
     const room = createDefaultRoom('main-office', 'Main Office');
@@ -147,11 +248,12 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
     state.pushTileHistory(tileTypes);
     state.setTiles(room.tiles);
     state.setFurniture(room.furniture);
-    state.setZones([]);
+    state.setZones(room.zones);
   }, []);
 
   const floorEntries = TILE_PALETTE.filter((e) => e.category === 'floor');
-  const furnitureEntries = TILE_PALETTE.filter((e) => e.category === 'furniture');
+  const [objectTab, setObjectTab] = useState<'furniture' | 'decor' | 'electronics'>('furniture');
+  const objectEntries = TILE_PALETTE.filter((e) => e.category === objectTab);
 
   return (
     <div className="absolute top-0 right-0 z-50 w-56 h-full bg-white/95 backdrop-blur-md border-l border-purple-100 shadow-2xl p-4 pointer-events-auto overflow-y-auto"
@@ -177,10 +279,25 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
         ))}
       </div>
 
-      {/* Visual palette — furniture */}
-      <p className="text-gray-500 text-[10px] uppercase tracking-wider mb-2">Furniture</p>
+      {/* Visual palette — furniture/decor/electronics, split into tabs so
+          the growing list of curated pieces doesn't become one long
+          undifferentiated scroll. */}
+      <p className="text-gray-500 text-[10px] uppercase tracking-wider mb-2">Objects</p>
+      <div className="flex gap-1 mb-2">
+        {(['furniture', 'decor', 'electronics'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setObjectTab(tab)}
+            className={`flex-1 py-1 rounded-md text-[10px] font-medium capitalize transition-all cursor-pointer ${
+              objectTab === tab ? 'bg-purple-600 text-white' : 'bg-purple-50 text-gray-500 hover:bg-purple-100'
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
       <div className="grid grid-cols-4 gap-1.5 mb-4">
-        {furnitureEntries.map((entry) => (
+        {objectEntries.map((entry) => (
           <button
             key={entry.id}
             onClick={() => setSelectedPaletteId(entry.id)}
@@ -195,7 +312,7 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
       </div>
 
       <p className="text-gray-400 text-[10px] mb-3 leading-relaxed">
-        Click to place • Right-click to erase. Furniture is stamped in one click at the tile you click (its base), taller pieces extend upward and let you walk behind them.
+        Click to place • Right-click to erase. Objects are stamped in one click at the tile you click (its base), taller pieces extend upward and let you walk behind them. Chairs can be sat in (SPACE) once placed.
       </p>
 
       <hr className="border-purple-100 my-3" />
@@ -229,7 +346,7 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
           zoneDrawMode ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
         }`}
       >
-        🔒 {zoneDrawMode ? 'Drag on map to draw…' : 'Draw Zone'}
+        <LockFill size={12} /> {zoneDrawMode ? 'Drag on map to draw…' : 'Draw Zone'}
       </button>
       {pendingZoneRect && (
         <ZoneForm rect={pendingZoneRect} onCancel={() => setPendingZoneRect(null)} />
@@ -239,13 +356,42 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
           {zones.map((z) => (
             <div key={z.id} className="flex items-center justify-between px-2 py-1.5 rounded bg-gray-50 text-xs">
               <span className="text-gray-600 truncate">{z.name}</span>
-              <button onClick={() => removeZone(z.id)} className="text-red-500/70 hover:text-red-500 cursor-pointer ml-2">✕</button>
+              <button onClick={() => removeZone(z.id)} className="text-red-500/70 hover:text-red-500 cursor-pointer ml-2"><X size={14} /></button>
             </div>
           ))}
         </div>
       )}
       <p className="text-gray-400 text-[10px] mb-3 leading-relaxed">
         Players inside a zone only hear/see each other, regardless of distance — great for meeting rooms.
+      </p>
+
+      <hr className="border-purple-100 my-3" />
+
+      {/* Decorative banners/signage */}
+      <p className="text-gray-500 text-[10px] uppercase tracking-wider mb-2">Banners</p>
+      <button
+        onClick={toggleBannerPlaceMode}
+        className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer mb-2 ${
+          bannerPlaceMode ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+        }`}
+      >
+        <MegaphoneFill size={12} /> {bannerPlaceMode ? 'Click on map to place…' : 'Add Banner'}
+      </button>
+      {pendingBannerPos && (
+        <BannerForm pos={pendingBannerPos} onCancel={() => setPendingBannerPos(null)} />
+      )}
+      {banners.length > 0 && (
+        <div className="space-y-1 mb-3">
+          {banners.map((b) => (
+            <div key={b.id} className="flex items-center justify-between px-2 py-1.5 rounded bg-gray-50 text-xs">
+              <span className="text-gray-600 truncate">{b.text || b.imageUrl || 'Banner'}</span>
+              <button onClick={() => removeFurnitureAt(b.x, b.y)} className="text-red-500/70 hover:text-red-500 cursor-pointer ml-2"><X size={14} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="text-gray-400 text-[10px] mb-3 leading-relaxed">
+        Decorative signage — team name, tagline, announcements. Purely visual, doesn't block movement.
       </p>
 
       <hr className="border-purple-100 my-4" />
@@ -271,17 +417,17 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
       {/* Save */}
       <button
         onClick={onSave}
-        className="w-full py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-sm transition-colors mb-2 cursor-pointer"
+        className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-sm transition-colors mb-2 cursor-pointer"
       >
-        💾 Save Room
+        <SaveFill size={14} /> Save Room
       </button>
 
       {/* Reset */}
       <button
         onClick={handleReset}
-        className="w-full py-2 rounded-lg bg-red-100 hover:bg-red-200 text-red-600 text-sm transition-colors cursor-pointer"
+        className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-red-100 hover:bg-red-200 text-red-600 text-sm transition-colors cursor-pointer"
       >
-        🔄 Reset to Default
+        <ArrowClockwise size={14} /> Reset to Default
       </button>
     </div>
   );

@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { Server } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
-import { SocketEvents } from '@virtualmeet/shared';
+import { SocketEvents, createDefaultOfficeLayout } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
 
@@ -104,6 +104,10 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
     const { name, maxPlayers = 50, isPublic = true } = req.body;
     const slug = generateSlug(name);
 
+    // Seed with a real office layout (walls, desk clusters, a meeting room,
+    // a lounge) instead of an empty floor — see shared/defaultRoomLayout.ts.
+    const layout = createDefaultOfficeLayout();
+
     const room = await prisma.room.create({
       data: {
         name,
@@ -111,7 +115,9 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
         maxPlayers,
         isPublic,
         ownerId: req.userId!,
-        tilemapData: [],
+        tilemapData: layout.tiles as any,
+        furniture: layout.furniture as any,
+        zones: layout.zones as any,
       },
     });
 

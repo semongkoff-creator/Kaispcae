@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from 'react';
+import { CameraVideoFill, CameraVideoOffFill } from 'react-bootstrap-icons';
 
 interface CameraButtonProps {
   enabled: boolean;
@@ -23,7 +24,7 @@ export function CameraButton({ enabled, onToggle }: CameraButtonProps) {
       className="flex items-center justify-center w-12 h-12 rounded-full bg-white/90 backdrop-blur-sm border border-purple-200 shadow-lg transition-all hover:scale-105 cursor-pointer"
       title="Toggle Camera (V)"
     >
-      <span className="text-xl">{enabled ? '📹' : '📷'}</span>
+      {enabled ? <CameraVideoFill className="text-purple-700" size={20} /> : <CameraVideoOffFill className="text-red-500" size={20} />}
     </button>
   );
 }

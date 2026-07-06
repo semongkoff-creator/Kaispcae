@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { ChatDotsFill } from 'react-bootstrap-icons';
 
 interface StatusButtonProps {
   status: string;
@@ -33,9 +34,9 @@ export function StatusButton({ status, onSave }: StatusButtonProps) {
     <div className="absolute bottom-16 left-4 z-30 pointer-events-auto">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="bg-white/90 backdrop-blur-sm hover:bg-white text-purple-700 hover:text-purple-800 text-xs font-medium px-3 py-2 rounded-lg border border-purple-200 shadow-sm transition-all cursor-pointer"
+        className="bg-white/90 backdrop-blur-sm hover:bg-white text-purple-700 hover:text-purple-800 text-xs font-medium px-3 py-2 rounded-lg border border-purple-200 shadow-sm transition-all cursor-pointer inline-flex items-center gap-1.5"
       >
-        {status ? `💬 ${status}` : '💬 Set Status'}
+        <ChatDotsFill size={12} /> {status || 'Set Status'}
       </button>
 
       {open && (

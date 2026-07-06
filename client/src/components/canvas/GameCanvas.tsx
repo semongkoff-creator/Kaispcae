@@ -66,8 +66,20 @@ const FLOOR_SPRITE: TileSpriteDef = { src: `${OFFICE_SINGLES}/Modern_Office_Sing
 
 const TILE_SPRITES: Record<TileType, TileSpriteDef> = {
   floor: FLOOR_SPRITE,
-  wall: { src: ROOM_BUILDER_OFFICE, srcX: 0, srcY: 0 },
-  door: { src: ROOM_BUILDER_OFFICE, srcX: 7 * TILE_SIZE, srcY: 1 * TILE_SIZE },
+  // Column 0 row 0 (the previous crop) is a fully TRANSPARENT cell in this
+  // sheet — every 'wall' tile in the game has only ever worked as invisible
+  // collision, never an actual visible wall, which is a big part of why
+  // rooms read as undifferentiated open floor. Row 10 col 0 is a real,
+  // fully-opaque brick texture (this sheet stores its wall-piece art as
+  // 32x64 cells with the true content bottom-anchored in the second row —
+  // same "padded canvas" convention documented in tilePaletteManifest.ts
+  // for the Modern_Office_Singles files).
+  wall: { src: ROOM_BUILDER_OFFICE, srcX: 0, srcY: 10 * TILE_SIZE },
+  // Column 7 row 1 (the previous crop) is one half of a 2-tile-wide door
+  // graphic in this sheet — mostly transparent with a thin sliver of wall
+  // on one edge, which is exactly the stray white vertical line reported.
+  // Column 8 row 0 is a complete, fully-opaque single-tile door slab.
+  door: { src: ROOM_BUILDER_OFFICE, srcX: 8 * TILE_SIZE, srcY: 0 * TILE_SIZE },
   desk: { src: `${OFFICE_SINGLES}/Modern_Office_Singles_32x32_211.png`, srcX: 0, srcY: 64 },
   chair: { src: `${OFFICE_SINGLES}/Modern_Office_Singles_32x32_101.png`, srcX: 0, srcY: 64 },
   portal: FLOOR_SPRITE,
@@ -178,10 +190,13 @@ interface GameCanvasProps {
   onFurnitureErase: (x: number, y: number) => void;
   zoneDrawMode: boolean;
   onZoneDrawComplete: (x: number, y: number, width: number, height: number) => void;
+  bannerPlaceMode: boolean;
+  onBannerPlaceComplete: (x: number, y: number) => void;
   onPortalEnter: (target: string) => void;
+  emitSit: (sitting: boolean, x: number, y: number, direction: Direction) => void;
 }
 
-export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, onPortalEnter }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -190,6 +205,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
 
   const emitMoveRef = useRef(emitMove); emitMoveRef.current = emitMove;
   const emitStopRef = useRef(emitStop); emitStopRef.current = emitStop;
+  const emitSitRef = useRef(emitSit); emitSitRef.current = emitSit;
 
   const tiles = useGameStore((s) => s.tiles);
   const localPlayer = useGameStore((s) => s.localPlayer);
@@ -209,6 +225,9 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
   const zoneBannerRefs = useRef(new Map<string, HTMLDivElement>());
   const furniture = useGameStore((s) => s.furniture);
   const furnitureRef = useRef(furniture);
+  // Banner furniture (Furniture.kind === 'banner') renders as a DOM overlay
+  // too, positioned the same imperative way as zone banners above.
+  const bannerRefs = useRef(new Map<string, HTMLDivElement>());
 
   useEffect(() => {
     tilesRef.current = tiles;
@@ -237,6 +256,8 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
 
   const zoneDrawModeRef = useRef(zoneDrawMode); zoneDrawModeRef.current = zoneDrawMode;
   const onZoneDrawCompleteRef = useRef(onZoneDrawComplete); onZoneDrawCompleteRef.current = onZoneDrawComplete;
+  const bannerPlaceModeRef = useRef(bannerPlaceMode); bannerPlaceModeRef.current = bannerPlaceMode;
+  const onBannerPlaceCompleteRef = useRef(onBannerPlaceComplete); onBannerPlaceCompleteRef.current = onBannerPlaceComplete;
   const onPortalEnterRef = useRef(onPortalEnter); onPortalEnterRef.current = onPortalEnter;
   const zoneDragStartRef = useRef<{ x: number; y: number } | null>(null);
   const zoneDragCurrentRef = useRef<{ x: number; y: number } | null>(null);
@@ -256,11 +277,76 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
   const { update, setPosition } = useMovement({
     isBlocked,
     onMove: onMoveRef.current,
+    isFrozen: () => useGameStore.getState().localPlayer.isSitting === true,
   });
 
   useEffect(() => {
     setPosition(localPlayer.x, localPlayer.y);
   }, [localPlayer.x, localPlayer.y, setPosition]);
+
+  // ── Sit-in-chair ─────────────────────────────────────────────────────
+  // Updated every frame in draw() below (cheap — furniture lists are small)
+  // so both the "press SPACE" indicator and the keydown handler read the
+  // same up-to-date value without recomputing it twice.
+  const nearbyChairRef = useRef<Furniture | null>(null);
+
+  const performSit = useCallback((chair: Furniture) => {
+    const state = useGameStore.getState();
+    const player = state.localPlayer;
+    // The chair's own tile is movement-blocked, so simply leaving the
+    // player there on stand-up would strand them inside a wall-like tile —
+    // remember where they were so standing up can put them back.
+    state.setSitReturnPos({ x: player.x, y: player.y });
+    state.setSittingFurnitureId(chair.id);
+    const chairCenterX = chair.x * TILE_SIZE + TILE_SIZE / 2;
+    const chairCenterY = chair.y * TILE_SIZE + TILE_SIZE / 2;
+    const OPPOSITE: Record<Direction, Direction> = { up: 'down', down: 'up', left: 'right', right: 'left' };
+    // Face away from the chair — outward into the room, like someone
+    // sitting down rather than facing into the seat back.
+    const sitDirection = OPPOSITE[player.direction];
+    state.setLocalPlayer({ x: chairCenterX, y: chairCenterY, direction: sitDirection, isMoving: false, isSitting: true });
+    emitSitRef.current(true, chairCenterX, chairCenterY, sitDirection);
+  }, []);
+
+  const performStandUp = useCallback(() => {
+    const state = useGameStore.getState();
+    const returnPos = state.sitReturnPos;
+    const x = returnPos?.x ?? state.localPlayer.x;
+    const y = returnPos?.y ?? state.localPlayer.y;
+    const direction = state.localPlayer.direction;
+    state.setLocalPlayer({ x, y, isSitting: false });
+    state.setSittingFurnitureId(null);
+    state.setSitReturnPos(null);
+    emitSitRef.current(false, x, y, direction);
+  }, []);
+
+  useEffect(() => {
+    const handleSitKey = (e: KeyboardEvent) => {
+      const tag = document.activeElement?.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'textarea') return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        const state = useGameStore.getState();
+        if (state.localPlayer.isSitting) {
+          performStandUp();
+        } else if (nearbyChairRef.current) {
+          performSit(nearbyChairRef.current);
+        }
+        return;
+      }
+
+      // Pressing a movement key while sitting stands you up first, instead
+      // of silently eating the input (useMovement's isFrozen check would
+      // otherwise just ignore it with no feedback).
+      const MOVE_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd', 'W', 'A', 'S', 'D'];
+      if (MOVE_KEYS.includes(e.key) && useGameStore.getState().localPlayer.isSitting) {
+        performStandUp();
+      }
+    };
+    window.addEventListener('keydown', handleSitKey);
+    return () => window.removeEventListener('keydown', handleSitKey);
+  }, [performSit, performStandUp]);
 
   const resizeCanvas = useCallback(() => {
     const container = containerRef.current;
@@ -311,6 +397,21 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
 
     const playerX = moveResult.x;
     const playerY = moveResult.y;
+
+    // Sit-in-chair: is there a sittable chair on the tile the player is
+    // currently facing? Uses the STORED direction, not moveResult.direction
+    // — the latter resets to a hardcoded 'down' the instant no movement key
+    // is held (fine for movement, wrong for "which way am I facing").
+    {
+      const facingDir = localPlayerRef.current.direction;
+      const baseTileX = Math.floor(playerX / TILE_SIZE);
+      const baseTileY = Math.floor(playerY / TILE_SIZE);
+      const facingTileX = baseTileX + (facingDir === 'left' ? -1 : facingDir === 'right' ? 1 : 0);
+      const facingTileY = baseTileY + (facingDir === 'up' ? -1 : facingDir === 'down' ? 1 : 0);
+      nearbyChairRef.current = localPlayerRef.current.isSitting
+        ? null
+        : furnitureRef.current.find((f) => f.isInteractable && f.x === facingTileX && f.y === facingTileY) ?? null;
+    }
     // Rounded to whole CSS pixels — every tile/avatar screen position is
     // `n * TILE_SIZE - camera`, so a fractional camera offset put every draw
     // call at a fractional pixel, which the canvas antialiases into faint
@@ -381,9 +482,11 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
       }
     }
 
-    // Furniture — object layer (base row, drawn before avatars)
+    // Furniture — object layer (base row, drawn before avatars). Banners
+    // are DOM overlays (see bannerRefs below), not tileset sprites.
     const furnitureList = furnitureRef.current;
     for (const item of furnitureList) {
+      if (item.kind === 'banner') continue;
       if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
       drawFurnitureLayer(ctx, item, cameraX, cameraY, 'object');
     }
@@ -468,6 +571,18 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
       }
     }
 
+    // Banner furniture (DOM overlay) — same imperative positioning as zone
+    // banners above, anchored at the furniture's tile position.
+    for (const item of furnitureList) {
+      if (item.kind !== 'banner') continue;
+      const el = bannerRefs.current.get(item.id);
+      if (!el) continue;
+      const bx = item.x * TILE_SIZE - cameraX;
+      const by = item.y * TILE_SIZE - cameraY;
+      el.style.transform = `translate(${bx}px, ${by}px)`;
+      el.style.width = `${item.tilesW * TILE_SIZE}px`;
+    }
+
     // Zone draw preview (while dragging out a new zone rectangle)
     if (zoneDragStartRef.current && zoneDragCurrentRef.current) {
       const a = zoneDragStartRef.current;
@@ -492,7 +607,12 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     const walkOffset = moveResult.isMoving ? Math.sin(timestamp * 0.008) * 2 : 0;
     const localAvatar: Avatar = {
       ...localPlayer, x: playerX, y: playerY, isMoving: moveResult.isMoving,
-      direction: moveResult.direction, id: localPlayerId,
+      // moveResult.direction resets to a hardcoded 'down' the instant no
+      // movement key is held — fine for movement itself, but wrong to draw
+      // from while idle/sitting, where the stored direction (last real
+      // heading, or the sit-facing direction set in performSit) is correct.
+      direction: moveResult.isMoving ? moveResult.direction : localPlayer.direction,
+      id: localPlayerId,
     };
     const remoteAvatars = Object.values(playerRecords).filter((p) => p.id !== localPlayerId);
     const allAvatars: Avatar[] = [localAvatar, ...remoteAvatars];
@@ -540,8 +660,23 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     // Furniture — overhead layer (drawn after avatars, so tall pieces let
     // players walk visually behind their upper portion)
     for (const item of furnitureList) {
+      if (item.kind === 'banner') continue;
       if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
       drawFurnitureLayer(ctx, item, cameraX, cameraY, 'overhead');
+    }
+
+    // Sit-in-chair prompt — a small floating chair icon + hint over the
+    // chair the player is currently facing, only while not already sitting.
+    if (nearbyChairRef.current) {
+      const chair = nearbyChairRef.current;
+      const csx = chair.x * TILE_SIZE - cameraX + TILE_SIZE / 2;
+      const csy = chair.y * TILE_SIZE - cameraY;
+      const bob = Math.sin(timestamp * 0.005) * 2;
+      ctx.font = '16px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('🪑', csx, csy - 8 + bob);
+      ctx.font = 'bold 9px sans-serif';
+      ctx.fillStyle = 'rgba(124, 58, 237, 0.9)';
+      ctx.fillText('SPACE to sit', csx, csy - 22 + bob);
     }
 
     // Speech bubbles
@@ -622,13 +757,18 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
       return;
     }
 
+    if (bannerPlaceModeRef.current) {
+      onBannerPlaceCompleteRef.current(tile.x, tile.y);
+      return;
+    }
+
     const paletteId = selectedPaletteRef.current;
     if (paletteId) {
       const entry = TILE_PALETTE_BY_ID[paletteId];
       if (entry?.category === 'floor') {
         isPaintingRef.current = true;
         onFloorPaint(tile.x, tile.y, paletteId);
-      } else if (entry?.category === 'furniture') {
+      } else if (entry?.category === 'furniture' || entry?.category === 'decor' || entry?.category === 'electronics') {
         onFurniturePlace(tile.x, tile.y, paletteId);
       }
       return;
@@ -685,9 +825,15 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     const tile = getTileFromMouse(e.clientX, e.clientY);
     if (!tile) return;
     if (tile.x <= 0 || tile.x >= MAP_WIDTH - 1 || tile.y <= 0 || tile.y >= MAP_HEIGHT - 1) return;
+    // Banners never touched the tile underneath (they can decorate a wall,
+    // not just floor — see gameStore addFurniture/removeFurnitureAt), so
+    // erasing one must NOT force it back to 'floor' like normal furniture.
+    const erasedBanner = furnitureRef.current.some(
+      (f) => f.kind === 'banner' && f.y === tile.y && tile.x >= f.x && tile.x < f.x + f.tilesW
+    );
     onFurnitureErase(tile.x, tile.y);
     onTileHistoryPush();
-    onTilePaint(tile.x, tile.y, 'floor');
+    if (!erasedBanner) onTilePaint(tile.x, tile.y, 'floor');
   }, [getTileFromMouse, onTilePaint, onTileHistoryPush, onFurnitureErase]);
 
   useEffect(() => {
@@ -739,6 +885,31 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
                 style={{ backgroundColor: zone.color || '#7c3aed' }}
               >
                 {zone.label}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {/* Banner furniture — decorative signage placed via the Room Editor,
+          same imperative-transform pattern as zone banners above. */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {furniture.filter((f) => f.kind === 'banner').map((item) => (
+          <div
+            key={item.id}
+            ref={(el) => {
+              if (el) bannerRefs.current.set(item.id, el);
+              else bannerRefs.current.delete(item.id);
+            }}
+            className="absolute top-0 left-0 will-change-transform"
+          >
+            {item.imageUrl ? (
+              <img src={item.imageUrl} alt={item.text || 'Banner'} className="w-full h-auto shadow-md" />
+            ) : (
+              <div
+                className="px-3 py-1.5 text-center font-bold text-sm tracking-wide shadow-md"
+                style={{ backgroundColor: item.bgColor || '#7c3aed', color: item.textColor || '#ffffff' }}
+              >
+                {item.text || 'Banner'}
               </div>
             )}
           </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { Tools, GearFill, Clipboard, BoxArrowLeft } from 'react-bootstrap-icons';
 import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, Furniture } from '@virtualmeet/shared';
 import { TILE_PALETTE_BY_ID } from './data/tilePaletteManifest';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -31,7 +32,7 @@ import { loadAvatarConfig, saveAvatarConfig } from './hooks/useAvatarConfig';
 
 function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }: { roomSlug: string; onLeave: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke } = useSocket(authDisplayName, roomSlug, authUserId);
   const [showEditor, setShowEditor] = useState(false);
 
   // Media state from store
@@ -133,6 +134,19 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
   // Cleanup
   useEffect(() => () => destroy(), [destroy]);
 
+  // Room deleted by its owner while we were in it — show the notice for a
+  // moment, then navigate back to the Lobby the same way the "Leave" button
+  // does (React state, not a full page reload).
+  const roomDeletedNotice = useGameStore((s) => s.roomDeletedNotice);
+  useEffect(() => {
+    if (!roomDeletedNotice) return;
+    const timer = setTimeout(() => {
+      useGameStore.getState().setRoomDeletedNotice(null);
+      onLeave();
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [roomDeletedNotice, onLeave]);
+
   // Admin / Editor
   const isAdmin = useGameStore((s) => s.isAdmin);
   const editorMode = useGameStore((s) => s.editorMode);
@@ -140,6 +154,7 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
   const selectedTileType = useGameStore((s) => s.selectedTileType);
   const selectedPaletteId = useGameStore((s) => s.selectedPaletteId);
   const zoneDrawMode = useGameStore((s) => s.zoneDrawMode);
+  const bannerPlaceMode = useGameStore((s) => s.bannerPlaceMode);
   const pushTileHistory = useGameStore((s) => s.pushTileHistory);
   const setTiles = useGameStore((s) => s.setTiles);
   const tiles = useGameStore((s) => s.tiles);
@@ -192,13 +207,16 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
 
   const handleFurniturePlace = useCallback((x: number, y: number, paletteId: string) => {
     const entry = TILE_PALETTE_BY_ID[paletteId];
-    if (!entry || entry.category !== 'furniture') return;
+    if (!entry || entry.category === 'floor') return;
     const state = useGameStore.getState();
     for (let dx = 0; dx < entry.tilesW; dx++) {
       const tx = x + dx;
       if (tx >= MAP_WIDTH - 1 || state.tiles[y]?.[tx]?.type !== 'floor') return;
     }
-    const item: Furniture = { id: crypto.randomUUID(), paletteId, x, y, tilesW: entry.tilesW, tilesH: entry.tilesH };
+    const item: Furniture = {
+      id: crypto.randomUUID(), paletteId, x, y, tilesW: entry.tilesW, tilesH: entry.tilesH,
+      isInteractable: entry.sittable || undefined,
+    };
     state.addFurniture(item);
   }, []);
 
@@ -210,6 +228,12 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
     const state = useGameStore.getState();
     state.setPendingZoneRect({ x, y, width, height });
     state.toggleZoneDrawMode();
+  }, []);
+
+  const handleBannerPlaceComplete = useCallback((x: number, y: number) => {
+    const state = useGameStore.getState();
+    state.setPendingBannerPos({ x, y });
+    state.toggleBannerPlaceMode();
   }, []);
 
   const portalTravelGuardRef = useRef(false);
@@ -310,7 +334,10 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
         onFurnitureErase={handleFurnitureErase}
         zoneDrawMode={zoneDrawMode}
         onZoneDrawComplete={handleZoneDrawComplete}
+        bannerPlaceMode={bannerPlaceMode}
+        onBannerPlaceComplete={handleBannerPlaceComplete}
         onPortalEnter={handlePortalEnter}
+        emitSit={emitSit}
       />
 
       <div className="absolute top-4 left-28 pointer-events-none">
@@ -331,9 +358,9 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
       {isAdmin && (
         <button
           onClick={toggleEditorMode}
-          className={`absolute bottom-4 left-28 z-30 px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer ${editorMode ? 'bg-purple-600 text-white border-purple-500' : 'bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm'}`}
+          className={`absolute bottom-4 left-28 z-30 px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 ${editorMode ? 'bg-purple-600 text-white border-purple-500' : 'bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm'}`}
         >
-          🛠️ {editorMode ? 'Editing...' : 'Edit Room'}
+          <Tools size={12} /> {editorMode ? 'Editing...' : 'Edit Room'}
         </button>
       )}
 
@@ -342,8 +369,8 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
       )}
 
       {editorMode && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-purple-600/90 text-white text-xs font-bold px-3 py-1 rounded-full pointer-events-none">
-          🔧 EDIT MODE
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-purple-600/90 text-white text-xs font-bold px-3 py-1 rounded-full pointer-events-none inline-flex items-center gap-1.5">
+          <GearFill size={11} /> EDIT MODE
         </div>
       )}
 
@@ -392,10 +419,10 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
             setRoomCodeCopied(true);
             setTimeout(() => setRoomCodeCopied(false), 2000);
           }}
-          className="text-gray-400 hover:text-gray-700 text-xs cursor-pointer transition-colors"
+          className="text-gray-400 hover:text-gray-700 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
           title="Copy room code"
         >
-          📋 {roomSlug.slice(0, 12)}
+          <Clipboard size={11} /> {roomSlug.slice(0, 12)}
         </button>
       </div>
 
@@ -409,9 +436,9 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
       <div className="absolute top-4 left-4 pointer-events-auto">
         <button
           onClick={() => setShowLeaveConfirm(true)}
-          className="text-red-500/70 hover:text-red-500 text-xs font-medium cursor-pointer transition-colors"
+          className="text-red-500/70 hover:text-red-500 text-xs font-medium cursor-pointer transition-colors inline-flex items-center gap-1"
         >
-          🚪 Leave
+          <BoxArrowLeft size={12} /> Leave
         </button>
       </div>
 
@@ -433,6 +460,18 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
                 Leave Room
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Covers the (now-stale) canvas instead of leaving it visible and
+          interactive — nothing on it will ever update again since the room
+          is gone server-side. z-[60] so it wins over every other overlay. */}
+      {roomDeletedNotice && (
+        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-xl p-6 shadow-xl shadow-purple-100/50 border border-purple-100 text-center max-w-xs">
+            <p className="text-gray-900 text-sm font-medium mb-1">{roomDeletedNotice}</p>
+            <p className="text-gray-400 text-xs">Returning to the Lobby...</p>
           </div>
         </div>
       )}
@@ -467,8 +506,14 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
 }
 
 export default function App() {
-  const { user, loading, error, login, register, logout } = useAuth();
+  const { user, loading, error, sessionExpiredMessage, login, register, logout } = useAuth();
   const [roomSlug, setRoomSlug] = useState<string | null>(null);
+
+  // Remembered purely for the Lobby's "Rejoin last room" shortcut — not
+  // part of the auto-login mechanism itself (that's the JWT in vm_token).
+  useEffect(() => {
+    if (roomSlug) localStorage.setItem('vm_last_room_slug', roomSlug);
+  }, [roomSlug]);
   const [playerName, setPlayerName] = useState<string | null>(null);
   const [showAvatarSetup, setShowAvatarSetup] = useState(false);
   const [isRoomReady, setIsRoomReady] = useState(false);
@@ -535,7 +580,7 @@ export default function App() {
 
   // Auth gate
   if (!user) {
-    return <LoginPage onLogin={async (e, p) => { await login(e, p); }} onRegister={async (e, p, n) => { await register(e, p, n); }} error={error} />;
+    return <LoginPage onLogin={async (e, p) => { await login(e, p); }} onRegister={async (e, p, n) => { await register(e, p, n); }} error={error} sessionExpiredMessage={sessionExpiredMessage} />;
   }
 
   // Lobby

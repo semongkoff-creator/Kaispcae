@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { TrashFill } from 'react-bootstrap-icons';
 import { io } from 'socket.io-client';
 import { api, RoomInfo } from '@/services/api';
 import { UserProfile } from '@/services/api';
@@ -24,6 +25,11 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  // "Continue where you left off" — only offered if that room still exists
+  // (deleted rooms just silently don't show this, no dead-link risk).
+  const lastRoomSlug = localStorage.getItem('vm_last_room_slug');
+  const lastRoom = rooms.find((r) => r.slug === lastRoomSlug);
 
   useEffect(() => {
     const socket = io('http://localhost:3001', { transports: ['websocket', 'polling'] });
@@ -73,6 +79,19 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
         {toast && (
           <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-emerald-500/90 text-white text-xs px-3 py-1 rounded-full">{toast}</div>
         )}
+        {lastRoom && (
+          <div className="flex items-center justify-between bg-purple-50 border border-purple-100 rounded-xl px-4 py-3 mb-6">
+            <p className="text-gray-700 text-sm">
+              Continue where you left off — <span className="font-semibold">{lastRoom.name}</span>
+            </p>
+            <button
+              onClick={() => onJoinRoom(lastRoom.slug)}
+              className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg cursor-pointer"
+            >
+              Rejoin
+            </button>
+          </div>
+        )}
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-semibold text-gray-900">Public Rooms</h2>
           <div className="flex gap-3">
@@ -103,28 +122,42 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {rooms.map((room) => (
-              <div key={room.id} className="bg-white rounded-xl p-5 border border-purple-100 shadow-sm hover:border-purple-300 hover:shadow-md transition-all">
-                <div className="flex items-start justify-between mb-1" onClick={() => onJoinRoom(room.slug)}>
-                  <h3 className="font-semibold text-sm text-gray-900 cursor-pointer">{room.name}</h3>
+            {rooms.map((room) => {
+              const isConfirmingDelete = deletingSlug === room.slug;
+              const handleJoinClick = () => { if (!isConfirmingDelete) onJoinRoom(room.slug); };
+              return (
+              <div
+                key={room.id}
+                className={`rounded-xl p-5 border shadow-sm transition-all ${
+                  isConfirmingDelete
+                    ? 'bg-red-50 border-red-200 ring-2 ring-red-200'
+                    : 'bg-white border-purple-100 hover:border-purple-300 hover:shadow-md'
+                }`}
+              >
+                <div className="flex items-start justify-between mb-1" onClick={handleJoinClick}>
+                  <h3 className={`font-semibold text-sm text-gray-900 ${isConfirmingDelete ? '' : 'cursor-pointer'}`}>{room.name}</h3>
                   <span className="text-[10px] text-gray-400 font-mono">{room.slug.slice(0, 8)}</span>
                 </div>
                 <p className="text-gray-400 text-[10px] mb-3">Created by {room.ownerDisplayName}</p>
-                <div className="flex items-center justify-between text-xs text-gray-500">
-                  <span onClick={() => onJoinRoom(room.slug)} className="cursor-pointer">{room.playerCount} / {room.maxPlayers} online</span>
-                  {room.ownerId === user.id && (
-                    deletingSlug === room.slug ? (
-                      <div className="flex gap-1">
-                        <button onClick={() => { handleDelete(room.slug); setDeletingSlug(null); }} className="text-[10px] text-red-500 hover:text-red-600 cursor-pointer">Confirm</button>
-                        <button onClick={() => setDeletingSlug(null)} className="text-[10px] text-gray-400 hover:text-gray-600 cursor-pointer">Cancel</button>
-                      </div>
-                    ) : (
-                      <button onClick={(e) => { e.stopPropagation(); setDeletingSlug(room.slug); }} className="text-red-500/70 hover:text-red-500 text-xs cursor-pointer">🗑️ Delete</button>
-                    )
-                  )}
-                </div>
+                {isConfirmingDelete ? (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-red-600 font-medium">Delete this room permanently?</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => { handleDelete(room.slug); setDeletingSlug(null); }} className="text-[10px] font-semibold text-white bg-red-500 hover:bg-red-600 px-2 py-1 rounded cursor-pointer">Confirm</button>
+                      <button onClick={() => setDeletingSlug(null)} className="text-[10px] text-gray-500 hover:text-gray-700 bg-white border border-gray-200 px-2 py-1 rounded cursor-pointer">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <span onClick={handleJoinClick} className="cursor-pointer">{room.playerCount} / {room.maxPlayers} online</span>
+                    {room.ownerId === user.id && (
+                      <button onClick={(e) => { e.stopPropagation(); setDeletingSlug(room.slug); }} className="text-red-500/70 hover:text-red-500 text-xs cursor-pointer inline-flex items-center gap-1"><TrashFill size={11} /> Delete</button>
+                    )}
+                  </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </main>

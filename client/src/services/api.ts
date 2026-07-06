@@ -1,5 +1,19 @@
 const API_BASE = '/api';
 
+// Thrown for non-2xx HTTP responses — carries the status code so callers can
+// tell "the server said no" (bad credentials, expired token) apart from a
+// plain network failure (offline, server down), where fetch() itself throws
+// a status-less TypeError instead. useAuth.ts uses this distinction to only
+// show "session expired" for an actual 401/403/404, not a network blip.
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('vm_token');
   const headers: Record<string, string> = {
@@ -14,7 +28,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error((body as any).error || `Request failed: ${res.status}`);
+    throw new ApiError((body as any).error || `Request failed: ${res.status}`, res.status);
   }
 
   return res.json();
@@ -52,7 +66,10 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
 
-  getMe: () => request<{ user: UserProfile }>('/auth/me'),
+  // `token` is only present when the server decided this session is close
+  // enough to expiry to hand back a freshly-signed replacement — see
+  // server/src/routes/auth.ts and useAuth.ts, which persists it.
+  getMe: () => request<{ user: UserProfile; token?: string }>('/auth/me'),
 
   getRooms: () => request<{ rooms: RoomInfo[] }>('/rooms'),
 

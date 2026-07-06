@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { ChatDotsFill, LockFill, EmojiSmile } from 'react-bootstrap-icons';
 import { ChatMessage, EmoteType } from '@virtualmeet/shared';
 
 const COMMON_EMOJIS = ['😀','😂','❤️','👍','🔥','🎉','😢','😡','🤔','👋','💯','✨'];
@@ -58,9 +59,9 @@ export function ChatPanel({ messages, localPlayerName, onSend, onBubble, onEmote
     <>
       <button
         onClick={() => setOpen(!open)}
-        className="absolute bottom-4 right-4 z-50 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg text-sm text-purple-700 hover:text-purple-800 border border-purple-200 shadow-sm cursor-pointer pointer-events-auto"
+        className="absolute bottom-4 right-4 z-50 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg text-sm text-purple-700 hover:text-purple-800 border border-purple-200 shadow-sm cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
       >
-        💬 {open ? 'Hide' : 'Chat'}
+        <ChatDotsFill size={14} /> {open ? 'Hide' : 'Chat'}
       </button>
 
       {open && (
@@ -94,7 +95,7 @@ export function ChatPanel({ messages, localPlayerName, onSend, onBubble, onEmote
                 }`}
                 title={`Private to ${currentZone.name}`}
               >
-                🔒 {currentZone.name}
+                <LockFill size={10} className="inline -mt-0.5 mr-1" /> {currentZone.name}
               </button>
             </div>
           )}
@@ -137,7 +138,7 @@ export function ChatPanel({ messages, localPlayerName, onSend, onBubble, onEmote
           )}
 
           <div className="p-3 border-t border-purple-100 flex gap-2 items-center">
-            <button onClick={() => setShowEmoji(!showEmoji)} className="text-sm cursor-pointer">😊</button>
+            <button onClick={() => setShowEmoji(!showEmoji)} className="text-purple-600 cursor-pointer"><EmojiSmile size={16} /></button>
             <input
               value={text}
               onChange={(e) => setText(e.target.value)}

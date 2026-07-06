@@ -1,4 +1,5 @@
 import { useRef, useEffect } from 'react';
+import { MicMuteFill, CameraVideoOffFill } from 'react-bootstrap-icons';
 import { ProximityPlayer } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 
@@ -72,19 +73,25 @@ function VideoTile({
 
   return (
     <div className="pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden w-40 border border-purple-200 shadow-lg transition-all duration-300 animate-fade-in">
+      {/* Never mirror. The local preview used to have no transform either,
+          but this is explicit so no global CSS can ever flip it by
+          accident — and this is purely a browser-side style, it can't
+          possibly affect the actual MediaStreamTrack sent to WebRTC peers,
+          so remote viewers were never at risk either way. */}
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted={isLocal}
+        style={{ transform: 'none' }}
         className="w-full h-24 object-cover bg-purple-100"
       />
       <div className="px-2 py-1 text-xs flex items-center justify-between">
         <span className="text-gray-700 truncate flex-1">{name}</span>
         {isLocal && (
           <span className="flex gap-1">
-            {micMuted && <span className="text-red-500">🔇</span>}
-            {cameraOff && <span className="text-red-500">📷</span>}
+            {micMuted && <MicMuteFill className="text-red-500" size={12} />}
+            {cameraOff && <CameraVideoOffFill className="text-red-500" size={12} />}
           </span>
         )}
       </div>

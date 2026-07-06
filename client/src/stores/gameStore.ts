@@ -43,6 +43,25 @@ export interface GameState {
   isConnected: boolean;
   setConnected: (connected: boolean) => void;
 
+  // Set when the server reports this room was deleted (by its owner) while
+  // we were in it. Game watches this and navigates back to the Lobby via
+  // React state (no full page reload) instead of leaving the player stuck
+  // looking at a canvas nothing else will ever update.
+  roomDeletedNotice: string | null;
+  setRoomDeletedNotice: (notice: string | null) => void;
+
+  // Sitting — localPlayer.isSitting/x/y/direction (Avatar fields, already
+  // synced to other players) hold the visible state; these two are local
+  // bookkeeping only, never broadcast. sittingFurnitureId names which chair
+  // to stand up from; sitReturnPos is where to put the player back once
+  // they do (their position right before sitting, one tile off the chair —
+  // the chair's own tile is normally movement-blocked, so simply leaving
+  // them there on stand-up would strand them on a blocked tile).
+  sittingFurnitureId: string | null;
+  setSittingFurnitureId: (id: string | null) => void;
+  sitReturnPos: { x: number; y: number } | null;
+  setSitReturnPos: (pos: { x: number; y: number } | null) => void;
+
   // Media / WebRTC
   micMuted: boolean;
   setMicMuted: (muted: boolean) => void;
@@ -84,6 +103,14 @@ export interface GameState {
   // finishes and cleared on confirm/cancel.
   pendingZoneRect: { x: number; y: number; width: number; height: number } | null;
   setPendingZoneRect: (rect: { x: number; y: number; width: number; height: number } | null) => void;
+
+  // Same click-to-place flow as furniture, but for decorative banners (see
+  // Furniture.kind === 'banner'): toggle bannerPlaceMode, click a tile, then
+  // RoomEditor shows a form (text/colors/width) before it's actually added.
+  bannerPlaceMode: boolean;
+  toggleBannerPlaceMode: () => void;
+  pendingBannerPos: { x: number; y: number } | null;
+  setPendingBannerPos: (pos: { x: number; y: number } | null) => void;
 
   isAdmin: boolean;
   masterAdminUserId: string;
@@ -189,6 +216,14 @@ export const useGameStore = create<GameState>((set, get) => ({
   isConnected: false,
   setConnected: (connected) => set({ isConnected: connected }),
 
+  roomDeletedNotice: null,
+  setRoomDeletedNotice: (notice) => set({ roomDeletedNotice: notice }),
+
+  sittingFurnitureId: null,
+  setSittingFurnitureId: (id) => set({ sittingFurnitureId: id }),
+  sitReturnPos: null,
+  setSitReturnPos: (pos) => set({ sitReturnPos: pos }),
+
   micMuted: false,
   setMicMuted: (muted) => set({ micMuted: muted }),
   cameraOn: true,
@@ -248,6 +283,12 @@ export const useGameStore = create<GameState>((set, get) => ({
   setFurniture: (f) => set({ furniture: f }),
   addFurniture: (item) =>
     set((state) => {
+      // Banners are pure decoration (signage), not physical objects — never
+      // block movement, so don't touch tile types (they may sit over a wall
+      // tile, as "a poster mounted on the wall" would).
+      if (item.kind === 'banner') {
+        return { furniture: [...state.furniture, item] };
+      }
       const tiles = state.tiles.map((row) => row.map((t) => ({ ...t })));
       for (let dx = 0; dx < item.tilesW; dx++) {
         const tx = item.x + dx;
@@ -259,6 +300,9 @@ export const useGameStore = create<GameState>((set, get) => ({
     set((state) => {
       const target = state.furniture.find((f) => f.y === y && x >= f.x && x < f.x + f.tilesW);
       if (!target) return state;
+      if (target.kind === 'banner') {
+        return { furniture: state.furniture.filter((f) => f.id !== target.id) };
+      }
       const tiles = state.tiles.map((row) => row.map((t) => ({ ...t })));
       for (let dx = 0; dx < target.tilesW; dx++) {
         const tx = target.x + dx;
@@ -281,6 +325,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   toggleZoneDrawMode: () => set((s) => ({ zoneDrawMode: !s.zoneDrawMode })),
   pendingZoneRect: null,
   setPendingZoneRect: (rect) => set({ pendingZoneRect: rect }),
+
+  bannerPlaceMode: false,
+  toggleBannerPlaceMode: () => set((s) => ({ bannerPlaceMode: !s.bannerPlaceMode })),
+  pendingBannerPos: null,
+  setPendingBannerPos: (pos) => set({ pendingBannerPos: pos }),
 
   isAdmin: false,
   masterAdminUserId: '',

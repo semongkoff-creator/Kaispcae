@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload } from '@virtualmeet/shared';
-import { addPlayer, removePlayer, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus } from '../store/roomStore';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, createDefaultOfficeLayout } from '@virtualmeet/shared';
+import { addPlayer, removePlayer, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerSitting } from '../store/roomStore';
 import { PrismaClient } from '@prisma/client';
 import { socketRateLimit } from '../middleware/rateLimit';
 
@@ -185,8 +185,16 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         return { ...p, userId: puid, isAdmin: rs.adminUserIds.has(puid), isMasterAdmin: puid === rs.masterAdminUserId };
       });
 
+      // Rooms created before the default-office-layout seed (or the legacy
+      // DEFAULT_ROOM slug, which has no DB row at all) still have empty or
+      // missing map data — fall back to the same layout newly-created rooms
+      // are seeded with (see shared/defaultRoomLayout.ts) instead of an
+      // empty floor. Computed lazily since most joins already have real
+      // saved data and don't need it.
+      const fallback = (!savedTiles || !savedFurniture || !savedZones) ? createDefaultOfficeLayout() : null;
+
       socket.emit(SocketEvents.ROOM_STATE, {
-        ...state, tiles: savedTiles || state.tiles, furniture: savedFurniture || [], zones: savedZones || [], players: playersWithMeta,
+        ...state, tiles: savedTiles || fallback!.tiles, furniture: savedFurniture || fallback!.furniture, zones: savedZones || fallback!.zones, players: playersWithMeta,
         adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId,
       });
     });
@@ -233,6 +241,14 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const trimmed = (status || '').slice(0, 24);
     socket.to(room).emit(SocketEvents.PLAYER_STATUS_UPDATED, { id: socket.id, status: trimmed });
     updatePlayerStatus(room, socket.id, trimmed);
+  });
+
+  socket.on(SocketEvents.PLAYER_SIT, (data: { sitting: boolean; x: number; y: number; direction: Avatar['direction'] }) => {
+    const room = currentRoom; if (!room) return;
+    if (typeof data?.x !== 'number' || typeof data?.y !== 'number') return;
+    const payload = { id: socket.id, isSitting: !!data.sitting, x: data.x, y: data.y, direction: data.direction };
+    socket.to(room).emit(SocketEvents.PLAYER_SAT, payload);
+    updatePlayerSitting(room, socket.id, payload.isSitting, payload.x, payload.y, payload.direction);
   });
 
   socket.on(SocketEvents.ROOM_UPDATE, (payload: RoomUpdatePayload) => {

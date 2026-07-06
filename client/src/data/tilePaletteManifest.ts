@@ -15,7 +15,7 @@
 // that render on the "overhead" layer (after avatars) so players can walk
 // visually behind tall pieces.
 
-export type PaletteCategory = 'floor' | 'furniture';
+export type PaletteCategory = 'floor' | 'furniture' | 'decor' | 'electronics';
 
 export interface PaletteEntry {
   id: string;
@@ -26,6 +26,10 @@ export interface PaletteEntry {
   srcY: number;
   tilesW: number;
   tilesH: number;
+  // Chairs a player can sit in (see Furniture.isInteractable / the sit
+  // feature in GameCanvas.tsx) — set automatically when this entry is
+  // placed, not a Room Editor toggle.
+  sittable?: boolean;
 }
 
 const SINGLES_BASE = '/assets/tilesets/modern-office/Modern_Office_Singles_32x32';
@@ -51,9 +55,15 @@ export const TILE_PALETTE: PaletteEntry[] = [
   { id: 'floor-lavender', label: 'Lavender Carpet (visible grid seam)', category: 'floor', src: single(70), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
   { id: 'floor-olive-carpet', label: 'Olive Carpet', category: 'floor', src: single(86), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
   { id: 'floor-maroon-carpet', label: 'Maroon Carpet', category: 'floor', src: single(90), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
+  // Verified seamless the same way as the entries above (rendered a 4x4
+  // repeat against a magenta background before adding).
+  { id: 'floor-tile-gray', label: 'Gray Office Tile', category: 'floor', src: single(88), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
+  { id: 'floor-brown-weave', label: 'Brown Woven Carpet', category: 'floor', src: single(89), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
 
   // ── Furniture (multi-cell, bottom-anchored) ───────────────────────
-  { id: 'chair-office', label: 'Office Chair', category: 'furniture', src: single(101), srcX: 0, srcY: 32, tilesW: 1, tilesH: 2 },
+  // `sittable: true` on chair entries drives the sit-down interaction (see
+  // GameCanvas.tsx) — every other field here works exactly as before.
+  { id: 'chair-office', label: 'Office Chair', category: 'furniture', src: single(101), srcX: 0, srcY: 32, tilesW: 1, tilesH: 2, sittable: true },
   { id: 'desk-basic', label: 'Desk', category: 'furniture', src: single(211), srcX: 0, srcY: 32, tilesW: 1, tilesH: 2 },
   { id: 'desk-computer-a', label: 'Desk w/ Monitor', category: 'furniture', src: single(109), srcX: 0, srcY: 32, tilesW: 1, tilesH: 2 },
   { id: 'desk-computer-b', label: 'Desk w/ Laptop', category: 'furniture', src: single(270), srcX: 0, srcY: 32, tilesW: 1, tilesH: 2 },
@@ -63,10 +73,33 @@ export const TILE_PALETTE: PaletteEntry[] = [
   { id: 'meeting-table', label: 'Meeting Table', category: 'furniture', src: single(205), srcX: 0, srcY: 32, tilesW: 2, tilesH: 2 },
   { id: 'wardrobe', label: 'Wardrobe', category: 'furniture', src: single(195), srcX: 0, srcY: 0, tilesW: 2, tilesH: 3 },
   { id: 'sofa-set', label: 'Sofa Set', category: 'furniture', src: single(201), srcX: 0, srcY: 0, tilesW: 2, tilesH: 3 },
+  { id: 'sofa-blue', label: 'Blue Sofa', category: 'furniture', src: single(196), srcX: 0, srcY: 32, tilesW: 1, tilesH: 2 },
+  { id: 'sofa-gray', label: 'Gray Sofa', category: 'furniture', src: single(197), srcX: 0, srcY: 32, tilesW: 1, tilesH: 2 },
   { id: 'pinboard', label: 'Pinboard', category: 'furniture', src: single(164), srcX: 0, srcY: 32, tilesW: 2, tilesH: 2 },
   { id: 'plant-tall', label: 'Tall Plant', category: 'furniture', src: single(98), srcX: 0, srcY: 0, tilesW: 1, tilesH: 3 },
   { id: 'plant-small', label: 'Small Plant', category: 'furniture', src: single(99), srcX: 0, srcY: 32, tilesW: 1, tilesH: 2 },
   { id: 'plant-potted', label: 'Potted Plant', category: 'furniture', src: single(100), srcX: 0, srcY: 0, tilesW: 1, tilesH: 3 },
+
+  // ── Decor (pictures, art, small accents) ──────────────────────────
+  // Bounding boxes for everything below were computed programmatically
+  // (draw each source file to a canvas, scan alpha channel for the true
+  // opaque region) rather than eyeballed — same rigor as the floor/wall
+  // fixes earlier, to avoid re-introducing the "sliver crop" class of bug.
+  { id: 'picture-portrait-a', label: 'Portrait Photo', category: 'decor', src: single(157), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
+  { id: 'picture-portrait-b', label: 'Portrait Photo (B)', category: 'decor', src: single(159), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
+  { id: 'picture-frame-tall', label: 'Framed Photo', category: 'decor', src: single(156), srcX: 0, srcY: 32, tilesW: 1, tilesH: 2 },
+  { id: 'picture-abstract', label: 'Abstract Art', category: 'decor', src: single(163), srcX: 0, srcY: 32, tilesW: 1, tilesH: 1 },
+  { id: 'picture-landscape', label: 'Landscape Art', category: 'decor', src: single(164), srcX: 0, srcY: 32, tilesW: 2, tilesH: 2 },
+  { id: 'picture-map', label: 'Wall Map', category: 'decor', src: single(171), srcX: 0, srcY: 32, tilesW: 2, tilesH: 2 },
+  { id: 'wall-frame-a', label: 'Small Frame', category: 'decor', src: single(96), srcX: 0, srcY: 32, tilesW: 1, tilesH: 2 },
+  { id: 'wall-frame-b', label: 'Small Frame (B)', category: 'decor', src: single(97), srcX: 0, srcY: 32, tilesW: 1, tilesH: 2 },
+  { id: 'desk-lamp', label: 'Desk Lamp', category: 'decor', src: single(237), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
+
+  // ── Electronics ────────────────────────────────────────────────────
+  { id: 'printer', label: 'Printer', category: 'electronics', src: single(166), srcX: 0, srcY: 64, tilesW: 2, tilesH: 1 },
+  { id: 'tv-monitor', label: 'TV / Monitor', category: 'electronics', src: single(170), srcX: 0, srcY: 32, tilesW: 2, tilesH: 2 },
+  { id: 'electronics-console', label: 'AV Console', category: 'electronics', src: single(240), srcX: 0, srcY: 64, tilesW: 2, tilesH: 1 },
+  { id: 'electronics-small', label: 'Small Device', category: 'electronics', src: single(241), srcX: 0, srcY: 64, tilesW: 1, tilesH: 1 },
 ];
 
 export const TILE_PALETTE_BY_ID: Record<string, PaletteEntry> = Object.fromEntries(

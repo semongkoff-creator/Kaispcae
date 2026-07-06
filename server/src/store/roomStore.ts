@@ -186,6 +186,25 @@ export async function updatePlayerStatus(
   }
 }
 
+export async function updatePlayerSitting(
+  roomId: string,
+  playerId: string,
+  isSitting: boolean,
+  x: number,
+  y: number,
+  direction: Avatar['direction'],
+): Promise<void> {
+  const players = await getPlayers(roomId);
+  const player = players.find((p) => p.id === playerId);
+  if (player) {
+    player.isSitting = isSitting || undefined;
+    player.x = x;
+    player.y = y;
+    player.direction = direction;
+    await setPlayers(roomId, players);
+  }
+}
+
 // ─── Room state ────────────────────────────────────────────────────
 
 export async function getRoomState(roomId: string, roomName: string): Promise<RoomState> {

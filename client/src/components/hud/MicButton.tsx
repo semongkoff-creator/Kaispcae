@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { MicFill, MicMuteFill } from 'react-bootstrap-icons';
 
 interface MicButtonProps {
   muted: boolean;
@@ -28,7 +29,7 @@ export function MicButton({ muted, onToggle }: MicButtonProps) {
       className="relative flex items-center justify-center w-12 h-12 rounded-full bg-white/90 backdrop-blur-sm border border-purple-200 shadow-lg transition-all hover:scale-105 cursor-pointer"
       title="Toggle Microphone (M)"
     >
-      <span className="text-xl">{muted ? '🔇' : '🎙️'}</span>
+      {muted ? <MicMuteFill className="text-red-500" size={20} /> : <MicFill className="text-purple-700" size={20} />}
       {muted && (
         <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-pulse" />
       )}

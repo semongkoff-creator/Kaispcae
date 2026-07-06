@@ -1,3 +1,4 @@
+import { StarFill, AwardFill } from 'react-bootstrap-icons';
 import { useGameStore } from '@/stores/gameStore';
 
 interface AdminPanelProps {
@@ -35,8 +36,8 @@ export function AdminPanel({ onGrant, onRevoke }: AdminPanelProps) {
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: useGameStore.getState().localPlayer.color }} />
             <span className="text-gray-700 text-xs">{useGameStore.getState().localPlayer.name}</span>
-            {isMasterAdmin && <span className="text-amber-500 text-xs">⭐</span>}
-            {localIsAdmin && !isMasterAdmin && <span className="text-amber-500 text-xs">👑</span>}
+            {isMasterAdmin && <StarFill className="text-amber-500" size={11} />}
+            {localIsAdmin && !isMasterAdmin && <AwardFill className="text-amber-500" size={11} />}
           </div>
           <span className="text-gray-400 text-[10px]">You</span>
         </div>
@@ -50,8 +51,8 @@ export function AdminPanel({ onGrant, onRevoke }: AdminPanelProps) {
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
                 <span className="text-gray-700 text-xs">{p.name}</span>
-                {pIsMaster && <span className="text-amber-500 text-xs" title="Master Admin">⭐</span>}
-                {pIsAdmin && !pIsMaster && <span className="text-amber-500 text-xs">👑</span>}
+                {pIsMaster && <StarFill className="text-amber-500" size={11} title="Master Admin" />}
+                {pIsAdmin && !pIsMaster && <AwardFill className="text-amber-500" size={11} />}
               </div>
 
               {localIsAdmin && !pIsAdmin && p.userId !== localUserId && (

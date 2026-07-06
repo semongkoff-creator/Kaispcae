@@ -128,6 +128,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       upsertPlayer({ id: data.id, status: data.status || undefined } as Avatar);
     });
 
+    socket.on(SocketEvents.PLAYER_SAT, (data: { id: string; isSitting: boolean; x: number; y: number; direction: Avatar['direction'] }) => {
+      const state = useGameStore.getState();
+      if (data.id === state.localPlayerId) return;
+      upsertPlayer({ id: data.id, isSitting: data.isSitting, x: data.x, y: data.y, direction: data.direction, isMoving: false } as Avatar);
+    });
+
     socket.on(SocketEvents.CHAT_BROADCAST, (msg: ChatMessage) => {
       if (msg.zoneId) {
         addZoneChatMessage(msg.zoneId, msg);
@@ -176,11 +182,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
     socket.on(SocketEvents.ROOM_DELETED, (data: { roomId: string }) => {
       console.warn('[socket] room deleted by owner:', data.roomId);
-      alert('This room has been deleted by the owner.');
-      // Redirect to lobby after 3 seconds
-      setTimeout(() => {
-        window.location.reload();
-      }, 3000);
+      // Game watches roomDeletedNotice and navigates back to the Lobby via
+      // React state — no alert()/reload(), so there's no multi-second
+      // window where the player is just stuck looking at a stale canvas.
+      useGameStore.getState().setRoomDeletedNotice('This room has been deleted by the owner.');
     });
 
     socket.on('connect_error', (err) => {
@@ -233,6 +238,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.PLAYER_STATUS_UPDATE, status);
   }, []);
 
+  const emitSit = useCallback((sitting: boolean, x: number, y: number, direction: Avatar['direction']) => {
+    socketRef.current?.emit(SocketEvents.PLAYER_SIT, { sitting, x, y, direction });
+  }, []);
+
   const emitChat = useCallback((text: string, isProximity?: boolean, zoneId?: string) => {
     socketRef.current?.emit(SocketEvents.CHAT_MESSAGE, text, isProximity, zoneId);
   }, []);
@@ -271,5 +280,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.ROOM_DELETE);
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitRoomDelete };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitRoomDelete };
 }

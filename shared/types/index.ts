@@ -51,6 +51,11 @@ export interface Avatar {
   // Free-text custom status shown as a small badge above the name tag
   // (e.g. "WFH", "In a meeting", "🎧 Focus") — independent of admin/online state.
   status?: string;
+  // True while sitting in a chair (see Furniture.isInteractable) — movement
+  // input is ignored client-side while true, and x/y are snapped to the
+  // chair's tile, so remote clients just render this player idle at that
+  // exact position rather than needing a separate "sitting" sprite.
+  isSitting?: boolean;
 }
 
 // A single tile on the room grid. `type` stays authoritative for collision
@@ -108,6 +113,9 @@ export enum SocketEvents {
   PLAYER_STATUS_UPDATE = 'player:status_update',
   PLAYER_STATUS_UPDATED = 'player:status_updated',
 
+  PLAYER_SIT = 'player:sit',
+  PLAYER_SAT = 'player:sat',
+
   RTC_OFFER = 'rtc:offer',
   RTC_ANSWER = 'rtc:answer',
   RTC_ICE_CANDIDATE = 'rtc:ice-candidate',
@@ -164,6 +172,14 @@ export interface RtcSignal {
 // applied (see roomHandler/RoomEditor); any rows above that (tilesH > 1)
 // are purely visual "overhead" — drawn above avatars — so tall pieces like a
 // chair back or wardrobe let players walk visually behind them.
+//
+// `kind: 'banner'` is a different sub-type: decorative signage/posters an
+// admin can drop anywhere via the Room Editor (team name, a tagline,
+// announcements) — distinct from a Zone's label, which only appears at the
+// top of a private zone. Banners are rendered as a DOM overlay (like Zone
+// labels) instead of a tileset sprite crop, and never block movement, so
+// `paletteId` is unused for them (kept as a stable placeholder id string)
+// and `tilesH` is always 1.
 export interface Furniture {
   id: string;
   paletteId: string;
@@ -171,6 +187,16 @@ export interface Furniture {
   y: number;
   tilesW: number;
   tilesH: number;
+  kind?: 'banner';
+  text?: string;
+  textColor?: string;
+  bgColor?: string;
+  imageUrl?: string;
+  // True for chair-like pieces a player can sit in (see Avatar.isSitting).
+  // Set automatically by the client when placing a chair palette entry —
+  // not exposed as a Room Editor toggle, since "which pieces are chairs" is
+  // a property of the art (tilePaletteManifest.ts), not an admin choice.
+  isInteractable?: boolean;
 }
 
 // Zones. 'meeting' zones render a big banner across the top of the area
@@ -244,3 +270,5 @@ export interface RoomUpdatePayload {
   furniture: Furniture[];
   zones: Zone[];
 }
+
+export { createDefaultOfficeLayout } from '../defaultRoomLayout';

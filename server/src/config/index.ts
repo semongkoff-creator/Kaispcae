@@ -9,7 +9,12 @@ const envSchema = z
     DATABASE_URL: z.string().default('postgresql://postgres:postgres@localhost:5432/virtualmeet'),
     REDIS_URL: z.string().optional(),
     JWT_SECRET: z.string().default(DEV_JWT_SECRET),
-    JWT_EXPIRES_IN: z.string().default('7d'),
+    // 30d, not 7d — this is a "sign in once, stay signed in" app, not a
+    // banking app; combined with the sliding-expiry refresh in
+    // GET /auth/me (see routes/auth.ts), a user who opens it at least once
+    // a month never sees an expired session. Still just an env var, not
+    // hardcoded — override per-deployment if a shorter session is wanted.
+    JWT_EXPIRES_IN: z.string().default('30d'),
     CORS_ORIGIN: z.string().default('http://localhost:5173'),
     CLIENT_URL: z.string().default('http://localhost:5173'),
     RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),

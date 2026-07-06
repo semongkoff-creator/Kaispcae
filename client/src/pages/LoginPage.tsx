@@ -4,9 +4,13 @@ interface LoginPageProps {
   onLogin: (email: string, password: string) => Promise<void>;
   onRegister: (email: string, password: string, displayName: string) => Promise<void>;
   error: string | null;
+  // Set instead of `error` when auto-login on mount found a token the
+  // server actively rejected (expired/invalid/deleted user) — distinct
+  // styling on purpose, since this isn't something the user did wrong.
+  sessionExpiredMessage?: string | null;
 }
 
-export function LoginPage({ onLogin, onRegister, error }: LoginPageProps) {
+export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage }: LoginPageProps) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,6 +36,12 @@ export function LoginPage({ onLogin, onRegister, error }: LoginPageProps) {
       <div className="bg-white rounded-2xl p-8 w-full max-w-sm shadow-xl shadow-purple-100/50 border border-purple-100">
         <h1 className="text-gray-900 text-2xl font-bold mb-1">VirtualMeet</h1>
         <p className="text-gray-500 text-sm mb-6">{mode === 'login' ? 'Welcome back' : 'Create your account'}</p>
+
+        {sessionExpiredMessage && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-700 text-xs rounded-lg px-3 py-2 mb-4">
+            {sessionExpiredMessage}
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-600 text-xs rounded-lg px-3 py-2 mb-4">

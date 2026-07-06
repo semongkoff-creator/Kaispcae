@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown } from 'react-bootstrap-icons';
 import { useGameStore } from '@/stores/gameStore';
 
 interface ParticipantPanelProps {
@@ -24,9 +25,9 @@ export function ParticipantPanel({ remoteStreams }: ParticipantPanelProps) {
     <>
       <button
         onClick={() => setOpen(!open)}
-        className="absolute top-14 left-4 z-40 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 hover:text-purple-800 border border-purple-200 shadow-sm cursor-pointer pointer-events-auto"
+        className="absolute top-14 left-4 z-40 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 hover:text-purple-800 border border-purple-200 shadow-sm cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
       >
-        👥 {totalOnline} {open ? '▲' : '▼'}
+        <PeopleFill size={13} /> {totalOnline} {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
       </button>
 
       {open && (
@@ -101,7 +102,7 @@ function ParticipantRow({
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        {inCall && <span className="text-[10px]" title="In call">🎥</span>}
+        {inCall && <CameraVideoFill className="text-purple-600" size={11} title="In call" />}
         {isLocal && <span className="text-gray-400 text-[10px]">You</span>}
       </div>
     </div>
@@ -123,6 +124,8 @@ function ParticipantThumb({ name, stream }: { name: string; stream: MediaStream 
 
   return (
     <div className="w-12 h-12 rounded-lg overflow-hidden bg-purple-100 relative shrink-0" title={name}>
+      {/* Always a remote participant's stream (see remoteStreams.get(p.id)
+          above) — never mirrored, no transform. */}
       <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
       <span className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[8px] px-1 truncate">{name}</span>
     </div>

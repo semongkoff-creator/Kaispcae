@@ -1,3 +1,5 @@
+import { DisplayFill, WindowDesktop } from 'react-bootstrap-icons';
+
 interface ScreenShareButtonProps {
   sharing: boolean;
   onToggle: () => void;
@@ -15,7 +17,7 @@ export function ScreenShareButton({ sharing, onToggle }: ScreenShareButtonProps)
       }`}
       title="Toggle Screen Share"
     >
-      <span className="text-xl">{sharing ? '🟪' : '🖥️'}</span>
+      {sharing ? <DisplayFill className="text-white" size={20} /> : <WindowDesktop className="text-purple-700" size={20} />}
       {sharing && (
         <div className="absolute inset-0 rounded-full border-2 border-purple-400 animate-pulse" />
       )}

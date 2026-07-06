@@ -29,10 +29,16 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
     canvas.style.height = `${MM_H}px`;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    // A near-white 0.85-alpha fill reads as "blank/broken box" rather than
+    // "a minimap" at a glance, especially with 0-1 player dots on it and a
+    // border faint enough (0.25 alpha) to disappear against the white HUD
+    // elements around it — give it a light purple tint and a firmer border
+    // so it reads as its own distinct panel instead of fusing visually with
+    // whatever white UI happens to sit next to it.
+    ctx.fillStyle = 'rgba(237,233,254,0.9)';
     ctx.fillRect(0, 0, MM_W, MM_H);
 
-    ctx.strokeStyle = 'rgba(124,58,237,0.25)';
+    ctx.strokeStyle = 'rgba(124,58,237,0.5)';
     ctx.lineWidth = 1;
     ctx.strokeRect(1, 1, MM_W - 2, MM_H - 2);
 
@@ -64,7 +70,11 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
   if (!visible) return null;
 
   return (
-    <div className="absolute bottom-4 right-20 z-30">
+    // Stacked directly above the collapsed Chat button (bottom-4 right-4),
+    // right-aligned with it and with a clear gap — not beside it, where its
+    // near-white background used to visually fuse with the button into what
+    // looked like one big blank panel.
+    <div className="absolute bottom-16 right-4 z-30">
       <canvas
         ref={canvasRef}
         onClick={handleClick}

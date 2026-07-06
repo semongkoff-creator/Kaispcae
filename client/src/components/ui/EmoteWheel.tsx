@@ -1,5 +1,31 @@
 import { useCallback, useEffect } from 'react';
-import { EMOTE_LIST, EMOTE_EMOJI, EMOTE_LABELS, EmoteType } from '@virtualmeet/shared';
+import {
+  HandIndexThumbFill,
+  HandThumbsUpFill,
+  EmojiLaughingFill,
+  HeartFill,
+  BalloonFill,
+  EmojiNeutralFill,
+  MoonStarsFill,
+  Fire,
+} from 'react-bootstrap-icons';
+import { EMOTE_LIST, EMOTE_LABELS, EmoteType } from '@virtualmeet/shared';
+
+// Bootstrap Icon for each emote's picker button. The floating bubble that
+// appears above the avatar in the game world is drawn on the <canvas> 2D
+// context (see GameCanvas.tsx), which can only render text/glyphs — not SVG
+// React components — so that bubble keeps using EMOTE_EMOJI (shared/types)
+// unchanged; this map only covers this picker's on-screen DOM buttons.
+const EMOTE_ICONS: Record<EmoteType, typeof HeartFill> = {
+  wave: HandIndexThumbFill,
+  clap: HandThumbsUpFill,
+  laugh: EmojiLaughingFill,
+  heart: HeartFill,
+  party: BalloonFill,
+  think: EmojiNeutralFill,
+  sleep: MoonStarsFill,
+  fire: Fire,
+};
 
 interface EmoteWheelProps {
   open: boolean;
@@ -35,15 +61,16 @@ export function EmoteWheel({ open, onSelect, onClose }: EmoteWheelProps) {
           const angle = (i / EMOTE_LIST.length) * Math.PI * 2 - Math.PI / 2;
           const bx = cx + r * Math.cos(angle) - 18;
           const by = cy + r * Math.sin(angle) - 18;
+          const EmoteIcon = EMOTE_ICONS[emote];
           return (
             <button
               key={emote}
               onClick={() => onSelect(emote)}
-              className="absolute w-9 h-9 rounded-full bg-white/90 border border-purple-200 shadow-sm flex items-center justify-center text-lg hover:bg-purple-50 hover:scale-110 transition-all cursor-pointer"
+              className="absolute w-9 h-9 rounded-full bg-white/90 border border-purple-200 shadow-sm flex items-center justify-center text-purple-600 hover:bg-purple-50 hover:scale-110 transition-all cursor-pointer"
               style={{ left: bx, top: by }}
               title={EMOTE_LABELS[emote]}
             >
-              {EMOTE_EMOJI[emote]}
+              <EmoteIcon size={18} />
             </button>
           );
         })}

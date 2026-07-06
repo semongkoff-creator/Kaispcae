@@ -4,6 +4,10 @@ import { Direction, TILE_SIZE, PLAYER_SPEED } from '@virtualmeet/shared';
 interface UseMovementOptions {
   isBlocked: (tileX: number, tileY: number) => boolean;
   onMove: (x: number, y: number, direction: Direction) => void;
+  // While this returns true, WASD/arrow input is ignored entirely (used
+  // while sitting) — checked fresh every frame, same ref pattern as
+  // isBlocked, so GameCanvas doesn't need to recreate the hook's callbacks.
+  isFrozen?: () => boolean;
 }
 
 interface MovementState {
@@ -13,7 +17,7 @@ interface MovementState {
   dy: number;
 }
 
-export function useMovement({ isBlocked, onMove }: UseMovementOptions) {
+export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions) {
   const keysRef = useRef<Set<string>>(new Set());
   const currentXRef = useRef<number>(0);
   const currentYRef = useRef<number>(0);
@@ -25,6 +29,9 @@ export function useMovement({ isBlocked, onMove }: UseMovementOptions) {
 
   const onMoveRef = useRef(onMove);
   onMoveRef.current = onMove;
+
+  const isFrozenRef = useRef(isFrozen);
+  isFrozenRef.current = isFrozen;
 
   const setPosition = useCallback((x: number, y: number) => {
     currentXRef.current = x;
@@ -87,7 +94,9 @@ export function useMovement({ isBlocked, onMove }: UseMovementOptions) {
   const tryMove = useCallback(
     (dt: number) => {
       const { dx, dy, direction, isMoving } = getInput();
-      if (!isMoving) return { x: currentXRef.current, y: currentYRef.current, direction, isMoving };
+      if (!isMoving || isFrozenRef.current?.()) {
+        return { x: currentXRef.current, y: currentYRef.current, direction, isMoving: false };
+      }
 
       const stepX = dx * PLAYER_SPEED * dt;
       const stepY = dy * PLAYER_SPEED * dt;

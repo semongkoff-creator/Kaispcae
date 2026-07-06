@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { Tools, LightningFill } from 'react-bootstrap-icons';
 import { AvatarConfig, SpriteMode } from '@virtualmeet/shared';
 import { drawAvatar } from '@/components/canvas/AvatarSprite';
 import { PALETTE } from '@/hooks/useAvatarConfig';
@@ -160,19 +161,19 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
         <div className="flex gap-2 mb-5 bg-purple-50 rounded-lg p-1">
           <button
             onClick={() => setTab('layered')}
-            className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${
+            className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all inline-flex items-center justify-center gap-1.5 ${
               config.spriteMode === 'layered' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
-            🛠️ Build Character
+            <Tools size={12} /> Build Character
           </button>
           <button
             onClick={() => setTab('premade')}
-            className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${
+            className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all inline-flex items-center justify-center gap-1.5 ${
               config.spriteMode === 'premade' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
-            ⚡ Quick Pick
+            <LightningFill size={12} /> Quick Pick
           </button>
         </div>
 
