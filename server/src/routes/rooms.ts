@@ -1,5 +1,7 @@
 import { Router, Response } from 'express';
+import { Server } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
+import { SocketEvents } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
 
@@ -7,6 +9,15 @@ const rooms = Router();
 
 function getPrisma(): PrismaClient {
   return new PrismaClient();
+}
+
+// Set once from index.ts after the Socket.IO server is created, so the
+// DELETE route below can notify/kick players currently in the room being
+// deleted — deleting via this REST endpoint (used by the Lobby) previously
+// left active sockets in a room whose DB row no longer existed until reload.
+let ioRef: Server | null = null;
+export function setIo(io: Server): void {
+  ioRef = io;
 }
 
 function generateSlug(name: string): string {
@@ -137,6 +148,14 @@ rooms.delete('/rooms/:slug', authenticateToken, async (req: AuthRequest, res: Re
       return res.status(403).json({ error: 'Only the room creator can delete this room' });
     }
     await prisma.room.delete({ where: { slug: req.params.slug } });
+
+    if (ioRef) {
+      ioRef.to(room.slug).emit(SocketEvents.ROOM_DELETED, { roomId: room.slug });
+      const roomSockets = await ioRef.in(room.slug).fetchSockets();
+      for (const s of roomSockets) s.leave(room.slug);
+      ioRef.emit('lobby:room_removed', { roomId: room.slug });
+    }
+
     return res.json({ success: true });
   } catch (err) {
     console.error('[rooms] delete error:', err);

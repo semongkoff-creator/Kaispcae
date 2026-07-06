@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ChatMessage, EMOTE_EMOJI, EMOTE_LIST, EmoteType } from '@virtualmeet/shared';
+import { ChatMessage, EmoteType } from '@virtualmeet/shared';
 
 const COMMON_EMOJIS = ['😀','😂','❤️','👍','🔥','🎉','😢','😡','🤔','👋','💯','✨'];
 

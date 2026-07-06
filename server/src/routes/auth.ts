@@ -5,6 +5,7 @@ import { PrismaClient } from '@prisma/client';
 import { getConfig } from '../config';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { validate, registerSchema, loginSchema } from '../middleware/validate';
+import { rateLimit } from '../middleware/rateLimit';
 
 const auth = Router();
 
@@ -12,8 +13,12 @@ function getPrisma(): PrismaClient {
   return new PrismaClient();
 }
 
+// Login/register are brute-force targets — much tighter than the global
+// 100-req/min limiter applied to every other route.
+const authRateLimit = rateLimit(15 * 60 * 1000, 10); // 10 attempts / 15 min / IP
+
 // POST /auth/register
-auth.post('/register', validate(registerSchema), async (req, res: Response) => {
+auth.post('/register', authRateLimit, validate(registerSchema), async (req, res: Response) => {
   try {
     const { email, password, displayName } = req.body;
     const prisma = getPrisma();
@@ -46,7 +51,7 @@ auth.post('/register', validate(registerSchema), async (req, res: Response) => {
 });
 
 // POST /auth/login
-auth.post('/login', validate(loginSchema), async (req, res: Response) => {
+auth.post('/login', authRateLimit, validate(loginSchema), async (req, res: Response) => {
   try {
     const { email, password } = req.body;
     const prisma = getPrisma();

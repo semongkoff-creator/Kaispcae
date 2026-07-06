@@ -118,9 +118,6 @@ export enum SocketEvents {
   ZONE_ENTER = 'zone:enter',
   ZONE_EXIT = 'zone:exit',
 
-  ROOM_SAVE = 'room:save',
-  ROOM_LOADED = 'room:loaded',
-
   ROOM_UPDATE = 'room:update',
   ROOM_UPDATED = 'room:updated',
 
@@ -244,15 +241,6 @@ export interface SpeechBubble {
 // the Room Editor, sent together so they stay consistent on save/reload.
 export interface RoomUpdatePayload {
   tiles: RoomTile[][];
-  furniture: Furniture[];
-  zones: Zone[];
-}
-
-// Room save payload
-export interface RoomData {
-  id: string;
-  name: string;
-  tiles: { type: string; x: number; y: number }[][];
   furniture: Furniture[];
   zones: Zone[];
 }

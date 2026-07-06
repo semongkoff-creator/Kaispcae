@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
@@ -9,12 +10,12 @@ import { registerRtcHandlers } from './socket/rtcHandler';
 import { registerChatHandlers } from './socket/chatHandler';
 import { registerEmoteHandlers } from './socket/emoteHandler';
 import { registerZoneHandlers } from './socket/zoneHandler';
-import { registerRoomSaveHandlers } from './socket/roomSaveHandler';
 import { getRedis } from './store/roomStore';
 import { loadConfig, getConfig } from './config';
 import { rateLimit } from './middleware/rateLimit';
+import { verifyToken } from './middleware/auth';
 import authRoutes from './routes/auth';
-import roomRoutes from './routes/rooms';
+import roomRoutes, { setIo } from './routes/rooms';
 
 loadConfig();
 const config = getConfig();
@@ -39,6 +40,23 @@ const io = new Server(httpServer, {
     credentials: true,
   },
 });
+
+// Verify the JWT (if any) supplied at connect time and attach the real user
+// id to the socket. Handlers must trust socket.data.userId over any
+// client-supplied userId param — otherwise anyone can claim to be any
+// account (including a room's owner) and take over admin/master-admin
+// privileges. Unauthenticated connections are still allowed through (guest
+// fallback), they just don't get a verified identity.
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (typeof token === 'string' && token) {
+    const userId = verifyToken(token);
+    if (userId) socket.data.userId = userId;
+  }
+  next();
+});
+
+setIo(io);
 
 // ── REST routes ──────────────────────────────────────────────────
 app.get('/api/health', async (_req, res) => {
@@ -76,7 +94,6 @@ async function start() {
     registerChatHandlers(io, socket, () => getPlayerName(socket.id), () => getPlayerColor(socket.id));
     registerEmoteHandlers(io, socket);
     registerZoneHandlers(io, socket);
-    registerRoomSaveHandlers(io, socket);
   });
 
   httpServer.listen(config.PORT, () => {

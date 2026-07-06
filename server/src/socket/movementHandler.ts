@@ -24,31 +24,29 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     const clampedX = Math.max(TILE_SIZE / 2, Math.min(MAP_WIDTH * TILE_SIZE - TILE_SIZE / 2, data.x));
     const clampedY = Math.max(TILE_SIZE / 2, Math.min(MAP_HEIGHT * TILE_SIZE - TILE_SIZE / 2, data.y));
 
-    // Broadcast to all others in the socket's room(s) — excluding sender
-    socket.broadcast.emit(SocketEvents.PLAYER_MOVED, {
-      id: socket.id,
-      x: clampedX,
-      y: clampedY,
-      direction: data.direction,
-    });
-
-    // Persist in room store (fire-and-forget for speed)
+    // Broadcast to all others in the socket's game room only — a plain
+    // socket.broadcast.emit would leak positions to every room on the server.
     const rooms = Array.from(socket.rooms);
     const gameRoom = rooms.find((r) => r !== socket.id);
     if (gameRoom) {
+      socket.to(gameRoom).emit(SocketEvents.PLAYER_MOVED, {
+        id: socket.id,
+        x: clampedX,
+        y: clampedY,
+        direction: data.direction,
+      });
       updatePlayerPosition(gameRoom, socket.id, clampedX, clampedY, data.direction);
     }
   });
 
   socket.on(SocketEvents.PLAYER_STOP, (data: { direction: string }) => {
-    socket.broadcast.emit(SocketEvents.PLAYER_STOPPED, {
-      id: socket.id,
-      direction: data.direction,
-    });
-
     const rooms = Array.from(socket.rooms);
     const gameRoom = rooms.find((r) => r !== socket.id);
     if (gameRoom) {
+      socket.to(gameRoom).emit(SocketEvents.PLAYER_STOPPED, {
+        id: socket.id,
+        direction: data.direction,
+      });
       setPlayerStopped(gameRoom, socket.id);
     }
   });

@@ -14,12 +14,22 @@ export function authenticateToken(req: AuthRequest, res: Response, next: NextFun
     return res.status(401).json({ error: 'Access token required' });
   }
 
+  const userId = verifyToken(token);
+  if (!userId) {
+    return res.status(403).json({ error: 'Invalid or expired token' });
+  }
+  req.userId = userId;
+  next();
+}
+
+// Non-throwing verify used for Socket.IO handshake auth, where a missing/
+// invalid token means "treat as anonymous" rather than "reject the request".
+export function verifyToken(token: string): string | null {
   try {
     const config = getConfig();
     const decoded = jwt.verify(token, config.JWT_SECRET) as { userId: string; email: string };
-    req.userId = decoded.userId;
-    next();
+    return decoded.userId;
   } catch {
-    return res.status(403).json({ error: 'Invalid or expired token' });
+    return null;
   }
 }

@@ -1,8 +1,10 @@
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, ChatMessage } from '@virtualmeet/shared';
 import { getSocketIdsInZone } from './zoneHandler';
+import { socketRateLimit } from '../middleware/rateLimit';
 
 let messageId = 0;
+const canSendChat = socketRateLimit(5); // max 5 chat messages/sec per socket
 
 export function registerChatHandlers(io: Server, socket: Socket, playerName: () => string, playerColor: () => string) {
   let currentRoom: string | null = null;
@@ -12,6 +14,7 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
   });
 
   socket.on(SocketEvents.CHAT_MESSAGE, (text: string, isProximity?: boolean, zoneId?: string) => {
+    if (!canSendChat(socket.id)) return;
     const msg: ChatMessage = {
       id: `msg-${++messageId}`,
       senderId: socket.id,
@@ -36,11 +39,14 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
       return;
     }
 
-    io.emit(SocketEvents.CHAT_BROADCAST, msg);
+    // Scoped to the sender's room — io.emit() here would leak chat across
+    // every other room/meeting running on the same server.
+    io.to(currentRoom || 'main-office').emit(SocketEvents.CHAT_BROADCAST, msg);
   });
 
   socket.on(SocketEvents.CHAT_BUBBLE, (text: string) => {
-    socket.broadcast.emit(SocketEvents.CHAT_BUBBLE, {
+    if (!currentRoom) return;
+    socket.to(currentRoom).emit(SocketEvents.CHAT_BUBBLE, {
       playerId: socket.id,
       text: text.slice(0, 100),
     });

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, Furniture } from '@virtualmeet/shared';
 import { TILE_PALETTE_BY_ID } from './data/tilePaletteManifest';
 import { GameCanvas } from './components/canvas/GameCanvas';

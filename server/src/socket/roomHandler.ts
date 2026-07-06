@@ -2,6 +2,10 @@ import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload } from '@virtualmeet/shared';
 import { addPlayer, removePlayer, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus } from '../store/roomStore';
 import { PrismaClient } from '@prisma/client';
+import { socketRateLimit } from '../middleware/rateLimit';
+
+const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec per socket
+const canUpdateRoom = socketRateLimit(2); // max 2 room:update (DB write) calls/sec per socket
 
 function getPrisma(): PrismaClient {
   return new PrismaClient();
@@ -113,7 +117,12 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     playerColors.set(socket.id, color);
     colorIndex++;
 
-    const uid = userId || socket.id;
+    // socket.data.userId comes from a server-verified JWT (see index.ts's
+    // io.use handshake middleware) and always wins over the client-supplied
+    // `userId` param — trusting the raw param let anyone claim to be a
+    // room's owner (learned via the public GET /api/rooms/:slug response)
+    // and grant themselves master-admin.
+    const uid = (socket.data as { userId?: string }).userId || userId || socket.id;
     userSocketMap.set(uid, socket.id);
 
     // Load master admin from database (ownerId), not first socket
@@ -184,6 +193,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   });
 
   socket.on(SocketEvents.ADMIN_GRANT, (data: { targetUserId: string }) => {
+    if (!canChangeAdmin(socket.id)) return;
     const room = currentRoom; if (!room) return;
     const senderUid = findUserIdBySocket(socket.id);
     const rs = getRoomAdmin(room);
@@ -196,6 +206,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   });
 
   socket.on(SocketEvents.ADMIN_REVOKE, (data: { targetUserId: string }) => {
+    if (!canChangeAdmin(socket.id)) return;
     const room = currentRoom; if (!room) return;
     const senderUid = findUserIdBySocket(socket.id);
     const rs = getRoomAdmin(room);
@@ -225,6 +236,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   });
 
   socket.on(SocketEvents.ROOM_UPDATE, (payload: RoomUpdatePayload) => {
+    if (!canUpdateRoom(socket.id)) return;
     const room = currentRoom; if (!room) return;
     socket.to(room).emit(SocketEvents.ROOM_UPDATED, payload);
     try {

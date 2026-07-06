@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, SpeechBubble, EmoteType, RoomUpdatePayload } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, RoomUpdatePayload } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 
@@ -52,10 +52,13 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
   useEffect(() => {
     // Connect directly to the game server — bypass Vite proxy entirely
-    // to avoid WebSocket proxy ECONNABORTED issues.
+    // to avoid WebSocket proxy ECONNABORTED issues. The JWT (if logged in)
+    // lets the server verify our identity server-side instead of trusting
+    // the userId we hand it in JOIN_ROOM below (see index.ts io.use()).
     const socket = io('http://localhost:3001', {
       transports: ['websocket', 'polling'],
       autoConnect: false,
+      auth: { token: localStorage.getItem('vm_token') || undefined },
     });
     socketRef.current = socket;
 
@@ -151,11 +154,6 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
     socket.on(SocketEvents.EMOTE_PLAY, (event: EmoteEvent) => {
       addEmote(event);
-    });
-
-    socket.on(SocketEvents.ROOM_LOADED, (data: any) => {
-      if (data.furniture) setFurniture(data.furniture);
-      if (data.zones) setZones(data.zones);
     });
 
     socket.on(SocketEvents.ROOM_UPDATED, (data: RoomUpdatePayload) => {
@@ -255,10 +253,6 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.ZONE_EXIT, zoneId);
   }, []);
 
-  const emitRoomSave = useCallback((data: any) => {
-    socketRef.current?.emit(SocketEvents.ROOM_SAVE, data);
-  }, []);
-
   const emitRoomUpdate = useCallback((payload: RoomUpdatePayload) => {
     socketRef.current?.emit(SocketEvents.ROOM_UPDATE, payload);
   }, []);
@@ -277,5 +271,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.ROOM_DELETE);
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomSave, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitRoomDelete };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitRoomDelete };
 }

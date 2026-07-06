@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -29,15 +27,15 @@ services:
 
   server:
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: server/Dockerfile
     ports:
       - '3001:3001'
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/virtualmeet
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-production-secret}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set — see .env.example}
       CLIENT_URL: http://localhost
       CORS_ORIGIN: http://localhost
     depends_on:

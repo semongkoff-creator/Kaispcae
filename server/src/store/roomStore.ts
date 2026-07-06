@@ -13,14 +13,23 @@ function memoryKey(roomId: string): string {
 }
 
 function createRedisClient(): Redis {
-  const client = new Redis({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: Number(process.env.REDIS_PORT) || 6379,
+  // REDIS_URL is the documented/configured var (see .env.example and
+  // docker-compose.yml, which points it at the `redis` service hostname).
+  // Falling back to REDIS_HOST/REDIS_PORT only for setups that prefer discrete vars.
+  const url = process.env.REDIS_URL;
+  const options = {
     maxRetriesPerRequest: 1,
     lazyConnect: true,
     connectTimeout: 2000,
     retryStrategy: () => null, // never retry — fail fast
-  });
+  };
+  const client = url
+    ? new Redis(url, options)
+    : new Redis({
+        host: process.env.REDIS_HOST || 'localhost',
+        port: Number(process.env.REDIS_PORT) || 6379,
+        ...options,
+      });
 
   // CRITICAL: must attach error listener before connect, otherwise Node.js
   // will crash on unhandled 'error' events from the connection attempt.

@@ -1,17 +1,31 @@
 import { z } from 'zod';
 
-const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'staging', 'production']).default('development'),
-  PORT: z.coerce.number().default(3001),
-  DATABASE_URL: z.string().default('postgresql://postgres:postgres@localhost:5432/virtualmeet'),
-  REDIS_URL: z.string().optional(),
-  JWT_SECRET: z.string().default('dev-secret-change-in-production'),
-  JWT_EXPIRES_IN: z.string().default('7d'),
-  CORS_ORIGIN: z.string().default('http://localhost:5173'),
-  CLIENT_URL: z.string().default('http://localhost:5173'),
-  RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
-  RATE_LIMIT_MAX: z.coerce.number().default(100),
-});
+const DEV_JWT_SECRET = 'dev-secret-change-in-production';
+
+const envSchema = z
+  .object({
+    NODE_ENV: z.enum(['development', 'staging', 'production']).default('development'),
+    PORT: z.coerce.number().default(3001),
+    DATABASE_URL: z.string().default('postgresql://postgres:postgres@localhost:5432/virtualmeet'),
+    REDIS_URL: z.string().optional(),
+    JWT_SECRET: z.string().default(DEV_JWT_SECRET),
+    JWT_EXPIRES_IN: z.string().default('7d'),
+    CORS_ORIGIN: z.string().default('http://localhost:5173'),
+    CLIENT_URL: z.string().default('http://localhost:5173'),
+    RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
+    RATE_LIMIT_MAX: z.coerce.number().default(100),
+  })
+  .superRefine((val, ctx) => {
+    // The default JWT secret is a well-known literal — anyone can forge valid
+    // tokens with it, so it must never be allowed to silently apply in production.
+    if (val.NODE_ENV === 'production' && val.JWT_SECRET === DEV_JWT_SECRET) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['JWT_SECRET'],
+        message: 'JWT_SECRET must be set to a real secret when NODE_ENV=production',
+      });
+    }
+  });
 
 export type EnvConfig = z.infer<typeof envSchema>;
 
