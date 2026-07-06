@@ -1,3 +1,4 @@
+import { MAP_WIDTH, MAP_HEIGHT } from './types/index';
 import type { RoomTile, Furniture, Zone, TileType } from './types/index';
 
 // Default office layout used to seed a brand-new room's tilemapData/
@@ -14,9 +15,6 @@ import type { RoomTile, Furniture, Zone, TileType } from './types/index';
 // footprint (tilesW/tilesH), not the actual sprite crop rects, so it stays
 // free of any client-only rendering concerns.
 
-const MAP_WIDTH = 30;
-const MAP_HEIGHT = 20;
-
 // Mirrors the tilesW/tilesH of each palette id used below (see
 // client/src/data/tilePaletteManifest.ts — kept in sync manually since this
 // package has no dependency on the client's asset manifest).
@@ -30,11 +28,20 @@ const FOOTPRINT: Record<string, { w: number; h: number }> = {
   'meeting-table': { w: 2, h: 2 },
   'wardrobe': { w: 2, h: 3 },
   'sofa-set': { w: 2, h: 3 },
+  'sofa-blue': { w: 1, h: 2 },
+  'sofa-gray': { w: 1, h: 2 },
   'plant-tall': { w: 1, h: 3 },
   'plant-small': { w: 1, h: 2 },
   'plant-potted': { w: 1, h: 3 },
   'pinboard': { w: 2, h: 2 },
 };
+
+// Palette ids a player can sit on (see Furniture.isInteractable / the sit
+// feature in GameCanvas.tsx) — mirrors the `sittable: true` entries in
+// client/src/data/tilePaletteManifest.ts, kept in sync manually since this
+// package has no dependency on the client's asset manifest (same reasoning
+// as FOOTPRINT above).
+const SITTABLE_PALETTE_IDS = new Set(['chair-office', 'sofa-set', 'sofa-blue', 'sofa-gray']);
 
 // Same convention as gameStore.addFurniture / client's createDefaultRoom
 // placeFurniture: the piece's base row tiles are marked type 'desk' purely
@@ -45,12 +52,32 @@ function placeFurniture(tiles: RoomTile[][], furniture: Furniture[], paletteId: 
   if (!size) return;
   furniture.push({
     id: `${paletteId}-${x}-${y}`, paletteId, x, y, tilesW: size.w, tilesH: size.h,
-    isInteractable: paletteId === 'chair-office' || undefined,
+    isInteractable: SITTABLE_PALETTE_IDS.has(paletteId) || undefined,
   });
   for (let dx = 0; dx < size.w; dx++) {
     const tx = x + dx;
     if (tiles[y]?.[tx]) tiles[y][tx].type = 'desk';
   }
+}
+
+// Places a full row of desks with a matching row of chairs two tiles below
+// (leaving a walking gap in between), alternating desk variants for visual
+// variety. Returns the number of desks placed.
+function placeDeskRow(
+  tiles: RoomTile[][],
+  furniture: Furniture[],
+  startX: number,
+  deskY: number,
+  chairY: number,
+  count: number,
+): number {
+  const variants = ['desk-computer-a', 'desk-basic', 'desk-computer-c', 'desk-basic', 'desk-computer-b'];
+  for (let i = 0; i < count; i++) {
+    const x = startX + i;
+    placeFurniture(tiles, furniture, variants[i % variants.length], x, deskY);
+    placeFurniture(tiles, furniture, 'chair-office', x, chairY);
+  }
+  return count;
 }
 
 function setTile(tiles: RoomTile[][], x: number, y: number, type: TileType) {
@@ -66,18 +93,18 @@ function setFloor(tiles: RoomTile[][], x0: number, y0: number, x1: number, y1: n
 }
 
 /**
- * Generates a 30x20 office with two separate walled desk rooms on the left
- * (joined by a 2-tile-wide corridor, not just open floor), and two small
- * enclosed rooms on the right (meeting room, lounge) reached through door
- * openings.
+ * Generates a 42x28 office sized for ~20 concurrent occupants: two desk
+ * zones with 10 individually-seated desks each (2 rows of 5), plus an
+ * enclosed meeting room and a lounge on the right, mirroring the original
+ * 6-desk/30x20 layout's structure just scaled up to fit real team sizes.
  *
- *   ┌───────────────┬┬───────────────┬─────────┐
- *   │               ││               │ MEETING │
- *   │  DESK ZONE A  ││  DESK ZONE B  ├─────────┤
- *   │               ││               │ LOUNGE  │
- *   │               ││               │         │
- *   └───────────────┴┴───────────────┴─────────┘
- *              ^corridor
+ *   ┌───────────────────┬┬───────────────────┬───────────┐
+ *   │                   ││                   │  MEETING  │
+ *   │    DESK ZONE A    ││    DESK ZONE B    ├───────────┤
+ *   │     (10 desks)    ││     (10 desks)    │   LOUNGE  │
+ *   │                   ││                   │           │
+ *   └───────────────────┴┴───────────────────┴───────────┘
+ *                  ^corridor
  *
  * Only the meeting room gets a Zone: zones give everyone inside them full
  * proximity audio/video regardless of distance (see useProximity.ts), which
@@ -106,87 +133,86 @@ export function createDefaultOfficeLayout(): { tiles: RoomTile[][]; furniture: F
   }
 
   // Main entrance on the top wall
-  setTile(tiles, 15, 0, 'door');
+  setTile(tiles, 21, 0, 'door');
 
   // Spawn point, in the open desk floor near the entrance
   setTile(tiles, 3, 3, 'spawn');
 
-  // ── Desk zone partition: splits the left half into two separate rooms
+  // ── Desk zone partition: splits the left area into two separate rooms
   // (not just furniture floating on open floor), joined by a 2-tile-wide
   // corridor so it reads as a deliberate passage, not a random gap.
-  for (let y = 1; y <= 18; y++) setTile(tiles, 10, y, 'wall');
-  setTile(tiles, 10, 9, 'door');
-  setTile(tiles, 10, 10, 'door');
+  for (let y = 1; y <= 26; y++) setTile(tiles, 14, y, 'wall');
+  setTile(tiles, 14, 13, 'door');
+  setTile(tiles, 14, 14, 'door');
 
   // ── Right-side partition: meeting room (top) + lounge (bottom) ──────
-  // Left wall of both rooms (full height, y 1-18, so it actually meets the
+  // Left wall of both rooms (full height, y 1-26, so it actually meets the
   // top/bottom borders instead of leaving a gap at the last row)
-  for (let y = 1; y <= 18; y++) setTile(tiles, 20, y, 'wall');
+  for (let y = 1; y <= 26; y++) setTile(tiles, 29, y, 'wall');
   // Wall separating meeting room from lounge, with a door between them
-  for (let x = 20; x <= 28; x++) setTile(tiles, x, 9, 'wall');
-  setTile(tiles, 24, 9, 'door');
+  for (let x = 29; x <= 40; x++) setTile(tiles, x, 14, 'wall');
+  setTile(tiles, 34, 14, 'door');
   // Doors from the open desk floor into each room
-  setTile(tiles, 20, 4, 'door');
-  setTile(tiles, 20, 14, 'door');
+  setTile(tiles, 29, 6, 'door');
+  setTile(tiles, 29, 20, 'door');
 
-  // Meeting room interior (x 21-28, y 1-8) — distinct carpet so it reads as
+  // Meeting room interior (x 30-40, y 1-13) — distinct carpet so it reads as
   // its own room even before the banner/zone kicks in
-  setFloor(tiles, 21, 1, 28, 8, 'floor-maroon-carpet');
+  setFloor(tiles, 30, 1, 40, 13, 'floor-maroon-carpet');
 
-  // Lounge interior (x 21-28, y 10-18) — warm woven carpet, distinct from
+  // Lounge interior (x 30-40, y 15-26) — warm woven carpet, distinct from
   // the plain office floor everywhere else (floor-olive-carpet is actually
   // the SAME source texture as the default floor sprite, so it wouldn't
   // have read as a different area at all).
-  setFloor(tiles, 21, 10, 28, 18, 'floor-brown-weave');
+  setFloor(tiles, 30, 15, 40, 26, 'floor-brown-weave');
 
   // Desk Zone B gets a plain gray office tile so the two desk rooms read as
   // distinct spaces, not just a copy-pasted duplicate of Zone A.
-  setFloor(tiles, 11, 1, 19, 18, 'floor-tile-gray');
+  setFloor(tiles, 15, 1, 28, 26, 'floor-tile-gray');
 
   const furniture: Furniture[] = [];
 
-  // Meeting room: table + two flanking chairs + a plant for polish
-  placeFurniture(tiles, furniture, 'meeting-table', 23, 6);
-  placeFurniture(tiles, furniture, 'chair-office', 22, 4);
-  placeFurniture(tiles, furniture, 'chair-office', 26, 4);
+  // Meeting room: table + four chairs around it + plants for polish
+  placeFurniture(tiles, furniture, 'meeting-table', 34, 7);
+  placeFurniture(tiles, furniture, 'chair-office', 32, 5);
+  placeFurniture(tiles, furniture, 'chair-office', 36, 5);
+  placeFurniture(tiles, furniture, 'chair-office', 32, 10);
+  placeFurniture(tiles, furniture, 'chair-office', 36, 10);
+  placeFurniture(tiles, furniture, 'plant-small', 39, 3);
+  placeFurniture(tiles, furniture, 'plant-potted', 31, 12);
+
+  // Lounge: three seating pieces (sofa-set + two single sofas) instead of
+  // just one, since it's now meant to comfortably fit a handful of people
+  // taking a break at once, not just 1-2.
+  placeFurniture(tiles, furniture, 'sofa-set', 32, 19);
+  placeFurniture(tiles, furniture, 'sofa-blue', 37, 17);
+  placeFurniture(tiles, furniture, 'sofa-gray', 39, 17);
+  placeFurniture(tiles, furniture, 'plant-small', 37, 24);
+  placeFurniture(tiles, furniture, 'plant-potted', 31, 24);
+
+  // Desk Zone A (x 1-13, y 1-26): 10 individually-seated desks in two rows
+  // of 5, plus a wardrobe/plants for polish. Spawn sits in the open area
+  // above the first desk row.
+  placeDeskRow(tiles, furniture, 3, 6, 8, 5);
+  placeDeskRow(tiles, furniture, 3, 16, 18, 5);
+  placeFurniture(tiles, furniture, 'wardrobe', 11, 4);
+  placeFurniture(tiles, furniture, 'plant-tall', 2, 23);
+  placeFurniture(tiles, furniture, 'plant-potted', 11, 23);
+
+  // Desk Zone B (x 15-28, y 1-26): a second 10-desk block, mirrored, with
+  // its own pinboard/plants so it doesn't read as a copy-pasted duplicate.
+  placeDeskRow(tiles, furniture, 17, 6, 8, 5);
+  placeDeskRow(tiles, furniture, 17, 16, 18, 5);
+  placeFurniture(tiles, furniture, 'pinboard', 16, 4);
   placeFurniture(tiles, furniture, 'plant-small', 27, 3);
-
-  // Lounge: sofa + plants (kept clear of the y=9 partition wall above)
-  placeFurniture(tiles, furniture, 'sofa-set', 22, 17);
-  placeFurniture(tiles, furniture, 'plant-small', 26, 17);
-  placeFurniture(tiles, furniture, 'plant-potted', 27, 13);
-
-  // Desk Zone A (x 1-9, y 1-18): spawn area, one desk cluster, a wardrobe,
-  // a plant in the otherwise-empty top-right corner.
-  placeFurniture(tiles, furniture, 'desk-computer-a', 5, 5);
-  placeFurniture(tiles, furniture, 'desk-basic', 6, 5);
-  placeFurniture(tiles, furniture, 'desk-computer-c', 7, 5);
-  placeFurniture(tiles, furniture, 'chair-office', 5, 7);
-  placeFurniture(tiles, furniture, 'chair-office', 6, 7);
-  placeFurniture(tiles, furniture, 'chair-office', 7, 7);
-  placeFurniture(tiles, furniture, 'wardrobe', 2, 4);
-  placeFurniture(tiles, furniture, 'plant-tall', 2, 16);
-  placeFurniture(tiles, furniture, 'plant-potted', 8, 3);
-
-  // Desk Zone B (x 11-19, y 1-18): a second desk cluster plus a combined
-  // multi-desk cluster piece for variety, a pinboard (wall art) and a plant
-  // in corners that were otherwise bare.
-  placeFurniture(tiles, furniture, 'desk-computer-a', 13, 10);
-  placeFurniture(tiles, furniture, 'desk-basic', 14, 10);
-  placeFurniture(tiles, furniture, 'desk-computer-b', 15, 10);
-  placeFurniture(tiles, furniture, 'chair-office', 13, 12);
-  placeFurniture(tiles, furniture, 'chair-office', 14, 12);
-  placeFurniture(tiles, furniture, 'chair-office', 15, 12);
-  placeFurniture(tiles, furniture, 'desk-cluster-l', 16, 16);
-  placeFurniture(tiles, furniture, 'plant-potted', 17, 3);
-  placeFurniture(tiles, furniture, 'pinboard', 11, 4);
-  placeFurniture(tiles, furniture, 'plant-small', 18, 10);
+  placeFurniture(tiles, furniture, 'plant-potted', 16, 23);
+  placeFurniture(tiles, furniture, 'plant-small', 27, 23);
 
   const zones: Zone[] = [
     {
       id: 'default-meeting-room',
       name: 'Meeting Room',
-      x: 21, y: 1, width: 8, height: 8,
+      x: 30, y: 1, width: 11, height: 13,
       label: 'MEETING ROOM',
       color: '#7c3aed',
       type: 'meeting',

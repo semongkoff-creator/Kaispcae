@@ -12,4 +12,15 @@ html, body, #root {
   width: 100%;
   height: 100%;
   overflow: hidden;
+  /* This is a game HUD, not a document — click-dragging across the screen
+     (moving the camera, clicking through overlapping panels) shouldn't leave
+     browser text-selection highlights across nametags/labels/panels. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }

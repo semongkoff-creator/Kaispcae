@@ -32,7 +32,7 @@ import { loadAvatarConfig, saveAvatarConfig } from './hooks/useAvatarConfig';
 
 function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }: { roomSlug: string; onLeave: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke } = useSocket(authDisplayName, roomSlug, authUserId);
   const [showEditor, setShowEditor] = useState(false);
 
   // Media state from store
@@ -86,6 +86,10 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const zones = useGameStore((s) => s.zones);
+  const sittingFurnitureId = useGameStore((s) => s.sittingFurnitureId);
+  const furniture = useGameStore((s) => s.furniture);
+  const localUserId = useGameStore((s) => s.localUserId);
+  const sittingItem = sittingFurnitureId ? furniture.find((f) => f.id === sittingFurnitureId) : undefined;
 
   const nearby = useProximity(
     { x: localPlayer.x, y: localPlayer.y, id: localPlayerId },
@@ -354,6 +358,36 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
 
       <AvatarEditorButton onClick={() => setShowEditor(true)} />
       <StatusButton status={localPlayer.status || ''} onSave={handleStatusSave} />
+
+      {/* Permanent seat assignment (ZEP-style "this is my desk") — only
+          shown while actually sitting, since it acts on the specific chair
+          you're in. Distinct from the transient "SPACE to sit" prompt drawn
+          on the canvas itself (GameCanvas.tsx), which anyone can use
+          regardless of login; assigning requires an account (server-side
+          checked) since it's meant to persist across sessions. */}
+      {localPlayer.isSitting && sittingItem && (
+        <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
+          {!sittingItem.assignedToUserId ? (
+            <button
+              onClick={() => emitFurnitureAssign(sittingItem.id, playerName)}
+              className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg cursor-pointer inline-flex items-center gap-1.5"
+            >
+              🪑 Assign as My Seat
+            </button>
+          ) : sittingItem.assignedToUserId === localUserId ? (
+            <button
+              onClick={() => emitFurnitureUnassign(sittingItem.id)}
+              className="bg-white hover:bg-gray-50 text-purple-700 text-xs font-semibold px-4 py-2 rounded-full shadow-lg border border-purple-200 cursor-pointer inline-flex items-center gap-1.5"
+            >
+              Unassign My Seat
+            </button>
+          ) : (
+            <div className="bg-white/90 backdrop-blur-sm text-gray-500 text-xs font-medium px-4 py-2 rounded-full shadow-sm border border-purple-100 inline-flex items-center gap-1.5">
+              🔒 Reserved by {sittingItem.assignedToName || 'someone'}
+            </div>
+          )}
+        </div>
+      )}
 
       {isAdmin && (
         <button

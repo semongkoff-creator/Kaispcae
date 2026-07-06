@@ -122,9 +122,20 @@ export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions)
   const update = useCallback(
     (dt: number) => {
       const result = tryMove(dt);
-      if (result.x !== currentXRef.current || result.y !== currentYRef.current) {
+      const moved = result.x !== currentXRef.current || result.y !== currentYRef.current;
+      if (moved) {
         currentXRef.current = result.x;
         currentYRef.current = result.y;
+      }
+      // Fire on direction-only changes too (moved === false but a movement
+      // key is still held) — otherwise walking up to something blocking
+      // (a wall, a chair) and pressing further into it never updates
+      // localPlayer.direction in the store, since collision keeps x/y
+      // unchanged. That left facing-direction-dependent interactions (the
+      // chair sit prompt, in particular) permanently stuck on whatever
+      // direction the player last successfully moved in, rather than the
+      // direction they're actually pressing/facing now.
+      if (moved || result.isMoving) {
         onMoveRef.current(result.x, result.y, result.direction);
       }
       return result;

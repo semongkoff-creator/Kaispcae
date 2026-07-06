@@ -288,9 +288,9 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
   // Updated every frame in draw() below (cheap — furniture lists are small)
   // so both the "press SPACE" indicator and the keydown handler read the
   // same up-to-date value without recomputing it twice.
-  const nearbyChairRef = useRef<Furniture | null>(null);
+  const nearbyChairRef = useRef<{ furniture: Furniture; tileX: number; tileY: number } | null>(null);
 
-  const performSit = useCallback((chair: Furniture) => {
+  const performSit = useCallback((chair: Furniture, tileX: number, tileY: number) => {
     const state = useGameStore.getState();
     const player = state.localPlayer;
     // The chair's own tile is movement-blocked, so simply leaving the
@@ -298,8 +298,11 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     // remember where they were so standing up can put them back.
     state.setSitReturnPos({ x: player.x, y: player.y });
     state.setSittingFurnitureId(chair.id);
-    const chairCenterX = chair.x * TILE_SIZE + TILE_SIZE / 2;
-    const chairCenterY = chair.y * TILE_SIZE + TILE_SIZE / 2;
+    // Seat at the exact tile faced, not always the furniture's anchor tile —
+    // a multi-tile sofa is one seat spanning several tiles, so sitting from
+    // its right half shouldn't visually snap the player over to its left end.
+    const chairCenterX = tileX * TILE_SIZE + TILE_SIZE / 2;
+    const chairCenterY = tileY * TILE_SIZE + TILE_SIZE / 2;
     const OPPOSITE: Record<Direction, Direction> = { up: 'down', down: 'up', left: 'right', right: 'left' };
     // Face away from the chair — outward into the room, like someone
     // sitting down rather than facing into the seat back.
@@ -327,11 +330,24 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
 
       if (e.code === 'Space') {
         e.preventDefault();
+        // A focused HUD button (Mic/Camera/Chat/Edit Avatar/etc. — clicking
+        // any of them leaves it focused) still fires its own native click on
+        // Space *keyup*, regardless of preventDefault() here on *keydown*
+        // (browsers treat "scroll on Space" and "activate the focused
+        // button on Space" as two separate default actions tied to two
+        // separate events). That reactivated the last-clicked button
+        // whenever Space was pressed to sit — e.g. re-toggling the mic —
+        // which read as something randomly "jumping"/changing. Blurring now
+        // removes the focus before that keyup fires, so nothing's left to
+        // reactivate.
+        const active = document.activeElement as HTMLElement | null;
+        if (active && active !== document.body) active.blur();
         const state = useGameStore.getState();
         if (state.localPlayer.isSitting) {
           performStandUp();
         } else if (nearbyChairRef.current) {
-          performSit(nearbyChairRef.current);
+          const { furniture, tileX, tileY } = nearbyChairRef.current;
+          performSit(furniture, tileX, tileY);
         }
         return;
       }
@@ -408,9 +424,17 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
       const baseTileY = Math.floor(playerY / TILE_SIZE);
       const facingTileX = baseTileX + (facingDir === 'left' ? -1 : facingDir === 'right' ? 1 : 0);
       const facingTileY = baseTileY + (facingDir === 'up' ? -1 : facingDir === 'down' ? 1 : 0);
-      nearbyChairRef.current = localPlayerRef.current.isSitting
-        ? null
-        : furnitureRef.current.find((f) => f.isInteractable && f.x === facingTileX && f.y === facingTileY) ?? null;
+      // Match anywhere across the piece's base-row width, not just its
+      // anchor tile — a 2-wide sofa is still one seat, so facing its right
+      // half must trigger the sit prompt exactly like facing its left half.
+      if (localPlayerRef.current.isSitting) {
+        nearbyChairRef.current = null;
+      } else {
+        const chair = furnitureRef.current.find((f) =>
+          f.isInteractable && f.y === facingTileY && facingTileX >= f.x && facingTileX < f.x + f.tilesW,
+        );
+        nearbyChairRef.current = chair ? { furniture: chair, tileX: facingTileX, tileY: facingTileY } : null;
+      }
     }
     // Rounded to whole CSS pixels — every tile/avatar screen position is
     // `n * TILE_SIZE - camera`, so a fractional camera offset put every draw
@@ -665,12 +689,32 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
       drawFurnitureLayer(ctx, item, cameraX, cameraY, 'overhead');
     }
 
+    // Permanently-assigned seat labels — unlike the "SPACE to sit" prompt
+    // below, these are always visible (not just while facing the piece), so
+    // everyone can see whose desk is whose at a glance, ZEP-style.
+    for (const item of furnitureList) {
+      if (!item.assignedToUserId) continue;
+      if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
+      const asx = item.x * TILE_SIZE - cameraX + TILE_SIZE / 2;
+      const asy = item.y * TILE_SIZE - cameraY - (item.tilesH - 1) * TILE_SIZE;
+      const label = `🪑 ${item.assignedToName || 'Reserved'}`;
+      ctx.font = 'bold 9px sans-serif';
+      ctx.textAlign = 'center';
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(76, 29, 149, 0.85)';
+      ctx.beginPath();
+      ctx.roundRect(asx - tw / 2 - 5, asy - 20, tw + 10, 14, 6);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(label, asx, asy - 9);
+    }
+
     // Sit-in-chair prompt — a small floating chair icon + hint over the
     // chair the player is currently facing, only while not already sitting.
     if (nearbyChairRef.current) {
-      const chair = nearbyChairRef.current;
-      const csx = chair.x * TILE_SIZE - cameraX + TILE_SIZE / 2;
-      const csy = chair.y * TILE_SIZE - cameraY;
+      const { tileX, tileY } = nearbyChairRef.current;
+      const csx = tileX * TILE_SIZE - cameraX + TILE_SIZE / 2;
+      const csy = tileY * TILE_SIZE - cameraY;
       const bob = Math.sin(timestamp * 0.005) * 2;
       ctx.font = '16px sans-serif'; ctx.textAlign = 'center';
       ctx.fillText('🪑', csx, csy - 8 + bob);

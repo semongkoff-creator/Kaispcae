@@ -134,6 +134,14 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       upsertPlayer({ id: data.id, isSitting: data.isSitting, x: data.x, y: data.y, direction: data.direction, isMoving: false } as Avatar);
     });
 
+    socket.on(SocketEvents.FURNITURE_ASSIGNED, (data: { furnitureId: string; userId: string; name: string }) => {
+      useGameStore.getState().setFurnitureAssignment(data.furnitureId, data.userId, data.name);
+    });
+
+    socket.on(SocketEvents.FURNITURE_UNASSIGNED, (data: { furnitureId: string }) => {
+      useGameStore.getState().setFurnitureAssignment(data.furnitureId, undefined, undefined);
+    });
+
     socket.on(SocketEvents.CHAT_BROADCAST, (msg: ChatMessage) => {
       if (msg.zoneId) {
         addZoneChatMessage(msg.zoneId, msg);
@@ -242,6 +250,14 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.PLAYER_SIT, { sitting, x, y, direction });
   }, []);
 
+  const emitFurnitureAssign = useCallback((furnitureId: string, name: string) => {
+    socketRef.current?.emit(SocketEvents.FURNITURE_ASSIGN, { furnitureId, name });
+  }, []);
+
+  const emitFurnitureUnassign = useCallback((furnitureId: string) => {
+    socketRef.current?.emit(SocketEvents.FURNITURE_UNASSIGN, { furnitureId });
+  }, []);
+
   const emitChat = useCallback((text: string, isProximity?: boolean, zoneId?: string) => {
     socketRef.current?.emit(SocketEvents.CHAT_MESSAGE, text, isProximity, zoneId);
   }, []);
@@ -280,5 +296,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.ROOM_DELETE);
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitRoomDelete };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitRoomDelete };
 }

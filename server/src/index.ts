@@ -10,6 +10,7 @@ import { registerRtcHandlers } from './socket/rtcHandler';
 import { registerChatHandlers } from './socket/chatHandler';
 import { registerEmoteHandlers } from './socket/emoteHandler';
 import { registerZoneHandlers } from './socket/zoneHandler';
+import { registerFurnitureHandlers } from './socket/furnitureHandler';
 import { getRedis } from './store/roomStore';
 import { loadConfig, getConfig } from './config';
 import { rateLimit } from './middleware/rateLimit';
@@ -94,6 +95,7 @@ async function start() {
     registerChatHandlers(io, socket, () => getPlayerName(socket.id), () => getPlayerColor(socket.id));
     registerEmoteHandlers(io, socket);
     registerZoneHandlers(io, socket);
+    registerFurnitureHandlers(io, socket);
   });
 
   httpServer.listen(config.PORT, () => {

@@ -116,6 +116,12 @@ export enum SocketEvents {
   PLAYER_SIT = 'player:sit',
   PLAYER_SAT = 'player:sat',
 
+  // Permanent seat assignment — see Furniture.assignedToUserId/assignedToName
+  FURNITURE_ASSIGN = 'furniture:assign',
+  FURNITURE_ASSIGNED = 'furniture:assigned',
+  FURNITURE_UNASSIGN = 'furniture:unassign',
+  FURNITURE_UNASSIGNED = 'furniture:unassigned',
+
   RTC_OFFER = 'rtc:offer',
   RTC_ANSWER = 'rtc:answer',
   RTC_ICE_CANDIDATE = 'rtc:ice-candidate',
@@ -139,8 +145,11 @@ export enum SocketEvents {
 
 // Grid and rendering constants — shared so server can also validate bounds
 export const TILE_SIZE = 32;
-export const MAP_WIDTH = 30;
-export const MAP_HEIGHT = 20;
+// Sized for ~20 concurrent occupants with their own desk (see
+// defaultRoomLayout.ts's two 10-desk zones) plus a meeting room and lounge,
+// not just the original ~6-desk office.
+export const MAP_WIDTH = 42;
+export const MAP_HEIGHT = 28;
 export const PLAYER_SPEED = 150; // pixels per second
 
 // Proximity / WebRTC constants
@@ -197,6 +206,13 @@ export interface Furniture {
   // not exposed as a Room Editor toggle, since "which pieces are chairs" is
   // a property of the art (tilePaletteManifest.ts), not an admin choice.
   isInteractable?: boolean;
+  // Permanent seat assignment (ZEP-style "this is my desk"), distinct from
+  // Avatar.isSitting which is just transient occupancy. Only set on
+  // isInteractable pieces — see FURNITURE_ASSIGN/FURNITURE_UNASSIGN.
+  // assignedToName is cached here (not looked up live) so an assigned
+  // desk still shows whose it is even while that person is offline.
+  assignedToUserId?: string;
+  assignedToName?: string;
 }
 
 // Zones. 'meeting' zones render a big banner across the top of the area

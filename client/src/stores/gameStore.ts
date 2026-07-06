@@ -90,6 +90,9 @@ export interface GameState {
   // Room editor
   furniture: Furniture[];
   setFurniture: (f: Furniture[]) => void;
+  // Patches one furniture item's permanent seat assignment (undefined
+  // userId/name clears it) — see FURNITURE_ASSIGN/FURNITURE_UNASSIGN.
+  setFurnitureAssignment: (id: string, userId: string | undefined, name: string | undefined) => void;
   addFurniture: (item: Furniture) => void;
   removeFurnitureAt: (x: number, y: number) => void;
   setFloorPaletteId: (x: number, y: number, paletteId: string | undefined) => void;
@@ -281,6 +284,12 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   furniture: [],
   setFurniture: (f) => set({ furniture: f }),
+  setFurnitureAssignment: (id, userId, name) =>
+    set((state) => ({
+      furniture: state.furniture.map((f) =>
+        f.id === id ? { ...f, assignedToUserId: userId, assignedToName: name } : f,
+      ),
+    })),
   addFurniture: (item) =>
     set((state) => {
       // Banners are pure decoration (signage), not physical objects — never

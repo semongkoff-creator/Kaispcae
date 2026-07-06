@@ -97,16 +97,17 @@ export function drawAvatar(
 //
 // Assets come from the LimeZu "Character Generator" pack
 // (client/public/assets/characters/generator/<Category>/*.png). Every file
-// in a category shares one 56x41-cell grid of 32x32 frames. Layout isn't
-// documented anywhere machine-readable, so this was reverse-engineered by
-// inspecting pixel occupancy per cell against Spritesheet_animations_GUIDE.png:
+// in a category shares one 56x41-cell grid of 32x32 frames:
 //   - row 3  = idle animation, row 5 = walk animation, 24 cols wide each
-//   - the 24 cols split into 4 direction-groups of 6 frames; the group at
-//     columns 6-11 is the only one where the Eyes layer is fully blank in
-//     every frame, which only makes sense for the "facing away" pose — so
-//     direction order is down, up, left, right (not the more common
-//     down/left/right/up ordering).
-// If this ever looks wrong in-browser, adjust DIRECTION_COLUMN_ORDER below.
+//   - the 24 cols split into 4 direction-groups of 6 frames. The asset
+//     pack's own docs (Spritesheet_animations_GUIDE.png, ASSETS_README.md)
+//     say the column order is down/left/right/up, but that turned out to be
+//     one rotation off from how these particular frames actually look in
+//     game — confirmed by having each direction key show the previous
+//     key's pose (W showed A's pose, A showed D's, D showed S's, S showed
+//     W's). Rotating the mapping by one step fixes it; if the asset files
+//     ever get regenerated/replaced, re-verify this in-browser rather than
+//     trusting the docs literally.
 const GENERATOR_BASE = '/assets/characters/generator';
 // generator-premade characters are ready-made exports from the same
 // Character Generator tool, so they share the identical 56x41 frame grid
@@ -120,7 +121,7 @@ const WALK_ROW = 5;
 const IDLE_FRAME_MS = 400;
 const WALK_FRAME_MS = 110;
 
-const DIRECTION_COLUMN_ORDER: Direction[] = ['down', 'up', 'left', 'right'];
+const DIRECTION_COLUMN_ORDER: Direction[] = ['right', 'up', 'left', 'down'];
 
 const LAYER_CATEGORIES: Array<[string, keyof NonNullable<Avatar['avatarConfig']>]> = [
   ['Bodies', 'bodyId'],

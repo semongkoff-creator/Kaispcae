@@ -1,5 +1,6 @@
 import { useRef, useEffect } from 'react';
-import { Avatar, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT } from '@virtualmeet/shared';
+import { Avatar, RoomTile, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT } from '@virtualmeet/shared';
+import { useGameStore } from '@/stores/gameStore';
 
 interface MinimapProps {
   players: Avatar[];
@@ -13,8 +14,37 @@ const MM_H = 100;
 const SCALE_X = MM_W / (MAP_WIDTH * TILE_SIZE);
 const SCALE_Y = MM_H / (MAP_HEIGHT * TILE_SIZE);
 
+// Minimap tile colors — only the shapes that make the room readable as a
+// floor plan at this scale (walls/doors); everything else just shows the
+// floor tint underneath, same as the real room editor's collision model
+// (BLOCKED_TILES) but simplified to what's visible at 5px/tile.
+const MM_WALL = 'rgba(76,29,149,0.85)';
+const MM_DOOR = 'rgba(167,139,250,0.9)';
+const MM_DESK_CHAIR = 'rgba(124,58,237,0.4)';
+
+function drawTileType(ctx: CanvasRenderingContext2D, type: RoomTile['type'], x: number, y: number, w: number, h: number) {
+  switch (type) {
+    case 'wall':
+      ctx.fillStyle = MM_WALL;
+      ctx.fillRect(x, y, w, h);
+      break;
+    case 'door':
+      ctx.fillStyle = MM_DOOR;
+      ctx.fillRect(x, y, w, h);
+      break;
+    case 'desk':
+    case 'chair':
+      ctx.fillStyle = MM_DESK_CHAIR;
+      ctx.fillRect(x, y, w, h);
+      break;
+    default:
+      break; // floor/portal/spawn — just the background tint shows through
+  }
+}
+
 export function Minimap({ players, localPlayerId, onTeleport, visible }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const tiles = useGameStore((s) => s.tiles);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -37,6 +67,22 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
     // whatever white UI happens to sit next to it.
     ctx.fillStyle = 'rgba(237,233,254,0.9)';
     ctx.fillRect(0, 0, MM_W, MM_H);
+
+    // Actual floor plan — walls/doors/desks/chairs, scaled down from the
+    // room's real tile grid. This was missing entirely before: the minimap
+    // only ever drew the background tint + player dots, so it always read
+    // as a blank panel no matter which room you were in.
+    const cellW = MM_W / MAP_WIDTH;
+    const cellH = MM_H / MAP_HEIGHT;
+    for (let ty = 0; ty < tiles.length; ty++) {
+      const row = tiles[ty];
+      if (!row) continue;
+      for (let tx = 0; tx < row.length; tx++) {
+        const tile = row[tx];
+        if (!tile) continue;
+        drawTileType(ctx, tile.type, tx * cellW, ty * cellH, cellW, cellH);
+      }
+    }
 
     ctx.strokeStyle = 'rgba(124,58,237,0.5)';
     ctx.lineWidth = 1;

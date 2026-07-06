@@ -107,7 +107,14 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
     onClose?.();
   };
 
-  // Live preview canvas
+  // Live preview canvas — runs a small animation loop rather than a
+  // one-shot draw. Sprite images load asynchronously (see spriteLoader.ts),
+  // so a single draw call can fire before a newly-selected body/eyes/
+  // outfit/hair/accessory image has finished loading, producing an
+  // incomplete/garbled composite that — with no loop to redraw it — stayed
+  // frozen that way until some unrelated re-render happened to land after
+  // the image became ready. GameCanvas.tsx avoids this the same way, with
+  // a real requestAnimationFrame loop; this preview needs one too.
   useEffect(() => {
     const canvas = previewRef.current;
     if (!canvas) return;
@@ -122,24 +129,31 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
 
-    ctx.clearRect(0, 0, 120, 120);
+    let raf: number;
+    const loop = (timestamp: number) => {
+      ctx.clearRect(0, 0, 120, 120);
+      drawAvatar(ctx, {
+        avatar: {
+          id: 'preview',
+          name: config.name,
+          x: 0,
+          y: 0,
+          direction: 'down',
+          color: config.color,
+          isMoving: false,
+          avatarConfig: config,
+        },
+        x: 60,
+        y: 55,
+        isLocal: false,
+        walkAnimOffset: 0,
+        timestamp,
+      });
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
 
-    drawAvatar(ctx, {
-      avatar: {
-        id: 'preview',
-        name: config.name,
-        x: 0,
-        y: 0,
-        direction: 'down',
-        color: config.color,
-        isMoving: false,
-        avatarConfig: config,
-      },
-      x: 60,
-      y: 55,
-      isLocal: false,
-      walkAnimOffset: 0,
-    });
+    return () => cancelAnimationFrame(raf);
   }, [config]);
 
   return (
