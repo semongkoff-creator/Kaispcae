@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { Server } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
-import { SocketEvents, createDefaultOfficeLayout } from '@virtualmeet/shared';
+import { SocketEvents, createDefaultOfficeLayout, findZoneEntryTile } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
 
@@ -55,6 +55,7 @@ rooms.get('/rooms', async (_req, res: Response) => {
         ownerDisplayName: r.owner?.displayName || 'Unknown',
         playerCount: r._count.members,
         maxPlayers: r.maxPlayers,
+        theme: r.theme,
         createdAt: r.createdAt,
       })),
     });
@@ -89,6 +90,7 @@ rooms.get('/rooms/:slug', async (req, res: Response) => {
       playerCount: room._count.members,
       maxPlayers: room.maxPlayers,
       isPublic: room.isPublic,
+      theme: room.theme,
     });
   } catch (err) {
     console.error('[rooms] get error:', err);
@@ -101,12 +103,15 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
   console.log('[rooms] POST create received — userId:', req.userId, 'body:', req.body);
   try {
     const prisma = getPrisma();
-    const { name, maxPlayers = 50, isPublic = true } = req.body;
+    const { name, maxPlayers = 50, isPublic = true, theme = 'modern-interiors' } = req.body;
     const slug = generateSlug(name);
 
     // Seed with a real office layout (walls, desk clusters, a meeting room,
     // a lounge) instead of an empty floor — see shared/defaultRoomLayout.ts.
-    const layout = createDefaultOfficeLayout();
+    // The layout itself (tile grid, furniture footprints) is the same
+    // regardless of theme — theme only changes which art renders each tile
+    // type/palette id (see client/src/data/themeAssets.ts), not the layout.
+    const layout = createDefaultOfficeLayout(theme);
 
     const room = await prisma.room.create({
       data: {
@@ -114,6 +119,7 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
         slug,
         maxPlayers,
         isPublic,
+        theme,
         ownerId: req.userId!,
         tilemapData: layout.tiles as any,
         furniture: layout.furniture as any,
@@ -128,6 +134,20 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
         role: 'admin',
       },
     });
+
+    // §4.1 — Pre-fill Team Locations with the room's own named zones (its
+    // "denah") instead of leaving staff to walk to each one manually and
+    // add it by hand. One row per Zone, in layout order; findZoneEntryTile
+    // picks a walkable tile inside each (its center, or the nearest open
+    // floor tile if the center happens to land on furniture).
+    if (layout.zones.length > 0) {
+      await prisma.teleportLocation.createMany({
+        data: layout.zones.map((zone, index) => {
+          const point = findZoneEntryTile(layout.tiles, zone);
+          return { roomId: room.id, name: zone.name, x: point.x, y: point.y, orderIndex: index, createdBy: req.userId! };
+        }),
+      });
+    }
 
     return res.status(201).json({
       id: room.id,

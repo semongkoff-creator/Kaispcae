@@ -17,6 +17,18 @@ export function getSocketIdsInZone(room: string, zoneId: string): string[] {
   return ids;
 }
 
+// Used by chatHandler.ts to reject a zone-scoped CHAT_MESSAGE from a socket
+// that isn't actually tracked as being inside that zone — previously any
+// socket could attach any zoneId to a message and it would be routed to
+// that zone's chat regardless of whether the sender was really there,
+// since only the RECIPIENTS were computed from real zone membership, never
+// the sender's own claim (see §1.3's "reject send_chat kalau
+// player.currentAreaId tidak sesuai" rule).
+export function isSocketInZone(room: string, socketId: string, zoneId: string): boolean {
+  const loc = socketZone.get(socketId);
+  return !!loc && loc.room === room && loc.zoneId === zoneId;
+}
+
 export function registerZoneHandlers(io: Server, socket: Socket) {
   let currentRoom: string | null = null;
 

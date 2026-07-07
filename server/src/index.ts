@@ -11,12 +11,14 @@ import { registerChatHandlers } from './socket/chatHandler';
 import { registerEmoteHandlers } from './socket/emoteHandler';
 import { registerZoneHandlers } from './socket/zoneHandler';
 import { registerFurnitureHandlers } from './socket/furnitureHandler';
+import { registerFollowHandlers } from './socket/followHandler';
 import { getRedis } from './store/roomStore';
 import { loadConfig, getConfig } from './config';
 import { rateLimit } from './middleware/rateLimit';
 import { verifyToken } from './middleware/auth';
 import authRoutes from './routes/auth';
 import roomRoutes, { setIo } from './routes/rooms';
+import teleportRoutes from './routes/teleport';
 
 loadConfig();
 const config = getConfig();
@@ -79,6 +81,7 @@ app.get('/api/metrics', (_req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api', roomRoutes);
+app.use('/api', teleportRoutes);
 
 // ── Socket.IO ────────────────────────────────────────────────────
 async function start() {
@@ -96,6 +99,7 @@ async function start() {
     registerEmoteHandlers(io, socket);
     registerZoneHandlers(io, socket);
     registerFurnitureHandlers(io, socket);
+    registerFollowHandlers(io, socket);
   });
 
   httpServer.listen(config.PORT, () => {

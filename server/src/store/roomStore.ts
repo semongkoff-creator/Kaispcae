@@ -1,4 +1,4 @@
-import { Avatar, RoomState, AvatarConfig } from '@virtualmeet/shared';
+import { Avatar, RoomState, AvatarConfig, RoomTile } from '@virtualmeet/shared';
 import { Redis } from 'ioredis';
 
 // In-memory fallback storage — always works, zero dependencies
@@ -215,4 +215,58 @@ export async function getRoomState(roomId: string, roomName: string): Promise<Ro
     tiles: [],
     players,
   };
+}
+
+// ─── Tile cache (in-memory only — see caveat below) ─────────────────
+//
+// movementHandler.ts needs to validate every PLAYER_MOVE against the
+// room's actual wall/desk/chair layout (server-authoritative collision —
+// previously the server only clamped to the map's outer bounds and
+// otherwise trusted whatever x/y the client reported, so a modified
+// client could walk through walls). Hitting Postgres on every move tick
+// would be far too slow, so the currently-active tile grid for each room
+// is cached here instead, populated on join (roomHandler.ts's JOIN_ROOM)
+// and refreshed on every editor save (ROOM_UPDATE).
+//
+// In-memory only, like the rest of this file's non-Redis-backed maps
+// (playerNames/roomAdminMap in roomHandler.ts) — fine for a single server
+// process; a multi-instance deployment would need this in Redis too,
+// same as the player list already is.
+const tileCache = new Map<string, RoomTile[][]>();
+
+export function setCachedTiles(roomId: string, tiles: RoomTile[][]): void {
+  tileCache.set(roomId, tiles);
+}
+
+export function getCachedTiles(roomId: string): RoomTile[][] | undefined {
+  return tileCache.get(roomId);
+}
+
+// ─── Last known position (reconnect persistence) ─────────────────────
+//
+// Keyed by the player's real account id (uid), not socket.id — socket.id
+// is different on every reconnect, so keying by it would never actually
+// find a previous entry. Populated on disconnect/leave (roomHandler.ts's
+// handleLeave) and consulted on JOIN_ROOM so refreshing/reconnecting
+// resumes where the player left off instead of always resetting to the
+// room's spawn tile (see the "Move" spec's explicit reconnect-persist rule).
+interface LastKnownPosition {
+  roomId: string;
+  x: number;
+  y: number;
+  direction: string;
+}
+
+const lastKnownPosition = new Map<string, LastKnownPosition>();
+
+export function saveLastKnownPosition(userId: string, roomId: string, x: number, y: number, direction: string): void {
+  lastKnownPosition.set(userId, { roomId, x, y, direction });
+}
+
+// Only returns a position if it's for THIS room — a player who last left
+// from a different room should still spawn fresh, not appear at their old
+// coordinates in an unrelated map.
+export function getLastKnownPosition(userId: string, roomId: string): LastKnownPosition | undefined {
+  const entry = lastKnownPosition.get(userId);
+  return entry && entry.roomId === roomId ? entry : undefined;
 }

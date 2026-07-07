@@ -26,6 +26,10 @@ model Room {
   tilemapData Json
   furniture   Json?
   zones       Json?
+  // Which curated asset set the room renders with — see RoomTheme in
+  // shared/types/index.ts. Default keeps every room created before this
+  // field existed rendering exactly as before.
+  theme       String       @default("modern-interiors")
   ownerId     String
   owner       User         @relation(fields: [ownerId], references: [id])
   isPublic    Boolean      @default(true)
@@ -33,6 +37,8 @@ model Room {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   members     RoomMember[]
+  teleportLocations TeleportLocation[]
+  ownerBookmarks     OwnerBookmark[]
 }
 
 model RoomMember {
@@ -45,4 +51,43 @@ model RoomMember {
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
   @@id([userId, roomId])
+}
+
+// §4.1 — Teleport (Admin): staff+ role, shared across everyone with access
+// to this room, max 20 per room (enforced in server/src/routes/teleport.ts,
+// not here — Prisma doesn't do conditional insert limits). Unlike the
+// spec's generic "Space" with multiple maps, a MeetKai Room IS the map, so
+// these are scoped to one roomId only — no cross-map case exists here.
+model TeleportLocation {
+  id         String   @id @default(cuid())
+  roomId     String
+  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  name       String
+  x          Int
+  y          Int
+  icon       String?
+  orderIndex Int
+  createdBy  String
+  createdAt  DateTime @default(now())
+
+  @@index([roomId])
+}
+
+// §4.2 — Teleport (Owner): personal bookmarks, visible only to the room's
+// own owner. Deliberately scoped by (ownerId, roomId) together with NO
+// auto-copy across rooms — per the spec's own design note, a bookmark set
+// in one room/map doesn't appear in another; the owner re-adds locations
+// per room on purpose.
+model OwnerBookmark {
+  id         String   @id @default(cuid())
+  ownerId    String
+  roomId     String
+  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  label      String
+  x          Int
+  y          Int
+  orderIndex Int
+  createdAt  DateTime @default(now())
+
+  @@index([ownerId, roomId])
 }

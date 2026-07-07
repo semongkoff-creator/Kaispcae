@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, Notice, FollowInfo, Role, SummonWarningPayload, SummonNoticePayload } from '@virtualmeet/shared';
 
 const AVATAR_COLORS = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a786df', '#6bcb77', '#4d96ff'];
 
@@ -38,6 +38,11 @@ export interface GameState {
   // Room meta
   roomId: string;
   roomName: string;
+  // Which curated asset set to render this room with — see RoomTheme in
+  // shared/types/index.ts and client/src/data/themeAssets.ts. Set from
+  // room:state (see setRoomState below); defaults to the original tileset
+  // so the optimistic local room shown before that arrives still renders.
+  theme: RoomTheme;
 
   // Connection
   isConnected: boolean;
@@ -82,6 +87,28 @@ export interface GameState {
   speechBubbles: Record<string, SpeechBubble>;
   setSpeechBubble: (playerId: string, bubble: SpeechBubble | null) => void;
 
+  // Pinned notice banner (see shared/types/index.ts's Notice doc comment) —
+  // set from room:state on join and kept live via notice:updated.
+  notice: Notice | null;
+  setNotice: (notice: Notice | null) => void;
+
+  // My own Follow relationship (I am the follower) — server-validated, see
+  // followHandler.ts. GameCanvas.tsx reads followInfo.targetUserId every
+  // frame to drive auto-trailing movement while it's non-null and
+  // status === 'active'. followerUserIds is who's currently following ME
+  // (for a small UI indicator), keyed by whichever userId is being tracked.
+  followInfo: FollowInfo | null;
+  setFollowInfo: (info: FollowInfo | null) => void;
+  followerUserIds: string[];
+  setFollowerUserIds: (ids: string[]) => void;
+
+  // §5 — Summon. Both are transient toasts (App.tsx auto-clears them after
+  // a timeout), not persisted state — mirrors roomDeletedNotice's pattern.
+  summonWarning: SummonWarningPayload | null;
+  setSummonWarning: (warning: SummonWarningPayload | null) => void;
+  summonNotice: SummonNoticePayload | null;
+  setSummonNotice: (notice: SummonNoticePayload | null) => void;
+
   // Emotes
   emoteEvents: EmoteEvent[];
   addEmote: (event: EmoteEvent) => void;
@@ -118,7 +145,15 @@ export interface GameState {
   isAdmin: boolean;
   masterAdminUserId: string;
   adminPlayerIds: Set<string>;
-  applyAdminChanged: (data: { adminUserIds: string[]; masterAdminUserId: string }) => void;
+  // Staff sits between admin and member (see shared/permissions.ts's Role
+  // hierarchy) — tracked the same way adminPlayerIds already is.
+  staffPlayerIds: Set<string>;
+  applyAdminChanged: (data: { adminUserIds: string[]; masterAdminUserId: string; staffUserIds?: string[] }) => void;
+  // My own resolved role in this room, straight from the server (see
+  // RoomState.role's doc comment) — the authoritative source; isAdmin
+  // above is derived from it for existing call sites that only care about
+  // the admin/not-admin boolean.
+  localRole: Role;
   localUserId: string;
   setLocalUserId: (id: string) => void;
   editorMode: boolean;
@@ -215,6 +250,7 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   roomId: 'default',
   roomName: 'Default Room',
+  theme: 'modern-interiors',
 
   isConnected: false,
   setConnected: (connected) => set({ isConnected: connected }),
@@ -271,6 +307,19 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
       return { speechBubbles: bubbles };
     }),
+
+  notice: null,
+  setNotice: (notice) => set({ notice }),
+
+  followInfo: null,
+  setFollowInfo: (info) => set({ followInfo: info }),
+
+  summonWarning: null,
+  setSummonWarning: (warning) => set({ summonWarning: warning }),
+  summonNotice: null,
+  setSummonNotice: (notice) => set({ summonNotice: notice }),
+  followerUserIds: [],
+  setFollowerUserIds: (ids) => set({ followerUserIds: ids }),
 
   emoteEvents: [],
   addEmote: (event) =>
@@ -343,11 +392,15 @@ export const useGameStore = create<GameState>((set, get) => ({
   isAdmin: false,
   masterAdminUserId: '',
   adminPlayerIds: new Set<string>(),
+  staffPlayerIds: new Set<string>(),
+  localRole: 'member',
   applyAdminChanged: (data) =>
     set((state) => {
       const adminSet = new Set(data.adminUserIds);
+      const staffSet = new Set(data.staffUserIds ?? []);
       const uid = state.localUserId;
       const isAdminNow = adminSet.has(uid);
+      const localRole: Role = uid === data.masterAdminUserId ? 'owner' : isAdminNow ? 'admin' : staffSet.has(uid) ? 'staff' : 'member';
 
       // Update isAdmin on all player records
       const records = { ...state.playerRecords };
@@ -362,7 +415,9 @@ export const useGameStore = create<GameState>((set, get) => ({
       return {
         masterAdminUserId: data.masterAdminUserId,
         adminPlayerIds: adminSet,
+        staffPlayerIds: staffSet,
         isAdmin: isAdminNow,
+        localRole,
         playerRecords: records,
       };
     }),
@@ -418,16 +473,25 @@ export const useGameStore = create<GameState>((set, get) => ({
       records[player.id] = player;
     }
 
+    const staffIds = new Set(roomState.staffUserIds ?? []);
+
     set((prev) => ({
       roomId: roomState.id,
       roomName: roomState.name,
+      theme: roomState.theme ?? prev.theme,
       tiles: roomState.tiles.length > 0 ? roomState.tiles : prev.tiles,
       furniture: roomState.furniture ?? prev.furniture,
       zones: roomState.zones ?? prev.zones,
       playerRecords: records,
       isAdmin: localIsAdmin,
       adminPlayerIds: adminIds,
+      staffPlayerIds: staffIds,
+      // roomState.role is the server's own authoritative resolution (see
+      // its doc comment) — prefer it, but fall back to re-deriving from
+      // the raw sets for the (should-never-happen) case it's missing.
+      localRole: roomState.role ?? (localIsAdmin ? 'admin' : prev.localRole),
       masterAdminUserId: roomState.masterAdminUserId ?? prev.masterAdminUserId,
+      notice: roomState.notice !== undefined ? roomState.notice : prev.notice,
     }));
 
     console.log('[store] setRoomState — adminPlayerIds:', Array.from(adminIds), 'masterAdminUserId:', roomState.masterAdminUserId, 'localIsAdmin:', localIsAdmin);

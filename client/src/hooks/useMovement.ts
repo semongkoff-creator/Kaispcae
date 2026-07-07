@@ -119,6 +119,65 @@ export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions)
     [getInput, wouldCollide], // both stable — never recreates
   );
 
+  // Same collision-checked stepping as tryMove, but driven toward an
+  // arbitrary pixel target instead of keyboard input — used by the Follow
+  // feature (see GameCanvas.tsx) to auto-trail another player. Deliberately
+  // NOT wired into keysRef/getInput at all, so it can never be confused
+  // with "the user pressed a movement key" (GameCanvas relies on that
+  // distinction to auto-unfollow the instant a *real* key press happens —
+  // see §3's rule: any manual move immediately cancels an active follow).
+  const tryMoveToward = useCallback(
+    (targetX: number, targetY: number, dt: number) => {
+      const curX = currentXRef.current;
+      const curY = currentYRef.current;
+      const distX = targetX - curX;
+      const distY = targetY - curY;
+      const dist = Math.hypot(distX, distY);
+
+      // Close enough — stop, rather than jittering around the target
+      // forever as it keeps moving by sub-pixel amounts each frame.
+      if (dist < 4) {
+        return { x: curX, y: curY, direction: 'down' as Direction, isMoving: false };
+      }
+
+      const stepDist = Math.min(dist, PLAYER_SPEED * dt);
+      const stepX = (distX / dist) * stepDist;
+      const stepY = (distY / dist) * stepDist;
+      const direction: Direction = Math.abs(distX) > Math.abs(distY)
+        ? (distX > 0 ? 'right' : 'left')
+        : (distY > 0 ? 'down' : 'up');
+
+      let newX = curX;
+      let newY = curY;
+
+      const nextX = curX + stepX;
+      if (!wouldCollide(nextX, curY)) newX = nextX;
+
+      const nextY = curY + stepY;
+      if (!wouldCollide(curX, nextY)) newY = nextY;
+
+      return { x: newX, y: newY, direction, isMoving: newX !== curX || newY !== curY };
+    },
+    [wouldCollide], // stable — never recreates
+  );
+
+  // Public wrapper mirroring update()'s ref-syncing/onMove-firing contract
+  // — GameCanvas calls this instead of update() for frames where an active
+  // follow target should drive movement instead of the keyboard.
+  const updateFollow = useCallback(
+    (targetX: number, targetY: number, dt: number) => {
+      const result = tryMoveToward(targetX, targetY, dt);
+      const moved = result.x !== currentXRef.current || result.y !== currentYRef.current;
+      if (moved) {
+        currentXRef.current = result.x;
+        currentYRef.current = result.y;
+        onMoveRef.current(result.x, result.y, result.direction);
+      }
+      return result;
+    },
+    [tryMoveToward], // stable — never recreates
+  );
+
   const update = useCallback(
     (dt: number) => {
       const result = tryMove(dt);
@@ -179,5 +238,5 @@ export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions)
     };
   }, []);
 
-  return { update, setPosition, getInput };
+  return { update, setPosition, getInput, updateFollow };
 }

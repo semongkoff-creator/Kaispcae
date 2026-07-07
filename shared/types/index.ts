@@ -1,3 +1,5 @@
+import type { Role } from '../permissions';
+
 // Direction the avatar is facing or moving
 export type Direction = 'up' | 'down' | 'left' | 'right';
 
@@ -75,6 +77,29 @@ export interface RoomTile {
 // are always walkable (never added to BLOCKED_TILES).
 export type TileType = 'floor' | 'wall' | 'door' | 'desk' | 'chair' | 'portal' | 'spawn';
 
+// Which curated art/asset set a room renders with. 'modern-interiors' is the
+// original LimeZu-based tileset (default, for backward compatibility with
+// every room created before this field existed); 'scifi-office' is the
+// Space Station 14-derived tileset (client/public/assets/tilesets/
+// scifi-office/, CC-BY-SA 3.0 — see ATTRIBUTION.md there and the Credits
+// section in Lobby.tsx). Additive: adding a theme here never removes or
+// alters the modern-interiors asset set.
+export type RoomTheme = 'modern-interiors' | 'scifi-office';
+
+// A single pinned chat message ("notice") shown as a persistent banner —
+// distinct from a speech bubble (which is per-sender and auto-expires) or
+// a Furniture banner (static signage placed via the Room Editor). Only one
+// notice is pinned per room at a time; pinning a new message replaces
+// whatever was pinned before. See §1.3's "pin as notice" requirement —
+// admin-only, enforced server-side (roomHandler.ts), not just hidden in the UI.
+export interface Notice {
+  messageId: string;
+  text: string;
+  senderName: string;
+  pinnedByName: string;
+  pinnedAt: number;
+}
+
 // Full room state transmitted over the network
 export interface RoomState {
   id: string;
@@ -83,8 +108,16 @@ export interface RoomState {
   players: Avatar[];
   adminUserIds?: string[];
   masterAdminUserId?: string;
+  staffUserIds?: string[];
   furniture?: Furniture[];
   zones?: Zone[];
+  theme?: RoomTheme;
+  notice?: Notice | null;
+  // The RECEIVING socket's own resolved role in this room (see
+  // shared/permissions.ts) — computed server-side per-socket, not
+  // broadcast, so a client always gets its own current tier without
+  // re-deriving it from adminUserIds/masterAdminUserId/staffUserIds itself.
+  role?: Role;
 }
 
 // All socket event names used between client and server
@@ -139,17 +172,122 @@ export enum SocketEvents {
   ADMIN_REVOKE = 'admin:revoke',
   ADMIN_CHANGED = 'admin:changed',
 
+  // Staff sits between admin and member (see shared/permissions.ts's Role
+  // hierarchy) — broadcast on the same ADMIN_CHANGED event above (its
+  // payload carries staffUserIds alongside adminUserIds/masterAdminUserId)
+  // rather than a parallel event, since it's the exact same "room's role
+  // assignments changed" notification either way.
+  STAFF_GRANT = 'staff:grant',
+  STAFF_REVOKE = 'staff:revoke',
+
+  // §4 — Teleport. One request event for both admin locations and owner
+  // bookmarks (payload's `kind` distinguishes them — see TeleportRequest);
+  // server resolves the real x/y from its own stored data rather than
+  // trusting client-supplied coordinates, same "server-authoritative"
+  // principle as regular movement (§1). Broadcast via a dedicated
+  // PLAYER_TELEPORTED event (not PLAYER_MOVED) so every client — including
+  // the mover's own — snaps instantly instead of interpolating a fast
+  // slide across the map like a normal walk would.
+  TELEPORT_REQUEST = 'teleport:request',
+  PLAYER_TELEPORTED = 'player:teleported',
+
   ROOM_DELETE = 'room:delete',
   ROOM_DELETED = 'room:deleted',
+
+  NOTICE_PIN = 'notice:pin',
+  NOTICE_UNPIN = 'notice:unpin',
+  NOTICE_UPDATED = 'notice:updated',
+
+  FOLLOW_REQUEST = 'follow:request',
+  FOLLOW_UNFOLLOW = 'follow:unfollow',
+  FOLLOW_UPDATED = 'follow:updated',
+  FOLLOWER_CHANGED = 'follow:follower_changed',
+
+  // §5 — Summon. SUMMON_USER moves its target immediately (no warning —
+  // spec §5.1 only warns for the mass form). SUMMON_ROOM warns everyone
+  // else in the room first (SUMMON_WARNING, 5s), THEN moves them via the
+  // same PLAYER_TELEPORTED broadcast Teleport already uses (snap, no lerp).
+  // Named SUMMON_ROOM rather than the spec's "summon_map" — this app has one
+  // map per room, not the spec's multi-map Space, so the 'to_current_map'
+  // scope (pull people FROM other maps) has nothing to do here; "everyone
+  // else in my current room" is the only scope that still makes sense.
+  SUMMON_USER = 'summon:user',
+  SUMMON_ROOM = 'summon:room',
+  SUMMON_WARNING = 'summon:warning',
+  SUMMON_NOTICE = 'summon:notice',
+}
+
+// My own follow relationship (I am the follower) — sent only to me, never
+// broadcast, since it's private info about my own client's behavior. null
+// means "not following anyone". 'standby' means the target went offline;
+// see followHandler.ts — position tracking pauses but the relationship is
+// kept so it resumes automatically the moment the target reconnects,
+// instead of the follower having to click Follow again (§3's explicit rule).
+export interface FollowInfo {
+  targetUserId: string;
+  targetName: string;
+  status: 'active' | 'standby';
+}
+
+// Broadcast to everyone in the room whenever a given player's follower set
+// changes — lets any client show "N people following" on that player
+// without a private per-viewer round trip.
+export interface FollowerChangedPayload {
+  targetUserId: string;
+  followerUserIds: string[];
+}
+
+// §4.1 — a shared, staff+ visible saved spot in the current room. Capped at
+// 20 per room (enforced server-side in server/src/routes/teleport.ts, not
+// representable in the type itself).
+export interface TeleportLocation {
+  id: string;
+  roomId: string;
+  name: string;
+  x: number;
+  y: number;
+  icon?: string | null;
+  orderIndex: number;
+  createdBy: string;
+}
+
+// §4.2 — a personal bookmark visible only to the room's own owner, scoped
+// to (ownerId, roomId) — never copied to other rooms, see the Prisma
+// model's doc comment for why.
+export interface OwnerBookmark {
+  id: string;
+  roomId: string;
+  label: string;
+  x: number;
+  y: number;
+  orderIndex: number;
+}
+
+export interface TeleportRequest {
+  kind: 'admin' | 'bookmark';
+  locationId: string;
+}
+
+// §5 — Summon. Sent to a single target right before SUMMON_ROOM's delayed
+// PLAYER_TELEPORTED (so their UI can show "moving you in 5s"), or to a
+// SUMMON_USER target — who gets no warning at all, per spec §5.1.
+export interface SummonWarningPayload {
+  actorName: string;
+  countdownSec: number;
+}
+
+export interface SummonNoticePayload {
+  actorName: string;
 }
 
 // Grid and rendering constants — shared so server can also validate bounds
 export const TILE_SIZE = 32;
-// Sized for ~20 concurrent occupants with their own desk (see
-// defaultRoomLayout.ts's two 10-desk zones) plus a meeting room and lounge,
-// not just the original ~6-desk office.
-export const MAP_WIDTH = 42;
-export const MAP_HEIGHT = 28;
+// "Main Office" ZEP-inspired layout (see defaultRoomLayout.ts): two meeting
+// rooms, an open main desk zone with 4 team clusters, a dev team room, an
+// external meeting room, a 5-pod focus zone, a lounge, and an entrance/
+// reception strip spanning the bottom.
+export const MAP_WIDTH = 50;
+export const MAP_HEIGHT = 36;
 export const PLAYER_SPEED = 150; // pixels per second
 
 // Proximity / WebRTC constants
@@ -287,4 +425,7 @@ export interface RoomUpdatePayload {
   zones: Zone[];
 }
 
-export { createDefaultOfficeLayout } from '../defaultRoomLayout';
+export { createDefaultOfficeLayout, findSpawnPixel } from '../defaultRoomLayout';
+export { BLOCKED_TILES, isTileBlocked, findZoneEntryTile } from '../tileCollision';
+export type { Role, FeatureKey } from '../permissions';
+export { roleAtLeast, hasFeatureAccess, FEATURE_MIN_ROLE } from '../permissions';

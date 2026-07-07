@@ -1,3 +1,5 @@
+import { TeleportLocation, OwnerBookmark } from '@virtualmeet/shared';
+
 const API_BASE = '/api';
 
 // Thrown for non-2xx HTTP responses — carries the status code so callers can
@@ -51,6 +53,7 @@ export interface RoomInfo {
   maxPlayers: number;
   isPublic: boolean;
   createdAt: string;
+  theme?: 'modern-interiors' | 'scifi-office';
 }
 
 export const api = {
@@ -75,10 +78,10 @@ export const api = {
 
   getRoom: (slug: string) => request<RoomInfo>(`/rooms/${slug}`),
 
-  createRoom: (name: string, maxPlayers?: number, isPublic?: boolean) =>
+  createRoom: (name: string, maxPlayers?: number, isPublic?: boolean, theme?: 'modern-interiors' | 'scifi-office') =>
     request<RoomInfo>('/rooms', {
       method: 'POST',
-      body: JSON.stringify({ name, maxPlayers, isPublic }),
+      body: JSON.stringify({ name, maxPlayers, isPublic, theme }),
     }),
 
   saveAvatar: (config: any) =>
@@ -90,5 +93,48 @@ export const api = {
   deleteRoom: (slug: string) =>
     request<{ success: boolean }>(`/rooms/${slug}`, {
       method: 'DELETE',
+    }),
+
+  // §4.1 — Teleport (Admin), shared team locations, staff+ only (server
+  // re-validates independently, this just decides what to show/offer).
+  getTeleportLocations: (slug: string) => request<{ locations: TeleportLocation[] }>(`/rooms/${slug}/teleport-locations`),
+
+  addTeleportLocation: (slug: string, name: string, x: number, y: number, icon?: string) =>
+    request<{ location: TeleportLocation }>(`/rooms/${slug}/teleport-locations`, {
+      method: 'POST',
+      body: JSON.stringify({ name, x, y, icon }),
+    }),
+
+  deleteTeleportLocation: (slug: string, id: string) =>
+    request<{ success: boolean }>(`/rooms/${slug}/teleport-locations/${id}`, { method: 'DELETE' }),
+
+  reorderTeleportLocations: (slug: string, orderedIds: string[]) =>
+    request<{ success: boolean }>(`/rooms/${slug}/teleport-locations/reorder`, {
+      method: 'PUT',
+      body: JSON.stringify({ orderedIds }),
+    }),
+
+  // §4.2 — Teleport (Owner), personal bookmarks, owner-only.
+  getBookmarks: (slug: string) => request<{ bookmarks: OwnerBookmark[] }>(`/rooms/${slug}/bookmarks`),
+
+  addBookmark: (slug: string, label: string, x: number, y: number) =>
+    request<{ bookmark: OwnerBookmark }>(`/rooms/${slug}/bookmarks`, {
+      method: 'POST',
+      body: JSON.stringify({ label, x, y }),
+    }),
+
+  deleteBookmark: (slug: string, id: string) =>
+    request<{ success: boolean }>(`/rooms/${slug}/bookmarks/${id}`, { method: 'DELETE' }),
+
+  renameBookmark: (slug: string, id: string, label: string) =>
+    request<{ success: boolean }>(`/rooms/${slug}/bookmarks/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ label }),
+    }),
+
+  reorderBookmarks: (slug: string, orderedIds: string[]) =>
+    request<{ success: boolean }>(`/rooms/${slug}/bookmarks/reorder`, {
+      method: 'PUT',
+      body: JSON.stringify({ orderedIds }),
     }),
 };

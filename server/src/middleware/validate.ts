@@ -30,6 +30,7 @@ export const createRoomSchema = z.object({
   name: z.string().min(1).max(50),
   maxPlayers: z.number().int().min(2).max(100).optional(),
   isPublic: z.boolean().optional(),
+  theme: z.enum(['modern-interiors', 'scifi-office']).optional(),
 });
 
 export const avatarUpdateSchema = z.object({

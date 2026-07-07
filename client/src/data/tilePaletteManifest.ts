@@ -30,6 +30,14 @@ export interface PaletteEntry {
   // feature in GameCanvas.tsx) — set automatically when this entry is
   // placed, not a Room Editor toggle.
   sittable?: boolean;
+  // Full pixel size of `src` itself, only needed when it differs from the
+  // 64x96 Modern_Office_Singles padded-canvas convention every entry below
+  // shares (see RoomEditor.tsx's PaletteThumb, which needs the real source
+  // dimensions to size its CSS background-size crop correctly). Per-file RSI
+  // assets (scifiOfficePaletteManifest.ts) each have their own PNG
+  // dimensions, so they set this explicitly.
+  srcW?: number;
+  srcH?: number;
 }
 
 const SINGLES_BASE = '/assets/tilesets/modern-office/Modern_Office_Singles_32x32';

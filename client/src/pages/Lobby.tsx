@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { TrashFill } from 'react-bootstrap-icons';
+import { TrashFill, InfoCircle } from 'react-bootstrap-icons';
 import { io } from 'socket.io-client';
+import { RoomTheme } from '@virtualmeet/shared';
 import { api, RoomInfo } from '@/services/api';
 import { UserProfile } from '@/services/api';
+import { CreditsModal } from '@/components/ui/CreditsModal';
 
 interface LobbyProps {
   user: UserProfile;
@@ -10,14 +12,27 @@ interface LobbyProps {
   onLogout: () => void;
 }
 
+// Small preview images for the theme picker below — one representative
+// state per theme, not the actual in-game crop (that's PALETTE_BY_THEME in
+// themeAssets.ts). "icon" is a state Machines/arcade.rsi ships specifically
+// as a standalone representative image (its meta.json literally has an
+// "icon" state distinct from the in-game "arcade" state), which is exactly
+// what a small picker thumbnail wants.
+const THEME_OPTIONS: { value: RoomTheme; label: string; preview: string }[] = [
+  { value: 'modern-interiors', label: 'Modern Interiors', preview: '/assets/tilesets/modern-office/Modern_Office_Singles_32x32/Modern_Office_Singles_32x32_205.png' },
+  { value: 'scifi-office', label: 'Sci-Fi Office', preview: '/assets/tilesets/scifi-office/Machines/arcade.rsi/icon.png' },
+];
+
 export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [roomName, setRoomName] = useState('');
+  const [roomTheme, setRoomTheme] = useState<RoomTheme>('modern-interiors');
   const [joinCode, setJoinCode] = useState('');
   const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
   const [toast, setToast] = useState('');
+  const [showCredits, setShowCredits] = useState(false);
 
   useEffect(() => {
     api.getRooms()
@@ -46,7 +61,7 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
 
   const handleCreate = async () => {
     if (!roomName.trim()) return;
-    try { const room = await api.createRoom(roomName); onJoinRoom(room.slug); } catch (err) { console.error(err); }
+    try { const room = await api.createRoom(roomName, undefined, undefined, roomTheme); onJoinRoom(room.slug); } catch (err) { console.error(err); }
   };
 
   const handleJoinByCode = async () => {
@@ -105,12 +120,42 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
           </div>
         </div>
         {showCreate && (
-          <div className="bg-white rounded-xl p-4 mb-6 border border-purple-100 shadow-sm flex gap-3 items-end">
-            <div className="flex-1">
-              <label className="text-gray-500 text-xs block mb-1">Room Name</label>
-              <input value={roomName} onChange={(e) => setRoomName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreate()} placeholder="My Awesome Room" maxLength={50} className="w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 text-sm rounded-lg px-3 py-2 outline-none border border-purple-100 focus:border-purple-500" />
+          <div className="bg-white rounded-xl p-4 mb-6 border border-purple-100 shadow-sm">
+            <div className="flex gap-3 items-end mb-3">
+              <div className="flex-1">
+                <label className="text-gray-500 text-xs block mb-1">Room Name</label>
+                <input value={roomName} onChange={(e) => setRoomName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreate()} placeholder="My Awesome Room" maxLength={50} className="w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 text-sm rounded-lg px-3 py-2 outline-none border border-purple-100 focus:border-purple-500" />
+              </div>
+              <button onClick={handleCreate} className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg cursor-pointer">Create</button>
             </div>
-            <button onClick={handleCreate} className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg cursor-pointer">Create</button>
+            <label className="text-gray-500 text-xs block mb-1.5">Theme</label>
+            <div className="flex gap-2">
+              {THEME_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setRoomTheme(opt.value)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-left cursor-pointer transition-all ${
+                    roomTheme === opt.value ? 'bg-purple-50 border-purple-400 ring-1 ring-purple-300' : 'bg-white border-gray-200 hover:border-purple-200'
+                  }`}
+                >
+                  <div
+                    className="w-8 h-8 rounded bg-gray-900 shrink-0"
+                    style={{
+                      backgroundImage: `url(${opt.preview})`,
+                      backgroundSize: 'cover',
+                      imageRendering: 'pixelated',
+                    }}
+                  />
+                  <span className="text-xs font-medium text-gray-700">{opt.label}</span>
+                </button>
+              ))}
+            </div>
+            {roomTheme === 'scifi-office' && (
+              <p className="text-gray-400 text-[10px] mt-2">
+                Uses art from Space Station 14 (CC-BY-SA 3.0).{' '}
+                <button onClick={() => setShowCredits(true)} className="text-purple-500 hover:text-purple-700 underline cursor-pointer">Credits</button>
+              </p>
+            )}
           </div>
         )}
         {loading ? (
@@ -161,6 +206,15 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
           </div>
         )}
       </main>
+      <footer className="max-w-4xl mx-auto px-6 py-6 flex justify-center">
+        <button
+          onClick={() => setShowCredits(true)}
+          className="text-gray-400 hover:text-gray-600 text-xs cursor-pointer inline-flex items-center gap-1.5"
+        >
+          <InfoCircle size={12} /> Credits / About
+        </button>
+      </footer>
+      {showCredits && <CreditsModal onClose={() => setShowCredits(false)} />}
     </div>
   );
 }

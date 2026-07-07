@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE } from '@virtualmeet/shared';
-import { updatePlayerPosition, setPlayerStopped } from '../store/roomStore';
+import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked } from '@virtualmeet/shared';
+import { updatePlayerPosition, setPlayerStopped, getCachedTiles } from '../store/roomStore';
 
 // Rate limiting: max 20 updates per second per player
 const rateLimitMap = new Map<string, number>();
@@ -29,6 +29,22 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     const rooms = Array.from(socket.rooms);
     const gameRoom = rooms.find((r) => r !== socket.id);
     if (gameRoom) {
+      // Server-authoritative collision check: previously this handler only
+      // clamped to the map's outer rectangle and otherwise broadcast
+      // whatever x/y the client reported — a modified client could walk
+      // through walls/desks since nothing re-validated against the actual
+      // room layout. getCachedTiles() is populated by roomHandler.ts on
+      // join and on every editor save, so this is a synchronous lookup, no
+      // DB round-trip per move. If the room's tiles haven't been cached yet
+      // (e.g. a stray move racing the initial ROOM_STATE), fail open rather
+      // than silently dropping legitimate early input.
+      const tiles = getCachedTiles(gameRoom);
+      if (tiles) {
+        const tileX = Math.floor(clampedX / TILE_SIZE);
+        const tileY = Math.floor(clampedY / TILE_SIZE);
+        if (isTileBlocked(tiles, tileX, tileY)) return;
+      }
+
       socket.to(gameRoom).emit(SocketEvents.PLAYER_MOVED, {
         id: socket.id,
         x: clampedX,

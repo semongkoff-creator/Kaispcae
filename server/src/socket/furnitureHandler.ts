@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents } from '@virtualmeet/shared';
+import { SocketEvents, hasFeatureAccess } from '@virtualmeet/shared';
 import { PrismaClient } from '@prisma/client';
 import { socketRateLimit } from '../middleware/rateLimit';
 
@@ -24,7 +24,12 @@ export function registerFurnitureHandlers(io: Server, socket: Socket) {
     if (!canAssign(socket.id)) return;
     const room = currentRoom; if (!room) return;
     const uid = (socket.data as { userId?: string }).userId;
-    if (!uid) {
+    // 'furniture:assign' only requires 'member' (see shared/permissions.ts)
+    // — any authenticated user qualifies, so this is really just the
+    // "logged in at all" check; 'guest' (unauthenticated) is the only role
+    // hasFeatureAccess would reject here, and is unreachable anyway since
+    // login is mandatory before joining a room.
+    if (!uid || !hasFeatureAccess('member', 'furniture:assign')) {
       socket.emit('admin:error', { message: 'You must be logged in to assign a seat' });
       return;
     }

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Tools, GearFill, Clipboard, BoxArrowLeft } from 'react-bootstrap-icons';
-import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture } from '@virtualmeet/shared';
-import { TILE_PALETTE_BY_ID } from './data/tilePaletteManifest';
+import { Tools, GearFill, Clipboard, BoxArrowLeft, PersonWalking, X, GeoAltFill, MagnetFill } from 'react-bootstrap-icons';
+import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast } from '@virtualmeet/shared';
+import { PALETTE_BY_ID } from './data/themeAssets';
 import { GameCanvas } from './components/canvas/GameCanvas';
 import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
 import { NameModal } from './components/ui/NameModal';
@@ -10,10 +10,12 @@ import { AvatarEditorButton } from './components/avatar/AvatarEditorButton';
 import { StatusButton } from './components/avatar/StatusButton';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { ChatPanel } from './components/ui/ChatPanel';
+import { NoticeBanner } from './components/ui/NoticeBanner';
 import { EmoteWheel } from './components/ui/EmoteWheel';
 import { Minimap } from './components/hud/Minimap';
 import { RoomEditor } from './components/ui/RoomEditor';
 import { AdminPanel } from './components/ui/AdminPanel';
+import { TeleportPanel } from './components/ui/TeleportPanel';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
 import { MicButton } from './components/hud/MicButton';
 import { CameraButton } from './components/hud/CameraButton';
@@ -32,7 +34,7 @@ import { loadAvatarConfig, saveAvatarConfig } from './hooks/useAvatarConfig';
 
 function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }: { roomSlug: string; onLeave: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRoom } = useSocket(authDisplayName, roomSlug, authUserId);
   const [showEditor, setShowEditor] = useState(false);
 
   // Media state from store
@@ -151,6 +153,24 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
     return () => clearTimeout(timer);
   }, [roomDeletedNotice, onLeave]);
 
+  // §5 — Summon toasts. Both auto-clear: the warning matches its own
+  // countdown (it's superseded by the actual PLAYER_TELEPORTED snap anyway,
+  // this just stops the toast from lingering if that arrives late), the
+  // notice is a one-off "you were summoned" ping.
+  const summonWarning = useGameStore((s) => s.summonWarning);
+  useEffect(() => {
+    if (!summonWarning) return;
+    const timer = setTimeout(() => useGameStore.getState().setSummonWarning(null), summonWarning.countdownSec * 1000);
+    return () => clearTimeout(timer);
+  }, [summonWarning]);
+
+  const summonNotice = useGameStore((s) => s.summonNotice);
+  useEffect(() => {
+    if (!summonNotice) return;
+    const timer = setTimeout(() => useGameStore.getState().setSummonNotice(null), 2500);
+    return () => clearTimeout(timer);
+  }, [summonNotice]);
+
   // Admin / Editor
   const isAdmin = useGameStore((s) => s.isAdmin);
   const editorMode = useGameStore((s) => s.editorMode);
@@ -164,6 +184,8 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
   const tiles = useGameStore((s) => s.tiles);
   const [editorToast, setEditorToast] = useState('');
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [showTeleportPanel, setShowTeleportPanel] = useState(false);
+  const localRole = useGameStore((s) => s.localRole);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
 
@@ -210,7 +232,7 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
   }, []);
 
   const handleFurniturePlace = useCallback((x: number, y: number, paletteId: string) => {
-    const entry = TILE_PALETTE_BY_ID[paletteId];
+    const entry = PALETTE_BY_ID[paletteId];
     if (!entry || entry.category === 'floor') return;
     const state = useGameStore.getState();
     for (let dx = 0; dx < entry.tilesW; dx++) {
@@ -280,12 +302,18 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
 
   // Chat + emotes + minimap state
   const chatMessages = useGameStore((s) => s.chatMessages);
+  const notice = useGameStore((s) => s.notice);
+  const followInfo = useGameStore((s) => s.followInfo);
   const [showEmoteWheel, setShowEmoteWheel] = useState(false);
   const [showMinimap, setShowMinimap] = useState(true);
 
   const handleChatSend = useCallback((text: string, isProximity?: boolean) => {
     emitChat(text, isProximity);
   }, [emitChat]);
+
+  const handlePinNotice = useCallback((message: { id: string; text: string; senderName: string }) => {
+    emitNoticePin(message.id, message.text, message.senderName);
+  }, [emitNoticePin]);
 
   const handleEmoteSelect = useCallback((emote: EmoteType) => {
     const lp = useGameStore.getState().localPlayer;
@@ -342,6 +370,7 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
         onBannerPlaceComplete={handleBannerPlaceComplete}
         onPortalEnter={handlePortalEnter}
         emitSit={emitSit}
+        emitFollowUnfollow={emitFollowUnfollow}
       />
 
       <div className="absolute top-4 left-28 pointer-events-none">
@@ -354,7 +383,41 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
       </div>
 
       <ConnectionIndicator />
-      <ParticipantPanel remoteStreams={remoteStreams} />
+      <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} />
+
+      {/* Follow (§3) indicator — only the ONE new thing from this pass that's
+          always visible without opening a panel first. 'standby' means the
+          target went offline; movement pauses but the relationship is kept
+          server-side (see followHandler.ts) and resumes automatically the
+          moment they reconnect, no need to click Follow again. */}
+      {followInfo && (
+        <div className="absolute bottom-28 left-4 z-30 pointer-events-auto">
+          <div className="bg-white/90 backdrop-blur-sm border border-purple-200 shadow-sm rounded-lg px-3 py-2 flex items-center gap-2 text-xs">
+            <PersonWalking size={13} className="text-purple-600" />
+            <span className="text-gray-700">
+              {followInfo.status === 'active' ? 'Following ' : 'Waiting for '}
+              <span className="font-medium">{followInfo.targetName}</span>
+              {followInfo.status === 'standby' && <span className="text-gray-400"> (offline)</span>}
+            </span>
+            <button onClick={emitFollowUnfollow} title="Stop following" className="text-gray-400 hover:text-red-500 cursor-pointer">
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* §5 — Summon toasts. z-50 so they win over the Follow indicator
+          below, which sits at the same bottom-28 corner. */}
+      {summonWarning && (
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-50 bg-amber-500/90 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-1.5">
+          <MagnetFill size={13} /> {summonWarning.actorName} is summoning you — moving in {summonWarning.countdownSec}s
+        </div>
+      )}
+      {summonNotice && (
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-50 bg-purple-600/90 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-1.5">
+          <MagnetFill size={13} /> Summoned by {summonNotice.actorName}
+        </div>
+      )}
 
       <AvatarEditorButton onClick={() => setShowEditor(true)} />
       <StatusButton status={localPlayer.status || ''} onSave={handleStatusSave} />
@@ -398,6 +461,34 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
         </button>
       )}
 
+      {/* §4 — Teleport. Gated at staff+ since the panel's "Team Locations"
+          tab is the only thing a plain member has no use for; the "My
+          Bookmarks" tab inside the panel is further gated to owner-only. */}
+      {roleAtLeast(localRole, 'staff') && (
+        <button
+          onClick={() => setShowTeleportPanel((v) => !v)}
+          className={`absolute bottom-4 left-52 z-30 px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 ${showTeleportPanel ? 'bg-purple-600 text-white border-purple-500' : 'bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm'}`}
+        >
+          <GeoAltFill size={12} /> Teleport
+        </button>
+      )}
+
+      {/* §5.2/5.3 — Summon All. Disruptive to everyone else in the room, so
+          unlike Teleport's button this asks for confirmation first — same
+          window.confirm pattern the Leave Room flow already uses elsewhere
+          (well, that one's a styled modal; this reuses the simpler
+          window.confirm since Summon All is staff-only and infrequent). */}
+      {roleAtLeast(localRole, 'staff') && (
+        <button
+          onClick={() => {
+            if (window.confirm('Summon everyone else in this room to your position?')) emitSummonRoom();
+          }}
+          className="absolute bottom-4 left-76 z-30 px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm"
+        >
+          <MagnetFill size={12} /> Summon All
+        </button>
+      )}
+
       {isAdmin && editorMode && (
         <RoomEditor onSave={handleRoomSave} />
       )}
@@ -416,8 +507,19 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
 
       {showAdminPanel && (
         <AdminPanel
-          onGrant={(userId) => emitAdminGrant(userId)}
-          onRevoke={(userId) => emitAdminRevoke(userId)}
+          onGrantAdmin={(userId) => emitAdminGrant(userId)}
+          onRevokeAdmin={(userId) => emitAdminRevoke(userId)}
+          onGrantStaff={(userId) => emitStaffGrant(userId)}
+          onRevokeStaff={(userId) => emitStaffRevoke(userId)}
+        />
+      )}
+
+      {showTeleportPanel && (
+        <TeleportPanel
+          roomSlug={roomSlug}
+          isOwner={localRole === 'owner'}
+          onTeleport={(kind, locationId) => emitTeleportRequest({ kind, locationId })}
+          onClose={() => setShowTeleportPanel(false)}
         />
       )}
 
@@ -510,6 +612,10 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
         </div>
       )}
 
+      {notice && (
+        <NoticeBanner notice={notice} isAdmin={isAdmin} onUnpin={emitNoticeUnpin} />
+      )}
+
       <ChatPanel
         messages={chatMessages}
         localPlayerName={playerName}
@@ -519,6 +625,8 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
         currentZone={currentZone}
         zoneMessages={currentZone ? zoneChatHistory[currentZone.id] ?? [] : []}
         onSendZone={handleSendZoneChat}
+        isAdmin={isAdmin}
+        onPinNotice={handlePinNotice}
       />
 
       <EmoteWheel

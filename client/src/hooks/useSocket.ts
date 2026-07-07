@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, RoomUpdatePayload } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, SummonWarningPayload, SummonNoticePayload } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 
@@ -11,6 +11,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   const setConnected = useGameStore((s) => s.setConnected);
   const setLocalPlayerId = useGameStore((s) => s.setLocalPlayerId);
   const setRoomState = useGameStore((s) => s.setRoomState);
+  const setLocalPlayer = useGameStore((s) => s.setLocalPlayer);
   const upsertPlayer = useGameStore((s) => s.upsertPlayer);
   const removePlayer = useGameStore((s) => s.removePlayer);
   const setPlayerTarget = useGameStore((s) => s.setPlayerTarget);
@@ -24,6 +25,9 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   const setTilesFromData = useGameStore((s) => s.setTiles);
   const applyAdminChanged = useGameStore((s) => s.applyAdminChanged);
   const setLocalUserId = useGameStore((s) => s.setLocalUserId);
+  const setNotice = useGameStore((s) => s.setNotice);
+  const setFollowInfo = useGameStore((s) => s.setFollowInfo);
+  const setFollowerUserIds = useGameStore((s) => s.setFollowerUserIds);
 
   // Identify this player by their real authenticated account id whenever one
   // is available, so admin/ownership checks (which compare against
@@ -81,6 +85,21 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socket.on(SocketEvents.ROOM_STATE, (roomState) => {
       console.log('[socket] room:state received — players:', roomState.players?.length, 'tiles:', roomState.tiles?.length ?? 0);
       setRoomState(roomState);
+
+      // setRoomState() deliberately skips the local player's own entry (it
+      // only reads other players' data from room:state, so a stray re-sync
+      // never teleports someone mid-movement) — but on the very first
+      // room:state after joining, the server's own entry for us IS the
+      // authoritative spawn position (computed from the room's actual
+      // 'spawn' tile — see roomHandler.ts's findSpawnPixel), so apply it
+      // here once, explicitly, rather than leaving the local player at
+      // gameStore's static initial default position regardless of where
+      // this room's spawn tile actually is.
+      const localId = useGameStore.getState().localPlayerId;
+      const serverSelf = roomState.players?.find((p: Avatar) => p.id === localId);
+      if (serverSelf) {
+        setLocalPlayer({ x: serverSelf.x, y: serverSelf.y, direction: serverSelf.direction });
+      }
     });
 
     socket.on(SocketEvents.PLAYER_JOINED, (player: Avatar) => {
@@ -134,6 +153,38 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       upsertPlayer({ id: data.id, isSitting: data.isSitting, x: data.x, y: data.y, direction: data.direction, isMoving: false } as Avatar);
     });
 
+    // §4 — Teleport. Broadcast via io.to(room) (not socket.to(room)), so the
+    // mover's own client gets this too — unlike a normal walk, there's no
+    // local prediction to reconcile with, the server's resolved x/y is the
+    // only source of truth. Snaps instantly rather than going through
+    // playerTargets' lerp (interpolatePlayers in gameStore.ts) — sliding a
+    // remote avatar across the whole map over ~200ms would look like a fast
+    // walk, not a teleport.
+    socket.on(SocketEvents.PLAYER_TELEPORTED, (data: { id: string; x: number; y: number; direction: Avatar['direction'] }) => {
+      console.log('[socket] player teleported:', data.id, '→', data.x, data.y);
+      const state = useGameStore.getState();
+      if (data.id === state.localPlayerId) {
+        state.setLocalPlayer({ x: data.x, y: data.y, direction: data.direction, isMoving: false });
+        return;
+      }
+      upsertPlayer({ id: data.id, x: data.x, y: data.y, direction: data.direction, isMoving: false } as Avatar);
+      // Clears any in-flight lerp target left over from a move right before
+      // the teleport — otherwise interpolatePlayers would still nudge this
+      // avatar toward the pre-teleport target for a frame or two.
+      setPlayerTarget(data.id, data.x, data.y);
+    });
+
+    // §5 — Summon. SUMMON_WARNING (mass summon only) fires 5s before the
+    // PLAYER_TELEPORTED that actually moves me; SUMMON_NOTICE (single-user
+    // summon only) fires right as I'm moved, since that form has no warning.
+    socket.on(SocketEvents.SUMMON_WARNING, (data: SummonWarningPayload) => {
+      useGameStore.getState().setSummonWarning(data);
+    });
+
+    socket.on(SocketEvents.SUMMON_NOTICE, (data: SummonNoticePayload) => {
+      useGameStore.getState().setSummonNotice(data);
+    });
+
     socket.on(SocketEvents.FURNITURE_ASSIGNED, (data: { furnitureId: string; userId: string; name: string }) => {
       useGameStore.getState().setFurnitureAssignment(data.furnitureId, data.userId, data.name);
     });
@@ -179,8 +230,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       setZones(data.zones || []);
     });
 
-    socket.on(SocketEvents.ADMIN_CHANGED, (data: { adminUserIds: string[]; masterAdminUserId: string }) => {
-      console.log('[socket] admin:changed —', data.adminUserIds.length, 'admins, master:', data.masterAdminUserId);
+    socket.on(SocketEvents.ADMIN_CHANGED, (data: { adminUserIds: string[]; masterAdminUserId: string; staffUserIds?: string[] }) => {
+      console.log('[socket] admin:changed —', data.adminUserIds.length, 'admins,', (data.staffUserIds ?? []).length, 'staff, master:', data.masterAdminUserId);
       applyAdminChanged(data);
     });
 
@@ -194,6 +245,19 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       // React state — no alert()/reload(), so there's no multi-second
       // window where the player is just stuck looking at a stale canvas.
       useGameStore.getState().setRoomDeletedNotice('This room has been deleted by the owner.');
+    });
+
+    socket.on(SocketEvents.NOTICE_UPDATED, (notice: Notice | null) => {
+      setNotice(notice);
+    });
+
+    socket.on(SocketEvents.FOLLOW_UPDATED, (info: FollowInfo | null) => {
+      setFollowInfo(info);
+    });
+
+    socket.on(SocketEvents.FOLLOWER_CHANGED, (data: FollowerChangedPayload) => {
+      const localUid = useGameStore.getState().localUserId;
+      if (data.targetUserId === localUid) setFollowerUserIds(data.followerUserIds);
     });
 
     socket.on('connect_error', (err) => {
@@ -292,9 +356,45 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.ADMIN_REVOKE, { targetUserId });
   }, []);
 
+  const emitStaffGrant = useCallback((targetUserId: string) => {
+    socketRef.current?.emit(SocketEvents.STAFF_GRANT, { targetUserId });
+  }, []);
+
+  const emitStaffRevoke = useCallback((targetUserId: string) => {
+    socketRef.current?.emit(SocketEvents.STAFF_REVOKE, { targetUserId });
+  }, []);
+
   const emitRoomDelete = useCallback(() => {
     socketRef.current?.emit(SocketEvents.ROOM_DELETE);
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitRoomDelete };
+  const emitNoticePin = useCallback((messageId: string, text: string, senderName: string) => {
+    socketRef.current?.emit(SocketEvents.NOTICE_PIN, { messageId, text, senderName });
+  }, []);
+
+  const emitNoticeUnpin = useCallback(() => {
+    socketRef.current?.emit(SocketEvents.NOTICE_UNPIN);
+  }, []);
+
+  const emitFollowRequest = useCallback((targetUserId: string) => {
+    socketRef.current?.emit(SocketEvents.FOLLOW_REQUEST, { targetUserId });
+  }, []);
+
+  const emitTeleportRequest = useCallback((request: TeleportRequest) => {
+    socketRef.current?.emit(SocketEvents.TELEPORT_REQUEST, request);
+  }, []);
+
+  const emitSummonUser = useCallback((nickname: string) => {
+    socketRef.current?.emit(SocketEvents.SUMMON_USER, { nickname });
+  }, []);
+
+  const emitSummonRoom = useCallback(() => {
+    socketRef.current?.emit(SocketEvents.SUMMON_ROOM);
+  }, []);
+
+  const emitFollowUnfollow = useCallback(() => {
+    socketRef.current?.emit(SocketEvents.FOLLOW_UNFOLLOW);
+  }, []);
+
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRoom };
 }

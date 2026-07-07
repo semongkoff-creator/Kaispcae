@@ -11,12 +11,13 @@ import {
   ProximityPlayer,
   PROXIMITY_THRESHOLD_PX,
   EMOTE_EMOJI,
+  RoomTheme,
 } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useMovement } from '@/hooks/useMovement';
 import { drawAvatar } from './AvatarSprite';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
-import { TILE_PALETTE_BY_ID } from '@/data/tilePaletteManifest';
+import { PALETTE_BY_ID, THEME_TILE_SPRITES } from '@/data/themeAssets';
 import { isTileBlocked } from '@/utils/createDefaultRoom';
 
 // Fallback solid colors, used only while the real tileset image is still loading.
@@ -30,65 +31,14 @@ const TILE_COLORS: Record<TileType, string> = {
   spawn: '#e8d5b0',
 };
 
-// Real tileset art for each generic TileType, used when a tile has no
-// `floorPaletteId` / no matching Furniture entry (legacy rooms, or fallback
-// while richer data hasn't loaded). Modern_Office_Singles files are exported
-// on a padded 64x96 canvas with content bottom-anchored — srcX/srcY here
-// crop just the bottom-most 32x32 slice of that real content (see
-// tilePaletteManifest.ts for the full multi-cell-aware version of this data).
-const OFFICE_SINGLES = '/assets/tilesets/modern-office/Modern_Office_Singles_32x32';
-const ROOM_BUILDER_OFFICE = '/assets/tilesets/modern-office/Room_Builder_Office_32x32.png';
-
-interface TileSpriteDef {
-  src: string;
-  srcX: number;
-  srcY: number;
-}
-
-// portal/spawn render as plain floor — their special meaning is conveyed by
-// the pulsing ring markers drawn in the tile loop below, not a distinct sprite.
-//
-// BUG FIX: this used to point at Singles_28.png, whose actual opaque content
-// (verified by rendering the crop against a magenta background) is only a
-// 30x14px sliver at the bottom of its 32x32 cell — not a full tile. Drawing
-// that meant ~55% of every floor tile was transparent, so the dark canvas
-// background showed through as a "thin strip with gaps" for every row.
-// Singles_6.png looked right in a one-off crop check but turned out to have
-// a 2px transparent inset on its left edge (bbox x:[2,31] of 32) — invisible
-// in a single tile, but tiling it repeats that gap as a faint vertical seam
-// every 32px. Singles_36.png fixed that (full [0,31]x[0,31] bbox, no margin)
-// but rendering a 4x4 block of it revealed a DIFFERENT problem: its texture
-// itself isn't horizontally seamless, so repeating it draws a visible line
-// down every tile boundary regardless of crop correctness. Singles_86.png's
-// fine crosshatch pattern tiles cleanly in both directions (verified by
-// rendering a 4x4 repeat) — no code fix can make a non-tileable texture
-// tileable, so the fix here is picking a texture that actually is one.
-const FLOOR_SPRITE: TileSpriteDef = { src: `${OFFICE_SINGLES}/Modern_Office_Singles_32x32_86.png`, srcX: 0, srcY: 64 };
-
-const TILE_SPRITES: Record<TileType, TileSpriteDef> = {
-  floor: FLOOR_SPRITE,
-  // Column 0 row 0 (the previous crop) is a fully TRANSPARENT cell in this
-  // sheet — every 'wall' tile in the game has only ever worked as invisible
-  // collision, never an actual visible wall, which is a big part of why
-  // rooms read as undifferentiated open floor. Row 10 col 0 is a real,
-  // fully-opaque brick texture (this sheet stores its wall-piece art as
-  // 32x64 cells with the true content bottom-anchored in the second row —
-  // same "padded canvas" convention documented in tilePaletteManifest.ts
-  // for the Modern_Office_Singles files).
-  wall: { src: ROOM_BUILDER_OFFICE, srcX: 0, srcY: 10 * TILE_SIZE },
-  // Column 7 row 1 (the previous crop) is one half of a 2-tile-wide door
-  // graphic in this sheet — mostly transparent with a thin sliver of wall
-  // on one edge, which is exactly the stray white vertical line reported.
-  // Column 8 row 0 is a complete, fully-opaque single-tile door slab.
-  door: { src: ROOM_BUILDER_OFFICE, srcX: 8 * TILE_SIZE, srcY: 0 * TILE_SIZE },
-  desk: { src: `${OFFICE_SINGLES}/Modern_Office_Singles_32x32_211.png`, srcX: 0, srcY: 64 },
-  chair: { src: `${OFFICE_SINGLES}/Modern_Office_Singles_32x32_101.png`, srcX: 0, srcY: 64 },
-  portal: FLOOR_SPRITE,
-  spawn: FLOOR_SPRITE,
-};
-
-function drawTile(ctx: CanvasRenderingContext2D, type: TileType, screenX: number, screenY: number) {
-  const sprite = TILE_SPRITES[type];
+// Real tileset art for each generic TileType (used when a tile has no
+// `floorPaletteId` / no matching Furniture entry — legacy rooms, or fallback
+// while richer data hasn't loaded) now varies by the room's theme — see
+// client/src/data/themeAssets.ts's THEME_TILE_SPRITES for the actual crops
+// (verified the same alpha-channel-scan / real-pixel-dimensions way as
+// before theming existed, not guessed).
+function drawTile(ctx: CanvasRenderingContext2D, type: TileType, screenX: number, screenY: number, theme: RoomTheme) {
+  const sprite = THEME_TILE_SPRITES[theme][type];
   const drew = sprite && drawSpriteFrame(ctx, sprite.src, {
     srcX: sprite.srcX, srcY: sprite.srcY, cellWidth: TILE_SIZE, cellHeight: TILE_SIZE,
     dx: screenX, dy: screenY,
@@ -101,15 +51,15 @@ function drawTile(ctx: CanvasRenderingContext2D, type: TileType, screenX: number
 
 // Draws a floor tile, preferring its palette-picked texture (set via the
 // Room Editor's visual palette) and falling back to the generic floor sprite.
-function drawFloorTile(ctx: CanvasRenderingContext2D, tile: RoomTile, screenX: number, screenY: number) {
+function drawFloorTile(ctx: CanvasRenderingContext2D, tile: RoomTile, screenX: number, screenY: number, theme: RoomTheme) {
   if (tile.floorPaletteId) {
-    const entry = TILE_PALETTE_BY_ID[tile.floorPaletteId];
+    const entry = PALETTE_BY_ID[tile.floorPaletteId];
     if (entry && drawSpriteFrame(ctx, entry.src, {
       srcX: entry.srcX, srcY: entry.srcY, cellWidth: TILE_SIZE, cellHeight: TILE_SIZE,
       dx: screenX, dy: screenY,
     })) return;
   }
-  drawTile(ctx, 'floor', screenX, screenY);
+  drawTile(ctx, 'floor', screenX, screenY, theme);
 }
 
 // Furniture is anchored at its bottom-left tile. The bottom tile row (the
@@ -123,7 +73,7 @@ function drawFurnitureLayer(
   cameraY: number,
   layer: 'object' | 'overhead',
 ) {
-  const entry = TILE_PALETTE_BY_ID[item.paletteId];
+  const entry = PALETTE_BY_ID[item.paletteId];
   if (!entry) return;
   const screenX = item.x * TILE_SIZE - cameraX;
   const baseRowScreenY = item.y * TILE_SIZE - cameraY;
@@ -145,6 +95,18 @@ function drawFurnitureLayer(
 }
 
 const AVATAR_RADIUS = 14;
+
+// Follow (§3): where a follower stands relative to their target, based on
+// the target's current facing direction — one tile on the side "behind"
+// them, per spec's example ("target menghadap 'right' -> follower taruh di
+// 'left'-nya"), not directly on top of them (which would just stack the
+// two avatars on the same tile).
+const FOLLOW_OFFSET: Record<Direction, { dx: number; dy: number }> = {
+  up: { dx: 0, dy: 1 },
+  down: { dx: 0, dy: -1 },
+  left: { dx: 1, dy: 0 },
+  right: { dx: -1, dy: 0 },
+};
 
 function hexToRgb(hex: string | undefined): [number, number, number] | null {
   if (!hex) return null;
@@ -193,9 +155,10 @@ interface GameCanvasProps {
   onBannerPlaceComplete: (x: number, y: number) => void;
   onPortalEnter: (target: string) => void;
   emitSit: (sitting: boolean, x: number, y: number, direction: Direction) => void;
+  emitFollowUnfollow: () => void;
 }
 
-export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -205,12 +168,17 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
   const emitMoveRef = useRef(emitMove); emitMoveRef.current = emitMove;
   const emitStopRef = useRef(emitStop); emitStopRef.current = emitStop;
   const emitSitRef = useRef(emitSit); emitSitRef.current = emitSit;
+  const emitFollowUnfollowRef = useRef(emitFollowUnfollow); emitFollowUnfollowRef.current = emitFollowUnfollow;
 
   const tiles = useGameStore((s) => s.tiles);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
+  const theme = useGameStore((s) => s.theme);
+  const followInfo = useGameStore((s) => s.followInfo);
 
   const tilesRef = useRef(tiles);
+  const themeRef = useRef(theme);
+  const followInfoRef = useRef(followInfo);
   const playerRecordsRef = useRef(useGameStore.getState().playerRecords);
   const localPlayerRef = useRef(localPlayer);
   const localPlayerIdRef = useRef(localPlayerId);
@@ -230,6 +198,8 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
 
   useEffect(() => {
     tilesRef.current = tiles;
+    themeRef.current = theme;
+    followInfoRef.current = followInfo;
     playerRecordsRef.current = useGameStore.getState().playerRecords;
     localPlayerRef.current = localPlayer;
     localPlayerIdRef.current = localPlayerId;
@@ -272,7 +242,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     useGameStore.getState().setLocalPlayer({ x, y, direction, isMoving: true });
   });
 
-  const { update, setPosition } = useMovement({
+  const { update, setPosition, updateFollow } = useMovement({
     isBlocked,
     onMove: onMoveRef.current,
     isFrozen: () => useGameStore.getState().localPlayer.isSitting === true,
@@ -408,18 +378,42 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     const logicalH = canvas.height / (window.devicePixelRatio || 1);
 
     const moveResult = update(dt);
+    let effectiveMoveResult = moveResult;
 
-    if (moveResult.isMoving) {
-      emitMoveRef.current(moveResult.x, moveResult.y, moveResult.direction);
+    // Follow (§3): while an active follow target exists, drive movement
+    // toward a trailing position behind them instead of waiting for
+    // keyboard input — but the instant a REAL key press produces movement
+    // (moveResult.isMoving, which only ever reflects keyboard input — see
+    // useMovement's tryMove), that's a manual move and immediately cancels
+    // the follow, per spec. Frozen (sitting) is left alone either way —
+    // follow just pauses until standing back up, same as keyboard input does.
+    const activeFollow = followInfoRef.current;
+    if (activeFollow) {
+      if (moveResult.isMoving) {
+        useGameStore.getState().setFollowInfo(null);
+        emitFollowUnfollowRef.current();
+      } else if (activeFollow.status === 'active' && !localPlayerRef.current.isSitting) {
+        const targetPlayer = Object.values(playerRecordsRef.current).find((p) => p.userId === activeFollow.targetUserId);
+        if (targetPlayer) {
+          const offset = FOLLOW_OFFSET[targetPlayer.direction] ?? FOLLOW_OFFSET.down;
+          const desiredX = targetPlayer.x + offset.dx * TILE_SIZE;
+          const desiredY = targetPlayer.y + offset.dy * TILE_SIZE;
+          effectiveMoveResult = updateFollow(desiredX, desiredY, dt);
+        }
+      }
+    }
+
+    if (effectiveMoveResult.isMoving) {
+      emitMoveRef.current(effectiveMoveResult.x, effectiveMoveResult.y, effectiveMoveResult.direction);
       wasMovingRef.current = true;
     } else if (wasMovingRef.current) {
-      emitStopRef.current(moveResult.direction);
+      emitStopRef.current(effectiveMoveResult.direction);
       useGameStore.getState().setLocalPlayer({ isMoving: false });
       wasMovingRef.current = false;
     }
 
-    const playerX = moveResult.x;
-    const playerY = moveResult.y;
+    const playerX = effectiveMoveResult.x;
+    const playerY = effectiveMoveResult.y;
 
     // Sit-in-chair: is there a sittable chair on the tile the player is
     // currently facing? Uses the STORED direction, not moveResult.direction
@@ -489,9 +483,9 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
 
         // Furniture/wall tiles have transparent sprite margins, so paint the
         // floor underneath first — otherwise gaps show the dark canvas backdrop.
-        drawFloorTile(ctx, tile, screenX, screenY);
+        drawFloorTile(ctx, tile, screenX, screenY, themeRef.current);
         if (tile.type !== 'floor' && tile.type !== 'portal' && tile.type !== 'spawn') {
-          drawTile(ctx, tile.type, screenX, screenY);
+          drawTile(ctx, tile.type, screenX, screenY, themeRef.current);
         }
 
         if (tile.type === 'portal') {
@@ -538,7 +532,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
         const hsx = hover.x * TILE_SIZE - cameraX;
         const hsy = hover.y * TILE_SIZE - cameraY;
         const activePaletteId = selectedPaletteRef.current;
-        const paletteEntry = activePaletteId ? TILE_PALETTE_BY_ID[activePaletteId] : undefined;
+        const paletteEntry = activePaletteId ? PALETTE_BY_ID[activePaletteId] : undefined;
         ctx.fillStyle = paletteEntry ? 'rgba(124,58,237,0.35)' : TILE_COLORS[selectedTileRef.current] + '80';
         const hw = paletteEntry ? paletteEntry.tilesW * TILE_SIZE : TILE_SIZE;
         const hh = paletteEntry ? TILE_SIZE : TILE_SIZE;
@@ -635,14 +629,16 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     const playerRecords = playerRecordsRef.current;
     const localPlayerId = localPlayerIdRef.current;
     const localPlayer = localPlayerRef.current;
-    const walkOffset = moveResult.isMoving ? Math.sin(timestamp * 0.008) * 2 : 0;
+    const walkOffset = effectiveMoveResult.isMoving ? Math.sin(timestamp * 0.008) * 2 : 0;
     const localAvatar: Avatar = {
-      ...localPlayer, x: playerX, y: playerY, isMoving: moveResult.isMoving,
-      // moveResult.direction resets to a hardcoded 'down' the instant no
-      // movement key is held — fine for movement itself, but wrong to draw
-      // from while idle/sitting, where the stored direction (last real
-      // heading, or the sit-facing direction set in performSit) is correct.
-      direction: moveResult.isMoving ? moveResult.direction : localPlayer.direction,
+      ...localPlayer, x: playerX, y: playerY, isMoving: effectiveMoveResult.isMoving,
+      // effectiveMoveResult.direction resets to a hardcoded 'down' the
+      // instant no movement key is held (or, while following, the instant
+      // the follower reaches the target and stops) — fine for movement
+      // itself, but wrong to draw from while idle/sitting, where the
+      // stored direction (last real heading, or the sit-facing direction
+      // set in performSit) is correct.
+      direction: effectiveMoveResult.isMoving ? effectiveMoveResult.direction : localPlayer.direction,
       id: localPlayerId,
     };
     const remoteAvatars = Object.values(playerRecords).filter((p) => p.id !== localPlayerId);
@@ -815,7 +811,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
 
     const paletteId = selectedPaletteRef.current;
     if (paletteId) {
-      const entry = TILE_PALETTE_BY_ID[paletteId];
+      const entry = PALETTE_BY_ID[paletteId];
       if (entry?.category === 'floor') {
         isPaintingRef.current = true;
         onFloorPaint(tile.x, tile.y, paletteId);
@@ -846,7 +842,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
       if (tile.x <= 0 || tile.x >= MAP_WIDTH - 1 || tile.y <= 0 || tile.y >= MAP_HEIGHT - 1) return;
       const paletteId = selectedPaletteRef.current;
       if (paletteId) {
-        const entry = TILE_PALETTE_BY_ID[paletteId];
+        const entry = PALETTE_BY_ID[paletteId];
         if (entry?.category === 'floor') onFloorPaint(tile.x, tile.y, paletteId);
         return;
       }

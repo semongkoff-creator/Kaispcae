@@ -73,17 +73,19 @@ function VideoTile({
 
   return (
     <div className="pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden w-40 border border-purple-200 shadow-lg transition-all duration-300 animate-fade-in">
-      {/* Never mirror. The local preview used to have no transform either,
-          but this is explicit so no global CSS can ever flip it by
-          accident — and this is purely a browser-side style, it can't
-          possibly affect the actual MediaStreamTrack sent to WebRTC peers,
-          so remote viewers were never at risk either way. */}
+      {/* Mirror the LOCAL self-preview only — raising your right hand should
+          show on the right side of YOUR OWN preview, same as a real mirror
+          (every video call app does this for the self-view). Remote tiles
+          stay unmirrored so you see others exactly as their camera sees
+          them. This is purely a browser-side style on the <video> element —
+          it can't touch the actual MediaStreamTrack sent to WebRTC peers,
+          so remote viewers were never at risk of seeing a flipped feed. */}
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted={isLocal}
-        style={{ transform: 'none' }}
+        style={{ transform: isLocal ? 'scaleX(-1)' : 'none' }}
         className="w-full h-24 object-cover bg-purple-100"
       />
       <div className="px-2 py-1 text-xs flex items-center justify-between">

@@ -16,9 +16,14 @@ interface ChatPanelProps {
   currentZone?: { id: string; name: string } | null;
   zoneMessages?: ChatMessage[];
   onSendZone?: (text: string, zoneId: string) => void;
+  // Only admins can pin a message as the room's Notice banner — the
+  // server re-checks this independently (see roomHandler.ts's NOTICE_PIN
+  // handler), this just decides whether the option is offered at all.
+  isAdmin?: boolean;
+  onPinNotice?: (message: ChatMessage) => void;
 }
 
-export function ChatPanel({ messages, localPlayerName, onSend, onBubble, onEmote, currentZone, zoneMessages = [], onSendZone }: ChatPanelProps) {
+export function ChatPanel({ messages, localPlayerName, onSend, onBubble, onEmote, currentZone, zoneMessages = [], onSendZone, isAdmin, onPinNotice }: ChatPanelProps) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [proximityMode, setProximityMode] = useState(false);
@@ -107,7 +112,9 @@ export function ChatPanel({ messages, localPlayerName, onSend, onBubble, onEmote
               return (
                 <div
                   key={m.id}
-                  className={`rounded-lg px-2 py-1 ${
+                  onContextMenu={isAdmin && onPinNotice ? (e) => { e.preventDefault(); onPinNotice(m); } : undefined}
+                  title={isAdmin && onPinNotice ? 'Right-click to pin as notice' : undefined}
+                  className={`rounded-lg px-2 py-1 ${isAdmin && onPinNotice ? 'cursor-context-menu' : ''} ${
                     isMentioned ? 'bg-amber-100' : isOwn ? 'bg-purple-600' : 'bg-gray-100'
                   }`}
                 >

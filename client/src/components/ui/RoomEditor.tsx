@@ -3,7 +3,8 @@ import { LockFill, X, SaveFill, ArrowClockwise, MegaphoneFill } from 'react-boot
 import { TileType, Zone, ZoneType, Furniture } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { createDefaultRoom } from '@/utils/createDefaultRoom';
-import { TILE_PALETTE, PaletteEntry } from '@/data/tilePaletteManifest';
+import { PaletteEntry } from '@/data/tilePaletteManifest';
+import { PALETTE_BY_THEME } from '@/data/themeAssets';
 
 const ZONE_COLORS = ['#7c3aed', '#4d96ff', '#10b981', '#f59e0b', '#ef4444', '#64748b'];
 const BANNER_COLORS = ['#7c3aed', '#4d96ff', '#10b981', '#f59e0b', '#ef4444', '#1f2937'];
@@ -190,12 +191,17 @@ const BASIC_TYPES: { type: TileType; label: string; color: string }[] = [
 
 // Modern_Office_Singles files are always exported on a fixed 64x96 canvas
 // (see tilePaletteManifest.ts) — used to scale the CSS background crop.
+// scifi-office entries set their own srcW/srcH instead (each RSI state's PNG
+// has its own real dimensions — see scifiOfficePaletteManifest.ts), since
+// they don't share that one fixed canvas size.
 const SOURCE_W = 64;
 const SOURCE_H = 96;
 const TILE_PX = 32;
 const THUMB_BOX = 40;
 
 function PaletteThumb({ entry }: { entry: PaletteEntry }) {
+  const fullW = entry.srcW ?? SOURCE_W;
+  const fullH = entry.srcH ?? SOURCE_H;
   const cropW = entry.tilesW * TILE_PX;
   const cropH = entry.tilesH * TILE_PX;
   const scale = Math.min(THUMB_BOX / cropW, THUMB_BOX / cropH);
@@ -205,7 +211,7 @@ function PaletteThumb({ entry }: { entry: PaletteEntry }) {
         width: cropW * scale,
         height: cropH * scale,
         backgroundImage: `url(${entry.src})`,
-        backgroundSize: `${SOURCE_W * scale}px ${SOURCE_H * scale}px`,
+        backgroundSize: `${fullW * scale}px ${fullH * scale}px`,
         backgroundPosition: `-${entry.srcX * scale}px -${entry.srcY * scale}px`,
         backgroundRepeat: 'no-repeat',
         imageRendering: 'pixelated',
@@ -242,8 +248,8 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
   const banners = furniture.filter((f) => f.kind === 'banner');
 
   const handleReset = useCallback(() => {
-    const room = createDefaultRoom('main-office', 'Main Office');
     const state = useGameStore.getState();
+    const room = createDefaultRoom('main-office', 'Main Office', state.theme);
     const tileTypes = room.tiles.map((row) => row.map((t) => t.type));
     state.pushTileHistory(tileTypes);
     state.setTiles(room.tiles);
@@ -251,9 +257,15 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
     state.setZones(room.zones);
   }, []);
 
-  const floorEntries = TILE_PALETTE.filter((e) => e.category === 'floor');
+  // Palette shown here always matches the room's own theme (set at creation
+  // — see Lobby.tsx) — the scifi-office palette never mixes with the
+  // modern-interiors one, they're two entirely separate arrays keyed by
+  // theme (see themeAssets.ts).
+  const theme = useGameStore((s) => s.theme);
+  const activePalette = PALETTE_BY_THEME[theme];
+  const floorEntries = activePalette.filter((e) => e.category === 'floor');
   const [objectTab, setObjectTab] = useState<'furniture' | 'decor' | 'electronics'>('furniture');
-  const objectEntries = TILE_PALETTE.filter((e) => e.category === objectTab);
+  const objectEntries = activePalette.filter((e) => e.category === objectTab);
 
   return (
     <div className="absolute top-0 right-0 z-50 w-56 h-full bg-white/95 backdrop-blur-md border-l border-purple-100 shadow-2xl p-4 pointer-events-auto overflow-y-auto"

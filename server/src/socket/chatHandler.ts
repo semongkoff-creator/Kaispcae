@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, ChatMessage } from '@virtualmeet/shared';
-import { getSocketIdsInZone } from './zoneHandler';
+import { getSocketIdsInZone, isSocketInZone } from './zoneHandler';
 import { socketRateLimit } from '../middleware/rateLimit';
 
 let messageId = 0;
@@ -15,6 +15,11 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
 
   socket.on(SocketEvents.CHAT_MESSAGE, (text: string, isProximity?: boolean, zoneId?: string) => {
     if (!canSendChat(socket.id)) return;
+    // Reject a claimed zone chat from a sender not actually tracked as
+    // being inside that zone — the client-side UI already hides the
+    // private tab once you leave (see ChatPanel.tsx), but a modified
+    // client could still emit this directly with a stale/spoofed zoneId.
+    if (zoneId && !(currentRoom && isSocketInZone(currentRoom, socket.id, zoneId))) return;
     const msg: ChatMessage = {
       id: `msg-${++messageId}`,
       senderId: socket.id,
