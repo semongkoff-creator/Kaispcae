@@ -1,7 +1,19 @@
-import { Avatar, TileType, MAP_WIDTH, MAP_HEIGHT, createDefaultOfficeLayout } from '@virtualmeet/shared';
+import { Avatar, RoomTile, TileType, createDefaultOfficeLayout } from '@virtualmeet/shared';
 
 // Blocking tiles that the player cannot walk through
-const BLOCKED_TILES: Set<TileType> = new Set(['wall', 'desk', 'chair']);
+export const BLOCKED_TILES: Set<TileType> = new Set(['wall', 'desk', 'chair']);
+
+// Shared with GameCanvas.tsx's own movement collision check and the minimap
+// click-to-teleport handler (App.tsx) — anywhere a target tile needs
+// validating before moving/placing the player there uses this exact rule,
+// so a minimap click can't drop someone into a wall/desk tile that normal
+// WASD movement would never let them walk into in the first place.
+export function isTileBlocked(tiles: RoomTile[][], tileX: number, tileY: number): boolean {
+  if (tileY < 0 || tileY >= tiles.length) return true;
+  const row = tiles[tileY];
+  if (!row || tileX < 0 || tileX >= row.length) return true;
+  return BLOCKED_TILES.has(row[tileX].type);
+}
 
 // Default avatar colors for generated players
 const AVATAR_COLORS = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a786df', '#6bcb77', '#4d96ff'];
@@ -35,11 +47,6 @@ export function createDefaultRoom(id: string, name: string) {
     furniture,
     zones,
     players: [localPlayer],
-    isBlocked: (tileX: number, tileY: number) => {
-      if (tileX < 0 || tileX >= MAP_WIDTH || tileY < 0 || tileY >= MAP_HEIGHT) {
-        return true;
-      }
-      return BLOCKED_TILES.has(tiles[tileY][tileX].type);
-    },
+    isBlocked: (tileX: number, tileY: number) => isTileBlocked(tiles, tileX, tileY),
   };
 }

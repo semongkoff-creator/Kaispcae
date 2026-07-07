@@ -17,6 +17,7 @@ import { useMovement } from '@/hooks/useMovement';
 import { drawAvatar } from './AvatarSprite';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
 import { TILE_PALETTE_BY_ID } from '@/data/tilePaletteManifest';
+import { isTileBlocked } from '@/utils/createDefaultRoom';
 
 // Fallback solid colors, used only while the real tileset image is still loading.
 const TILE_COLORS: Record<TileType, string> = {
@@ -145,8 +146,6 @@ function drawFurnitureLayer(
 
 const AVATAR_RADIUS = 14;
 
-const BLOCKED_TILES: Set<TileType> = new Set(['wall', 'desk', 'chair']);
-
 function hexToRgb(hex: string | undefined): [number, number, number] | null {
   if (!hex) return null;
   const m = /^#?([0-9a-f]{6})$/i.exec(hex);
@@ -264,10 +263,9 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
   const lastPortalTileRef = useRef<string | null>(null);
 
   const isBlocked = useCallback((tileX: number, tileY: number) => {
-    if (tileX < 0 || tileX >= MAP_WIDTH || tileY < 0 || tileY >= MAP_HEIGHT) return true;
     const t = tilesRef.current;
-    if (t.length === 0) return false;
-    return BLOCKED_TILES.has(t[tileY]?.[tileX]?.type);
+    if (t.length === 0) return false; // room state not loaded yet — don't block movement
+    return isTileBlocked(t, tileX, tileY);
   }, []);
 
   const onMoveRef = useRef((x: number, y: number, direction: Direction) => {
@@ -291,6 +289,20 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
   const nearbyChairRef = useRef<{ furniture: Furniture; tileX: number; tileY: number } | null>(null);
 
   const performSit = useCallback((chair: Furniture, tileX: number, tileY: number) => {
+    // Seat at the exact tile faced, not always the furniture's anchor tile —
+    // a multi-tile sofa is one seat spanning several tiles, so sitting from
+    // its right half shouldn't visually snap the player over to its left end.
+    const chairCenterX = tileX * TILE_SIZE + TILE_SIZE / 2;
+    const chairCenterY = tileY * TILE_SIZE + TILE_SIZE / 2;
+
+    // Refuse if another player is already seated on this exact tile —
+    // without this check, two players could both sit at the same spot and
+    // their avatars would render fully overlapping each other.
+    const occupied = Object.values(playerRecordsRef.current).some(
+      (p) => p.isSitting && p.x === chairCenterX && p.y === chairCenterY,
+    );
+    if (occupied) return;
+
     const state = useGameStore.getState();
     const player = state.localPlayer;
     // The chair's own tile is movement-blocked, so simply leaving the
@@ -298,11 +310,6 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     // remember where they were so standing up can put them back.
     state.setSitReturnPos({ x: player.x, y: player.y });
     state.setSittingFurnitureId(chair.id);
-    // Seat at the exact tile faced, not always the furniture's anchor tile —
-    // a multi-tile sofa is one seat spanning several tiles, so sitting from
-    // its right half shouldn't visually snap the player over to its left end.
-    const chairCenterX = tileX * TILE_SIZE + TILE_SIZE / 2;
-    const chairCenterY = tileY * TILE_SIZE + TILE_SIZE / 2;
     const OPPOSITE: Record<Direction, Direction> = { up: 'down', down: 'up', left: 'right', right: 'left' };
     // Face away from the chair — outward into the room, like someone
     // sitting down rather than facing into the seat back.

@@ -1,4 +1,4 @@
-import { Avatar, BodyShape, Accessory, Expression, Direction } from '@virtualmeet/shared';
+import { Avatar, BodyShape, Accessory, Expression, Direction, TILE_SIZE } from '@virtualmeet/shared';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
 
 const AVATAR_RADIUS = 14;
@@ -50,11 +50,17 @@ export function drawAvatar(
 
   // ─── Pixel-art sprite (falls back to shape below if the sprite images
   // haven't finished loading yet, or none is configured) ──────────────
+  // Sitting shrinks the sprite down to tile width (32px) instead of its
+  // normal 40px — chairs are placed edge-to-edge with no gap (a desk row,
+  // in particular), and the wider standing/walking size visibly overlapped
+  // the armrests of whichever chairs sat directly left/right, reading as
+  // "colliding with the furniture" rather than sitting in it.
+  const spriteSize = avatar.isSitting ? TILE_SIZE : SPRITE_DISPLAY_SIZE;
   let renderedSprite = false;
   if (config?.spriteMode === 'premade' && config.premadeId) {
-    renderedSprite = drawPremadeAvatar(ctx, cx, cy, config.premadeId, avatar.direction, avatar.isMoving, timestamp);
+    renderedSprite = drawPremadeAvatar(ctx, cx, cy, config.premadeId, avatar.direction, avatar.isMoving, timestamp, spriteSize);
   } else if (config?.spriteMode === 'layered' && config.bodyId) {
-    renderedSprite = drawLayeredAvatar(ctx, cx, cy, config, avatar.direction, avatar.isMoving, timestamp);
+    renderedSprite = drawLayeredAvatar(ctx, cx, cy, config, avatar.direction, avatar.isMoving, timestamp, spriteSize);
   }
 
   if (!renderedSprite) {
@@ -148,10 +154,11 @@ function drawLayeredAvatar(
   direction: Direction,
   isMoving: boolean,
   timestamp: number,
+  displaySize: number = SPRITE_DISPLAY_SIZE,
 ): boolean {
   const { col, row } = spriteFrameCoords(direction, isMoving, timestamp);
-  const dx = cx - SPRITE_DISPLAY_SIZE / 2;
-  const dy = cy - SPRITE_DISPLAY_SIZE / 2;
+  const dx = cx - displaySize / 2;
+  const dy = cy - displaySize / 2;
 
   let drewAny = false;
   for (const [category, field] of LAYER_CATEGORIES) {
@@ -159,7 +166,7 @@ function drawLayeredAvatar(
     if (!fileName) continue;
     const drew = drawSpriteFrame(ctx, `${GENERATOR_BASE}/${category}/${fileName}`, {
       col, row, cellWidth: FRAME_SIZE, cellHeight: FRAME_SIZE,
-      dx, dy, dWidth: SPRITE_DISPLAY_SIZE, dHeight: SPRITE_DISPLAY_SIZE,
+      dx, dy, dWidth: displaySize, dHeight: displaySize,
     });
     drewAny = drewAny || drew;
   }
@@ -174,14 +181,15 @@ function drawPremadeAvatar(
   direction: Direction,
   isMoving: boolean,
   timestamp: number,
+  displaySize: number = SPRITE_DISPLAY_SIZE,
 ): boolean {
   const { col, row } = spriteFrameCoords(direction, isMoving, timestamp);
-  const dx = cx - SPRITE_DISPLAY_SIZE / 2;
-  const dy = cy - SPRITE_DISPLAY_SIZE / 2;
+  const dx = cx - displaySize / 2;
+  const dy = cy - displaySize / 2;
 
   return drawSpriteFrame(ctx, `${PREMADE_BASE}/${premadeId}`, {
     col, row, cellWidth: FRAME_SIZE, cellHeight: FRAME_SIZE,
-    dx, dy, dWidth: SPRITE_DISPLAY_SIZE, dHeight: SPRITE_DISPLAY_SIZE,
+    dx, dy, dWidth: displaySize, dHeight: displaySize,
   });
 }
 

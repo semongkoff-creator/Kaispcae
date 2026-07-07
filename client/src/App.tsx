@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Tools, GearFill, Clipboard, BoxArrowLeft } from 'react-bootstrap-icons';
-import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, Furniture } from '@virtualmeet/shared';
+import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture } from '@virtualmeet/shared';
 import { TILE_PALETTE_BY_ID } from './data/tilePaletteManifest';
 import { GameCanvas } from './components/canvas/GameCanvas';
 import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
@@ -22,7 +22,7 @@ import { Lobby } from './pages/Lobby';
 import { LoginPage } from './pages/LoginPage';
 import { useAuth } from './hooks/useAuth';
 import { api } from './services/api';
-import { createDefaultRoom } from './utils/createDefaultRoom';
+import { createDefaultRoom, isTileBlocked } from './utils/createDefaultRoom';
 import { useGameStore } from './stores/gameStore';
 import { useSocket } from './hooks/useSocket';
 import { useProximity, findZoneAt } from './hooks/useProximity';
@@ -531,7 +531,17 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
         players={Object.values(allPlayers)}
         localPlayerId={localPlayerId}
         onTeleport={(x, y) => {
-          useGameStore.getState().setLocalPlayer({ x, y });
+          // Reject clicks on walls/furniture — the minimap previously
+          // teleported straight to wherever was clicked with no validation,
+          // so clicking on a wall dropped the player inside it, and once
+          // there they were stuck (every direction's own collision check
+          // correctly refuses to move a player who's already standing in a
+          // blocked tile back out the way they "shouldn't" have gotten in).
+          const state = useGameStore.getState();
+          const tileX = Math.floor(x / TILE_SIZE);
+          const tileY = Math.floor(y / TILE_SIZE);
+          if (state.tiles.length > 0 && isTileBlocked(state.tiles, tileX, tileY)) return;
+          state.setLocalPlayer({ x, y });
         }}
         visible={showMinimap}
       />
