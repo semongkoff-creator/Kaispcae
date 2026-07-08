@@ -60,14 +60,21 @@ recordings.get('/recordings/:id/download', authenticateToken, async (req: AuthRe
     if (row.status !== 'done' || !row.fileUrl) {
       return res.status(400).json({ error: 'Recording is not ready for download' });
     }
-    if (row.downloadExpiresAt && new Date() > row.downloadExpiresAt) {
-      return res.status(410).json({ error: 'Download link has expired' });
-    }
-    if (row.downloadCount >= row.maxDownloads) {
-      return res.status(410).json({ error: 'Maximum download count reached' });
-    }
 
-    await prisma.recording.update({ where: { id: row.id }, data: { downloadCount: { increment: 1 } } });
+    // Check-then-increment as two separate statements would let two
+    // concurrent requests both read downloadCount < maxDownloads before
+    // either's increment lands, letting more than maxDownloads through.
+    // A single conditional UPDATE re-checks count/expiry against the row's
+    // CURRENT state at the moment Postgres applies it — only one of two
+    // racing requests can match a row still under the limit, so `count`
+    // below is 0 for every request after the last one that legitimately won.
+    const result = await prisma.recording.updateMany({
+      where: { id: row.id, downloadCount: { lt: row.maxDownloads }, downloadExpiresAt: { gt: new Date() } },
+      data: { downloadCount: { increment: 1 } },
+    });
+    if (result.count === 0) {
+      return res.status(410).json({ error: 'Download link has expired or reached its maximum download count' });
+    }
 
     const filename = path.basename(row.fileUrl);
     const filePath = path.join(process.cwd(), 'uploads', filename);

@@ -8,7 +8,11 @@ interface UseScreenRecordingOptions {
   activeRecording: ActiveRecordingInfo | null;
   findSocketIdByUserId: (userId: string) => string | undefined;
   emitRecordingStop: (recordingId: string) => void;
-  emitRecordingFinalize: (recordingId: string, fileUrl: string) => void;
+  // fileUrl is null to signal "capture never produced anything" (couldn't
+  // resolve the target's stream, or the upload failed) — recordingHandler.ts
+  // marks the row 'failed' and releases the one-recording-per-room lock in
+  // that case, instead of leaving it stuck at 'recording' forever.
+  emitRecordingFinalize: (recordingId: string, fileUrl: string | null) => void;
 }
 
 // §7 — Screen Recording capture, entirely client-side (see the Recording
@@ -19,6 +23,7 @@ interface UseScreenRecordingOptions {
 // moment *this* client requests a recording, before the server confirms it.
 export function useScreenRecording({ activeRecording, findSocketIdByUserId, emitRecordingStop, emitRecordingFinalize }: UseScreenRecordingOptions) {
   const pendingTargetRef = useRef<string | null>(null);
+  const pendingClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -38,10 +43,19 @@ export function useScreenRecording({ activeRecording, findSocketIdByUserId, emit
   // Request a new recording — capture itself only begins once the server
   // confirms via RECORDING_STARTED (see the effect below), so a rejected
   // request (no permission, lock held, target gone) never spins up a
-  // MediaRecorder at all.
+  // MediaRecorder at all. But a rejection arrives as the generic
+  // 'admin:error' event (see useSocket.ts), which this hook has no way to
+  // react to — without the timeout below, pendingTargetRef would stay set
+  // to targetUserId forever, and a LATER, unrelated recording of that same
+  // person (started by someone else entirely) would be wrongly claimed as
+  // mine the moment its RECORDING_STARTED arrives.
   const requestRecording = useCallback((targetUserId: string, title: string, emitStart: (targetUserId: string, title: string) => void) => {
     pendingTargetRef.current = targetUserId;
     emitStart(targetUserId, title);
+    if (pendingClearTimeoutRef.current) clearTimeout(pendingClearTimeoutRef.current);
+    pendingClearTimeoutRef.current = setTimeout(() => {
+      if (pendingTargetRef.current === targetUserId) pendingTargetRef.current = null;
+    }, 5000);
   }, []);
 
   const stopMyRecording = useCallback(() => {
@@ -54,11 +68,18 @@ export function useScreenRecording({ activeRecording, findSocketIdByUserId, emit
     if (!activeRecording) return;
     if (pendingTargetRef.current !== activeRecording.targetUserId) return; // not my request
     pendingTargetRef.current = null;
+    if (pendingClearTimeoutRef.current) {
+      clearTimeout(pendingClearTimeoutRef.current);
+      pendingClearTimeoutRef.current = null;
+    }
 
     const targetSocketId = findSocketIdByUserId(activeRecording.targetUserId);
     const stream = targetSocketId ? webrtcService.getRecordingStream(targetSocketId) : null;
     if (!stream) {
       console.error('[recording] could not capture target stream — no active connection to them');
+      // Release the lock immediately — without this the row stays at
+      // 'recording' until the starter disconnects (see the bug this fixes).
+      emitRecordingFinalize(activeRecording.recordingId, null);
       return;
     }
 
@@ -79,6 +100,7 @@ export function useScreenRecording({ activeRecording, findSocketIdByUserId, emit
         emitRecordingFinalize(activeRecording.recordingId, url);
       } catch (e) {
         console.error('[recording] upload failed:', e);
+        emitRecordingFinalize(activeRecording.recordingId, null);
       } finally {
         setUploading(false);
         recorderRef.current = null;

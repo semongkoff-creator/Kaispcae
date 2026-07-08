@@ -72,23 +72,37 @@ export function registerRecordingHandlers(io: Server, socket: Socket): void {
         return;
       }
 
-      // Lock — spec's own explicit rule: only one active recording per room.
-      const existing = await prisma.recording.findFirst({ where: { roomId: dbRoom.id, status: { in: ['recording', 'processing'] } } });
-      if (existing) {
-        socket.emit('admin:error', { message: 'A recording is already in progress in this room' });
-        return;
+      // Lock — spec's own explicit rule: only one active recording per
+      // room. Plain findFirst-then-create would let two RECORDING_START
+      // calls that arrive within the same tick both see "no existing
+      // recording" and both create a row; wrapping the check+create in a
+      // Serializable transaction makes Postgres abort one of them with a
+      // serialization conflict (caught below) instead.
+      let row;
+      try {
+        row = await prisma.$transaction(async (tx) => {
+          const existing = await tx.recording.findFirst({ where: { roomId: dbRoom.id, status: { in: ['recording', 'processing'] } } });
+          if (existing) throw new Error('RECORDING_LOCK_HELD');
+          return tx.recording.create({
+            data: {
+              roomId: dbRoom.id,
+              startedBy: uid,
+              startedByName: getPlayerName(socket.id),
+              targetUserId: data.targetUserId,
+              targetName: getPlayerName(targetSocketId),
+              title,
+            },
+          });
+        }, { isolationLevel: 'Serializable' });
+      } catch (e) {
+        const isLockConflict = e instanceof Error && e.message === 'RECORDING_LOCK_HELD';
+        const isSerializationFailure = !!e && typeof e === 'object' && 'code' in e && (e as { code?: string }).code === 'P2034';
+        if (isLockConflict || isSerializationFailure) {
+          socket.emit('admin:error', { message: 'A recording is already in progress in this room' });
+          return;
+        }
+        throw e;
       }
-
-      const row = await prisma.recording.create({
-        data: {
-          roomId: dbRoom.id,
-          startedBy: uid,
-          startedByName: getPlayerName(socket.id),
-          targetUserId: data.targetUserId,
-          targetName: getPlayerName(targetSocketId),
-          title,
-        },
-      });
 
       // Per-socket visibility (spec §7's explicit rule): only the target
       // (sees it on their own tile) and admin+ (see it on any relevant
@@ -137,15 +151,26 @@ export function registerRecordingHandlers(io: Server, socket: Socket): void {
     }
   });
 
-  socket.on(SocketEvents.RECORDING_FINALIZE, async (data: { recordingId: string; fileUrl: string }) => {
+  // A falsy/empty fileUrl means the client never actually captured
+  // anything (e.g. it couldn't resolve a stream for the target — see
+  // useScreenRecording.ts) rather than a completed upload; that still has
+  // to release the one-recording-per-room lock, just as a "failed" instead
+  // of "done", or the room would stay stuck until the starter disconnects.
+  socket.on(SocketEvents.RECORDING_FINALIZE, async (data: { recordingId: string; fileUrl: string | null }) => {
     const room = socketToRoom.get(socket.id);
     const uid = socketToUid.get(socket.id);
-    if (!room || !uid || !data?.recordingId || !data.fileUrl) return;
+    if (!room || !uid || !data?.recordingId) return;
 
     try {
       const prisma = getPrisma();
       const row = await prisma.recording.findUnique({ where: { id: data.recordingId } });
       if (!row || row.startedBy !== uid) return;
+
+      if (!data.fileUrl) {
+        await prisma.recording.update({ where: { id: row.id }, data: { status: 'failed', endedAt: new Date() } });
+        io.to(room).emit(SocketEvents.RECORDING_FAILED, { recordingId: row.id, targetUserId: row.targetUserId });
+        return;
+      }
 
       await prisma.recording.update({
         where: { id: row.id },

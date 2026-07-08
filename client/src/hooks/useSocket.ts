@@ -478,7 +478,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_STOP, { recordingId });
   }, []);
 
-  const emitRecordingFinalize = useCallback((recordingId: string, fileUrl: string) => {
+  const emitRecordingFinalize = useCallback((recordingId: string, fileUrl: string | null) => {
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 

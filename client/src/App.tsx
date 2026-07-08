@@ -135,9 +135,15 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
     emitRecordingStop,
     emitRecordingFinalize,
   });
+  // §7 — recording targets only, so excludes myself even if I'm spotlighted:
+  // the mesh only gives me a capturable stream for REMOTE peers
+  // (webrtcService.getRecordingStream looks up the peers Map, which never
+  // contains my own connection) — recording my own outgoing camera isn't
+  // reachable through this architecture, so it's left out of the picker
+  // instead of silently failing after the server's already created the row.
   const spotlightedPlayers = spotlightedUserIds
+    .filter((uid) => uid !== localUserId)
     .map((uid) => {
-      if (uid === localUserId) return { userId: uid, name: localPlayer.name };
       const p = Object.values(playerRecords).find((rec) => rec.userId === uid);
       return p ? { userId: uid, name: p.name } : null;
     })
