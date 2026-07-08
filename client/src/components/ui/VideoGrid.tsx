@@ -1,38 +1,48 @@
-import { useRef, useEffect } from 'react';
-import { MicMuteFill, CameraVideoOffFill } from 'react-bootstrap-icons';
+import { useRef, useEffect, useState } from 'react';
+import { MicMuteFill, CameraVideoOffFill, PipFill, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill } from 'react-bootstrap-icons';
 import { ProximityPlayer } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 
 interface VideoGridProps {
   nearby: ProximityPlayer[];
   localStream: MediaStream | null;
+  localScreenStream: MediaStream | null;
   remoteStreams: Map<string, MediaStream>;
+  remoteScreenStreams: Map<string, MediaStream>;
   micMuted: boolean;
   cameraOff: boolean;
+  onManualVolumeChange: (id: string, volume: number) => void;
+  // §7 — set only when I'm allowed to know a recording is happening at all
+  // (see recordingHandler.ts's per-socket RECORDING_STARTED emit); resolved
+  // here from userId to socket id since that's how tiles are keyed.
+  recordedTargetUserId?: string;
+  isLocalBeingRecorded?: boolean;
 }
 
-export function VideoGrid({ nearby, localStream, remoteStreams, micMuted, cameraOff }: VideoGridProps) {
+export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded }: VideoGridProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
 
+  // §6 — 'not_visible' peers get no tile at all (same as before); a
+  // 'translucent' peer still gets one, just dimmed (see VideoTile's opacity).
   const videoTiles = nearby
-    .filter((p) => p.inProximity)
+    .filter((p) => p.visibility !== 'not_visible')
     .map((p) => ({
       id: p.id,
       name: playerRecords[p.id]?.name || 'Unknown',
       stream: remoteStreams.get(p.id)!,
+      screenStream: remoteScreenStreams.get(p.id),
+      translucent: p.visibility === 'translucent',
+      isBeingRecorded: !!recordedTargetUserId && playerRecords[p.id]?.userId === recordedTargetUserId,
     }))
     .filter((t) => t.stream);
 
   return (
     <div className="absolute top-16 right-4 z-20 flex flex-col gap-2 pointer-events-none">
       {localStream && (
-        <VideoTile
-          name="You"
-          stream={localStream}
-          isLocal
-          micMuted={micMuted}
-          cameraOff={cameraOff}
-        />
+        <VideoTile name="You" stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} />
+      )}
+      {localScreenStream && (
+        <VideoTile name="Your screen" stream={localScreenStream} isLocal isScreen />
       )}
       {videoTiles.map((tile) => (
         <VideoTile
@@ -40,8 +50,16 @@ export function VideoGrid({ nearby, localStream, remoteStreams, micMuted, camera
           name={tile.name}
           stream={tile.stream}
           isLocal={false}
+          translucent={tile.translucent}
+          onVolumeChange={(v) => onManualVolumeChange(tile.id, v)}
+          isBeingRecorded={tile.isBeingRecorded}
         />
       ))}
+      {videoTiles
+        .filter((t) => t.screenStream)
+        .map((tile) => (
+          <VideoTile key={`${tile.id}-screen`} name={`${tile.name}'s screen`} stream={tile.screenStream!} isLocal={false} isScreen />
+        ))}
     </div>
   );
 }
@@ -52,14 +70,23 @@ function VideoTile({
   isLocal,
   micMuted,
   cameraOff,
+  isScreen,
+  translucent,
+  onVolumeChange,
+  isBeingRecorded,
 }: {
   name: string;
   stream: MediaStream;
   isLocal: boolean;
   micMuted?: boolean;
   cameraOff?: boolean;
+  isScreen?: boolean;
+  translucent?: boolean;
+  onVolumeChange?: (volume: number) => void;
+  isBeingRecorded?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [volume, setVolume] = useState(1);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -71,32 +98,87 @@ function VideoTile({
     };
   }, [stream]);
 
+  const handlePip = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (document.pictureInPictureElement === video) {
+      document.exitPictureInPicture().catch(() => {});
+    } else {
+      video.requestPictureInPicture?.().catch(() => {});
+    }
+  };
+
   return (
-    <div className="pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden w-40 border border-purple-200 shadow-lg transition-all duration-300 animate-fade-in">
+    <div
+      className="pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden w-40 border border-purple-200 shadow-lg transition-all duration-300 animate-fade-in group relative"
+      style={{ opacity: translucent ? 0.5 : 1 }}
+    >
       {/* Mirror the LOCAL self-preview only — raising your right hand should
           show on the right side of YOUR OWN preview, same as a real mirror
           (every video call app does this for the self-view). Remote tiles
-          stay unmirrored so you see others exactly as their camera sees
-          them. This is purely a browser-side style on the <video> element —
-          it can't touch the actual MediaStreamTrack sent to WebRTC peers,
-          so remote viewers were never at risk of seeing a flipped feed. */}
+          and screen shares stay unmirrored. This is purely a browser-side
+          style on the <video> element — it can't touch the actual
+          MediaStreamTrack sent to WebRTC peers. */}
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted={isLocal}
-        style={{ transform: isLocal ? 'scaleX(-1)' : 'none' }}
+        style={{ transform: isLocal && !isScreen ? 'scaleX(-1)' : 'none' }}
         className="w-full h-24 object-cover bg-purple-100"
       />
-      <div className="px-2 py-1 text-xs flex items-center justify-between">
+      {/* §6 — PIP, available on every tile (local or remote, camera or
+          screen) via the standard requestPictureInPicture API; shown on
+          hover so it doesn't clutter the small tile by default. */}
+      <button
+        onClick={handlePip}
+        title="Picture-in-picture"
+        className="absolute top-1 right-1 w-5 h-5 rounded bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+      >
+        <PipFill size={11} />
+      </button>
+      {isScreen && (
+        <span className="absolute top-1 left-1 bg-black/50 text-white rounded p-0.5">
+          <DisplayFill size={10} />
+        </span>
+      )}
+      {isBeingRecorded && (
+        <span className="absolute top-1 left-1 bg-red-600/90 text-white text-[9px] font-bold rounded px-1 py-0.5 inline-flex items-center gap-0.5">
+          <RecordCircleFill size={9} /> REC
+        </span>
+      )}
+      <div className="px-2 py-1 text-xs flex items-center justify-between gap-1">
         <span className="text-gray-700 truncate flex-1">{name}</span>
         {isLocal && (
-          <span className="flex gap-1">
+          <span className="flex gap-1 shrink-0">
             {micMuted && <MicMuteFill className="text-red-500" size={12} />}
             {cameraOff && <CameraVideoOffFill className="text-red-500" size={12} />}
           </span>
         )}
       </div>
+      {/* §6 — manual per-listener volume, purely client-side (spec's own
+          rule: no server sync needed, it's just my own listening preference).
+          Not shown for screen-share tiles or my own tiles — screen share
+          carries no audio track here, and muting yourself already has the
+          mic button. */}
+      {!isLocal && !isScreen && onVolumeChange && (
+        <div className="px-2 pb-1.5 flex items-center gap-1.5">
+          {volume === 0 ? <VolumeMuteFill size={10} className="text-gray-400 shrink-0" /> : <VolumeUpFill size={10} className="text-gray-400 shrink-0" />}
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.1}
+            value={volume}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setVolume(v);
+              onVolumeChange(v);
+            }}
+            className="flex-1 accent-purple-600 h-1"
+          />
+        </div>
+      )}
     </div>
   );
 }

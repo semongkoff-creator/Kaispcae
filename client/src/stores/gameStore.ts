@@ -1,5 +1,16 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, Notice, FollowInfo, Role, SummonWarningPayload, SummonNoticePayload } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, Notice, FollowInfo, Role, SummonWarningPayload, SummonNoticePayload, MapMediaObject, WhiteboardStroke } from '@virtualmeet/shared';
+
+// §7 — only ever populated for clients who are allowed to see it at all
+// (the target being recorded, or an admin+) — see recordingHandler.ts's
+// per-socket RECORDING_STARTED emit, which simply never reaches anyone else.
+export interface ActiveRecordingInfo {
+  recordingId: string;
+  targetUserId: string;
+  targetName: string;
+  startedByName: string;
+  title: string;
+}
 
 const AVATAR_COLORS = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a786df', '#6bcb77', '#4d96ff'];
 
@@ -108,6 +119,28 @@ export interface GameState {
   setSummonWarning: (warning: SummonWarningPayload | null) => void;
   summonNotice: SummonNoticePayload | null;
   setSummonNotice: (notice: SummonNoticePayload | null) => void;
+
+  // §6 — Add Media. Full list synced from MEDIA_LIST (on join) then kept
+  // live via MEDIA_ADDED/MEDIA_REMOVED; whiteboard strokes are mutated
+  // in-place on the matching object's payload.strokes rather than resent
+  // in full, since WHITEBOARD_STROKE_ADDED only ever carries the one new
+  // stroke (see mediaHandler.ts's append-only design).
+  mediaObjects: MapMediaObject[];
+  setMediaObjects: (objects: MapMediaObject[]) => void;
+  addMediaObject: (object: MapMediaObject) => void;
+  removeMediaObject: (id: string) => void;
+  appendWhiteboardStroke: (mediaId: string, stroke: WhiteboardStroke) => void;
+  clearWhiteboardStrokes: (mediaId: string) => void;
+
+  // §6 (RTC upgrade) — account userIds (not socket ids) currently
+  // spotlighted in this room; see rtcHandler.ts's doc comment on why userId.
+  spotlightedUserIds: string[];
+  setSpotlightedUserIds: (ids: string[]) => void;
+
+  // §7 — Screen Recording. null means either nothing is being recorded, or
+  // it is but I'm not allowed to know (plain member, not the target).
+  activeRecording: ActiveRecordingInfo | null;
+  setActiveRecording: (info: ActiveRecordingInfo | null) => void;
 
   // Emotes
   emoteEvents: EmoteEvent[];
@@ -320,6 +353,27 @@ export const useGameStore = create<GameState>((set, get) => ({
   setSummonNotice: (notice) => set({ summonNotice: notice }),
   followerUserIds: [],
   setFollowerUserIds: (ids) => set({ followerUserIds: ids }),
+
+  mediaObjects: [],
+  setMediaObjects: (objects) => set({ mediaObjects: objects }),
+  addMediaObject: (object) => set((state) => ({ mediaObjects: [...state.mediaObjects, object] })),
+  removeMediaObject: (id) => set((state) => ({ mediaObjects: state.mediaObjects.filter((m) => m.id !== id) })),
+  appendWhiteboardStroke: (mediaId, stroke) =>
+    set((state) => ({
+      mediaObjects: state.mediaObjects.map((m) =>
+        m.id === mediaId ? { ...m, payload: { ...m.payload, strokes: [...(m.payload.strokes ?? []), stroke] } } : m,
+      ),
+    })),
+  clearWhiteboardStrokes: (mediaId) =>
+    set((state) => ({
+      mediaObjects: state.mediaObjects.map((m) => (m.id === mediaId ? { ...m, payload: { ...m.payload, strokes: [] } } : m)),
+    })),
+
+  spotlightedUserIds: [],
+  setSpotlightedUserIds: (ids) => set({ spotlightedUserIds: ids }),
+
+  activeRecording: null,
+  setActiveRecording: (info) => set({ activeRecording: info }),
 
   emoteEvents: [],
   addEmote: (event) =>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, X } from 'react-bootstrap-icons';
+import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, StarFill, X } from 'react-bootstrap-icons';
 import { roleAtLeast } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 
@@ -8,18 +8,20 @@ interface ParticipantPanelProps {
   emitFollowRequest: (targetUserId: string) => void;
   emitFollowUnfollow: () => void;
   emitSummonUser: (nickname: string) => void;
+  emitSpotlightToggle: (targetUserId: string) => void;
 }
 
 const MAX_VIDEO_THUMBS = 3;
 
-export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowUnfollow, emitSummonUser }: ParticipantPanelProps) {
+export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSpotlightToggle }: ParticipantPanelProps) {
   const [open, setOpen] = useState(false);
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const followInfo = useGameStore((s) => s.followInfo);
   const followerUserIds = useGameStore((s) => s.followerUserIds);
-  const canSummon = roleAtLeast(useGameStore((s) => s.localRole), 'staff');
+  const spotlightedUserIds = useGameStore((s) => s.spotlightedUserIds);
+  const canModerate = roleAtLeast(useGameStore((s) => s.localRole), 'staff');
 
   const remotePlayers = Object.values(playerRecords);
   const totalOnline = remotePlayers.length + 1;
@@ -81,7 +83,9 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
                 isFollowingThem={!!p.userId && followInfo?.targetUserId === p.userId}
                 onFollow={p.userId ? () => emitFollowRequest(p.userId!) : undefined}
                 onUnfollow={emitFollowUnfollow}
-                onSummon={canSummon ? () => emitSummonUser(p.name) : undefined}
+                onSummon={canModerate ? () => emitSummonUser(p.name) : undefined}
+                isSpotlighted={!!p.userId && spotlightedUserIds.includes(p.userId)}
+                onSpotlight={canModerate && p.userId ? () => emitSpotlightToggle(p.userId!) : undefined}
               />
             ))}
           </div>
@@ -102,6 +106,8 @@ function ParticipantRow({
   onFollow,
   onUnfollow,
   onSummon,
+  isSpotlighted,
+  onSpotlight,
 }: {
   name: string;
   color: string;
@@ -118,6 +124,11 @@ function ParticipantRow({
   // §5.1 — undefined (not just a no-op) when I'm below staff, so the button
   // doesn't render at all rather than rendering disabled.
   onSummon?: () => void;
+  // §6 — spotlight bypasses this player's distance-visibility limit for
+  // everyone in the room; undefined when I'm below staff or they have no
+  // account id (guest fallback — unreachable today, login is mandatory).
+  isSpotlighted?: boolean;
+  onSpotlight?: () => void;
 }) {
   return (
     <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50">
@@ -163,6 +174,15 @@ function ParticipantRow({
             className="text-gray-400 hover:text-purple-600 cursor-pointer"
           >
             <MagnetFill size={12} />
+          </button>
+        )}
+        {!isLocal && onSpotlight && (
+          <button
+            onClick={onSpotlight}
+            title={isSpotlighted ? `Remove spotlight from ${name}` : `Spotlight ${name} (visible to everyone regardless of distance)`}
+            className={`cursor-pointer ${isSpotlighted ? 'text-amber-500' : 'text-gray-400 hover:text-amber-500'}`}
+          >
+            <StarFill size={12} />
           </button>
         )}
         {isLocal && <span className="text-gray-400 text-[10px]">You</span>}

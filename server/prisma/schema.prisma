@@ -39,6 +39,8 @@ model Room {
   members     RoomMember[]
   teleportLocations TeleportLocation[]
   ownerBookmarks     OwnerBookmark[]
+  mediaObjects       MapMediaObject[]
+  recordings         Recording[]
 }
 
 model RoomMember {
@@ -90,4 +92,73 @@ model OwnerBookmark {
   createdAt  DateTime @default(now())
 
   @@index([ownerId, roomId])
+}
+
+// §6 — Add Media. One table for every media type, `type` as discriminator
+// (mirrors the spec's own "MapMediaObject" model) — `payload`'s shape
+// depends on `type`, see MediaPayload in shared/types/index.ts. `portal`
+// isn't a valid `type` here — this app's portal is a permanent Room Editor
+// tile, not a media object (see the SocketEvents doc comment for why).
+model MapMediaObject {
+  id        String    @id @default(cuid())
+  roomId    String
+  room      Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  type      String
+  x         Int
+  y         Int
+  createdBy     String
+  // Captured once at creation from the live socket's display name — NOT
+  // resolved lazily from createdBy later, since getPlayerName() is keyed by
+  // socket id (which changes every reconnect and is meaningless once the
+  // creator disconnects), not by this user id.
+  createdByName String
+  createdAt DateTime  @default(now())
+  // null = permanent (youtube, whiteboard). image/file get now+24h at
+  // creation; a periodic sweep (see mediaHandler.ts) deletes expired rows
+  // (and, for image/file, the uploaded file on disk) — there's no separate
+  // job queue in this app to run a real cron against.
+  expiresAt DateTime?
+  payload   Json
+
+  @@index([roomId])
+}
+
+// §7 — Screen Recording. Adapted from the spec's server-side/SFU-worker
+// design to a client-side capture: this app's WebRTC is a mesh (§8's own
+// scope decision), so raw media never touches the server at all — there's
+// no stream for a server worker to subscribe to and encode. Instead the
+// admin who starts the recording captures the target's already-decoded
+// video (MediaRecorder on the incoming MediaStream, see webrtcService.ts's
+// getRecordingStream) in their OWN browser and uploads the result when
+// done. Real consequence of that trade-off: the recording does NOT survive
+// the starting admin's tab closing/refreshing, unlike the spec's explicit
+// "starter refresh tetap jalan" requirement — there's no server-side
+// process to keep it alive independent of that browser tab.
+model Recording {
+  id        String    @id @default(cuid())
+  roomId    String
+  room      Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  startedBy String
+  // Captured at creation the same way MapMediaObject.createdByName is —
+  // see that model's doc comment for why (getPlayerName is socket-id keyed).
+  startedByName String
+  targetUserId  String
+  targetName    String
+  title     String
+  // recording -> processing (Stop clicked, upload in flight) -> done
+  // (uploaded successfully), or -> failed at any point if the starter
+  // disconnects (see recordingHandler.ts's DISCONNECT handler — capture
+  // genuinely dies with that browser tab).
+  status    String    @default("recording")
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  fileUrl   String?
+  // Set once status becomes "done": now + 3 days / 3 downloads, matching
+  // the spec's own numbers even though there's no real S3 signed-URL here
+  // (see routes/recordings.ts's own download-gate enforcing these).
+  downloadExpiresAt DateTime?
+  downloadCount     Int       @default(0)
+  maxDownloads      Int       @default(3)
+
+  @@index([roomId])
 }

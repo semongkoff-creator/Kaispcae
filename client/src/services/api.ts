@@ -1,4 +1,4 @@
-import { TeleportLocation, OwnerBookmark } from '@virtualmeet/shared';
+import { TeleportLocation, OwnerBookmark, Recording } from '@virtualmeet/shared';
 
 const API_BASE = '/api';
 
@@ -34,6 +34,67 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   return res.json();
+}
+
+// §6 — Add Media (Image/File upload). Separate from request() because it
+// must NOT set Content-Type: application/json — the browser needs to set
+// its own multipart/form-data boundary for a FormData body.
+async function uploadFile(path: string, file: File): Promise<{ url: string; fileName: string }> {
+  const token = localStorage.getItem('vm_token');
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError((body as any).error || `Upload failed: ${res.status}`, res.status);
+  }
+  return res.json();
+}
+
+// §7 — Screen Recording upload, separate endpoint/limit from uploadFile
+// above (a recording can be far larger than an ordinary Add Media upload —
+// see routes/uploads.ts's dedicated multer instance).
+async function uploadRecordingBlob(blob: Blob): Promise<{ url: string }> {
+  const token = localStorage.getItem('vm_token');
+  const form = new FormData();
+  form.append('file', blob, 'recording.webm');
+  const res = await fetch(`${API_BASE}/uploads/recording`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError((body as any).error || `Upload failed: ${res.status}`, res.status);
+  }
+  return res.json();
+}
+
+// The download route requires an Authorization header (see
+// routes/recordings.ts) to enforce the count/expiry gate against the right
+// user — a plain <a href> navigation can't attach that header, so this
+// fetches the bytes with the header attached and triggers the save via a
+// throwaway object URL instead.
+async function downloadRecordingBlob(id: string, filename: string): Promise<void> {
+  const token = localStorage.getItem('vm_token');
+  const res = await fetch(`${API_BASE}/recordings/${id}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError((body as any).error || `Download failed: ${res.status}`, res.status);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export interface UserProfile {
@@ -137,4 +198,16 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ orderedIds }),
     }),
+
+  // §6 — Add Media (Image/File). Returns the url to hand to emitMediaAdd's
+  // payload — the actual MapMediaObject row is created over the socket
+  // (see mediaHandler.ts), not here; this endpoint only handles the binary.
+  uploadMedia: (file: File) => uploadFile('/uploads', file),
+
+  // §7 — Screen Recording.
+  uploadRecording: (blob: Blob) => uploadRecordingBlob(blob),
+
+  getRecordings: (slug: string) => request<{ recordings: Recording[] }>(`/rooms/${slug}/recordings`),
+
+  downloadRecording: (id: string, filename: string) => downloadRecordingBlob(id, filename),
 };

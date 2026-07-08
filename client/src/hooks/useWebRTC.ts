@@ -37,14 +37,16 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     }
   }, [onRemoteStream]);
 
-  // Watch proximity: connect if within 3 tiles, disconnect with debounce
+  // §6 — connect for both 'full_visible' and 'translucent' (still shown,
+  // just dimmed); only 'not_visible' disconnects. Disconnect is debounced
+  // the same as before so a brief flicker across a tier boundary doesn't
+  // tear the connection down and immediately rebuild it.
   const updateProximity = useCallback((nearby: ProximityPlayer[]) => {
-    const inRangeIds = new Set(nearby.filter((p) => p.inProximity).map((p) => p.id));
+    const inRangeIds = new Set(nearby.filter((p) => p.visibility !== 'not_visible').map((p) => p.id));
     const connectedIds = connectedRef.current;
 
-    // Connect new in-range players
     for (const p of nearby) {
-      if (p.inProximity) {
+      if (p.visibility !== 'not_visible') {
         // Clear any pending disconnect timer
         const timer = disconnectTimers.current.get(p.id);
         if (timer) {
@@ -103,6 +105,10 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     return result.success;
   }, []);
 
+  const setManualVolume = useCallback((id: string, volume: number) => {
+    webrtcService.setManualVolume(id, volume);
+  }, []);
+
   const destroy = useCallback(() => {
     for (const timer of disconnectTimers.current.values()) {
       clearTimeout(timer);
@@ -123,6 +129,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     isMicMuted,
     isCameraOn,
     isScreenSharing,
+    setManualVolume,
     destroy,
     getLocalStream: () => webrtcService.getLocalStream(),
   };

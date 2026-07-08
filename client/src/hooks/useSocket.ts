@@ -1,8 +1,9 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, SummonWarningPayload, SummonNoticePayload } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, SummonWarningPayload, SummonNoticePayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
+import { notifyNewMessage } from '@/services/browserNotifications';
 
 export function useSocket(authUserName: string = '', roomSlug: string = 'main-office', authUserId: string = '') {
   const socketRef = useRef<Socket | null>(null);
@@ -28,6 +29,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   const setNotice = useGameStore((s) => s.setNotice);
   const setFollowInfo = useGameStore((s) => s.setFollowInfo);
   const setFollowerUserIds = useGameStore((s) => s.setFollowerUserIds);
+  const setMediaObjects = useGameStore((s) => s.setMediaObjects);
+  const addMediaObject = useGameStore((s) => s.addMediaObject);
+  const removeMediaObject = useGameStore((s) => s.removeMediaObject);
+  const appendWhiteboardStroke = useGameStore((s) => s.appendWhiteboardStroke);
+  const clearWhiteboardStrokes = useGameStore((s) => s.clearWhiteboardStrokes);
 
   // Identify this player by their real authenticated account id whenever one
   // is available, so admin/ownership checks (which compare against
@@ -185,6 +191,48 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().setSummonNotice(data);
     });
 
+    // §6 — Add Media. MEDIA_LIST arrives once right after ROOM_STATE (this
+    // module's own JOIN_ROOM emit in mediaHandler.ts, not bundled into
+    // ROOM_STATE itself — see that handler's doc comment for why); the rest
+    // stay live via ADDED/REMOVED for the whole session.
+    socket.on(SocketEvents.MEDIA_LIST, (data: { mediaObjects: MapMediaObject[] }) => {
+      setMediaObjects(data.mediaObjects);
+    });
+    socket.on(SocketEvents.MEDIA_ADDED, (data: MapMediaObject) => {
+      addMediaObject(data);
+    });
+    socket.on(SocketEvents.MEDIA_REMOVED, (data: { id: string }) => {
+      removeMediaObject(data.id);
+    });
+    socket.on(SocketEvents.WHITEBOARD_STROKE_ADDED, (data: { mediaId: string; stroke: WhiteboardStroke }) => {
+      appendWhiteboardStroke(data.mediaId, data.stroke);
+    });
+    socket.on(SocketEvents.WHITEBOARD_CLEARED, (data: { mediaId: string }) => {
+      clearWhiteboardStrokes(data.mediaId);
+    });
+
+    // §6 (RTC upgrade) — full replacement list each time (small set, simpler
+    // than diffing add/remove), including the one sent right after JOIN_ROOM
+    // for spotlights that were already active before I connected.
+    socket.on(SocketEvents.SPOTLIGHT_CHANGED, (data: { spotlightedUserIds: string[] }) => {
+      console.log('[socket] spotlight changed —', data.spotlightedUserIds.length, 'spotlighted');
+      useGameStore.getState().setSpotlightedUserIds(data.spotlightedUserIds);
+    });
+
+    // §7 — only ever arrives for clients allowed to see it at all (see
+    // recordingHandler.ts's per-socket emit) — App.tsx's own effect watches
+    // this same state to decide whether IT was the request that started
+    // it (and if so, begins the actual client-side capture).
+    socket.on(SocketEvents.RECORDING_STARTED, (data: { recordingId: string; targetUserId: string; targetName: string; startedByName: string; title: string }) => {
+      useGameStore.getState().setActiveRecording(data);
+    });
+    socket.on(SocketEvents.RECORDING_ENDED, () => {
+      useGameStore.getState().setActiveRecording(null);
+    });
+    socket.on(SocketEvents.RECORDING_FAILED, () => {
+      useGameStore.getState().setActiveRecording(null);
+    });
+
     socket.on(SocketEvents.FURNITURE_ASSIGNED, (data: { furnitureId: string; userId: string; name: string }) => {
       useGameStore.getState().setFurnitureAssignment(data.furnitureId, data.userId, data.name);
     });
@@ -194,6 +242,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     });
 
     socket.on(SocketEvents.CHAT_BROADCAST, (msg: ChatMessage) => {
+      // §10 — only for messages from someone else, and notifyNewMessage
+      // itself no-ops unless the tab is actually in the background (spec's
+      // own rule) and the user has actually turned notifications on.
+      if (msg.senderId !== useGameStore.getState().localPlayerId) {
+        notifyNewMessage(msg.senderName, msg.text);
+      }
       if (msg.zoneId) {
         addZoneChatMessage(msg.zoneId, msg);
         return;
@@ -396,5 +450,37 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.FOLLOW_UNFOLLOW);
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRoom };
+  const emitMediaAdd = useCallback((type: MediaType, x: number, y: number, payload?: MediaPayload) => {
+    socketRef.current?.emit(SocketEvents.MEDIA_ADD, { type, x, y, payload });
+  }, []);
+
+  const emitMediaRemove = useCallback((id: string) => {
+    socketRef.current?.emit(SocketEvents.MEDIA_REMOVE, { id });
+  }, []);
+
+  const emitWhiteboardStroke = useCallback((mediaId: string, stroke: WhiteboardStroke) => {
+    socketRef.current?.emit(SocketEvents.WHITEBOARD_STROKE, { mediaId, stroke });
+  }, []);
+
+  const emitWhiteboardClear = useCallback((mediaId: string) => {
+    socketRef.current?.emit(SocketEvents.WHITEBOARD_CLEAR, { mediaId });
+  }, []);
+
+  const emitSpotlightToggle = useCallback((targetUserId: string) => {
+    socketRef.current?.emit(SocketEvents.SPOTLIGHT_TOGGLE, { targetUserId });
+  }, []);
+
+  const emitRecordingStart = useCallback((targetUserId: string, title: string) => {
+    socketRef.current?.emit(SocketEvents.RECORDING_START, { targetUserId, title });
+  }, []);
+
+  const emitRecordingStop = useCallback((recordingId: string) => {
+    socketRef.current?.emit(SocketEvents.RECORDING_STOP, { recordingId });
+  }, []);
+
+  const emitRecordingFinalize = useCallback((recordingId: string, fileUrl: string) => {
+    socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
+  }, []);
+
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRoom, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize };
 }

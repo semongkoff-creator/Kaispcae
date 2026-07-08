@@ -46,6 +46,14 @@ export const FEATURE_MIN_ROLE = {
   // Both the single-user and whole-room forms share this one gate — the
   // spec checks role identically for both (§5.1 and §5.2/5.3's pseudocode).
   'summon': 'staff',
+  // §6 (spec's §8/RTC upgrade) — spotlighting bypasses everyone's distance
+  // visibility limit for that one target, effectively a broadcast-to-room
+  // action, so it's gated the same as the other staff+ room-wide controls.
+  'rtc:spotlight': 'staff',
+  // §7 — the spec labels this "Enterprise-only", and recording someone's
+  // video is more sensitive than the other staff+ room controls above, so
+  // this is gated one tier higher at admin+ rather than reusing 'staff'.
+  'recording:start': 'admin',
 } as const satisfies Record<string, Role>;
 
 export type FeatureKey = keyof typeof FEATURE_MIN_ROLE;

@@ -156,9 +156,12 @@ interface GameCanvasProps {
   onPortalEnter: (target: string) => void;
   emitSit: (sitting: boolean, x: number, y: number, direction: Direction) => void;
   emitFollowUnfollow: () => void;
+  onMediaOpen: (mediaId: string) => void;
 }
 
-export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow }: GameCanvasProps) {
+const MEDIA_ICON: Record<string, string> = { image: '🖼️', youtube: '▶️', whiteboard: '📝', file: '📎' };
+
+export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, onMediaOpen }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -195,6 +198,11 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
   // Banner furniture (Furniture.kind === 'banner') renders as a DOM overlay
   // too, positioned the same imperative way as zone banners above.
   const bannerRefs = useRef(new Map<string, HTMLDivElement>());
+  const mediaObjects = useGameStore((s) => s.mediaObjects);
+  const mediaObjectsRef = useRef(mediaObjects);
+  // §6 — Add Media markers: same DOM-overlay-positioned-via-transform
+  // pattern as zone/banner above, one small clickable pin per object.
+  const mediaMarkerRefs = useRef(new Map<string, HTMLDivElement>());
 
   useEffect(() => {
     tilesRef.current = tiles;
@@ -207,6 +215,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     emotesRef.current = useGameStore.getState().emoteEvents;
     zonesRef.current = zones;
     furnitureRef.current = furniture;
+    mediaObjectsRef.current = mediaObjects;
   });
 
   const proximityRef = useRef(proximityData); proximityRef.current = proximityData;
@@ -608,6 +617,23 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
       el.style.width = `${item.tilesW * TILE_SIZE}px`;
     }
 
+    // §6 — Media markers (DOM overlay), same imperative positioning.
+    // Staggered horizontally when multiple objects share a tile (e.g.
+    // several added without moving in between) — otherwise they'd stack
+    // exactly on top of each other and only the last-added one would ever
+    // be clickable, with everything under it permanently unreachable.
+    const mediaTileCounts = new Map<string, number>();
+    for (const media of mediaObjectsRef.current) {
+      const tileKey = `${media.x},${media.y}`;
+      const stackIndex = mediaTileCounts.get(tileKey) ?? 0;
+      mediaTileCounts.set(tileKey, stackIndex + 1);
+      const el = mediaMarkerRefs.current.get(media.id);
+      if (!el) continue;
+      const mx = media.x * TILE_SIZE - cameraX + stackIndex * 18;
+      const my = media.y * TILE_SIZE - cameraY;
+      el.style.transform = `translate(${mx}px, ${my}px)`;
+    }
+
     // Zone draw preview (while dragging out a new zone rectangle)
     if (zoneDragStartRef.current && zoneDragCurrentRef.current) {
       const a = zoneDragStartRef.current;
@@ -665,7 +691,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
       const sp = speakingPlayersRef.current;
       const isSpeaking = isLocal ? localSpeakingRef.current : sp.has(avatar.id);
       const isMuted = isLocal && micMutedRef.current;
-      const inProx = proximityRef.current.find((p) => p.id === avatar.id)?.inProximity ?? false;
+      const inProx = (proximityRef.current.find((p) => p.id === avatar.id)?.visibility ?? 'not_visible') !== 'not_visible';
 
       if (isMuted || isLocal) {
         const iconY = sy + AVATAR_RADIUS + 18;
@@ -898,6 +924,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     <div ref={containerRef} className={`w-full h-full absolute inset-0 ${editorMode ? 'ring-2 ring-orange-500 ring-inset z-10' : ''}`}>
       <canvas
         ref={canvasRef}
+        id="game-canvas"
         className={`block ${editorMode ? 'cursor-crosshair' : ''}`}
         style={{ imageRendering: 'pixelated' }}
         onMouseDown={handleMouseDown}
@@ -959,6 +986,32 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
                 {item.text || 'Banner'}
               </div>
             )}
+          </div>
+        ))}
+      </div>
+      {/* §6 — Media markers: one small clickable pin per placed object,
+          same imperative-transform pattern as the overlays above. Opens
+          MediaViewerModal (App.tsx) rather than rendering the actual
+          image/iframe/whiteboard inline here — keeps N simultaneous media
+          objects cheap (no N mounted iframes/canvases) and reuses the
+          existing modal pattern already used elsewhere in this app. */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {mediaObjects.map((media) => (
+          <div
+            key={media.id}
+            ref={(el) => {
+              if (el) mediaMarkerRefs.current.set(media.id, el);
+              else mediaMarkerRefs.current.delete(media.id);
+            }}
+            className="absolute top-0 left-0 will-change-transform pointer-events-auto"
+          >
+            <button
+              onClick={() => onMediaOpen(media.id)}
+              title={media.type}
+              className="w-8 h-8 -mt-8 flex items-center justify-center text-lg bg-white/90 backdrop-blur-sm rounded-full shadow-md border border-purple-200 cursor-pointer hover:scale-110 transition-transform"
+            >
+              {MEDIA_ICON[media.type] ?? '📌'}
+            </button>
           </div>
         ))}
       </div>

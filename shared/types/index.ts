@@ -215,6 +215,44 @@ export enum SocketEvents {
   SUMMON_ROOM = 'summon:room',
   SUMMON_WARNING = 'summon:warning',
   SUMMON_NOTICE = 'summon:notice',
+
+  // §6 — Add Media. Portal (spec's ~10s ephemeral variant) is deliberately
+  // NOT included — this app already has a permanent portal tile placed via
+  // the Room Editor (see createDefaultRoom.ts's 'portal' TileType), and
+  // Screenshot is a pure client-side canvas capture with nothing to
+  // persist or broadcast, so neither needs a socket event.
+  MEDIA_LIST = 'media:list',
+  MEDIA_ADD = 'media:add',
+  MEDIA_ADDED = 'media:added',
+  MEDIA_REMOVE = 'media:remove',
+  MEDIA_REMOVED = 'media:removed',
+  // Whiteboard strokes are additive (two people drawing at once never
+  // "conflict" the way concurrent text edits do), so a plain broadcast of
+  // each completed stroke gives real-time multi-user sync without needing
+  // a CRDT/OT library — see the doc comment on WhiteboardStroke below.
+  WHITEBOARD_STROKE = 'whiteboard:stroke',
+  WHITEBOARD_STROKE_ADDED = 'whiteboard:stroke_added',
+  WHITEBOARD_CLEAR = 'whiteboard:clear',
+  WHITEBOARD_CLEARED = 'whiteboard:cleared',
+
+  // §6 (RTC upgrade) — spotlighting a player makes them FULL_VISIBLE to
+  // everyone in the room regardless of distance (spec's own
+  // computeVisibility bypass rule). Kept as its own tiny event pair rather
+  // than folded into ADMIN_CHANGED — it's a room-wide broadcast state, not
+  // a per-user role change, so it doesn't fit that payload's shape.
+  SPOTLIGHT_TOGGLE = 'rtc:spotlight_toggle',
+  SPOTLIGHT_CHANGED = 'rtc:spotlight_changed',
+
+  // §7 — Screen Recording, adapted to client-side capture (see the
+  // Recording Prisma model's doc comment for why). RECORDING_STARTED/ENDED
+  // are sent per-socket, not broadcast, since who gets to see a REC
+  // indicator at all is role/identity-dependent — see recordingHandler.ts.
+  RECORDING_START = 'recording:start',
+  RECORDING_STARTED = 'recording:started',
+  RECORDING_STOP = 'recording:stop',
+  RECORDING_FINALIZE = 'recording:finalize',
+  RECORDING_ENDED = 'recording:ended',
+  RECORDING_FAILED = 'recording:failed',
 }
 
 // My own follow relationship (I am the follower) — sent only to me, never
@@ -280,6 +318,69 @@ export interface SummonNoticePayload {
   actorName: string;
 }
 
+// §6 — Add Media. One table/type union with `type` as discriminator, per
+// the spec's own "MapMediaObject" model — 'portal' and 'screenshot' are
+// deliberately absent, see the SocketEvents doc comment above for why.
+export type MediaType = 'image' | 'youtube' | 'whiteboard' | 'file';
+
+export interface MediaPayload {
+  url?: string; // image / file — served from this app's own /uploads static route
+  fileName?: string; // file only — original name, for the download link's label
+  videoId?: string; // youtube only — parsed from whatever URL shape the user pasted
+  strokes?: WhiteboardStroke[]; // whiteboard only — full history, appended to on each stroke
+}
+
+export interface MapMediaObject {
+  id: string;
+  roomId: string;
+  type: MediaType;
+  x: number;
+  y: number;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  expiresAt: string | null; // image/file: now+24h; youtube/whiteboard: permanent (null)
+  payload: MediaPayload;
+}
+
+// A single freehand stroke — points in tile-relative pixel space (0..WHITEBOARD_SIZE)
+// so it renders the same regardless of which client's camera drew it.
+export interface WhiteboardStroke {
+  points: { x: number; y: number }[];
+  color: string;
+  width: number;
+}
+
+// §6 — fixed canvas size a whiteboard's stroke points are captured/drawn in,
+// independent of any client's actual on-screen zoom/camera — this is what
+// makes a stroke drawn on one client render identically on another.
+export const WHITEBOARD_SIZE = 480;
+
+// §7 — Screen Recording. See the Prisma model's doc comment for the
+// client-side-capture adaptation this represents.
+export const RECORDING_MAX_DURATION_MS = 80 * 60 * 1000; // 80 min, matches spec's 4800s cap
+export const RECORDING_DOWNLOAD_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+export const RECORDING_MAX_DOWNLOADS = 3;
+
+export type RecordingStatus = 'recording' | 'processing' | 'done' | 'failed';
+
+export interface Recording {
+  id: string;
+  roomId: string;
+  startedBy: string;
+  startedByName: string;
+  targetUserId: string;
+  targetName: string;
+  title: string;
+  status: RecordingStatus;
+  startedAt: string;
+  endedAt: string | null;
+  fileUrl: string | null;
+  downloadExpiresAt: string | null;
+  downloadCount: number;
+  maxDownloads: number;
+}
+
 // Grid and rendering constants — shared so server can also validate bounds
 export const TILE_SIZE = 32;
 // "Main Office" ZEP-inspired layout (see defaultRoomLayout.ts): two meeting
@@ -291,17 +392,28 @@ export const MAP_HEIGHT = 36;
 export const PLAYER_SPEED = 150; // pixels per second
 
 // Proximity / WebRTC constants
-export const PROXIMITY_THRESHOLD = 3; // tiles — within 3 tiles: video + audio
+export const PROXIMITY_THRESHOLD = 3; // tiles — within 3 tiles: full video + audio
 export const PROXIMITY_THRESHOLD_PX = 96; // 3 tiles × 32px
+// §6 (RTC upgrade) — beyond PROXIMITY_THRESHOLD but within this: still
+// connected, rendered translucent, audio faded near-zero. The spec's own
+// example numbers (6/10 tiles) were written for an unspecified room scale;
+// this app's rooms are already tuned around PROXIMITY_THRESHOLD=3, so this
+// keeps that scale and applies the same ~1.7x ratio the spec used (10/6)
+// rather than copying its absolute tile counts.
+export const TRANSLUCENT_THRESHOLD = 5;
 export const DISCONNECT_DEBOUNCE_MS = 500;
+
+// §6 — mirrors the spec's own three-state enum name
+// (full_visible/translucent/not_visible) for computeVisibility's result.
+export type VisibilityStatus = 'full_visible' | 'translucent' | 'not_visible';
 
 export interface ProximityPlayer {
   id: string;
   distanceTiles: number;
-  inProximity: boolean;
+  visibility: VisibilityStatus;
   // true when connected because both players share a private Zone (see
-  // useProximity.ts) rather than because they're within PROXIMITY_THRESHOLD
-  // tiles of each other — WebRTC uses this to skip distance-based audio falloff.
+  // useProximity.ts) rather than because they're within a distance
+  // threshold — WebRTC uses this to skip distance-based audio falloff.
   viaZone?: boolean;
 }
 

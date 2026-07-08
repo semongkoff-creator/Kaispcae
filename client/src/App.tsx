@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Tools, GearFill, Clipboard, BoxArrowLeft, PersonWalking, X, GeoAltFill, MagnetFill } from 'react-bootstrap-icons';
-import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast } from '@virtualmeet/shared';
+import { Tools, GearFill, Clipboard, BoxArrowLeft, PersonWalking, X, GeoAltFill, MagnetFill, ImageFill } from 'react-bootstrap-icons';
+import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import { GameCanvas } from './components/canvas/GameCanvas';
 import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
@@ -16,10 +16,14 @@ import { Minimap } from './components/hud/Minimap';
 import { RoomEditor } from './components/ui/RoomEditor';
 import { AdminPanel } from './components/ui/AdminPanel';
 import { TeleportPanel } from './components/ui/TeleportPanel';
+import { AddMediaPanel } from './components/ui/AddMediaPanel';
+import { MediaViewerModal } from './components/ui/MediaViewerModal';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
+import { RecordingControl } from './components/ui/RecordingControl';
 import { MicButton } from './components/hud/MicButton';
 import { CameraButton } from './components/hud/CameraButton';
 import { ScreenShareButton } from './components/hud/ScreenShareButton';
+import { NotificationSettings } from './components/ui/NotificationSettings';
 import { Lobby } from './pages/Lobby';
 import { LoginPage } from './pages/LoginPage';
 import { useAuth } from './hooks/useAuth';
@@ -29,12 +33,13 @@ import { useGameStore } from './stores/gameStore';
 import { useSocket } from './hooks/useSocket';
 import { useProximity, findZoneAt } from './hooks/useProximity';
 import { useWebRTC } from './hooks/useWebRTC';
+import { useScreenRecording } from './hooks/useScreenRecording';
 import { webrtcService } from './services/webrtcService';
 import { loadAvatarConfig, saveAvatarConfig } from './hooks/useAvatarConfig';
 
 function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }: { roomSlug: string; onLeave: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRoom } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRoom, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize } = useSocket(authDisplayName, roomSlug, authUserId);
   const [showEditor, setShowEditor] = useState(false);
 
   // Media state from store
@@ -53,16 +58,28 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
     isMicMuted,
     isCameraOn,
     isScreenSharing,
+    setManualVolume,
     destroy,
   } = useWebRTC({ socketRef });
 
   // Remote video streams
   const [remoteStreams] = useState(() => new Map<string, MediaStream>());
+  // §6 — the peer's screen share, tracked separately from their camera
+  // (remoteStreams above) so both can render as distinct VideoGrid tiles.
+  const [remoteScreenStreams] = useState(() => new Map<string, MediaStream>());
   const [streamsVersion, setStreamsVersion] = useState(0);
 
   useEffect(() => {
     webrtcService.setOnRemoteStream((id, stream) => {
       remoteStreams.set(id, stream);
+      setStreamsVersion((v) => v + 1);
+    });
+    webrtcService.setOnRemoteScreenStream((id, stream) => {
+      remoteScreenStreams.set(id, stream);
+      setStreamsVersion((v) => v + 1);
+    });
+    webrtcService.setOnRemoteScreenEnded((id) => {
+      remoteScreenStreams.delete(id);
       setStreamsVersion((v) => v + 1);
     });
     webrtcService.setOnSpeakingChange((id, speaking) => {
@@ -92,17 +109,39 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
   const furniture = useGameStore((s) => s.furniture);
   const localUserId = useGameStore((s) => s.localUserId);
   const sittingItem = sittingFurnitureId ? furniture.find((f) => f.id === sittingFurnitureId) : undefined;
+  const spotlightedUserIds = useGameStore((s) => s.spotlightedUserIds);
 
   const nearby = useProximity(
     { x: localPlayer.x, y: localPlayer.y, id: localPlayerId },
     playerRecords,
     zones,
+    spotlightedUserIds,
   );
 
   // Update WebRTC connections based on proximity
   useEffect(() => {
     updateProximity(nearby);
   }, [nearby, updateProximity]);
+
+  // §7 — Screen Recording
+  const activeRecording = useGameStore((s) => s.activeRecording);
+  const findSocketIdByUserId = useCallback(
+    (userId: string) => Object.values(playerRecords).find((p) => p.userId === userId)?.id,
+    [playerRecords],
+  );
+  const { requestRecording, stopMyRecording, isRecordingMine, uploading: recordingUploading } = useScreenRecording({
+    activeRecording,
+    findSocketIdByUserId,
+    emitRecordingStop,
+    emitRecordingFinalize,
+  });
+  const spotlightedPlayers = spotlightedUserIds
+    .map((uid) => {
+      if (uid === localUserId) return { userId: uid, name: localPlayer.name };
+      const p = Object.values(playerRecords).find((rec) => rec.userId === uid);
+      return p ? { userId: uid, name: p.name } : null;
+    })
+    .filter((p): p is { userId: string; name: string } => !!p);
 
   // Track which zone (if any) the local player is standing in — drives the
   // ChatPanel's "Private" tab, and notifies other players in the room when
@@ -185,7 +224,10 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
   const [editorToast, setEditorToast] = useState('');
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showTeleportPanel, setShowTeleportPanel] = useState(false);
+  const [showAddMediaPanel, setShowAddMediaPanel] = useState(false);
+  const [viewingMediaId, setViewingMediaId] = useState<string | null>(null);
   const localRole = useGameStore((s) => s.localRole);
+  const mediaObjects = useGameStore((s) => s.mediaObjects);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
 
@@ -315,6 +357,27 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
     emitNoticePin(message.id, message.text, message.senderName);
   }, [emitNoticePin]);
 
+  const handleMediaAdd = useCallback((type: MediaType, x: number, y: number, payload?: MediaPayload) => {
+    emitMediaAdd(type, x, y, payload);
+  }, [emitMediaAdd]);
+
+  // §6 — Screenshot. Capturing the <canvas> bitmap directly (toDataURL)
+  // already excludes every HTML overlay (chat, sidebar, media pins, HUD
+  // buttons) for free — those are separate DOM elements never part of the
+  // canvas's own pixels — which is exactly the spec's "map render without
+  // UI overlay" requirement, with no extra hide/show-elements step needed.
+  const handleScreenshot = useCallback(() => {
+    const canvas = document.getElementById('game-canvas') as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const link = document.createElement('a');
+    link.href = canvas.toDataURL('image/png');
+    link.download = `meetkai-screenshot-${Date.now()}.png`;
+    link.click();
+  }, []);
+
+  const viewingMedia = viewingMediaId ? mediaObjects.find((m) => m.id === viewingMediaId) ?? null : null;
+  const canDeleteViewingMedia = !!viewingMedia && (viewingMedia.createdBy === localUserId || isAdmin);
+
   const handleEmoteSelect = useCallback((emote: EmoteType) => {
     const lp = useGameStore.getState().localPlayer;
     emitEmote(emote, lp.x, lp.y);
@@ -371,6 +434,7 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
         onPortalEnter={handlePortalEnter}
         emitSit={emitSit}
         emitFollowUnfollow={emitFollowUnfollow}
+        onMediaOpen={setViewingMediaId}
       />
 
       <div className="absolute top-4 left-28 pointer-events-none">
@@ -383,7 +447,7 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
       </div>
 
       <ConnectionIndicator />
-      <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} />
+      <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSpotlightToggle={emitSpotlightToggle} />
 
       {/* Follow (§3) indicator — only the ONE new thing from this pass that's
           always visible without opening a panel first. 'standby' means the
@@ -483,10 +547,38 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
           onClick={() => {
             if (window.confirm('Summon everyone else in this room to your position?')) emitSummonRoom();
           }}
-          className="absolute bottom-4 left-76 z-30 px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm"
+          className="absolute bottom-4 left-[19rem] z-30 px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm"
         >
           <MagnetFill size={12} /> Summon All
         </button>
+      )}
+
+      {/* §6 — Add Media. Not role-gated — the spec's own dependency for
+          this feature is just §1's Interact, no permission requirement
+          (delete is separately gated to creator-or-admin, checked server
+          side in mediaHandler.ts, not here). */}
+      <button
+        onClick={() => setShowAddMediaPanel((v) => !v)}
+        className={`absolute bottom-4 left-[25rem] z-30 px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 ${showAddMediaPanel ? 'bg-purple-600 text-white border-purple-500' : 'bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm'}`}
+      >
+        <ImageFill size={12} /> Add Media
+      </button>
+
+      {/* §7 — Screen Recording, admin+ only (gated one tier above the
+          other staff+ controls — see shared/permissions.ts's doc comment
+          on why). */}
+      {isAdmin && (
+        <div className="absolute bottom-4 left-[31rem] z-30">
+          <RecordingControl
+            spotlightedPlayers={spotlightedPlayers}
+            activeRecording={activeRecording}
+            isRecordingMine={isRecordingMine}
+            uploading={recordingUploading}
+            roomSlug={roomSlug}
+            onStart={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
+            onStop={stopMyRecording}
+          />
+        </div>
       )}
 
       {isAdmin && editorMode && (
@@ -523,6 +615,25 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
         />
       )}
 
+      {showAddMediaPanel && (
+        <AddMediaPanel
+          onAdd={handleMediaAdd}
+          onScreenshot={handleScreenshot}
+          onClose={() => setShowAddMediaPanel(false)}
+        />
+      )}
+
+      {viewingMedia && (
+        <MediaViewerModal
+          media={viewingMedia}
+          canDelete={canDeleteViewingMedia}
+          onDelete={() => { emitMediaRemove(viewingMedia.id); setViewingMediaId(null); }}
+          onClose={() => setViewingMediaId(null)}
+          emitWhiteboardStroke={emitWhiteboardStroke}
+          emitWhiteboardClear={emitWhiteboardClear}
+        />
+      )}
+
       {showEditor && (
         <AvatarSetup
           initialConfig={savedConfig}
@@ -533,10 +644,15 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
 
       <VideoGrid
         nearby={nearby}
-        localStream={isScreenSharing ? webrtcService.getScreenStream() : webrtcService.getLocalStream()}
+        localStream={webrtcService.getLocalStream()}
+        localScreenStream={isScreenSharing ? webrtcService.getScreenStream() : null}
         remoteStreams={remoteStreams}
+        remoteScreenStreams={remoteScreenStreams}
         micMuted={isMicMuted}
         cameraOff={!isCameraOn}
+        onManualVolumeChange={setManualVolume}
+        recordedTargetUserId={activeRecording?.targetUserId}
+        isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
       />
 
       {/* HUD Controls */}
@@ -544,6 +660,7 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
         <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
         <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
         <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
+        <NotificationSettings />
       </div>
 
       {/* Room name HUD + code */}

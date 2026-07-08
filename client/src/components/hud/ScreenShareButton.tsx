@@ -8,7 +8,16 @@ interface ScreenShareButtonProps {
 // No keyboard shortcut here on purpose — every free letter key doubles as a
 // WASD movement key (S in particular collides directly with "move down"),
 // so this button is click-only.
+//
+// §6 — most mobile browsers don't implement getDisplayMedia at all, so
+// feature-detecting it (rather than user-agent sniffing, which the spec
+// offers as an alternative) hides the button wherever it could never work,
+// instead of showing it and failing only once tapped.
+const SCREEN_SHARE_SUPPORTED = typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getDisplayMedia === 'function';
+
 export function ScreenShareButton({ sharing, onToggle }: ScreenShareButtonProps) {
+  if (!SCREEN_SHARE_SUPPORTED) return null;
+
   return (
     <button
       onClick={onToggle}

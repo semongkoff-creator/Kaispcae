@@ -12,6 +12,8 @@ import { registerEmoteHandlers } from './socket/emoteHandler';
 import { registerZoneHandlers } from './socket/zoneHandler';
 import { registerFurnitureHandlers } from './socket/furnitureHandler';
 import { registerFollowHandlers } from './socket/followHandler';
+import { registerMediaHandlers, startMediaExpirySweep } from './socket/mediaHandler';
+import { registerRecordingHandlers } from './socket/recordingHandler';
 import { getRedis } from './store/roomStore';
 import { loadConfig, getConfig } from './config';
 import { rateLimit } from './middleware/rateLimit';
@@ -19,6 +21,8 @@ import { verifyToken } from './middleware/auth';
 import authRoutes from './routes/auth';
 import roomRoutes, { setIo } from './routes/rooms';
 import teleportRoutes from './routes/teleport';
+import uploadRoutes from './routes/uploads';
+import recordingRoutes from './routes/recordings';
 
 loadConfig();
 const config = getConfig();
@@ -82,6 +86,8 @@ app.get('/api/metrics', (_req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api', roomRoutes);
 app.use('/api', teleportRoutes);
+app.use('/api', uploadRoutes);
+app.use('/api', recordingRoutes);
 
 // ── Socket.IO ────────────────────────────────────────────────────
 async function start() {
@@ -100,7 +106,11 @@ async function start() {
     registerZoneHandlers(io, socket);
     registerFurnitureHandlers(io, socket);
     registerFollowHandlers(io, socket);
+    registerMediaHandlers(io, socket);
+    registerRecordingHandlers(io, socket);
   });
+
+  startMediaExpirySweep(io);
 
   httpServer.listen(config.PORT, () => {
     console.log(`[server] VirtualMeet running on http://localhost:${config.PORT}`);
