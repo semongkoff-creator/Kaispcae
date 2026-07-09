@@ -58,6 +58,11 @@ export interface Avatar {
   // chair's tile, so remote clients just render this player idle at that
   // exact position rather than needing a separate "sitting" sprite.
   isSitting?: boolean;
+  // True while the Run key (R) is held during active movement — only
+  // meaningful alongside isMoving; purely cosmetic (faster walk-cycle
+  // animation) plus the actual higher PLAYER_RUN_SPEED already reflected in
+  // x/y updates, no separate server validation (see movementHandler.ts).
+  isRunning?: boolean;
 }
 
 // A single tile on the room grid. `type` stays authoritative for collision
@@ -162,6 +167,12 @@ export enum SocketEvents {
   CHAT_BUBBLE = 'chat:bubble',
   EMOTE_PLAY = 'emote:play',
 
+  // Jump — purely cosmetic, fire-and-forget one-shot hop (same broadcast
+  // shape as EMOTE_PLAY above), never validated/stored server-side since
+  // there's no persistent state to reconcile — a late joiner just never
+  // sees a jump that already finished, same as an emote.
+  PLAYER_JUMP = 'player:jump',
+
   ZONE_ENTER = 'zone:enter',
   ZONE_EXIT = 'zone:exit',
 
@@ -198,23 +209,35 @@ export enum SocketEvents {
   NOTICE_UNPIN = 'notice:unpin',
   NOTICE_UPDATED = 'notice:updated',
 
+  // Follow now requires the target's consent before tracking starts:
+  // FOLLOW_REQUEST asks the server to start a request rather than following
+  // immediately; the server relays it to the target as FOLLOW_INCOMING, and
+  // the target's own accept/decline comes back as FOLLOW_RESPOND. Only once
+  // accepted does the server actually create the follow relationship and
+  // send FOLLOW_UPDATED/FOLLOWER_CHANGED, same as before. FOLLOW_RESULT lets
+  // the requester's own client show whether they were accepted, declined,
+  // or timed out with no reply.
   FOLLOW_REQUEST = 'follow:request',
+  FOLLOW_INCOMING = 'follow:incoming',
+  FOLLOW_RESPOND = 'follow:respond',
+  FOLLOW_RESULT = 'follow:result',
   FOLLOW_UNFOLLOW = 'follow:unfollow',
   FOLLOW_UPDATED = 'follow:updated',
   FOLLOWER_CHANGED = 'follow:follower_changed',
 
-  // §5 — Summon. SUMMON_USER moves its target immediately (no warning —
-  // spec §5.1 only warns for the mass form). SUMMON_ROOM warns everyone
-  // else in the room first (SUMMON_WARNING, 5s), THEN moves them via the
-  // same PLAYER_TELEPORTED broadcast Teleport already uses (snap, no lerp).
-  // Named SUMMON_ROOM rather than the spec's "summon_map" — this app has one
-  // map per room, not the spec's multi-map Space, so the 'to_current_map'
-  // scope (pull people FROM other maps) has nothing to do here; "everyone
-  // else in my current room" is the only scope that still makes sense.
+  // §5 — Summon. Requires the target's consent before moving them: SUMMON_USER
+  // asks the server to start a request rather than teleporting immediately;
+  // the server relays it to the target as SUMMON_REQUEST, and the target's
+  // accept/decline comes back as SUMMON_RESPOND — only on accept does the
+  // server actually move them via the same PLAYER_TELEPORTED broadcast
+  // Teleport already uses (snap, no lerp). SUMMON_RESULT lets the
+  // requester's own client show whether they were accepted, declined, or
+  // timed out with no reply. (Summon-the-whole-room was removed — see
+  // roomHandler.ts's git history if it ever needs to come back.)
   SUMMON_USER = 'summon:user',
-  SUMMON_ROOM = 'summon:room',
-  SUMMON_WARNING = 'summon:warning',
-  SUMMON_NOTICE = 'summon:notice',
+  SUMMON_REQUEST = 'summon:request',
+  SUMMON_RESPOND = 'summon:respond',
+  SUMMON_RESULT = 'summon:result',
 
   // §6 — Add Media. Portal (spec's ~10s ephemeral variant) is deliberately
   // NOT included — this app already has a permanent portal tile placed via
@@ -306,16 +329,47 @@ export interface TeleportRequest {
   locationId: string;
 }
 
-// §5 — Summon. Sent to a single target right before SUMMON_ROOM's delayed
-// PLAYER_TELEPORTED (so their UI can show "moving you in 5s"), or to a
-// SUMMON_USER target — who gets no warning at all, per spec §5.1.
-export interface SummonWarningPayload {
+// How long a Summon/Follow request waits for the target to respond before
+// the server auto-declines it — shared so the target's own countdown UI and
+// the server's timeout agree on the same duration.
+export const CONSENT_REQUEST_TIMEOUT_MS = 20 * 1000;
+
+// §5 — Summon consent. Sent to the target so they can accept/decline before
+// anything happens to their position.
+export interface SummonRequestPayload {
+  requestId: string;
   actorName: string;
-  countdownSec: number;
 }
 
-export interface SummonNoticePayload {
+export interface SummonRespondPayload {
+  requestId: string;
+  accept: boolean;
+}
+
+// Sent back to whoever asked to summon someone, so their own client can show
+// what happened to the request.
+export interface SummonResultPayload {
+  targetName: string;
+  accepted: boolean;
+  reason?: 'declined' | 'timeout' | 'offline';
+}
+
+// Follow consent — same shape as Summon's, see CONSENT_REQUEST_TIMEOUT_MS.
+export interface FollowRequestPayload {
+  requestId: string;
+  actorUserId: string;
   actorName: string;
+}
+
+export interface FollowRespondPayload {
+  requestId: string;
+  accept: boolean;
+}
+
+export interface FollowResultPayload {
+  targetName: string;
+  accepted: boolean;
+  reason?: 'declined' | 'timeout' | 'offline';
 }
 
 // §6 — Add Media. One table/type union with `type` as discriminator, per
@@ -390,6 +444,26 @@ export const TILE_SIZE = 32;
 export const MAP_WIDTH = 50;
 export const MAP_HEIGHT = 36;
 export const PLAYER_SPEED = 150; // pixels per second
+// Run (hold R while moving) — no dedicated run animation frames exist in
+// the LimeZu Character Generator pack (only idle/walk rows), so running is
+// the walk animation cycled faster (see AvatarSprite.ts's RUN_FRAME_MS)
+// plus this actual higher step speed; there's nothing for the server to
+// validate beyond what it already does for normal movement (bounds +
+// tile-collision — see movementHandler.ts's doc comment on why per-tick
+// max-distance was never enforced even before Run existed).
+export const PLAYER_RUN_SPEED = 260; // pixels per second
+
+// Jump (Space, when not sitting/near a chair) — cosmetic one-shot vertical
+// hop, rendered client-side only (see AvatarSprite.ts/GameCanvas.tsx);
+// shared here purely so the local trigger and the remote PLAYER_JUMP
+// listener animate the exact same arc.
+export const JUMP_DURATION_MS = 420;
+export const JUMP_HEIGHT_PX = 14;
+
+export interface JumpEvent {
+  playerId: string;
+  timestamp: number;
+}
 
 // Proximity / WebRTC constants
 export const PROXIMITY_THRESHOLD = 3; // tiles — within 3 tiles: full video + audio

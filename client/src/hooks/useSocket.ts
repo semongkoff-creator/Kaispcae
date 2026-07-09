@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, SummonWarningPayload, SummonNoticePayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage } from '@/services/browserNotifications';
@@ -113,12 +113,13 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       upsertPlayer(player);
     });
 
-    socket.on(SocketEvents.PLAYER_MOVED, (data: { id: string; x: number; y: number; direction: string }) => {
+    socket.on(SocketEvents.PLAYER_MOVED, (data: { id: string; x: number; y: number; direction: string; isRunning?: boolean }) => {
       setPlayerTarget(data.id, data.x, data.y);
       upsertPlayer({
         id: data.id,
         direction: data.direction as Avatar['direction'],
         isMoving: true,
+        isRunning: !!data.isRunning,
       } as Avatar);
     });
 
@@ -189,15 +190,25 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       setPlayerTarget(data.id, data.x, data.y);
     });
 
-    // §5 — Summon. SUMMON_WARNING (mass summon only) fires 5s before the
-    // PLAYER_TELEPORTED that actually moves me; SUMMON_NOTICE (single-user
-    // summon only) fires right as I'm moved, since that form has no warning.
-    socket.on(SocketEvents.SUMMON_WARNING, (data: SummonWarningPayload) => {
-      useGameStore.getState().setSummonWarning(data);
+    // §5 — Summon, consent-gated. SUMMON_REQUEST is someone else asking to
+    // move me — shown as an Accept/Decline toast (PendingRequestToast.tsx)
+    // instead of moving me immediately. SUMMON_RESULT is the reply to MY
+    // OWN request, telling me whether they accepted/declined/timed out.
+    socket.on(SocketEvents.SUMMON_REQUEST, (data: SummonRequestPayload) => {
+      useGameStore.getState().setIncomingSummonRequest(data);
     });
 
-    socket.on(SocketEvents.SUMMON_NOTICE, (data: SummonNoticePayload) => {
-      useGameStore.getState().setSummonNotice(data);
+    socket.on(SocketEvents.SUMMON_RESULT, (data: SummonResultPayload) => {
+      useGameStore.getState().setSummonResult(data);
+    });
+
+    // Follow, same consent shape as Summon above.
+    socket.on(SocketEvents.FOLLOW_INCOMING, (data: FollowRequestPayload) => {
+      useGameStore.getState().setIncomingFollowRequest(data);
+    });
+
+    socket.on(SocketEvents.FOLLOW_RESULT, (data: FollowResultPayload) => {
+      useGameStore.getState().setFollowResult(data);
     });
 
     // §6 — Add Media. MEDIA_LIST arrives once right after ROOM_STATE (this
@@ -284,6 +295,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       addEmote(event);
     });
 
+    socket.on(SocketEvents.PLAYER_JUMP, (event: JumpEvent) => {
+      useGameStore.getState().triggerJump(event.playerId, event.timestamp);
+    });
+
     socket.on(SocketEvents.ROOM_UPDATED, (data: RoomUpdatePayload) => {
       const tiles = data.tiles.map((row, y) =>
         row.map((t, x) => ({ ...t, x, y, type: t.type as any }))
@@ -338,7 +353,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   }, [authUserName, roomSlug, authUserId]);
 
   const emitMove = useCallback(
-    (x: number, y: number, direction: string) => {
+    (x: number, y: number, direction: string, isRunning?: boolean) => {
       const socket = socketRef.current;
       if (!socket || !socket.connected) return;
 
@@ -346,7 +361,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       if (now - lastEmitRef.current < 50) return;
       lastEmitRef.current = now;
 
-      socket.emit(SocketEvents.PLAYER_MOVE, { x, y, direction });
+      socket.emit(SocketEvents.PLAYER_MOVE, { x, y, direction, isRunning });
     },
     [],
   );
@@ -395,6 +410,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
   const emitEmote = useCallback((emote: string, x: number, y: number) => {
     socketRef.current?.emit(SocketEvents.EMOTE_PLAY, { emote, x, y });
+  }, []);
+
+  const emitJump = useCallback(() => {
+    socketRef.current?.emit(SocketEvents.PLAYER_JUMP);
   }, []);
 
   const emitZoneEnter = useCallback((zoneId: string) => {
@@ -451,8 +470,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.SUMMON_USER, { nickname });
   }, []);
 
-  const emitSummonRoom = useCallback(() => {
-    socketRef.current?.emit(SocketEvents.SUMMON_ROOM);
+  const emitSummonRespond = useCallback((requestId: string, accept: boolean) => {
+    socketRef.current?.emit(SocketEvents.SUMMON_RESPOND, { requestId, accept });
+  }, []);
+
+  const emitFollowRespond = useCallback((requestId: string, accept: boolean) => {
+    socketRef.current?.emit(SocketEvents.FOLLOW_RESPOND, { requestId, accept });
   }, []);
 
   const emitFollowUnfollow = useCallback(() => {
@@ -491,5 +514,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRoom, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize };
 }

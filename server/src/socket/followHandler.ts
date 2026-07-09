@@ -1,5 +1,6 @@
+import { randomUUID } from 'crypto';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, FollowInfo } from '@virtualmeet/shared';
+import { SocketEvents, FollowInfo, CONSENT_REQUEST_TIMEOUT_MS, FollowRespondPayload } from '@virtualmeet/shared';
 import { getPlayerName } from './roomHandler';
 
 // Follow (spec §3) — auto-move a follower's avatar to trail a target
@@ -38,6 +39,31 @@ function getRoomFollows(room: string): Map<string, FollowRecord> {
 const uidToSocket = new Map<string, string>();
 const socketToUid = new Map<string, string>();
 const socketToRoom = new Map<string, string>();
+
+// Follow now requires the target's consent before the relationship is
+// created. Keyed by requestId rather than by follower/target alone —
+// unlike Summon (one target, one pending slot), a target can legitimately
+// have several different people asking to follow them at once, so it can't
+// be keyed by target either.
+interface PendingFollow {
+  requestId: string;
+  followerUid: string;
+  followerName: string;
+  targetUid: string;
+  timeout: ReturnType<typeof setTimeout>;
+}
+const pendingFollows = new Map<string, PendingFollow>();
+
+// A follower can only have one outstanding (unanswered) request at a time —
+// asking someone new supersedes whatever they hadn't heard back on yet.
+function clearPendingFollowByFollower(followerUid: string): void {
+  for (const [id, rec] of pendingFollows) {
+    if (rec.followerUid === followerUid) {
+      clearTimeout(rec.timeout);
+      pendingFollows.delete(id);
+    }
+  }
+}
 
 function broadcastFollowerChange(io: Server, room: string, targetUid: string): void {
   const follows = getRoomFollows(room);
@@ -85,6 +111,9 @@ export function registerFollowHandlers(io: Server, socket: Socket): void {
     if (anyReactivated) broadcastFollowerChange(io, room, uid);
   });
 
+  // Starts a pending request rather than following immediately — the
+  // target has to accept via FOLLOW_RESPOND below before the relationship
+  // actually exists.
   socket.on(SocketEvents.FOLLOW_REQUEST, (data: { targetUserId: string }) => {
     const room = socketToRoom.get(socket.id); if (!room) return;
     const followerUid = socketToUid.get(socket.id); if (!followerUid) return;
@@ -103,15 +132,49 @@ export function registerFollowHandlers(io: Server, socket: Socket): void {
     }
 
     // Target must currently be an online, tracked player in this room.
-    if (!uidToSocket.has(targetUid)) {
+    const targetSocketId = uidToSocket.get(targetUid);
+    if (!targetSocketId) {
       socket.emit('admin:error', { message: 'User not found or offline' });
       return;
     }
 
-    const rec: FollowRecord = { followerId: followerUid, targetId: targetUid, status: 'active' };
-    follows.set(followerUid, rec);
-    sendFollowInfo(io, followerUid, rec);
-    broadcastFollowerChange(io, room, targetUid);
+    clearPendingFollowByFollower(followerUid);
+    const requestId = randomUUID();
+    const followerName = getPlayerName(socket.id);
+    const timeout = setTimeout(() => {
+      pendingFollows.delete(requestId);
+      socket.emit(SocketEvents.FOLLOW_RESULT, { targetName: getPlayerName(targetSocketId), accepted: false, reason: 'timeout' });
+    }, CONSENT_REQUEST_TIMEOUT_MS);
+    pendingFollows.set(requestId, { requestId, followerUid, followerName, targetUid, timeout });
+    io.to(targetSocketId).emit(SocketEvents.FOLLOW_INCOMING, { requestId, actorUserId: followerUid, actorName: followerName });
+  });
+
+  // Target's reply to a pending Follow request. Accept creates the actual
+  // FollowRecord (same as the old immediate-follow behavior); decline just
+  // drops the pending request. Either way the follower gets FOLLOW_RESULT
+  // so their UI knows what happened instead of waiting silently forever.
+  socket.on(SocketEvents.FOLLOW_RESPOND, (data: FollowRespondPayload) => {
+    const room = socketToRoom.get(socket.id); if (!room) return;
+    const respondingUid = socketToUid.get(socket.id); if (!respondingUid) return;
+    const pending = pendingFollows.get(data?.requestId);
+    if (!pending || pending.targetUid !== respondingUid) return;
+    clearTimeout(pending.timeout);
+    pendingFollows.delete(pending.requestId);
+
+    const followerSocketId = uidToSocket.get(pending.followerUid);
+    const targetName = getPlayerName(socket.id);
+
+    if (!data.accept) {
+      if (followerSocketId) io.to(followerSocketId).emit(SocketEvents.FOLLOW_RESULT, { targetName, accepted: false, reason: 'declined' });
+      return;
+    }
+
+    const follows = getRoomFollows(room);
+    const rec: FollowRecord = { followerId: pending.followerUid, targetId: pending.targetUid, status: 'active' };
+    follows.set(pending.followerUid, rec);
+    sendFollowInfo(io, pending.followerUid, rec);
+    broadcastFollowerChange(io, room, pending.targetUid);
+    if (followerSocketId) io.to(followerSocketId).emit(SocketEvents.FOLLOW_RESULT, { targetName, accepted: true });
   });
 
   socket.on(SocketEvents.FOLLOW_UNFOLLOW, () => {
@@ -148,6 +211,23 @@ export function registerFollowHandlers(io: Server, socket: Socket): void {
       }
       if (anyParked) broadcastFollowerChange(io, room, uid);
     }
+
+    // Any pending (unanswered) Follow request involving this uid — either
+    // side — can't be fulfilled correctly anymore.
+    if (uid) {
+      for (const [id, rec] of pendingFollows) {
+        if (rec.followerUid === uid) {
+          clearTimeout(rec.timeout);
+          pendingFollows.delete(id);
+        } else if (rec.targetUid === uid) {
+          clearTimeout(rec.timeout);
+          pendingFollows.delete(id);
+          const followerSocketId = uidToSocket.get(rec.followerUid);
+          if (followerSocketId) io.to(followerSocketId).emit(SocketEvents.FOLLOW_RESULT, { targetName: getPlayerName(socket.id), accepted: false, reason: 'offline' });
+        }
+      }
+    }
+
     if (uid) uidToSocket.delete(uid);
     socketToUid.delete(socket.id);
     socketToRoom.delete(socket.id);

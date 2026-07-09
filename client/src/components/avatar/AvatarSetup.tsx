@@ -217,33 +217,6 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
           </Section>
         )}
 
-        {/* Identity Color — used for minimap dot, chat name dot, etc. */}
-        <Section label="Identity Color">
-          <div className="flex flex-wrap gap-2">
-            {PALETTE.map((color) => (
-              <button
-                key={color}
-                onClick={() => setField('color', color)}
-                className="w-8 h-8 rounded-full border-2 transition-transform hover:scale-110"
-                style={{
-                  backgroundColor: color,
-                  borderColor: config.color === color ? '#7c3aed' : 'transparent',
-                }}
-              />
-            ))}
-            {/* Custom color picker */}
-            <label className="w-8 h-8 rounded-full cursor-pointer flex items-center justify-center bg-purple-50 border-2 border-transparent hover:scale-110 transition-transform">
-              <span className="text-gray-400 text-lg leading-none">+</span>
-              <input
-                type="color"
-                value={config.color}
-                onChange={(e) => setField('color', e.target.value)}
-                className="absolute opacity-0 w-0 h-0"
-              />
-            </label>
-          </div>
-        </Section>
-
         {/* Display Name */}
         <Section label="Display Name">
           <input

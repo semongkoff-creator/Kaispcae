@@ -1,13 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Tools, GearFill, Clipboard, BoxArrowLeft, PersonWalking, X, GeoAltFill, MagnetFill, ImageFill } from 'react-bootstrap-icons';
-import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload } from '@virtualmeet/shared';
+import { GearFill, Clipboard, PersonWalking, X, MagnetFill } from 'react-bootstrap-icons';
+import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import { GameCanvas } from './components/canvas/GameCanvas';
 import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
 import { NameModal } from './components/ui/NameModal';
 import { AvatarSetup } from './components/avatar/AvatarSetup';
-import { AvatarEditorButton } from './components/avatar/AvatarEditorButton';
-import { StatusButton } from './components/avatar/StatusButton';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { ChatPanel } from './components/ui/ChatPanel';
 import { NoticeBanner } from './components/ui/NoticeBanner';
@@ -19,7 +17,8 @@ import { TeleportPanel } from './components/ui/TeleportPanel';
 import { AddMediaPanel } from './components/ui/AddMediaPanel';
 import { MediaViewerModal } from './components/ui/MediaViewerModal';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
-import { RecordingControl } from './components/ui/RecordingControl';
+import { PendingRequestToast } from './components/ui/PendingRequestToast';
+import { Sidebar } from './components/ui/Sidebar';
 import { MicButton } from './components/hud/MicButton';
 import { CameraButton } from './components/hud/CameraButton';
 import { ScreenShareButton } from './components/hud/ScreenShareButton';
@@ -37,9 +36,19 @@ import { useScreenRecording } from './hooks/useScreenRecording';
 import { webrtcService } from './services/webrtcService';
 import { loadAvatarConfig, saveAvatarConfig } from './hooks/useAvatarConfig';
 
-function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }: { roomSlug: string; onLeave: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string }) {
+// Shared phrasing for the two non-accepted outcomes a Summon/Follow request
+// can resolve to — 'declined' and 'timeout' read very differently ("they
+// said no" vs "they never answered"), so this is deliberately not a single
+// generic "was declined" string.
+function describeConsentDecline(reason: 'declined' | 'timeout' | 'offline' | undefined): string {
+  if (reason === 'timeout') return "didn't respond to";
+  if (reason === 'offline') return 'went offline before responding to';
+  return 'declined';
+}
+
+function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRoom, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize } = useSocket(authDisplayName, roomSlug, authUserId);
   const [showEditor, setShowEditor] = useState(false);
 
   // Media state from store
@@ -131,23 +140,29 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
   );
   const { requestRecording, stopMyRecording, isRecordingMine, uploading: recordingUploading } = useScreenRecording({
     activeRecording,
+    localUserId,
     findSocketIdByUserId,
     emitRecordingStop,
     emitRecordingFinalize,
   });
-  // §7 — recording targets only, so excludes myself even if I'm spotlighted:
-  // the mesh only gives me a capturable stream for REMOTE peers
-  // (webrtcService.getRecordingStream looks up the peers Map, which never
-  // contains my own connection) — recording my own outgoing camera isn't
-  // reachable through this architecture, so it's left out of the picker
-  // instead of silently failing after the server's already created the row.
-  const spotlightedPlayers = spotlightedUserIds
-    .filter((uid) => uid !== localUserId)
-    .map((uid) => {
-      const p = Object.values(playerRecords).find((rec) => rec.userId === uid);
-      return p ? { userId: uid, name: p.name } : null;
-    })
-    .filter((p): p is { userId: string; name: string } => !!p);
+  // §7 — "Myself" is always an available recording target, spotlight or
+  // not: recording myself captures my whole screen/tab via getDisplayMedia
+  // (see useScreenRecording.ts), not a peer connection, so there's no
+  // reachability requirement the way there is for recording someone else.
+  // This also means solo/testing use (no one around to spotlight) still
+  // has something to record instead of the button just staying disabled.
+  // Spotlighted others are listed after, excluding myself if I happen to
+  // be spotlighted too (to avoid a duplicate "Myself" entry).
+  const recordingTargets = [
+    { userId: localUserId, name: `${localPlayer.name} (You)` },
+    ...spotlightedUserIds
+      .filter((uid) => uid !== localUserId)
+      .map((uid) => {
+        const p = Object.values(playerRecords).find((rec) => rec.userId === uid);
+        return p ? { userId: uid, name: p.name } : null;
+      })
+      .filter((p): p is { userId: string; name: string } => !!p),
+  ];
 
   // Track which zone (if any) the local player is standing in — drives the
   // ChatPanel's "Private" tab, and notifies other players in the room when
@@ -186,8 +201,8 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
   useEffect(() => () => destroy(), [destroy]);
 
   // Room deleted by its owner while we were in it — show the notice for a
-  // moment, then navigate back to the Lobby the same way the "Leave" button
-  // does (React state, not a full page reload).
+  // moment, then navigate back to the Lobby (React state, not a full page
+  // reload).
   const roomDeletedNotice = useGameStore((s) => s.roomDeletedNotice);
   useEffect(() => {
     if (!roomDeletedNotice) return;
@@ -198,23 +213,37 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
     return () => clearTimeout(timer);
   }, [roomDeletedNotice, onLeave]);
 
-  // §5 — Summon toasts. Both auto-clear: the warning matches its own
-  // countdown (it's superseded by the actual PLAYER_TELEPORTED snap anyway,
-  // this just stops the toast from lingering if that arrives late), the
-  // notice is a one-off "you were summoned" ping.
-  const summonWarning = useGameStore((s) => s.summonWarning);
+  // Summon/Follow consent requests (see PendingRequestToast.tsx). Incoming
+  // requests auto-clear on the same clock the server uses to auto-decline
+  // them (CONSENT_REQUEST_TIMEOUT_MS) so the toast never outlives a request
+  // that's already dead server-side; result toasts are a one-off ping.
+  const incomingSummonRequest = useGameStore((s) => s.incomingSummonRequest);
   useEffect(() => {
-    if (!summonWarning) return;
-    const timer = setTimeout(() => useGameStore.getState().setSummonWarning(null), summonWarning.countdownSec * 1000);
+    if (!incomingSummonRequest) return;
+    const timer = setTimeout(() => useGameStore.getState().setIncomingSummonRequest(null), CONSENT_REQUEST_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [summonWarning]);
+  }, [incomingSummonRequest]);
 
-  const summonNotice = useGameStore((s) => s.summonNotice);
+  const summonResult = useGameStore((s) => s.summonResult);
   useEffect(() => {
-    if (!summonNotice) return;
-    const timer = setTimeout(() => useGameStore.getState().setSummonNotice(null), 2500);
+    if (!summonResult) return;
+    const timer = setTimeout(() => useGameStore.getState().setSummonResult(null), 3000);
     return () => clearTimeout(timer);
-  }, [summonNotice]);
+  }, [summonResult]);
+
+  const incomingFollowRequest = useGameStore((s) => s.incomingFollowRequest);
+  useEffect(() => {
+    if (!incomingFollowRequest) return;
+    const timer = setTimeout(() => useGameStore.getState().setIncomingFollowRequest(null), CONSENT_REQUEST_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [incomingFollowRequest]);
+
+  const followResult = useGameStore((s) => s.followResult);
+  useEffect(() => {
+    if (!followResult) return;
+    const timer = setTimeout(() => useGameStore.getState().setFollowResult(null), 3000);
+    return () => clearTimeout(timer);
+  }, [followResult]);
 
   // Admin / Editor
   const isAdmin = useGameStore((s) => s.isAdmin);
@@ -234,7 +263,7 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
   const [viewingMediaId, setViewingMediaId] = useState<string | null>(null);
   const localRole = useGameStore((s) => s.localRole);
   const mediaObjects = useGameStore((s) => s.mediaObjects);
-  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
 
   // E key for editor, Tab for admin panel
@@ -420,6 +449,7 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
       <GameCanvas
         emitMove={emitMove}
         emitStop={emitStop}
+        emitJump={emitJump}
         proximityData={nearby}
         localSpeaking={localSpeaking}
         speakingPlayers={speakingPlayers}
@@ -444,7 +474,7 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
       />
 
       <div className="absolute top-4 left-28 pointer-events-none">
-        <p className="text-gray-500 text-xs font-mono">WASD / Arrow keys to move</p>
+        <p className="text-gray-500 text-xs font-mono">WASD / Arrows to move · hold R to run · Space to jump</p>
       </div>
       <div className="absolute top-10 left-28 pointer-events-none">
         <p className="text-gray-500 text-xs font-mono">
@@ -461,7 +491,7 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
           server-side (see followHandler.ts) and resumes automatically the
           moment they reconnect, no need to click Follow again. */}
       {followInfo && (
-        <div className="absolute bottom-28 left-4 z-30 pointer-events-auto">
+        <div className="absolute bottom-28 left-16 z-30 pointer-events-auto">
           <div className="bg-white/90 backdrop-blur-sm border border-purple-200 shadow-sm rounded-lg px-3 py-2 flex items-center gap-2 text-xs">
             <PersonWalking size={13} className="text-purple-600" />
             <span className="text-gray-700">
@@ -476,21 +506,73 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
         </div>
       )}
 
-      {/* §5 — Summon toasts. z-50 so they win over the Follow indicator
-          below, which sits at the same bottom-28 corner. */}
-      {summonWarning && (
-        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-50 bg-amber-500/90 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-1.5">
-          <MagnetFill size={13} /> {summonWarning.actorName} is summoning you — moving in {summonWarning.countdownSec}s
-        </div>
-      )}
-      {summonNotice && (
-        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-50 bg-purple-600/90 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-1.5">
-          <MagnetFill size={13} /> Summoned by {summonNotice.actorName}
-        </div>
-      )}
+      {/* Summon/Follow consent toasts — z-50 so they win over the Follow
+          indicator below, which sits at the same bottom-28 corner. Incoming
+          requests need Accept/Decline; results are a one-off ping about a
+          request I sent. */}
+      <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2">
+        {incomingSummonRequest && (
+          <PendingRequestToast
+            icon={<MagnetFill size={13} className="text-amber-500" />}
+            message={<><span className="font-medium">{incomingSummonRequest.actorName}</span> wants to summon you to their location</>}
+            onAccept={() => { emitSummonRespond(incomingSummonRequest.requestId, true); useGameStore.getState().setIncomingSummonRequest(null); }}
+            onDecline={() => { emitSummonRespond(incomingSummonRequest.requestId, false); useGameStore.getState().setIncomingSummonRequest(null); }}
+          />
+        )}
+        {incomingFollowRequest && (
+          <PendingRequestToast
+            icon={<PersonWalking size={13} className="text-purple-600" />}
+            message={<><span className="font-medium">{incomingFollowRequest.actorName}</span> wants to follow you</>}
+            onAccept={() => { emitFollowRespond(incomingFollowRequest.requestId, true); useGameStore.getState().setIncomingFollowRequest(null); }}
+            onDecline={() => { emitFollowRespond(incomingFollowRequest.requestId, false); useGameStore.getState().setIncomingFollowRequest(null); }}
+          />
+        )}
+        {summonResult && (
+          <div className="bg-purple-600/90 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-1.5">
+            <MagnetFill size={13} />
+            {summonResult.accepted
+              ? `${summonResult.targetName} accepted your summon request`
+              : `${summonResult.targetName} ${describeConsentDecline(summonResult.reason)} your summon request`}
+          </div>
+        )}
+        {followResult && (
+          <div className="bg-purple-600/90 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-1.5">
+            <PersonWalking size={13} />
+            {followResult.accepted
+              ? `${followResult.targetName} accepted your follow request`
+              : `${followResult.targetName} ${describeConsentDecline(followResult.reason)} your follow request`}
+          </div>
+        )}
+      </div>
 
-      <AvatarEditorButton onClick={() => setShowEditor(true)} />
-      <StatusButton status={localPlayer.status || ''} onSave={handleStatusSave} />
+      {/* ZEP-style left icon rail — every room-level feature button used to
+          be its own absolutely-positioned bottom-left button, which had
+          started overflowing/wrapping once Teleport/Summon/Add
+          Media/Record all landed in the same session. Now it's one rail,
+          one icon per feature; each feature's own panel/popover opens to
+          the right of the rail instead of scattered across the bottom. */}
+      <Sidebar
+        onEditAvatar={() => setShowEditor(true)}
+        status={localPlayer.status || ''}
+        onSaveStatus={handleStatusSave}
+        isAdmin={isAdmin}
+        editorMode={editorMode}
+        onToggleEditorMode={toggleEditorMode}
+        canTeleport={roleAtLeast(localRole, 'staff')}
+        showTeleportPanel={showTeleportPanel}
+        onToggleTeleport={() => setShowTeleportPanel((v) => !v)}
+        showAddMediaPanel={showAddMediaPanel}
+        onToggleAddMedia={() => setShowAddMediaPanel((v) => !v)}
+        canRecord={isAdmin}
+        recordingTargets={recordingTargets}
+        activeRecording={activeRecording}
+        isRecordingMine={isRecordingMine}
+        recordingUploading={recordingUploading}
+        roomSlug={roomSlug}
+        onStartRecording={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
+        onStopRecording={stopMyRecording}
+        onLogout={() => setShowLogoutConfirm(true)}
+      />
 
       {/* Permanent seat assignment (ZEP-style "this is my desk") — only
           shown while actually sitting, since it acts on the specific chair
@@ -519,71 +601,6 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
               🔒 Reserved by {sittingItem.assignedToName || 'someone'}
             </div>
           )}
-        </div>
-      )}
-
-      {isAdmin && (
-        <button
-          onClick={toggleEditorMode}
-          className={`absolute bottom-4 left-28 z-30 px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 ${editorMode ? 'bg-purple-600 text-white border-purple-500' : 'bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm'}`}
-        >
-          <Tools size={12} /> {editorMode ? 'Editing...' : 'Edit Room'}
-        </button>
-      )}
-
-      {/* §4 — Teleport. Gated at staff+ since the panel's "Team Locations"
-          tab is the only thing a plain member has no use for; the "My
-          Bookmarks" tab inside the panel is further gated to owner-only. */}
-      {roleAtLeast(localRole, 'staff') && (
-        <button
-          onClick={() => setShowTeleportPanel((v) => !v)}
-          className={`absolute bottom-4 left-52 z-30 px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 ${showTeleportPanel ? 'bg-purple-600 text-white border-purple-500' : 'bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm'}`}
-        >
-          <GeoAltFill size={12} /> Teleport
-        </button>
-      )}
-
-      {/* §5.2/5.3 — Summon All. Disruptive to everyone else in the room, so
-          unlike Teleport's button this asks for confirmation first — same
-          window.confirm pattern the Leave Room flow already uses elsewhere
-          (well, that one's a styled modal; this reuses the simpler
-          window.confirm since Summon All is staff-only and infrequent). */}
-      {roleAtLeast(localRole, 'staff') && (
-        <button
-          onClick={() => {
-            if (window.confirm('Summon everyone else in this room to your position?')) emitSummonRoom();
-          }}
-          className="absolute bottom-4 left-[19rem] z-30 px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm"
-        >
-          <MagnetFill size={12} /> Summon All
-        </button>
-      )}
-
-      {/* §6 — Add Media. Not role-gated — the spec's own dependency for
-          this feature is just §1's Interact, no permission requirement
-          (delete is separately gated to creator-or-admin, checked server
-          side in mediaHandler.ts, not here). */}
-      <button
-        onClick={() => setShowAddMediaPanel((v) => !v)}
-        className={`absolute bottom-4 left-[25rem] z-30 px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 ${showAddMediaPanel ? 'bg-purple-600 text-white border-purple-500' : 'bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm'}`}
-      >
-        <ImageFill size={12} /> Add Media
-      </button>
-
-      {/* §7 — Screen Recording, admin+ only (gated one tier above the
-          other staff+ controls — see shared/permissions.ts's doc comment
-          on why). */}
-      {isAdmin && (
-        <div className="absolute bottom-4 left-[31rem] z-30">
-          <RecordingControl
-            spotlightedPlayers={spotlightedPlayers}
-            activeRecording={activeRecording}
-            isRecordingMine={isRecordingMine}
-            uploading={recordingUploading}
-            roomSlug={roomSlug}
-            onStart={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
-            onStop={stopMyRecording}
-          />
         </div>
       )}
 
@@ -691,32 +708,22 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
         </div>
       )}
 
-      {/* Leave Room button */}
-      <div className="absolute top-4 left-4 pointer-events-auto">
-        <button
-          onClick={() => setShowLeaveConfirm(true)}
-          className="text-red-500/70 hover:text-red-500 text-xs font-medium cursor-pointer transition-colors inline-flex items-center gap-1"
-        >
-          <BoxArrowLeft size={12} /> Leave
-        </button>
-      </div>
-
-      {showLeaveConfirm && (
+      {showLogoutConfirm && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-xl p-6 shadow-xl shadow-purple-100/50 border border-purple-100 text-center">
-            <p className="text-gray-900 text-sm mb-4">Leave this room?</p>
+            <p className="text-gray-900 text-sm mb-4">Log out of your account?</p>
             <div className="flex gap-3">
               <button
-                onClick={() => setShowLeaveConfirm(false)}
+                onClick={() => setShowLogoutConfirm(false)}
                 className="px-4 py-2 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 text-sm cursor-pointer"
               >
                 Cancel
               </button>
               <button
-                onClick={() => { setShowLeaveConfirm(false); onLeave(); }}
+                onClick={() => { setShowLogoutConfirm(false); onLogout(); }}
                 className="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm cursor-pointer"
               >
-                Leave Room
+                Logout
               </button>
             </div>
           </div>
@@ -922,5 +929,5 @@ export default function App() {
     );
   }
 
-  return <Game roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} />;
+  return <Game roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} />;
 }

@@ -12,6 +12,8 @@ import {
   PROXIMITY_THRESHOLD_PX,
   EMOTE_EMOJI,
   RoomTheme,
+  JUMP_DURATION_MS,
+  JUMP_HEIGHT_PX,
 } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useMovement } from '@/hooks/useMovement';
@@ -134,8 +136,9 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
 }
 
 interface GameCanvasProps {
-  emitMove: (x: number, y: number, direction: string) => void;
+  emitMove: (x: number, y: number, direction: string, isRunning?: boolean) => void;
   emitStop: (direction: string) => void;
+  emitJump: () => void;
   proximityData: ProximityPlayer[];
   localSpeaking: boolean;
   speakingPlayers: Set<string>;
@@ -161,7 +164,19 @@ interface GameCanvasProps {
 
 const MEDIA_ICON: Record<string, string> = { image: '🖼️', youtube: '▶️', whiteboard: '📝', file: '📎' };
 
-export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, onMediaOpen }: GameCanvasProps) {
+// Jump — a one-shot vertical hop (half a sine arc: 0 -> -JUMP_HEIGHT_PX -> 0),
+// added on top of the normal walk-bob offset below. Returns 0 once
+// JUMP_DURATION_MS has elapsed, so a stale/never-cleared jumpingPlayers
+// entry (e.g. its player left mid-jump) just silently stops contributing
+// anything rather than needing to be pruned.
+function getJumpOffset(startTimestamp: number | undefined, timestamp: number): number {
+  if (startTimestamp === undefined) return 0;
+  const elapsed = timestamp - startTimestamp;
+  if (elapsed < 0 || elapsed > JUMP_DURATION_MS) return 0;
+  return -JUMP_HEIGHT_PX * Math.sin((Math.PI * elapsed) / JUMP_DURATION_MS);
+}
+
+export function GameCanvas({ emitMove, emitStop, emitJump, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, onMediaOpen }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -170,6 +185,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
 
   const emitMoveRef = useRef(emitMove); emitMoveRef.current = emitMove;
   const emitStopRef = useRef(emitStop); emitStopRef.current = emitStop;
+  const emitJumpRef = useRef(emitJump); emitJumpRef.current = emitJump;
   const emitSitRef = useRef(emitSit); emitSitRef.current = emitSit;
   const emitFollowUnfollowRef = useRef(emitFollowUnfollow); emitFollowUnfollowRef.current = emitFollowUnfollow;
 
@@ -187,6 +203,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
   const localPlayerIdRef = useRef(localPlayerId);
   const bubblesRef = useRef(useGameStore.getState().speechBubbles);
   const emotesRef = useRef(useGameStore.getState().emoteEvents);
+  const jumpingPlayersRef = useRef(useGameStore.getState().jumpingPlayers);
   const zones = useGameStore((s) => s.zones);
   const zonesRef = useRef(zones);
   // Labeled zones render a DOM banner positioned imperatively (via transform,
@@ -213,6 +230,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     localPlayerIdRef.current = localPlayerId;
     bubblesRef.current = useGameStore.getState().speechBubbles;
     emotesRef.current = useGameStore.getState().emoteEvents;
+    jumpingPlayersRef.current = useGameStore.getState().jumpingPlayers;
     zonesRef.current = zones;
     furnitureRef.current = furniture;
     mediaObjectsRef.current = mediaObjects;
@@ -313,6 +331,10 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     const handleSitKey = (e: KeyboardEvent) => {
       const tag = document.activeElement?.tagName.toLowerCase();
       if (tag === 'input' || tag === 'textarea') return;
+      // Ignore the OS's own key-repeat while Space is held — otherwise
+      // holding it down would fire a new jump (or re-toggle sit/stand)
+      // every repeat tick instead of once per physical press.
+      if (e.repeat) return;
 
       if (e.code === 'Space') {
         e.preventDefault();
@@ -334,6 +356,10 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
         } else if (nearbyChairRef.current) {
           const { furniture, tileX, tileY } = nearbyChairRef.current;
           performSit(furniture, tileX, tileY);
+        } else {
+          // Jump — cosmetic only, no chair nearby and not already sitting.
+          state.triggerJump(localPlayerIdRef.current, Date.now());
+          emitJumpRef.current();
         }
         return;
       }
@@ -413,7 +439,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     }
 
     if (effectiveMoveResult.isMoving) {
-      emitMoveRef.current(effectiveMoveResult.x, effectiveMoveResult.y, effectiveMoveResult.direction);
+      emitMoveRef.current(effectiveMoveResult.x, effectiveMoveResult.y, effectiveMoveResult.direction, effectiveMoveResult.isRunning);
       wasMovingRef.current = true;
     } else if (wasMovingRef.current) {
       emitStopRef.current(effectiveMoveResult.direction);
@@ -629,7 +655,11 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
       mediaTileCounts.set(tileKey, stackIndex + 1);
       const el = mediaMarkerRefs.current.get(media.id);
       if (!el) continue;
-      const mx = media.x * TILE_SIZE - cameraX + stackIndex * 18;
+      // Image/YouTube render as a much bigger inline thumbnail below (see
+      // the marker JSX) than the small pin whiteboard/file still use, so
+      // they need a wider stacking gap to avoid overlapping.
+      const stackOffsetPx = media.type === 'image' || media.type === 'youtube' ? 40 : 18;
+      const mx = media.x * TILE_SIZE - cameraX + stackIndex * stackOffsetPx;
       const my = media.y * TILE_SIZE - cameraY;
       el.style.transform = `translate(${mx}px, ${my}px)`;
     }
@@ -655,6 +685,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
     const playerRecords = playerRecordsRef.current;
     const localPlayerId = localPlayerIdRef.current;
     const localPlayer = localPlayerRef.current;
+    const now = Date.now();
     const walkOffset = effectiveMoveResult.isMoving ? Math.sin(timestamp * 0.008) * 2 : 0;
     const localAvatar: Avatar = {
       ...localPlayer, x: playerX, y: playerY, isMoving: effectiveMoveResult.isMoving,
@@ -666,6 +697,7 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
       // set in performSit) is correct.
       direction: effectiveMoveResult.isMoving ? effectiveMoveResult.direction : localPlayer.direction,
       id: localPlayerId,
+      isRunning: effectiveMoveResult.isMoving && effectiveMoveResult.isRunning,
     };
     const remoteAvatars = Object.values(playerRecords).filter((p) => p.id !== localPlayerId);
     const allAvatars: Avatar[] = [localAvatar, ...remoteAvatars];
@@ -677,8 +709,10 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
           sy < -AVATAR_RADIUS - 40 || sy > logicalH + AVATAR_RADIUS + 30) continue;
 
       const isLocal = avatar.id === localPlayerId;
+      const bobOffset = isLocal ? walkOffset : avatar.isMoving ? Math.sin(timestamp * 0.008 + (avatar.id.charCodeAt(0) || 0) * 0.1) * 2 : 0;
+      const jumpOffset = getJumpOffset(jumpingPlayersRef.current.get(avatar.id), now);
       drawAvatar(ctx, { avatar, x: sx, y: sy, isLocal, timestamp,
-        walkAnimOffset: isLocal ? walkOffset : avatar.isMoving ? Math.sin(timestamp * 0.008 + (avatar.id.charCodeAt(0) || 0) * 0.1) * 2 : 0,
+        walkAnimOffset: bobOffset + jumpOffset,
       });
 
       // Crown for admin players
@@ -754,7 +788,6 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
 
     // Speech bubbles
     const bubbles = bubblesRef.current;
-    const now = Date.now();
     for (const [pid, bubble] of Object.entries(bubbles)) {
       if (now > bubble.expireAt) continue;
       const records = playerRecordsRef.current;
@@ -989,31 +1022,52 @@ export function GameCanvas({ emitMove, emitStop, proximityData, localSpeaking, s
           </div>
         ))}
       </div>
-      {/* §6 — Media markers: one small clickable pin per placed object,
-          same imperative-transform pattern as the overlays above. Opens
-          MediaViewerModal (App.tsx) rather than rendering the actual
-          image/iframe/whiteboard inline here — keeps N simultaneous media
-          objects cheap (no N mounted iframes/canvases) and reuses the
-          existing modal pattern already used elsewhere in this app. */}
+      {/* §6 — Media markers, same imperative-transform pattern as the
+          overlays above. Image/YouTube show their actual content directly
+          (a real thumbnail, not just an icon) — no extra click needed to
+          see what's there; clicking it still opens MediaViewerModal for the
+          full-size image / actual video playback / delete. Whiteboard/file
+          stay a small icon pin: a whiteboard needs its own interactive
+          canvas either way (no "preview" that isn't also the real thing),
+          and a file has no visual content to show at all before opening it. */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {mediaObjects.map((media) => (
-          <div
-            key={media.id}
-            ref={(el) => {
-              if (el) mediaMarkerRefs.current.set(media.id, el);
-              else mediaMarkerRefs.current.delete(media.id);
-            }}
-            className="absolute top-0 left-0 will-change-transform pointer-events-auto"
-          >
-            <button
-              onClick={() => onMediaOpen(media.id)}
-              title={media.type}
-              className="w-8 h-8 -mt-8 flex items-center justify-center text-lg bg-white/90 backdrop-blur-sm rounded-full shadow-md border border-purple-200 cursor-pointer hover:scale-110 transition-transform"
+        {mediaObjects.map((media) => {
+          const isThumbnail = media.type === 'image' || media.type === 'youtube';
+          const thumbnailSrc = media.type === 'image'
+            ? media.payload.url
+            : media.payload.videoId
+              ? `https://img.youtube.com/vi/${media.payload.videoId}/mqdefault.jpg`
+              : undefined;
+          return (
+            <div
+              key={media.id}
+              ref={(el) => {
+                if (el) mediaMarkerRefs.current.set(media.id, el);
+                else mediaMarkerRefs.current.delete(media.id);
+              }}
+              className="absolute top-0 left-0 will-change-transform pointer-events-auto"
             >
-              {MEDIA_ICON[media.type] ?? '📌'}
-            </button>
-          </div>
-        ))}
+              <button
+                onClick={() => onMediaOpen(media.id)}
+                title={media.type}
+                className={isThumbnail && thumbnailSrc
+                  ? 'w-16 h-16 -mt-16 -ml-4 rounded-lg overflow-hidden shadow-md border border-purple-200 cursor-pointer hover:scale-105 transition-transform bg-white/90 relative'
+                  : 'w-8 h-8 -mt-8 flex items-center justify-center text-lg bg-white/90 backdrop-blur-sm rounded-full shadow-md border border-purple-200 cursor-pointer hover:scale-110 transition-transform'}
+              >
+                {isThumbnail && thumbnailSrc ? (
+                  <>
+                    <img src={thumbnailSrc} alt="" className="w-full h-full object-cover" />
+                    {media.type === 'youtube' && (
+                      <span className="absolute inset-0 flex items-center justify-center text-white text-xl drop-shadow">▶️</span>
+                    )}
+                  </>
+                ) : (
+                  MEDIA_ICON[media.type] ?? '📌'
+                )}
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { Direction, TILE_SIZE, PLAYER_SPEED } from '@virtualmeet/shared';
+import { Direction, TILE_SIZE, PLAYER_SPEED, PLAYER_RUN_SPEED } from '@virtualmeet/shared';
 
 interface UseMovementOptions {
   isBlocked: (tileX: number, tileY: number) => boolean;
@@ -15,6 +15,7 @@ interface MovementState {
   isMoving: boolean;
   dx: number;
   dy: number;
+  isRunning: boolean;
 }
 
 export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions) {
@@ -62,7 +63,10 @@ export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions)
     }
 
     const isMoving = dx !== 0 || dy !== 0;
-    return { direction, isMoving, dx, dy };
+    // Run (hold R) only means anything while actually moving — holding it
+    // alone with no direction key does nothing, same as every other game.
+    const isRunning = isMoving && (keys.has('r') || keys.has('R') || keys.has('KeyR'));
+    return { direction, isMoving, dx, dy, isRunning };
   }, []);
 
   // Collision check reads isBlocked from ref — never changes identity
@@ -93,13 +97,14 @@ export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions)
 
   const tryMove = useCallback(
     (dt: number) => {
-      const { dx, dy, direction, isMoving } = getInput();
+      const { dx, dy, direction, isMoving, isRunning } = getInput();
       if (!isMoving || isFrozenRef.current?.()) {
-        return { x: currentXRef.current, y: currentYRef.current, direction, isMoving: false };
+        return { x: currentXRef.current, y: currentYRef.current, direction, isMoving: false, isRunning: false };
       }
 
-      const stepX = dx * PLAYER_SPEED * dt;
-      const stepY = dy * PLAYER_SPEED * dt;
+      const speed = isRunning ? PLAYER_RUN_SPEED : PLAYER_SPEED;
+      const stepX = dx * speed * dt;
+      const stepY = dy * speed * dt;
 
       let newX = currentXRef.current;
       let newY = currentYRef.current;
@@ -114,7 +119,7 @@ export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions)
         newY = targetY;
       }
 
-      return { x: newX, y: newY, direction, isMoving };
+      return { x: newX, y: newY, direction, isMoving, isRunning };
     },
     [getInput, wouldCollide], // both stable — never recreates
   );
@@ -137,7 +142,7 @@ export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions)
       // Close enough — stop, rather than jittering around the target
       // forever as it keeps moving by sub-pixel amounts each frame.
       if (dist < 4) {
-        return { x: curX, y: curY, direction: 'down' as Direction, isMoving: false };
+        return { x: curX, y: curY, direction: 'down' as Direction, isMoving: false, isRunning: false };
       }
 
       const stepDist = Math.min(dist, PLAYER_SPEED * dt);
@@ -156,7 +161,7 @@ export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions)
       const nextY = curY + stepY;
       if (!wouldCollide(curX, nextY)) newY = nextY;
 
-      return { x: newX, y: newY, direction, isMoving: newX !== curX || newY !== curY };
+      return { x: newX, y: newY, direction, isMoving: newX !== curX || newY !== curY, isRunning: false };
     },
     [wouldCollide], // stable — never recreates
   );

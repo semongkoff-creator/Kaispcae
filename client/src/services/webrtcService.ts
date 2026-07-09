@@ -129,14 +129,17 @@ class WebRTCService {
     this.applyGain(peer);
   }
 
-  // §7 — combines the peer's already-decoded camera video track with a
-  // fresh tap of their mixed audio, for MediaRecorder to capture — see the
-  // audioDestNodes doc comment above for why this doesn't touch playback.
+  // §7 — combines the peer's video with a fresh tap of their mixed audio,
+  // for MediaRecorder to capture — see the audioDestNodes doc comment above
+  // for why this doesn't touch playback. Prefers their screen-share track
+  // over their camera when they're presenting one: that's the whole thing
+  // they chose to show (their screen/window), not just their face, which is
+  // the closest this mesh architecture can get to "record the whole UI" for
+  // someone who isn't me — I only ever see what they actively send.
   getRecordingStream(id: string): MediaStream | null {
     const peer = this.peers.get(id);
-    if (!peer?.videoStream) return null;
-    const videoTrack = peer.videoStream.getVideoTracks()[0];
-    if (!videoTrack) return null;
+    const videoTrack = peer?.remoteScreenStream?.getVideoTracks()[0] ?? peer?.videoStream?.getVideoTracks()[0];
+    if (!peer || !videoTrack) return null;
 
     const combined = new MediaStream([videoTrack]);
     if (this.audioContext) {

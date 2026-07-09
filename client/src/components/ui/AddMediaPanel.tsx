@@ -78,7 +78,7 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
 
   return (
     <div
-      className="absolute bottom-16 left-4 z-50 w-72 bg-white/95 backdrop-blur-md rounded-xl border border-purple-100 shadow-2xl p-3 pointer-events-auto"
+      className="absolute top-20 left-16 z-50 w-72 bg-white/95 backdrop-blur-md rounded-xl border border-purple-100 shadow-2xl p-3 pointer-events-auto"
       onMouseDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >

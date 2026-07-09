@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, Notice, FollowInfo, Role, SummonWarningPayload, SummonNoticePayload, MapMediaObject, WhiteboardStroke } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MapMediaObject, WhiteboardStroke } from '@virtualmeet/shared';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -113,12 +113,19 @@ export interface GameState {
   followerUserIds: string[];
   setFollowerUserIds: (ids: string[]) => void;
 
-  // §5 — Summon. Both are transient toasts (App.tsx auto-clears them after
-  // a timeout), not persisted state — mirrors roomDeletedNotice's pattern.
-  summonWarning: SummonWarningPayload | null;
-  setSummonWarning: (warning: SummonWarningPayload | null) => void;
-  summonNotice: SummonNoticePayload | null;
-  setSummonNotice: (notice: SummonNoticePayload | null) => void;
+  // Follow/Summon consent requests — see PendingRequestToast.tsx. Both
+  // "incoming" (someone else wants to do this to ME, needs Accept/Decline)
+  // and "result" (I asked, here's what happened) are transient, App.tsx
+  // auto-clears them, same pattern as the old summonWarning/summonNotice
+  // toasts this replaces.
+  incomingFollowRequest: FollowRequestPayload | null;
+  setIncomingFollowRequest: (req: FollowRequestPayload | null) => void;
+  followResult: FollowResultPayload | null;
+  setFollowResult: (result: FollowResultPayload | null) => void;
+  incomingSummonRequest: SummonRequestPayload | null;
+  setIncomingSummonRequest: (req: SummonRequestPayload | null) => void;
+  summonResult: SummonResultPayload | null;
+  setSummonResult: (result: SummonResultPayload | null) => void;
 
   // §6 — Add Media. Full list synced from MEDIA_LIST (on join) then kept
   // live via MEDIA_ADDED/MEDIA_REMOVED; whiteboard strokes are mutated
@@ -146,6 +153,14 @@ export interface GameState {
   emoteEvents: EmoteEvent[];
   addEmote: (event: EmoteEvent) => void;
   removeExpiredEmotes: (now: number) => void;
+
+  // Jump — cosmetic one-shot hop (see GameCanvas.tsx/AvatarSprite.ts). A Map
+  // keyed by playerId (not an ever-growing array like emoteEvents above)
+  // since only the MOST RECENT jump per player is ever relevant — a new
+  // jump before the old one finished just restarts the same player's entry
+  // instead of needing a second slot.
+  jumpingPlayers: Map<string, number>;
+  triggerJump: (playerId: string, timestamp: number) => void;
 
   // Room editor
   furniture: Furniture[];
@@ -346,11 +361,15 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   followInfo: null,
   setFollowInfo: (info) => set({ followInfo: info }),
+  incomingFollowRequest: null,
+  setIncomingFollowRequest: (req) => set({ incomingFollowRequest: req }),
+  followResult: null,
+  setFollowResult: (result) => set({ followResult: result }),
+  incomingSummonRequest: null,
+  setIncomingSummonRequest: (req) => set({ incomingSummonRequest: req }),
+  summonResult: null,
+  setSummonResult: (result) => set({ summonResult: result }),
 
-  summonWarning: null,
-  setSummonWarning: (warning) => set({ summonWarning: warning }),
-  summonNotice: null,
-  setSummonNotice: (notice) => set({ summonNotice: notice }),
   followerUserIds: [],
   setFollowerUserIds: (ids) => set({ followerUserIds: ids }),
 
@@ -384,6 +403,14 @@ export const useGameStore = create<GameState>((set, get) => ({
     set((state) => ({
       emoteEvents: state.emoteEvents.filter((e) => now - e.timestamp < 3000),
     })),
+
+  jumpingPlayers: new Map(),
+  triggerJump: (playerId, timestamp) =>
+    set((state) => {
+      const next = new Map(state.jumpingPlayers);
+      next.set(playerId, timestamp);
+      return { jumpingPlayers: next };
+    }),
 
   furniture: [],
   setFurniture: (f) => set({ furniture: f }),

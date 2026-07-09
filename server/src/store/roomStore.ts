@@ -135,6 +135,7 @@ export async function updatePlayerPosition(
   x: number,
   y: number,
   direction: string,
+  isRunning?: boolean,
 ): Promise<Avatar | null> {
   const players = await getPlayers(roomId);
   const player = players.find((p) => p.id === playerId);
@@ -143,6 +144,7 @@ export async function updatePlayerPosition(
     player.y = y;
     player.direction = direction as Avatar['direction'];
     player.isMoving = true;
+    player.isRunning = isRunning ?? false;
     await setPlayers(roomId, players);
     return player;
   }
@@ -154,6 +156,7 @@ export async function setPlayerStopped(roomId: string, playerId: string): Promis
   const player = players.find((p) => p.id === playerId);
   if (player) {
     player.isMoving = false;
+    player.isRunning = false;
     await setPlayers(roomId, players);
   }
 }

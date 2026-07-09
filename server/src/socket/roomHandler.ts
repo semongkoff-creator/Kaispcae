@@ -1,5 +1,6 @@
+import { randomUUID } from 'crypto';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -10,20 +11,29 @@ import { socketRateLimit } from '../middleware/rateLimit';
 const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec per socket
 const canTeleport = socketRateLimit(2); // max 2 teleport requests/sec per socket
 const canUpdateRoom = socketRateLimit(2); // max 2 room:update (DB write) calls/sec per socket
-const canSummonUser = socketRateLimit(3); // max 3 single-target summons/sec per socket
+const canSummonUser = socketRateLimit(3); // max 3 single-target summon requests/sec per socket
 
-// §5.2/5.3 — "1 summon-room action per beberapa detik per admin" (spec's own
-// wording) is a multi-second cooldown, not a per-second rate — socketRateLimit
-// only expresses the latter, so this tracks it directly instead of forcing
-// a per-second limiter to approximate a 5s gap.
-const SUMMON_ROOM_COOLDOWN_MS = 5000;
-const lastSummonRoomAt = new Map<string, number>();
-function canSummonRoom(socketId: string): boolean {
-  const now = Date.now();
-  const last = lastSummonRoomAt.get(socketId) ?? 0;
-  if (now - last < SUMMON_ROOM_COOLDOWN_MS) return false;
-  lastSummonRoomAt.set(socketId, now);
-  return true;
+// §5.1 — Summon now requires the target's consent, so the actual move only
+// happens once they accept. Keyed by TARGET socket id — a new request from
+// someone else simply replaces whichever request that target hadn't
+// answered yet, rather than queueing multiple.
+interface PendingSummon {
+  requestId: string;
+  fromSocketId: string;
+  fromName: string;
+  x: number;
+  y: number;
+  direction: Avatar['direction'];
+  timeout: ReturnType<typeof setTimeout>;
+}
+const pendingSummons = new Map<string, PendingSummon>();
+
+function clearPendingSummon(targetSocketId: string) {
+  const pending = pendingSummons.get(targetSocketId);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    pendingSummons.delete(targetSocketId);
+  }
 }
 
 function getPrisma(): PrismaClient {
@@ -431,10 +441,12 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     }
   });
 
-  // §5.1 — Summon (single user). Destination is always the actor's OWN live
-  // position, which by definition is never a blocked tile — unlike Teleport
-  // (§4), there's no separately-stored location that could have gone stale,
-  // so no isTileBlocked check is needed here.
+  // §5.1 — Summon (single user), request/consent step. Nothing moves yet —
+  // this only starts a pending request the target has to accept, mirroring
+  // Follow's consent flow below. Destination is captured as the actor's live
+  // position NOW (not re-read at accept time) so the target ends up where
+  // the actor was when they asked, not wherever the actor wandered to while
+  // the request sat unanswered.
   socket.on(SocketEvents.SUMMON_USER, async (data: { nickname: string }) => {
     if (!canSummonUser(socket.id)) return;
     const room = currentRoom; if (!room) return;
@@ -462,53 +474,44 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     }
     const target = matches[matches.length - 1];
 
-    updatePlayerPosition(room, target.id, actor.x, actor.y, actor.direction);
-    io.to(room).emit(SocketEvents.PLAYER_TELEPORTED, { id: target.id, x: actor.x, y: actor.y, direction: actor.direction });
-    io.to(target.id).emit(SocketEvents.SUMMON_NOTICE, { actorName: getPlayerName(socket.id) });
+    clearPendingSummon(target.id);
+    const requestId = randomUUID();
+    const actorName = getPlayerName(socket.id);
+    const timeout = setTimeout(() => {
+      pendingSummons.delete(target.id);
+      io.to(socket.id).emit(SocketEvents.SUMMON_RESULT, { targetName: target.name, accepted: false, reason: 'timeout' });
+    }, CONSENT_REQUEST_TIMEOUT_MS);
+    pendingSummons.set(target.id, { requestId, fromSocketId: socket.id, fromName: actorName, x: actor.x, y: actor.y, direction: actor.direction, timeout });
+    io.to(target.id).emit(SocketEvents.SUMMON_REQUEST, { requestId, actorName });
   });
 
-  // §5.2/5.3 — Summon (whole room). This app has one map per room, so only
-  // the spec's 'current_map' scope applies — 'to_current_map' (pull players
-  // FROM other maps) has no equivalent here. Warns every other player first
-  // (SUMMON_WARNING, 5s), then re-validates who's still online/still in the
-  // room right before moving them, per the spec's explicit edge-case rule
-  // ("validasi ulang online status saat scheduled job jalan").
-  socket.on(SocketEvents.SUMMON_ROOM, async () => {
+  // Target's reply to a pending Summon request. Accept moves them to the
+  // requester's captured position via the same PLAYER_TELEPORTED broadcast
+  // Teleport uses; decline just clears it. Either way the requester gets
+  // SUMMON_RESULT so their UI knows what happened instead of waiting
+  // silently forever.
+  socket.on(SocketEvents.SUMMON_RESPOND, async (data: SummonRespondPayload) => {
     const room = currentRoom; if (!room) return;
-    const uid = findUserIdBySocket(socket.id);
-    if (!uid) return;
+    const pending = pendingSummons.get(socket.id);
+    if (!pending || pending.requestId !== data?.requestId) return;
+    clearPendingSummon(socket.id);
 
-    const rs = getRoomAdmin(room);
-    if (!canAccess(rs, uid, 'summon')) {
-      socket.emit('admin:error', { message: 'Staff role or higher required to summon players' });
-      return;
-    }
-    if (!canSummonRoom(socket.id)) {
-      socket.emit('admin:error', { message: 'Please wait a few seconds before summoning the room again' });
+    const targetName = getPlayerName(socket.id);
+    if (!data.accept) {
+      io.to(pending.fromSocketId).emit(SocketEvents.SUMMON_RESULT, { targetName, accepted: false, reason: 'declined' });
       return;
     }
 
     const players = await getPlayers(room);
-    const targetIds = players.filter((p) => p.id !== socket.id).map((p) => p.id);
-    if (targetIds.length === 0) return;
-
-    const actorName = getPlayerName(socket.id);
-    for (const id of targetIds) {
-      io.to(id).emit(SocketEvents.SUMMON_WARNING, { actorName, countdownSec: 5 });
+    const stillRequester = players.find((p) => p.id === pending.fromSocketId);
+    if (!stillRequester) {
+      io.to(pending.fromSocketId).emit(SocketEvents.SUMMON_RESULT, { targetName, accepted: false, reason: 'offline' });
+      return;
     }
 
-    setTimeout(async () => {
-      const livePlayers = await getPlayers(room);
-      const liveActor = livePlayers.find((p) => p.id === socket.id);
-      if (!liveActor) return; // actor disconnected/left mid-countdown — abort entirely
-
-      for (const id of targetIds) {
-        const stillThere = livePlayers.find((p) => p.id === id);
-        if (!stillThere) continue; // disconnected or left the room — skip, per spec
-        updatePlayerPosition(room, id, liveActor.x, liveActor.y, liveActor.direction);
-        io.to(room).emit(SocketEvents.PLAYER_TELEPORTED, { id, x: liveActor.x, y: liveActor.y, direction: liveActor.direction });
-      }
-    }, 5000);
+    updatePlayerPosition(room, socket.id, stillRequester.x, stillRequester.y, stillRequester.direction);
+    io.to(room).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: stillRequester.x, y: stillRequester.y, direction: stillRequester.direction });
+    io.to(pending.fromSocketId).emit(SocketEvents.SUMMON_RESULT, { targetName, accepted: true });
   });
 
   socket.on(SocketEvents.AVATAR_UPDATE, (avatarConfig: AvatarConfig) => {
@@ -667,4 +670,12 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
   playerNames.delete(socket.id);
   playerColors.delete(socket.id);
   for (const [uid, sid] of userSocketMap) { if (sid === socket.id) { userSocketMap.delete(uid); break; } }
+
+  // A pending Summon request involving this socket (either side) can never
+  // be answered/fulfilled correctly anymore — drop it rather than leaving a
+  // stale entry that SUMMON_RESPOND would later act on against a gone player.
+  clearPendingSummon(socket.id);
+  for (const [targetId, pending] of pendingSummons) {
+    if (pending.fromSocketId === socket.id) clearPendingSummon(targetId);
+  }
 }

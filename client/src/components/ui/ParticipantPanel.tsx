@@ -34,14 +34,14 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
     <>
       <button
         onClick={() => setOpen(!open)}
-        className="absolute top-14 left-4 z-40 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 hover:text-purple-800 border border-purple-200 shadow-sm cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
+        className="absolute top-14 left-16 z-40 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 hover:text-purple-800 border border-purple-200 shadow-sm cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
       >
         <PeopleFill size={13} /> {totalOnline} {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
       </button>
 
       {open && (
         <div
-          className="absolute top-24 left-4 z-40 w-56 max-h-[60vh] bg-white/95 backdrop-blur-md rounded-xl border border-purple-100 shadow-2xl flex flex-col pointer-events-auto"
+          className="absolute top-24 left-16 z-40 w-56 max-h-[60vh] bg-white/95 backdrop-blur-md rounded-xl border border-purple-100 shadow-2xl flex flex-col pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >

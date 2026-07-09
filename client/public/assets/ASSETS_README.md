@@ -1,7 +1,7 @@
 # Asset Map — client/public/assets/
 
 Semua aset di sini sudah dikurasi ke resolusi **32x32** (satu ukuran konsisten) dari paket
-LimeZu "Modern Interiors" & "Modern Office", plus karakter gratis 16x16. Struktur:
+LimeZu "Modern Interiors" & "Modern Office". Struktur:
 
 ```
 assets/
@@ -33,10 +33,7 @@ assets/
     │   └── HOW_TO_CHARACTER_GENERATOR.png
     │
     └── premade/                    <- karakter siap pakai (tidak perlu di-layer manual)
-        ├── generator-premade/      <- hasil kombinasi jadi dari Character Generator, 32x32
-        └── free-pack-16x16/        <- Adam, Alex, Amelia, Bob, dll (16x16), tiap karakter
-                                        punya file terpisah: _idle, _idle_anim, _run, _sit,
-                                        _sit2, _sit3, _phone
+        └── generator-premade/      <- hasil kombinasi jadi dari Character Generator, 32x32
 
 ```
 
@@ -49,10 +46,6 @@ assets/
   sekali lalu dipakai untuk semua kategori.
 - **Layer order saat digambar** (dari belakang ke depan): Body → Outfit → Hairstyle →
   Eyes → Accessory → (Books/Smartphones sebagai prop tangan, opsional).
-- **Resolusi campuran**: `free-pack-16x16` itu 16x16 (bukan 32x32) dan formatnya beda
-  (per-file per-animasi, bukan layered). Kalau dipakai bareng tileset 32x32, scale up 2x
-  saat render supaya proporsinya pas dengan tile, ATAU tampilkan sebagai opsi "karakter
-  cepat" terpisah dari sistem avatar builder layered.
 - **Tileset "Singles" vs sheet gabungan**: pakai folder `*_Singles_32x32/` untuk UI palet
   room editor (tiap file = satu objek, gampang di-list & di-preview). Pakai
   `Interiors_32x32.png` / `Modern_Office_32x32.png` (sheet gabungan) kalau butuh render

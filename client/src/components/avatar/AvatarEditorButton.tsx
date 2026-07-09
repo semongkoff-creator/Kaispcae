@@ -2,9 +2,24 @@ import { PencilFill } from 'react-bootstrap-icons';
 
 interface AvatarEditorButtonProps {
   onClick: () => void;
+  // 'sidebar': icon-only, sized/styled to sit inside Sidebar.tsx's rail.
+  // Omit (or 'standalone') for the original labeled floating button.
+  variant?: 'standalone' | 'sidebar';
 }
 
-export function AvatarEditorButton({ onClick }: AvatarEditorButtonProps) {
+export function AvatarEditorButton({ onClick, variant = 'standalone' }: AvatarEditorButtonProps) {
+  if (variant === 'sidebar') {
+    return (
+      <button
+        onClick={onClick}
+        title="Edit Avatar"
+        className="w-10 h-10 rounded-lg flex items-center justify-center text-purple-700 hover:bg-purple-50 transition-all cursor-pointer"
+      >
+        <PencilFill size={16} />
+      </button>
+    );
+  }
+
   return (
     <button
       onClick={onClick}

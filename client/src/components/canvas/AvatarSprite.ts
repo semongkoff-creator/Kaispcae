@@ -50,17 +50,13 @@ export function drawAvatar(
 
   // ─── Pixel-art sprite (falls back to shape below if the sprite images
   // haven't finished loading yet, or none is configured) ──────────────
-  // Sitting shrinks the sprite down to tile width (32px) instead of its
-  // normal 40px — chairs are placed edge-to-edge with no gap (a desk row,
-  // in particular), and the wider standing/walking size visibly overlapped
-  // the armrests of whichever chairs sat directly left/right, reading as
-  // "colliding with the furniture" rather than sitting in it.
   const spriteSize = avatar.isSitting ? TILE_SIZE : SPRITE_DISPLAY_SIZE;
+
   let renderedSprite = false;
   if (config?.spriteMode === 'premade' && config.premadeId) {
-    renderedSprite = drawPremadeAvatar(ctx, cx, cy, config.premadeId, avatar.direction, avatar.isMoving, timestamp, spriteSize);
+    renderedSprite = drawPremadeAvatar(ctx, cx, cy, config.premadeId, avatar.direction, avatar.isMoving, timestamp, !!avatar.isRunning, spriteSize);
   } else if (config?.spriteMode === 'layered' && config.bodyId) {
-    renderedSprite = drawLayeredAvatar(ctx, cx, cy, config, avatar.direction, avatar.isMoving, timestamp, spriteSize);
+    renderedSprite = drawLayeredAvatar(ctx, cx, cy, config, avatar.direction, avatar.isMoving, timestamp, !!avatar.isRunning, spriteSize);
   }
 
   if (!renderedSprite) {
@@ -121,11 +117,15 @@ const GENERATOR_BASE = '/assets/characters/generator';
 const PREMADE_BASE = '/assets/characters/premade/generator-premade';
 const FRAME_SIZE = 32;
 const FRAMES_PER_DIRECTION = 6;
-const SPRITE_DISPLAY_SIZE = 40;
+const SPRITE_DISPLAY_SIZE = 32;
 const IDLE_ROW = 3;
 const WALK_ROW = 5;
 const IDLE_FRAME_MS = 400;
 const WALK_FRAME_MS = 110;
+// Run reuses the walk row (no dedicated run frames in this asset pack — see
+// PLAYER_RUN_SPEED's doc comment in shared/types/index.ts) at a faster cycle
+// so the legs visibly move quicker in step with the higher actual speed.
+const RUN_FRAME_MS = 70;
 
 const DIRECTION_COLUMN_ORDER: Direction[] = ['right', 'up', 'left', 'down'];
 
@@ -137,10 +137,10 @@ const LAYER_CATEGORIES: Array<[string, keyof NonNullable<Avatar['avatarConfig']>
   ['Accessories', 'spriteAccessoryId'],
 ];
 
-function spriteFrameCoords(direction: Direction, isMoving: boolean, timestamp: number) {
+function spriteFrameCoords(direction: Direction, isMoving: boolean, timestamp: number, isRunning: boolean) {
   const dirIndex = Math.max(0, DIRECTION_COLUMN_ORDER.indexOf(direction));
   const row = isMoving ? WALK_ROW : IDLE_ROW;
-  const frameMs = isMoving ? WALK_FRAME_MS : IDLE_FRAME_MS;
+  const frameMs = isMoving ? (isRunning ? RUN_FRAME_MS : WALK_FRAME_MS) : IDLE_FRAME_MS;
   const frameInCycle = Math.floor(timestamp / frameMs) % FRAMES_PER_DIRECTION;
   const col = dirIndex * FRAMES_PER_DIRECTION + frameInCycle;
   return { col, row };
@@ -154,9 +154,10 @@ function drawLayeredAvatar(
   direction: Direction,
   isMoving: boolean,
   timestamp: number,
+  isRunning: boolean,
   displaySize: number = SPRITE_DISPLAY_SIZE,
 ): boolean {
-  const { col, row } = spriteFrameCoords(direction, isMoving, timestamp);
+  const { col, row } = spriteFrameCoords(direction, isMoving, timestamp, isRunning);
   const dx = cx - displaySize / 2;
   const dy = cy - displaySize / 2;
 
@@ -181,9 +182,10 @@ function drawPremadeAvatar(
   direction: Direction,
   isMoving: boolean,
   timestamp: number,
+  isRunning: boolean,
   displaySize: number = SPRITE_DISPLAY_SIZE,
 ): boolean {
-  const { col, row } = spriteFrameCoords(direction, isMoving, timestamp);
+  const { col, row } = spriteFrameCoords(direction, isMoving, timestamp, isRunning);
   const dx = cx - displaySize / 2;
   const dy = cy - displaySize / 2;
 

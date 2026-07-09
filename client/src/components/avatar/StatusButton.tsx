@@ -4,11 +4,14 @@ import { ChatDotsFill } from 'react-bootstrap-icons';
 interface StatusButtonProps {
   status: string;
   onSave: (status: string) => void;
+  // 'sidebar': icon-only trigger, popover opens to the right (see Sidebar.tsx).
+  // Omit (or 'standalone') for the original labeled floating button.
+  variant?: 'standalone' | 'sidebar';
 }
 
 const QUICK_STATUSES = ['WFH', '🎧 Focus', 'In a meeting', '☕ Break', 'Available'];
 
-export function StatusButton({ status, onSave }: StatusButtonProps) {
+export function StatusButton({ status, onSave, variant = 'standalone' }: StatusButtonProps) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(status);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -30,18 +33,25 @@ export function StatusButton({ status, onSave }: StatusButtonProps) {
     setOpen(false);
   };
 
+  const isSidebar = variant === 'sidebar';
+
   return (
-    <div className="absolute bottom-16 left-4 z-30 pointer-events-auto">
+    <div className={isSidebar ? 'relative' : 'absolute bottom-16 left-4 z-30 pointer-events-auto'}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="bg-white/90 backdrop-blur-sm hover:bg-white text-purple-700 hover:text-purple-800 text-xs font-medium px-3 py-2 rounded-lg border border-purple-200 shadow-sm transition-all cursor-pointer inline-flex items-center gap-1.5"
+        title={isSidebar ? (status || 'Set Status') : undefined}
+        className={
+          isSidebar
+            ? `w-10 h-10 rounded-lg flex items-center justify-center transition-all cursor-pointer ${status ? 'text-purple-700 bg-purple-50' : 'text-purple-700 hover:bg-purple-50'}`
+            : 'bg-white/90 backdrop-blur-sm hover:bg-white text-purple-700 hover:text-purple-800 text-xs font-medium px-3 py-2 rounded-lg border border-purple-200 shadow-sm transition-all cursor-pointer inline-flex items-center gap-1.5'
+        }
       >
-        <ChatDotsFill size={12} /> {status || 'Set Status'}
+        <ChatDotsFill size={isSidebar ? 16 : 12} /> {!isSidebar && (status || 'Set Status')}
       </button>
 
       {open && (
         <div
-          className="absolute bottom-11 left-0 w-56 bg-white rounded-xl border border-purple-100 shadow-xl p-3"
+          className={isSidebar ? 'absolute top-0 left-full ml-2 w-56 bg-white rounded-xl border border-purple-100 shadow-xl p-3 z-40' : 'absolute bottom-11 left-0 w-56 bg-white rounded-xl border border-purple-100 shadow-xl p-3'}
           onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >

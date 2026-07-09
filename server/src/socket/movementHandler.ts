@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked } from '@virtualmeet/shared';
+import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, JumpEvent } from '@virtualmeet/shared';
 import { updatePlayerPosition, setPlayerStopped, getCachedTiles } from '../store/roomStore';
 
 // Rate limiting: max 20 updates per second per player
@@ -10,6 +10,7 @@ interface MoveData {
   x: number;
   y: number;
   direction: string;
+  isRunning?: boolean;
 }
 
 export function registerMovementHandlers(io: Server, socket: Socket) {
@@ -50,8 +51,9 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
         x: clampedX,
         y: clampedY,
         direction: data.direction,
+        isRunning: !!data.isRunning,
       });
-      updatePlayerPosition(gameRoom, socket.id, clampedX, clampedY, data.direction);
+      updatePlayerPosition(gameRoom, socket.id, clampedX, clampedY, data.direction, data.isRunning);
     }
   });
 
@@ -65,6 +67,16 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
       });
       setPlayerStopped(gameRoom, socket.id);
     }
+  });
+
+  // Jump — cosmetic, fire-and-forget (same shape/spirit as emoteHandler.ts's
+  // EMOTE_PLAY relay), so no rate limit / position validation needed here.
+  socket.on(SocketEvents.PLAYER_JUMP, () => {
+    const rooms = Array.from(socket.rooms);
+    const gameRoom = rooms.find((r) => r !== socket.id);
+    if (!gameRoom) return;
+    const event: JumpEvent = { playerId: socket.id, timestamp: Date.now() };
+    socket.to(gameRoom).emit(SocketEvents.PLAYER_JUMP, event);
   });
 
   // Clean up rate limit map on disconnect
