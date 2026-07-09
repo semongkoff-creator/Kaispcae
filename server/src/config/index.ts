@@ -39,6 +39,15 @@ let config: EnvConfig;
 export function loadConfig(): EnvConfig {
   if (!config) {
     config = envSchema.parse(process.env);
+    // Zod's .default() only affects the VALUE this function returns — it
+    // never mutates process.env itself. Prisma reads DATABASE_URL straight
+    // from process.env (via schema.prisma's env("DATABASE_URL")), completely
+    // bypassing this config module, so when the var is genuinely unset (no
+    // .env file loaded), Prisma throws "Environment variable not found"
+    // even though config.DATABASE_URL itself resolved to a sensible local
+    // default. Writing the resolved value back keeps every consumer — ours
+    // and Prisma's — looking at the same effective value.
+    process.env.DATABASE_URL = config.DATABASE_URL;
   }
   return config;
 }

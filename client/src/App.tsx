@@ -766,7 +766,44 @@ function Game({ roomSlug, onLeave, onPortalTravel, authDisplayName, authUserId }
           const tileX = Math.floor(x / TILE_SIZE);
           const tileY = Math.floor(y / TILE_SIZE);
           if (state.tiles.length > 0 && isTileBlocked(state.tiles, tileX, tileY)) return;
-          state.setLocalPlayer({ x, y });
+          // Snap to the tile's center instead of the raw (sub-tile-precision)
+          // clicked coordinate — the minimap is ~3px/tile, so a click can
+          // land anywhere within the tile, including right at its edge.
+          // useMovement's collision check uses the player's actual hitbox
+          // (~28px wide), so landing near a tile edge — especially in the
+          // office's many 1-tile-wide gaps between desk clusters — let that
+          // hitbox clip into a neighboring blocked tile even though the
+          // clicked tile itself was open, which then refused movement in
+          // whichever direction would keep overlapping that neighbor. Read
+          // exactly like "stuck on an object" despite the destination tile
+          // passing the isTileBlocked check above.
+          const targetX = tileX * TILE_SIZE + TILE_SIZE / 2;
+          const targetY = tileY * TILE_SIZE + TILE_SIZE / 2;
+          // Stand up first if sitting — otherwise the player's x/y moves to
+          // the clicked spot but isSitting stays true, so useMovement's
+          // isFrozen check keeps refusing all WASD input at the new
+          // location. That reads exactly like "stuck" even on a perfectly
+          // open tile, since nothing about the destination itself is
+          // blocked — the player just can't move at all anymore.
+          if (state.localPlayer.isSitting) {
+            state.setSittingFurnitureId(null);
+            state.setSitReturnPos(null);
+            emitSit(false, targetX, targetY, state.localPlayer.direction);
+          }
+          state.setLocalPlayer({ x: targetX, y: targetY, isSitting: false });
+          // Tell the server too — otherwise this jump is purely a local
+          // visual change: the server's own position record (used both for
+          // its authoritative movement/collision checks and for the value
+          // it hands back to every OTHER client's socket.io ROOM_STATE
+          // listener) stays at wherever we were before the click. The very
+          // next room:state broadcast (fired whenever anyone else joins or
+          // leaves — not something this teleport controls) then snaps us
+          // straight back to that stale server-known spot, which is often
+          // right up against whatever we'd just teleported away from. That
+          // silent snap-back is what actually reads as "still stuck near an
+          // object" even though the destination tile itself was never
+          // blocked.
+          emitMove(targetX, targetY, state.localPlayer.direction);
         }}
         visible={showMinimap}
       />
