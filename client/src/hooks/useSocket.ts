@@ -170,7 +170,16 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       console.log('[socket] player teleported:', data.id, '→', data.x, data.y);
       const state = useGameStore.getState();
       if (data.id === state.localPlayerId) {
-        state.setLocalPlayer({ x: data.x, y: data.y, direction: data.direction, isMoving: false });
+        // Stand up first if sitting — otherwise x/y jumps to the teleport
+        // target but isSitting stays true, so useMovement's isFrozen check
+        // keeps refusing all WASD input there. Server already dropped our
+        // sit state server-side implicitly (positions are independent), but
+        // the local store needs the same reset explicitly.
+        if (state.localPlayer.isSitting) {
+          state.setSittingFurnitureId(null);
+          state.setSitReturnPos(null);
+        }
+        state.setLocalPlayer({ x: data.x, y: data.y, direction: data.direction, isMoving: false, isSitting: false });
         return;
       }
       upsertPlayer({ id: data.id, x: data.x, y: data.y, direction: data.direction, isMoving: false } as Avatar);
