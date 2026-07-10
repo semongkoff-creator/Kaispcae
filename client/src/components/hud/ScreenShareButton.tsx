@@ -22,7 +22,7 @@ export function ScreenShareButton({ sharing, onToggle }: ScreenShareButtonProps)
     <button
       onClick={onToggle}
       className={`relative flex items-center justify-center w-12 h-12 rounded-full backdrop-blur-sm border shadow-lg transition-all hover:scale-105 cursor-pointer ${
-        sharing ? 'bg-purple-600 border-purple-500' : 'bg-white/90 border-purple-200'
+        sharing ? 'bg-purple-600 border-purple-500' : 'bg-white/90 dark:bg-gray-800/90 border-purple-200 dark:border-gray-600'
       }`}
       title="Toggle Screen Share"
     >

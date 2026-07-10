@@ -13,12 +13,12 @@ export function CreditsModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="bg-white rounded-xl p-6 shadow-xl shadow-purple-100/50 border border-purple-100 max-w-md mx-4"
+        className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 max-w-md mx-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-gray-900 text-sm font-bold">Credits / About</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 cursor-pointer"><X size={16} /></button>
+          <h3 className="text-gray-900 dark:text-gray-100 text-sm font-bold">Credits / About</h3>
+          <button onClick={onClose} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer"><X size={16} /></button>
         </div>
         <p className="text-gray-600 text-sm leading-relaxed mb-3">
           Sebagian aset visual room bertema Sci-Fi Office berasal dari{' '}
@@ -28,7 +28,7 @@ export function CreditsModal({ onClose }: { onClose: () => void }) {
           </a>
           ), dilisensikan CC-BY-SA 3.0.
         </p>
-        <p className="text-gray-400 text-xs leading-relaxed mb-4">
+        <p className="text-gray-400 dark:text-gray-500 text-xs leading-relaxed mb-4">
           Sebagian besar item dilisensikan CC-BY-SA 3.0 (gratis, boleh komersial, wajib kredit — dipenuhi oleh
           halaman ini); beberapa item individual memakai lisensi lain (misalnya CC0-1.0) — lihat daftar lengkap
           untuk rincian per-item.

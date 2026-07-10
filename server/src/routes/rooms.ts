@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { Server } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
-import { SocketEvents, createDefaultOfficeLayout, findZoneEntryTile } from '@virtualmeet/shared';
+import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
 
@@ -103,15 +103,16 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
   console.log('[rooms] POST create received — userId:', req.userId, 'body:', req.body);
   try {
     const prisma = getPrisma();
-    const { name, maxPlayers = 50, isPublic = true, theme = 'modern-interiors' } = req.body;
+    const { name, maxPlayers = 50, isPublic = true, theme = 'modern-interiors', template } = req.body;
     const slug = generateSlug(name);
 
     // Seed with a real office layout (walls, desk clusters, a meeting room,
     // a lounge) instead of an empty floor — see shared/defaultRoomLayout.ts.
-    // The layout itself (tile grid, furniture footprints) is the same
-    // regardless of theme — theme only changes which art renders each tile
-    // type/palette id (see client/src/data/themeAssets.ts), not the layout.
-    const layout = createDefaultOfficeLayout(theme);
+    // `template` picks WHICH layout (see ROOM_TEMPLATES); `theme` only
+    // changes which art renders each tile type/palette id within whichever
+    // layout that is (see client/src/data/themeAssets.ts) — the two are
+    // independent choices, not the same knob.
+    const layout = createRoomLayoutFromTemplate(template, theme);
 
     const room = await prisma.room.create({
       data: {

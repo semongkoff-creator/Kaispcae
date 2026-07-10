@@ -111,6 +111,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socket.on(SocketEvents.PLAYER_JOINED, (player: Avatar) => {
       console.log('[socket] player joined:', player.name);
       upsertPlayer(player);
+      useGameStore.getState().addActivity(`${player.name} joined the room`);
     });
 
     socket.on(SocketEvents.PLAYER_MOVED, (data: { id: string; x: number; y: number; direction: string; isRunning?: boolean }) => {
@@ -133,7 +134,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
     socket.on(SocketEvents.PLAYER_LEFT, (playerId: string) => {
       console.log('[socket] player left:', playerId);
+      // Must read the name BEFORE removePlayer() — it deletes this exact
+      // record, so looking it up after would always come back empty.
+      const leavingName = useGameStore.getState().playerRecords[playerId]?.name;
       removePlayer(playerId);
+      if (leavingName) useGameStore.getState().addActivity(`${leavingName} left the room`);
     });
 
     socket.on(SocketEvents.AVATAR_UPDATED, (data: { id: string; avatarConfig: AvatarConfig }) => {
@@ -220,6 +225,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     });
     socket.on(SocketEvents.MEDIA_ADDED, (data: MapMediaObject) => {
       addMediaObject(data);
+      const kind = data.type === 'youtube' ? 'a YouTube video' : data.type === 'whiteboard' ? 'a whiteboard' : data.type === 'file' ? 'a file' : 'an image';
+      useGameStore.getState().addActivity(`${data.createdByName} added ${kind}`);
     });
     socket.on(SocketEvents.MEDIA_REMOVED, (data: { id: string }) => {
       removeMediaObject(data.id);
@@ -245,9 +252,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // it (and if so, begins the actual client-side capture).
     socket.on(SocketEvents.RECORDING_STARTED, (data: { recordingId: string; targetUserId: string; targetName: string; startedByName: string; title: string }) => {
       useGameStore.getState().setActiveRecording(data);
+      useGameStore.getState().addActivity(`${data.startedByName} started recording ${data.targetName}`);
     });
     socket.on(SocketEvents.RECORDING_ENDED, () => {
+      const active = useGameStore.getState().activeRecording;
       useGameStore.getState().setActiveRecording(null);
+      if (active) useGameStore.getState().addActivity(`Recording of ${active.targetName} finished`);
     });
     socket.on(SocketEvents.RECORDING_FAILED, () => {
       useGameStore.getState().setActiveRecording(null);
@@ -327,6 +337,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
     socket.on(SocketEvents.NOTICE_UPDATED, (notice: Notice | null) => {
       setNotice(notice);
+      if (notice) useGameStore.getState().addActivity(`${notice.pinnedByName} pinned a notice`);
     });
 
     socket.on(SocketEvents.FOLLOW_UPDATED, (info: FollowInfo | null) => {

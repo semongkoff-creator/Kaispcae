@@ -1,4 +1,4 @@
-import { TeleportLocation, OwnerBookmark, Recording } from '@virtualmeet/shared';
+import { TeleportLocation, OwnerBookmark, Recording, RoomTemplateId } from '@virtualmeet/shared';
 
 const API_BASE = '/api';
 
@@ -139,10 +139,10 @@ export const api = {
 
   getRoom: (slug: string) => request<RoomInfo>(`/rooms/${slug}`),
 
-  createRoom: (name: string, maxPlayers?: number, isPublic?: boolean, theme?: 'modern-interiors' | 'scifi-office') =>
+  createRoom: (name: string, maxPlayers?: number, isPublic?: boolean, theme?: 'modern-interiors' | 'scifi-office', template?: RoomTemplateId) =>
     request<RoomInfo>('/rooms', {
       method: 'POST',
-      body: JSON.stringify({ name, maxPlayers, isPublic, theme }),
+      body: JSON.stringify({ name, maxPlayers, isPublic, theme, template }),
     }),
 
   saveAvatar: (config: any) =>

@@ -46,19 +46,19 @@ export function NotificationSettings() {
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center justify-center w-12 h-12 rounded-full bg-white/90 backdrop-blur-sm border border-purple-200 shadow-lg transition-all hover:scale-105 cursor-pointer"
+        className="flex items-center justify-center w-12 h-12 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-lg transition-all hover:scale-105 cursor-pointer"
         title="Notification settings"
       >
-        {settings.browserNotifOn ? <BellFill className="text-purple-700" size={18} /> : <BellSlashFill className="text-gray-400" size={18} />}
+        {settings.browserNotifOn ? <BellFill className="text-purple-700" size={18} /> : <BellSlashFill className="text-gray-400 dark:text-gray-500" size={18} />}
       </button>
 
       {open && (
         <div
-          className="absolute bottom-full mb-2 right-0 w-64 bg-white rounded-xl shadow-2xl border border-purple-100 p-3 z-50"
+          className="absolute bottom-full mb-2 right-0 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-purple-100 dark:border-gray-700 p-3 z-50"
           onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          <h3 className="text-gray-900 text-sm font-bold mb-2">Notifications</h3>
+          <h3 className="text-gray-900 dark:text-gray-100 text-sm font-bold mb-2">Notifications</h3>
 
           {permission === 'denied' || needsManualEnable ? (
             <p className="text-red-500 text-[11px] leading-relaxed">
@@ -67,7 +67,7 @@ export function NotificationSettings() {
             </p>
           ) : (
             <label className="flex items-center justify-between mb-2 cursor-pointer">
-              <span className="text-gray-700 text-xs">Enable browser notifications</span>
+              <span className="text-gray-700 dark:text-gray-300 text-xs">Enable browser notifications</span>
               <input
                 type="checkbox"
                 checked={settings.browserNotifOn}
@@ -78,7 +78,7 @@ export function NotificationSettings() {
           )}
 
           <label className={`flex items-center justify-between ${!settings.browserNotifOn ? 'opacity-40' : 'cursor-pointer'}`}>
-            <span className="text-gray-700 text-xs">Sound</span>
+            <span className="text-gray-700 dark:text-gray-300 text-xs">Sound</span>
             <input
               type="checkbox"
               checked={settings.soundOn}
@@ -88,7 +88,7 @@ export function NotificationSettings() {
             />
           </label>
 
-          <p className="text-gray-400 text-[10px] mt-2 leading-relaxed">
+          <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-2 leading-relaxed">
             Notifikasi cuma muncul saat tab ini tidak sedang aktif dilihat. Mode Do Not Disturb di OS tidak bisa dideteksi browser — cek pengaturan OS Anda kalau notifikasi tetap tidak terdengar/muncul.
           </p>
         </div>

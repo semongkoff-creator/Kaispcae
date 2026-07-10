@@ -78,13 +78,13 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
 
   return (
     <div
-      className="absolute top-20 left-16 z-50 w-72 bg-white/95 backdrop-blur-md rounded-xl border border-purple-100 shadow-2xl p-3 pointer-events-auto"
+      className="absolute top-20 left-16 z-50 w-72 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md rounded-xl border border-purple-100 dark:border-gray-700 shadow-2xl p-3 pointer-events-auto"
       onMouseDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-gray-900 text-sm font-bold">Add Media</h3>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xs cursor-pointer">✕</button>
+        <h3 className="text-gray-900 dark:text-gray-100 text-sm font-bold">Add Media</h3>
+        <button onClick={onClose} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-xs cursor-pointer">✕</button>
       </div>
 
       {error && <p className="text-red-500 text-[10px] mb-2">{error}</p>}
@@ -93,7 +93,7 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
         <button
           onClick={() => imageInputRef.current?.click()}
           disabled={uploading}
-          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer disabled:opacity-50"
+          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer disabled:opacity-50"
         >
           <Image size={16} /> Image
         </button>
@@ -101,7 +101,7 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
 
         <button
           onClick={handleWhiteboardAdd}
-          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer"
+          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer"
         >
           <StickyFill size={16} /> Whiteboard
         </button>
@@ -109,7 +109,7 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer disabled:opacity-50"
+          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer disabled:opacity-50"
         >
           <Paperclip size={16} /> File
         </button>
@@ -117,7 +117,7 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
 
         <button
           onClick={() => { onScreenshot(); onClose(); }}
-          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer"
+          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer"
         >
           <CameraFill size={16} /> Screenshot
         </button>
@@ -125,7 +125,7 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
 
       <div className="flex items-center gap-1.5 mb-1">
         <PlayBtnFill size={12} className="text-purple-500 shrink-0" />
-        <span className="text-gray-700 text-xs font-medium">YouTube</span>
+        <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">YouTube</span>
       </div>
       <div className="flex gap-1.5">
         <input
@@ -134,7 +134,7 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
           onChange={(e) => setYoutubeUrl(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleYoutubeSubmit(); }}
           placeholder="Tempel link YouTube..."
-          className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-purple-200 text-xs focus:outline-none focus:ring-1 focus:ring-purple-400"
+          className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-purple-200 dark:border-gray-600 text-xs focus:outline-none focus:ring-1 focus:ring-purple-400"
         />
         <button
           onClick={handleYoutubeSubmit}
@@ -144,7 +144,7 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
         </button>
       </div>
 
-      {uploading && <p className="text-gray-400 text-[10px] mt-2">Uploading...</p>}
+      {uploading && <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-2">Uploading...</p>}
     </div>
   );
 }

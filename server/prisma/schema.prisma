@@ -17,6 +17,9 @@ model User {
   updatedAt    DateTime     @updatedAt
   roomMembers  RoomMember[]
   ownedRooms   Room[]
+  sentChatMessages    ChatMessage[]
+  dmConversationsAsA  DirectConversation[] @relation("DMUserA")
+  dmConversationsAsB  DirectConversation[] @relation("DMUserB")
 }
 
 model Room {
@@ -41,6 +44,8 @@ model Room {
   ownerBookmarks     OwnerBookmark[]
   mediaObjects       MapMediaObject[]
   recordings         Recording[]
+  channels           Channel[]
+  dmConversations    DirectConversation[]
 }
 
 model RoomMember {
@@ -161,4 +166,65 @@ model Recording {
   maxDownloads      Int       @default(3)
 
   @@index([roomId])
+}
+
+// Channel/DM/Thread chat — replaces the old whole-room ephemeral broadcast
+// (see chatHandler.ts) with real persistence. Channels are per-Room (every
+// room gets an auto-created, non-deletable "general" channel — see
+// routes/rooms.ts's POST /rooms and routes/chat.ts's lazy backfill for
+// rooms created before this existed). Zone-private chat and the proximity
+// speech bubble are untouched — genuinely ephemeral, different feature.
+model Channel {
+  id        String        @id @default(cuid())
+  roomId    String
+  room      Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  name      String
+  isDefault Boolean       @default(false)
+  createdAt DateTime      @default(now())
+  messages  ChatMessage[]
+
+  @@unique([roomId, name])
+}
+
+// A 1:1 conversation scoped to the room both users are in — this app has no
+// global cross-room friends list to hang a global DM on. userAId/userBId
+// are always stored with userAId < userBId (string compare) so the same
+// pair can never produce two rows regardless of who started it — see
+// routes/chat.ts's findOrCreateDm.
+model DirectConversation {
+  id        String        @id @default(cuid())
+  roomId    String
+  room      Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userAId   String
+  userBId   String
+  userA     User          @relation("DMUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB     User          @relation("DMUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now())
+  messages  ChatMessage[]
+
+  @@unique([roomId, userAId, userBId])
+}
+
+// Belongs to exactly one of Channel or DirectConversation (never both).
+// parentId is a self-relation for threaded replies — a top-level message has
+// parentId null; a reply sets it to its parent's id. Threads are one level
+// deep in the UI (ChatPanel doesn't nest replies-of-replies) but the schema
+// itself doesn't need to enforce that.
+model ChatMessage {
+  id             String              @id @default(cuid())
+  channelId      String?
+  channel        Channel?            @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversationId String?
+  conversation   DirectConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  parentId       String?
+  parent         ChatMessage?        @relation("ThreadReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies        ChatMessage[]       @relation("ThreadReplies")
+  senderId       String
+  sender         User                @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  text           String
+  createdAt      DateTime            @default(now())
+
+  @@index([channelId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([parentId])
 }

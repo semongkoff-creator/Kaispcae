@@ -18,18 +18,18 @@ export function MediaViewerModal({ media, canDelete, onDelete, onClose, emitWhit
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onMouseDown={onClose}>
       <div
-        className="bg-white rounded-xl shadow-2xl p-4 max-w-lg w-full mx-4 max-h-[85vh] overflow-y-auto"
+        className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-4 max-w-lg w-full mx-4 max-h-[85vh] overflow-y-auto"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3">
-          <span className="text-gray-400 text-xs">Added by {media.createdByName}</span>
+          <span className="text-gray-400 dark:text-gray-500 text-xs">Added by {media.createdByName}</span>
           <div className="flex items-center gap-2">
             {canDelete && (
               <button onClick={onDelete} title="Remove" className="text-red-400 hover:text-red-600 cursor-pointer">
                 <TrashFill size={14} />
               </button>
             )}
-            <button onClick={onClose} title="Close" className="text-gray-400 hover:text-gray-700 cursor-pointer">
+            <button onClick={onClose} title="Close" className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer">
               <X size={18} />
             </button>
           </div>
@@ -54,7 +54,7 @@ export function MediaViewerModal({ media, canDelete, onDelete, onClose, emitWhit
           <a
             href={media.payload.url}
             download={media.payload.fileName}
-            className="flex items-center justify-center gap-2 py-6 rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100 text-sm font-medium"
+            className="flex items-center justify-center gap-2 py-6 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-sm font-medium"
           >
             <Download size={16} /> Download {media.payload.fileName || 'file'}
           </a>
@@ -165,7 +165,7 @@ function WhiteboardCanvas({
         onMouseMove={handleMove}
         onMouseUp={handleUp}
         onMouseLeave={handleUp}
-        className="border border-gray-200 rounded-lg cursor-crosshair touch-none w-full"
+        className="border border-gray-200 dark:border-gray-600 rounded-lg cursor-crosshair touch-none w-full"
         style={{ aspectRatio: '1 / 1' }}
       />
       <div className="flex items-center gap-2 mt-2">
@@ -178,7 +178,7 @@ function WhiteboardCanvas({
           />
         ))}
         {canClear && (
-          <button onClick={onClear} className="ml-auto flex items-center gap-1 text-xs text-gray-500 hover:text-red-500 cursor-pointer">
+          <button onClick={onClear} className="ml-auto flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-red-500 cursor-pointer">
             <EraserFill size={12} /> Clear
           </button>
         )}

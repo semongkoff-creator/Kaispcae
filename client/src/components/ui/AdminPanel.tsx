@@ -32,12 +32,12 @@ export function AdminPanel({ onGrantAdmin, onRevokeAdmin, onGrantStaff, onRevoke
 
   return (
     <div
-      className="absolute top-16 right-4 z-50 w-72 bg-white/95 backdrop-blur-md rounded-xl border border-purple-100 shadow-2xl p-3 pointer-events-auto"
+      className="absolute top-16 right-4 z-50 w-72 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md rounded-xl border border-purple-100 dark:border-gray-700 shadow-2xl p-3 pointer-events-auto"
       onMouseDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >
-      <h3 className="text-gray-900 text-sm font-bold mb-1">Players ({players.length + 1} online)</h3>
-      <p className="text-gray-400 text-[10px] mb-3">Your role: <span className="font-medium capitalize">{localRole}</span></p>
+      <h3 className="text-gray-900 dark:text-gray-100 text-sm font-bold mb-1">Players ({players.length + 1} online)</h3>
+      <p className="text-gray-400 dark:text-gray-500 text-[10px] mb-3">Your role: <span className="font-medium capitalize">{localRole}</span></p>
       <div className="space-y-1.5 max-h-64 overflow-y-auto">
         {/* Local player */}
         <PlayerRow
@@ -114,15 +114,15 @@ function PlayerRow({
 }) {
   const highlighted = role === 'owner' || role === 'admin' || role === 'staff';
   return (
-    <div className={`flex items-center justify-between px-2 py-1 rounded gap-1 ${highlighted ? 'bg-amber-100' : 'bg-purple-50/50'}`}>
+    <div className={`flex items-center justify-between px-2 py-1 rounded gap-1 ${highlighted ? 'bg-amber-100' : 'bg-purple-50/50 dark:bg-gray-700/50'}`}>
       <div className="flex items-center gap-2 min-w-0">
         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-        <span className="text-gray-700 text-xs truncate">{name}</span>
+        <span className="text-gray-700 dark:text-gray-300 text-xs truncate">{name}</span>
         {!isLocal && <RoleBadge role={role} />}
       </div>
       <div className="flex items-center gap-1 shrink-0">
         {isLocal ? (
-          <span className="text-gray-400 text-[10px]">You</span>
+          <span className="text-gray-400 dark:text-gray-500 text-[10px]">You</span>
         ) : (
           <>
             {canGrantStaff && (

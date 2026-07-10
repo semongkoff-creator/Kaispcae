@@ -34,24 +34,24 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
     <>
       <button
         onClick={() => setOpen(!open)}
-        className="absolute top-14 left-16 z-40 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 hover:text-purple-800 border border-purple-200 shadow-sm cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
+        className="absolute top-14 left-16 z-40 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 hover:text-purple-800 border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
       >
         <PeopleFill size={13} /> {totalOnline} {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
       </button>
 
       {open && (
         <div
-          className="absolute top-24 left-16 z-40 w-56 max-h-[60vh] bg-white/95 backdrop-blur-md rounded-xl border border-purple-100 shadow-2xl flex flex-col pointer-events-auto"
+          className="absolute top-24 left-16 z-40 w-56 max-h-[60vh] bg-white/95 dark:bg-gray-900/95 backdrop-blur-md rounded-xl border border-purple-100 dark:border-gray-700 shadow-2xl flex flex-col pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          <div className="p-3 border-b border-purple-100 flex items-center justify-between">
-            <span className="text-gray-900 text-sm font-medium">Participants</span>
-            <span className="text-gray-400 text-xs">{totalOnline} online</span>
+          <div className="p-3 border-b border-purple-100 dark:border-gray-700 flex items-center justify-between">
+            <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">Participants</span>
+            <span className="text-gray-400 dark:text-gray-500 text-xs">{totalOnline} online</span>
           </div>
 
           {videoThumbs.length > 0 && (
-            <div className="p-2 border-b border-purple-100 flex gap-1.5 flex-wrap">
+            <div className="p-2 border-b border-purple-100 dark:border-gray-700 flex gap-1.5 flex-wrap">
               {videoThumbs.map((p) => (
                 <ParticipantThumb key={p.id} name={p.name} stream={remoteStreams.get(p.id)!} />
               ))}
@@ -131,12 +131,12 @@ function ParticipantRow({
   onSpotlight?: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50">
+    <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50 dark:bg-gray-700/50">
       <div className="flex items-center gap-2 min-w-0">
         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
         <div className="min-w-0">
-          <span className="text-gray-700 text-xs truncate block">{name}</span>
-          {status && <span className="text-gray-400 text-[10px] truncate block">{status}</span>}
+          <span className="text-gray-700 dark:text-gray-300 text-xs truncate block">{name}</span>
+          {status && <span className="text-gray-400 dark:text-gray-500 text-[10px] truncate block">{status}</span>}
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
@@ -160,7 +160,7 @@ function ParticipantRow({
               <button
                 onClick={onFollow}
                 title={`Follow ${name}`}
-                className="text-gray-400 hover:text-purple-600 cursor-pointer"
+                className="text-gray-400 dark:text-gray-500 hover:text-purple-600 cursor-pointer"
               >
                 <PersonWalking size={12} />
               </button>
@@ -171,7 +171,7 @@ function ParticipantRow({
           <button
             onClick={onSummon}
             title={`Summon ${name} to me`}
-            className="text-gray-400 hover:text-purple-600 cursor-pointer"
+            className="text-gray-400 dark:text-gray-500 hover:text-purple-600 cursor-pointer"
           >
             <MagnetFill size={12} />
           </button>
@@ -180,12 +180,12 @@ function ParticipantRow({
           <button
             onClick={onSpotlight}
             title={isSpotlighted ? `Remove spotlight from ${name}` : `Spotlight ${name} (visible to everyone regardless of distance)`}
-            className={`cursor-pointer ${isSpotlighted ? 'text-amber-500' : 'text-gray-400 hover:text-amber-500'}`}
+            className={`cursor-pointer ${isSpotlighted ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500 hover:text-amber-500'}`}
           >
             <StarFill size={12} />
           </button>
         )}
-        {isLocal && <span className="text-gray-400 text-[10px]">You</span>}
+        {isLocal && <span className="text-gray-400 dark:text-gray-500 text-[10px]">You</span>}
       </div>
     </div>
   );

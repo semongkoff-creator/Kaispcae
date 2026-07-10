@@ -124,7 +124,7 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
       <canvas
         ref={canvasRef}
         onClick={handleClick}
-        className="rounded-lg border border-purple-200 shadow-sm cursor-crosshair"
+        className="rounded-lg border border-purple-200 dark:border-gray-600 shadow-sm cursor-crosshair"
       />
     </div>
   );

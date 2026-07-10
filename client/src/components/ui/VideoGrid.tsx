@@ -19,12 +19,20 @@ interface VideoGridProps {
   isLocalBeingRecorded?: boolean;
 }
 
-export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded }: VideoGridProps) {
-  const playerRecords = useGameStore((s) => s.playerRecords);
-
+// Shared with MeetingView.tsx (the "Dedicated Meeting View" full-screen
+// layout) so both derive the exact same participant list from the exact
+// same proximity/stream data — one filter rule, not two copies that could
+// silently drift apart.
+export function getVideoTiles(
+  nearby: ProximityPlayer[],
+  playerRecords: Record<string, { name: string; userId?: string }>,
+  remoteStreams: Map<string, MediaStream>,
+  remoteScreenStreams: Map<string, MediaStream>,
+  recordedTargetUserId?: string,
+) {
   // §6 — 'not_visible' peers get no tile at all (same as before); a
   // 'translucent' peer still gets one, just dimmed (see VideoTile's opacity).
-  const videoTiles = nearby
+  return nearby
     .filter((p) => p.visibility !== 'not_visible')
     .map((p) => ({
       id: p.id,
@@ -35,6 +43,11 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
       isBeingRecorded: !!recordedTargetUserId && playerRecords[p.id]?.userId === recordedTargetUserId,
     }))
     .filter((t) => t.stream);
+}
+
+export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded }: VideoGridProps) {
+  const playerRecords = useGameStore((s) => s.playerRecords);
+  const videoTiles = getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams, recordedTargetUserId);
 
   return (
     <div className="absolute top-16 right-4 z-20 flex flex-col gap-2 pointer-events-none">
@@ -64,7 +77,10 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   );
 }
 
-function VideoTile({
+// Exported for MeetingView.tsx (the "Dedicated Meeting View" full-screen
+// grid) — same tile, just sized up via `large` instead of a second
+// hand-maintained copy of the mirror/PIP/volume-slider logic.
+export function VideoTile({
   name,
   stream,
   isLocal,
@@ -74,6 +90,7 @@ function VideoTile({
   translucent,
   onVolumeChange,
   isBeingRecorded,
+  large,
 }: {
   name: string;
   stream: MediaStream;
@@ -84,6 +101,7 @@ function VideoTile({
   translucent?: boolean;
   onVolumeChange?: (volume: number) => void;
   isBeingRecorded?: boolean;
+  large?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [volume, setVolume] = useState(1);
@@ -110,7 +128,7 @@ function VideoTile({
 
   return (
     <div
-      className="pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden w-40 border border-purple-200 shadow-lg transition-all duration-300 animate-fade-in group relative"
+      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border border-purple-200 shadow-lg transition-all duration-300 animate-fade-in group relative ${large ? 'w-full' : 'w-40'}`}
       style={{ opacity: translucent ? 0.5 : 1 }}
     >
       {/* Mirror the LOCAL self-preview only — raising your right hand should
@@ -125,7 +143,7 @@ function VideoTile({
         playsInline
         muted={isLocal}
         style={{ transform: isLocal && !isScreen ? 'scaleX(-1)' : 'none' }}
-        className="w-full h-24 object-cover bg-purple-100"
+        className={`w-full object-cover bg-purple-100 ${large ? 'h-full aspect-video' : 'h-24'}`}
       />
       {/* §6 — PIP, available on every tile (local or remote, camera or
           screen) via the standard requestPictureInPicture API; shown on

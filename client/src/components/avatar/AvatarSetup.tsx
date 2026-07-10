@@ -158,25 +158,25 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
 
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl shadow-purple-100/50 border border-purple-100">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-gray-900 text-xl font-bold">Customize Avatar</h2>
+          <h2 className="text-gray-900 dark:text-gray-100 text-xl font-bold">Customize Avatar</h2>
           {onClose && (
-            <button onClick={handleClose} className="text-gray-400 hover:text-gray-700 text-lg leading-none">&times;</button>
+            <button onClick={handleClose} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-lg leading-none">&times;</button>
           )}
         </div>
 
         {/* Live Preview */}
         <div className="flex justify-center mb-4">
-          <canvas ref={previewRef} className="rounded-xl bg-purple-50" />
+          <canvas ref={previewRef} className="rounded-xl bg-purple-50 dark:bg-gray-700" />
         </div>
 
         {/* Mode tabs */}
-        <div className="flex gap-2 mb-5 bg-purple-50 rounded-lg p-1">
+        <div className="flex gap-2 mb-5 bg-purple-50 dark:bg-gray-700 rounded-lg p-1">
           <button
             onClick={() => setTab('layered')}
             className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all inline-flex items-center justify-center gap-1.5 ${
-              config.spriteMode === 'layered' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              config.spriteMode === 'layered' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
             }`}
           >
             <Tools size={12} /> Build Character
@@ -184,7 +184,7 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
           <button
             onClick={() => setTab('premade')}
             className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all inline-flex items-center justify-center gap-1.5 ${
-              config.spriteMode === 'premade' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              config.spriteMode === 'premade' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
             }`}
           >
             <LightningFill size={12} /> Quick Pick
@@ -199,7 +199,7 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
               onPrev={() => cyclePremade(-1)}
               onNext={() => cyclePremade(1)}
             />
-            <p className="text-gray-400 text-[10px] mt-2 leading-relaxed">
+            <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-2 leading-relaxed">
               Ready-made character combos — no need to mix layers yourself.
             </p>
           </Section>
@@ -224,10 +224,10 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
             value={config.name}
             onChange={(e) => setField('name', e.target.value.slice(0, 20))}
             maxLength={20}
-            className="w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 rounded-lg px-3 py-2 outline-none border border-purple-100 focus:border-purple-500 transition-colors text-sm"
+            className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 transition-colors text-sm"
             placeholder="Your display name"
           />
-          <span className="text-gray-400 text-xs mt-1 block">{config.name.length}/20</span>
+          <span className="text-gray-400 dark:text-gray-500 text-xs mt-1 block">{config.name.length}/20</span>
         </Section>
 
         {/* Status Tag */}
@@ -237,10 +237,10 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
             value={config.statusTag}
             onChange={(e) => setField('statusTag', e.target.value.slice(0, 10))}
             maxLength={10}
-            className="w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 rounded-lg px-3 py-2 outline-none border border-purple-100 focus:border-purple-500 transition-colors text-sm"
+            className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 transition-colors text-sm"
             placeholder="e.g. dev, design, AFK"
           />
-          <span className="text-gray-400 text-xs mt-1 block">{config.statusTag.length}/10</span>
+          <span className="text-gray-400 dark:text-gray-500 text-xs mt-1 block">{config.statusTag.length}/10</span>
         </Section>
 
         {/* Actions */}
@@ -248,7 +248,7 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
           {onClose && (
             <button
               onClick={handleClose}
-              className="flex-1 py-2.5 rounded-lg bg-gray-100 text-gray-500 hover:bg-gray-200 font-medium text-sm transition-colors"
+              className="flex-1 py-2.5 rounded-lg bg-gray-100 text-gray-500 dark:text-gray-400 hover:bg-gray-200 font-medium text-sm transition-colors"
             >
               Cancel
             </button>
@@ -267,20 +267,20 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
 
 function CyclePicker({ label, value, onPrev, onNext }: { label: string; value: string; onPrev: () => void; onNext: () => void }) {
   return (
-    <div className="flex items-center justify-between bg-purple-50 rounded-lg px-2 py-2 mb-2">
+    <div className="flex items-center justify-between bg-purple-50 dark:bg-gray-700 rounded-lg px-2 py-2 mb-2">
       <button
         onClick={onPrev}
-        className="w-7 h-7 flex items-center justify-center rounded-md bg-white text-purple-600 hover:bg-purple-100 shadow-sm cursor-pointer text-sm"
+        className="w-7 h-7 flex items-center justify-center rounded-md bg-white dark:bg-gray-800 text-purple-600 hover:bg-purple-100 shadow-sm cursor-pointer text-sm"
       >
         ◀
       </button>
       <div className="text-center">
-        <p className="text-gray-900 text-xs font-medium">{label}</p>
-        <p className="text-gray-400 text-[10px] font-mono">{value}</p>
+        <p className="text-gray-900 dark:text-gray-100 text-xs font-medium">{label}</p>
+        <p className="text-gray-400 dark:text-gray-500 text-[10px] font-mono">{value}</p>
       </div>
       <button
         onClick={onNext}
-        className="w-7 h-7 flex items-center justify-center rounded-md bg-white text-purple-600 hover:bg-purple-100 shadow-sm cursor-pointer text-sm"
+        className="w-7 h-7 flex items-center justify-center rounded-md bg-white dark:bg-gray-800 text-purple-600 hover:bg-purple-100 shadow-sm cursor-pointer text-sm"
       >
         ▶
       </button>
@@ -291,7 +291,7 @@ function CyclePicker({ label, value, onPrev, onNext }: { label: string; value: s
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-4">
-      <p className="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-2">{label}</p>
+      <p className="text-gray-500 dark:text-gray-400 text-xs font-semibold uppercase tracking-wider mb-2">{label}</p>
       {children}
     </div>
   );

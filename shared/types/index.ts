@@ -611,7 +611,8 @@ export interface RoomUpdatePayload {
   zones: Zone[];
 }
 
-export { createDefaultOfficeLayout, findSpawnPixel } from '../defaultRoomLayout';
+export { createDefaultOfficeLayout, findSpawnPixel, createRoomLayoutFromTemplate, ROOM_TEMPLATES } from '../defaultRoomLayout';
+export type { RoomTemplateId } from '../defaultRoomLayout';
 export { BLOCKED_TILES, isTileBlocked, findZoneEntryTile } from '../tileCollision';
 export type { Role, FeatureKey } from '../permissions';
 export { roleAtLeast, hasFeatureAccess, FEATURE_MIN_ROLE } from '../permissions';

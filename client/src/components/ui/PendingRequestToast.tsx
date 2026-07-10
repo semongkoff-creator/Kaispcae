@@ -15,9 +15,9 @@ interface PendingRequestToastProps {
 // in App.tsx where this is rendered for how it auto-clears.
 export function PendingRequestToast({ icon, message, onAccept, onDecline }: PendingRequestToastProps) {
   return (
-    <div className="bg-white/95 backdrop-blur-sm border border-purple-200 shadow-lg rounded-lg px-3 py-2 flex items-center gap-2 text-xs pointer-events-auto">
+    <div className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-lg rounded-lg px-3 py-2 flex items-center gap-2 text-xs pointer-events-auto">
       {icon}
-      <span className="text-gray-700">{message}</span>
+      <span className="text-gray-700 dark:text-gray-300">{message}</span>
       <button
         onClick={onAccept}
         className="px-2 py-1 rounded-md bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-medium cursor-pointer"

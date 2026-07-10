@@ -97,8 +97,8 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
       disabled={recordingTargets.length === 0}
       title="Record"
       className={isSidebar
-        ? 'w-10 h-10 rounded-lg flex items-center justify-center text-purple-700 hover:bg-purple-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer'
-        : 'px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed'}
+        ? 'w-10 h-10 rounded-lg flex items-center justify-center text-purple-700 hover:bg-purple-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer'
+        : 'px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 dark:border-gray-600 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed'}
     >
       <RecordCircleFill size={isSidebar ? 16 : 12} /> {!isSidebar && 'Record'}
     </button>
@@ -109,21 +109,21 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
       onClick={loadRecordings}
       title="Recordings"
       className={isSidebar
-        ? 'w-10 h-10 rounded-lg flex items-center justify-center text-purple-700 hover:bg-purple-50 transition-all cursor-pointer'
-        : 'px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 shadow-sm'}
+        ? 'w-10 h-10 rounded-lg flex items-center justify-center text-purple-700 hover:bg-purple-50 dark:hover:bg-gray-700 transition-all cursor-pointer'
+        : 'px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 dark:border-gray-600 shadow-sm'}
     >
       <Download size={isSidebar ? 16 : 12} /> {!isSidebar && 'Recordings'}
     </button>
   );
 
   const pickerPanel = showPicker && (
-    <div className={isSidebar ? 'absolute top-0 left-full ml-2 w-48 bg-white rounded-lg shadow-xl border border-purple-100 p-2 z-50' : 'absolute bottom-full mb-1.5 left-0 w-48 bg-white rounded-lg shadow-xl border border-purple-100 p-2 z-50'}>
-      <p className="text-gray-400 text-[10px] mb-1 px-1">Pilih target rekaman:</p>
+    <div className={isSidebar ? 'absolute top-0 left-full ml-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50' : 'absolute bottom-full mb-1.5 left-0 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50'}>
+      <p className="text-gray-400 dark:text-gray-500 text-[10px] mb-1 px-1">Pilih target rekaman:</p>
       {recordingTargets.map((p) => (
         <button
           key={p.userId}
           onClick={() => startWithTarget(p.userId)}
-          className="w-full text-left px-2 py-1.5 rounded hover:bg-purple-50 text-xs text-gray-700 cursor-pointer"
+          className="w-full text-left px-2 py-1.5 rounded hover:bg-purple-50 dark:hover:bg-gray-700 text-xs text-gray-700 dark:text-gray-300 cursor-pointer"
         >
           {p.name}
         </button>
@@ -132,15 +132,15 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
   );
 
   const listPanel = showList && (
-    <div className={isSidebar ? 'absolute top-0 left-full ml-2 w-64 max-h-64 overflow-y-auto bg-white rounded-lg shadow-xl border border-purple-100 p-2 z-50' : 'absolute bottom-full mb-1.5 right-0 w-64 max-h-64 overflow-y-auto bg-white rounded-lg shadow-xl border border-purple-100 p-2 z-50'}>
-      <p className="text-gray-900 text-xs font-semibold mb-1.5 px-1">Recordings</p>
+    <div className={isSidebar ? 'absolute top-0 left-full ml-2 w-64 max-h-64 overflow-y-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50' : 'absolute bottom-full mb-1.5 right-0 w-64 max-h-64 overflow-y-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50'}>
+      <p className="text-gray-900 dark:text-gray-100 text-xs font-semibold mb-1.5 px-1">Recordings</p>
       {error && <p className="text-red-500 text-[10px] px-1 mb-1">{error}</p>}
-      {recordings.length === 0 && <p className="text-gray-400 text-[10px] px-1">Belum ada rekaman.</p>}
+      {recordings.length === 0 && <p className="text-gray-400 dark:text-gray-500 text-[10px] px-1">Belum ada rekaman.</p>}
       {recordings.map((rec) => (
-        <div key={rec.id} className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-purple-50/50 gap-2">
+        <div key={rec.id} className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-purple-50/50 dark:hover:bg-gray-700/50 gap-2">
           <div className="min-w-0">
-            <p className="text-xs text-gray-700 truncate">{rec.title}</p>
-            <p className="text-[10px] text-gray-400 truncate">
+            <p className="text-xs text-gray-700 dark:text-gray-300 truncate">{rec.title}</p>
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 truncate">
               {rec.targetName} · {rec.status}
               {rec.status === 'done' && ` · ${rec.maxDownloads - rec.downloadCount} left`}
             </p>

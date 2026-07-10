@@ -1,12 +1,14 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { GearFill, Clipboard, PersonWalking, X, MagnetFill } from 'react-bootstrap-icons';
+import { GearFill, Clipboard, Link45deg, PersonWalking, X, MagnetFill, EyeFill, EyeSlashFill } from 'react-bootstrap-icons';
 import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import { GameCanvas } from './components/canvas/GameCanvas';
 import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
 import { NameModal } from './components/ui/NameModal';
 import { AvatarSetup } from './components/avatar/AvatarSetup';
-import { VideoGrid } from './components/ui/VideoGrid';
+import { VideoGrid, getVideoTiles } from './components/ui/VideoGrid';
+import { MeetingView } from './components/ui/MeetingView';
+import { MiniMode, isMiniModeSupported, openMiniModeWindow } from './components/ui/MiniMode';
 import { ChatPanel } from './components/ui/ChatPanel';
 import { NoticeBanner } from './components/ui/NoticeBanner';
 import { EmoteWheel } from './components/ui/EmoteWheel';
@@ -17,6 +19,7 @@ import { TeleportPanel } from './components/ui/TeleportPanel';
 import { AddMediaPanel } from './components/ui/AddMediaPanel';
 import { MediaViewerModal } from './components/ui/MediaViewerModal';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
+import { ActivityFeed } from './components/ui/ActivityFeed';
 import { PendingRequestToast } from './components/ui/PendingRequestToast';
 import { Sidebar } from './components/ui/Sidebar';
 import { MicButton } from './components/hud/MicButton';
@@ -26,6 +29,7 @@ import { NotificationSettings } from './components/ui/NotificationSettings';
 import { Lobby } from './pages/Lobby';
 import { LoginPage } from './pages/LoginPage';
 import { useAuth } from './hooks/useAuth';
+import { useTheme, Theme } from './hooks/useTheme';
 import { api } from './services/api';
 import { createDefaultRoom, isTileBlocked } from './utils/createDefaultRoom';
 import { useGameStore } from './stores/gameStore';
@@ -46,7 +50,7 @@ function describeConsentDecline(reason: 'declined' | 'timeout' | 'offline' | und
   return 'declined';
 }
 
-function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string }) {
+function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
   const { emitMove, emitStop, emitJump, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize } = useSocket(authDisplayName, roomSlug, authUserId);
   const [showEditor, setShowEditor] = useState(false);
@@ -265,6 +269,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
+  const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
   // E key for editor, Tab for admin panel
   useEffect(() => {
@@ -383,6 +388,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const followInfo = useGameStore((s) => s.followInfo);
   const [showEmoteWheel, setShowEmoteWheel] = useState(false);
   const [showMinimap, setShowMinimap] = useState(true);
+  const [meetingViewActive, setMeetingViewActive] = useState(false);
+  const [miniModeWindow, setMiniModeWindow] = useState<Window | null>(null);
+  // Simplified View — hides everything that isn't about "who's here and
+  // talking": the feature sidebar, minimap, room-meta hint text, and the
+  // participant/notice panels. Its own toggle deliberately lives OUTSIDE the
+  // sidebar (a fixed corner button) since the sidebar is exactly what gets
+  // hidden — there'd be no way back otherwise.
+  const [simplifiedView, setSimplifiedView] = useState(false);
 
   const handleChatSend = useCallback((text: string, isProximity?: boolean) => {
     emitChat(text, isProximity);
@@ -473,17 +486,70 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onMediaOpen={setViewingMediaId}
       />
 
-      <div className="absolute top-4 left-28 pointer-events-none">
-        <p className="text-gray-500 text-xs font-mono">WASD / Arrows to move · hold R to run · Space to jump</p>
-      </div>
-      <div className="absolute top-10 left-28 pointer-events-none">
-        <p className="text-gray-500 text-xs font-mono">
-          Playing as: <span className="text-gray-700">{playerName}</span>
-        </p>
-      </div>
+      {/* Simplified View — one fixed corner toggle that survives being on,
+          since everything else (including the sidebar) can disappear.
+          Hides room-meta text, the participant list, minimap, and the whole
+          feature sidebar; keeps the connection pill, video/Meeting View,
+          call controls (mic/camera/screen/notifications), and chat — the
+          "who's here and talking" essentials. */}
+      <button
+        onClick={() => setSimplifiedView((v) => !v)}
+        title={simplifiedView ? 'Exit Simplified View' : 'Simplified View'}
+        className="absolute top-14 right-4 z-30 bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 text-xs font-medium px-3 py-1.5 rounded-lg border border-purple-200 shadow-sm cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
+      >
+        {simplifiedView ? <EyeSlashFill size={12} /> : <EyeFill size={12} />} {simplifiedView ? 'Show UI' : 'Simplify'}
+      </button>
+
+      {/* Mini Mode — only offered where the browser actually supports the
+          Document Picture-in-Picture API (Chrome/Edge as of this writing);
+          there's no other way to keep a live, interactive UI on top of a
+          DIFFERENT application entirely, not just a different tab. The
+          window is opened here, directly inside the click handler (see
+          openMiniModeWindow's own doc comment for why it can't live in a
+          mount effect), not by <MiniMode> itself. */}
+      {isMiniModeSupported() && !miniModeWindow && (
+        <button
+          onClick={async () => {
+            const win = await openMiniModeWindow();
+            if (win) setMiniModeWindow(win);
+          }}
+          title="Mini Mode"
+          className="absolute top-24 right-4 z-30 bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 text-xs font-medium px-3 py-1.5 rounded-lg border border-purple-200 shadow-sm cursor-pointer pointer-events-auto"
+        >
+          Mini Mode
+        </button>
+      )}
+      {miniModeWindow && (
+        <MiniMode
+          pipWindow={miniModeWindow}
+          nearby={nearby}
+          localStream={webrtcService.getLocalStream()}
+          remoteStreams={remoteStreams}
+          remoteScreenStreams={remoteScreenStreams}
+          micMuted={isMicMuted}
+          cameraOff={!isCameraOn}
+          onToggleMic={handleMicToggle}
+          onToggleCamera={handleCameraToggle}
+          onClose={() => setMiniModeWindow(null)}
+        />
+      )}
+
+      {!simplifiedView && (
+        <>
+          <div className="absolute top-4 left-28 pointer-events-none">
+            <p className="text-gray-500 text-xs font-mono">WASD / Arrows to move · hold R to run · Space to jump</p>
+          </div>
+          <div className="absolute top-10 left-28 pointer-events-none">
+            <p className="text-gray-500 text-xs font-mono">
+              Playing as: <span className="text-gray-700">{playerName}</span>
+            </p>
+          </div>
+          <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSpotlightToggle={emitSpotlightToggle} />
+          <ActivityFeed />
+        </>
+      )}
 
       <ConnectionIndicator />
-      <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSpotlightToggle={emitSpotlightToggle} />
 
       {/* Follow (§3) indicator — only the ONE new thing from this pass that's
           always visible without opening a panel first. 'standby' means the
@@ -551,28 +617,32 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           Media/Record all landed in the same session. Now it's one rail,
           one icon per feature; each feature's own panel/popover opens to
           the right of the rail instead of scattered across the bottom. */}
-      <Sidebar
-        onEditAvatar={() => setShowEditor(true)}
-        status={localPlayer.status || ''}
-        onSaveStatus={handleStatusSave}
-        isAdmin={isAdmin}
-        editorMode={editorMode}
-        onToggleEditorMode={toggleEditorMode}
-        canTeleport={roleAtLeast(localRole, 'staff')}
-        showTeleportPanel={showTeleportPanel}
-        onToggleTeleport={() => setShowTeleportPanel((v) => !v)}
-        showAddMediaPanel={showAddMediaPanel}
-        onToggleAddMedia={() => setShowAddMediaPanel((v) => !v)}
-        canRecord={isAdmin}
-        recordingTargets={recordingTargets}
-        activeRecording={activeRecording}
-        isRecordingMine={isRecordingMine}
-        recordingUploading={recordingUploading}
-        roomSlug={roomSlug}
-        onStartRecording={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
-        onStopRecording={stopMyRecording}
-        onLogout={() => setShowLogoutConfirm(true)}
-      />
+      {!simplifiedView && (
+        <Sidebar
+          onEditAvatar={() => setShowEditor(true)}
+          status={localPlayer.status || ''}
+          onSaveStatus={handleStatusSave}
+          isAdmin={isAdmin}
+          editorMode={editorMode}
+          onToggleEditorMode={toggleEditorMode}
+          canTeleport={roleAtLeast(localRole, 'staff')}
+          showTeleportPanel={showTeleportPanel}
+          onToggleTeleport={() => setShowTeleportPanel((v) => !v)}
+          showAddMediaPanel={showAddMediaPanel}
+          onToggleAddMedia={() => setShowAddMediaPanel((v) => !v)}
+          canRecord={isAdmin}
+          recordingTargets={recordingTargets}
+          activeRecording={activeRecording}
+          isRecordingMine={isRecordingMine}
+          recordingUploading={recordingUploading}
+          roomSlug={roomSlug}
+          onStartRecording={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
+          onStopRecording={stopMyRecording}
+          onLogout={() => setShowLogoutConfirm(true)}
+          theme={theme}
+          onToggleTheme={onToggleTheme}
+        />
+      )}
 
       {/* Permanent seat assignment (ZEP-style "this is my desk") — only
           shown while actually sitting, since it acts on the specific chair
@@ -665,18 +735,48 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         />
       )}
 
-      <VideoGrid
-        nearby={nearby}
-        localStream={webrtcService.getLocalStream()}
-        localScreenStream={isScreenSharing ? webrtcService.getScreenStream() : null}
-        remoteStreams={remoteStreams}
-        remoteScreenStreams={remoteScreenStreams}
-        micMuted={isMicMuted}
-        cameraOff={!isCameraOn}
-        onManualVolumeChange={setManualVolume}
-        recordedTargetUserId={activeRecording?.targetUserId}
-        isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
-      />
+      {meetingViewActive ? (
+        <MeetingView
+          nearby={nearby}
+          localStream={webrtcService.getLocalStream()}
+          localScreenStream={isScreenSharing ? webrtcService.getScreenStream() : null}
+          remoteStreams={remoteStreams}
+          remoteScreenStreams={remoteScreenStreams}
+          micMuted={isMicMuted}
+          cameraOff={!isCameraOn}
+          onManualVolumeChange={setManualVolume}
+          recordedTargetUserId={activeRecording?.targetUserId}
+          isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
+          onClose={() => setMeetingViewActive(false)}
+        />
+      ) : (
+        <>
+          <VideoGrid
+            nearby={nearby}
+            localStream={webrtcService.getLocalStream()}
+            localScreenStream={isScreenSharing ? webrtcService.getScreenStream() : null}
+            remoteStreams={remoteStreams}
+            remoteScreenStreams={remoteScreenStreams}
+            micMuted={isMicMuted}
+            cameraOff={!isCameraOn}
+            onManualVolumeChange={setManualVolume}
+            recordedTargetUserId={activeRecording?.targetUserId}
+            isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
+          />
+          {/* Dedicated Meeting View entry point — only worth surfacing once
+              there's actually a camera/screen tile to switch to a bigger
+              layout for; otherwise it's a button that does nothing useful. */}
+          {(webrtcService.getLocalStream() || getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams).length > 0) && (
+            <button
+              onClick={() => setMeetingViewActive(true)}
+              title="Enter Meeting View"
+              className="absolute top-4 right-4 z-20 bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 text-xs font-medium px-3 py-1.5 rounded-lg border border-purple-200 shadow-sm cursor-pointer pointer-events-auto"
+            >
+              Meeting View
+            </button>
+          )}
+        </>
+      )}
 
       {/* HUD Controls */}
       <div className="absolute bottom-24 left-1/2 -translate-x-1/2 flex gap-3 z-30">
@@ -700,11 +800,33 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         >
           <Clipboard size={11} /> {roomSlug.slice(0, 12)}
         </button>
+        <button
+          onClick={async () => {
+            // ?join=<slug> — read back on load by App()'s own pending-invite
+            // effect below, which auto-joins this exact room once the
+            // clicker is authenticated (logging in first if they weren't).
+            const url = new URL(window.location.href);
+            url.search = '';
+            url.searchParams.set('join', roomSlug);
+            await navigator.clipboard.writeText(url.toString());
+            setInviteLinkCopied(true);
+            setTimeout(() => setInviteLinkCopied(false), 2000);
+          }}
+          className="text-gray-400 hover:text-gray-700 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
+          title="Copy invite link"
+        >
+          <Link45deg size={12} /> Invite
+        </button>
       </div>
 
       {roomCodeCopied && (
         <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 bg-purple-100 text-purple-700 text-[10px] px-2 py-0.5 rounded-full pointer-events-none">
           Code copied!
+        </div>
+      )}
+      {inviteLinkCopied && (
+        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 bg-purple-100 text-purple-700 text-[10px] px-2 py-0.5 rounded-full pointer-events-none">
+          Invite link copied!
         </div>
       )}
 
@@ -742,7 +864,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </div>
       )}
 
-      {notice && (
+      {notice && !simplifiedView && (
         <NoticeBanner notice={notice} isAdmin={isAdmin} onUnpin={emitNoticeUnpin} />
       )}
 
@@ -818,7 +940,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           // blocked.
           emitMove(targetX, targetY, state.localPlayer.direction);
         }}
-        visible={showMinimap}
+        visible={showMinimap && !simplifiedView}
       />
     </div>
   );
@@ -826,7 +948,54 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
 export default function App() {
   const { user, loading, error, sessionExpiredMessage, login, register, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [roomSlug, setRoomSlug] = useState<string | null>(null);
+
+  // Invite links (see the "Copy invite link" button in Game() above) are
+  // just this app's own URL with ?join=<slug> appended. Also mirrored into
+  // sessionStorage, not just this component's own state: the login/register
+  // form below causes an unrelated full page reload on submit in some
+  // browsers (a native form-submit fallback, despite handleSubmit's own
+  // preventDefault — observed even on a totally plain register flow once a
+  // query string had been present at some point in the tab's history), which
+  // would otherwise silently drop the pending invite the instant someone
+  // registers straight from a shared link. sessionStorage survives that
+  // reload (same tab); a fresh URL always wins over whatever's already there.
+  const PENDING_INVITE_KEY = 'vm_pending_invite_slug';
+  const [pendingInviteSlug, setPendingInviteSlug] = useState<string | null>(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get('join');
+    if (fromUrl) {
+      sessionStorage.setItem(PENDING_INVITE_KEY, fromUrl);
+      return fromUrl;
+    }
+    return sessionStorage.getItem(PENDING_INVITE_KEY);
+  });
+
+  // Scrub ?join=... back out of the visible URL immediately — the slug
+  // itself isn't secret (it's the same code "Copy room code" hands out),
+  // but leaving it sitting in the address bar after the invite's been
+  // consumed reads as broken/stale if the link is reshared from there.
+  useEffect(() => {
+    if (!pendingInviteSlug) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('join');
+    window.history.replaceState({}, '', url.toString());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-join once BOTH a pending invite exists AND we know who's asking —
+  // covers "already logged in, clicked a link" immediately, and "not logged
+  // in yet" the moment `user` flips truthy right after they log in/register
+  // (LoginPage below renders as normal in the meantime; nothing here forces
+  // that flow, it just waits on it). A dead/deleted room's slug fails
+  // getRoom() and falls through to the ordinary Lobby, not a blank screen.
+  useEffect(() => {
+    if (!user || !pendingInviteSlug || roomSlug) return;
+    const slug = pendingInviteSlug;
+    setPendingInviteSlug(null);
+    sessionStorage.removeItem(PENDING_INVITE_KEY);
+    api.getRoom(slug).then((room) => setRoomSlug(room.slug)).catch(() => {});
+  }, [user, pendingInviteSlug, roomSlug]);
 
   // Remembered purely for the Lobby's "Rejoin last room" shortcut — not
   // part of the auto-login mechanism itself (that's the JWT in vm_token).
@@ -899,12 +1068,12 @@ export default function App() {
 
   // Auth gate
   if (!user) {
-    return <LoginPage onLogin={async (e, p) => { await login(e, p); }} onRegister={async (e, p, n) => { await register(e, p, n); }} error={error} sessionExpiredMessage={sessionExpiredMessage} />;
+    return <LoginPage onLogin={async (e, p) => { await login(e, p); }} onRegister={async (e, p, n) => { await register(e, p, n); }} error={error} sessionExpiredMessage={sessionExpiredMessage} theme={theme} onToggleTheme={toggleTheme} />;
   }
 
   // Lobby
   if (!roomSlug) {
-    return <Lobby user={user} onJoinRoom={setRoomSlug} onLogout={logout} />;
+    return <Lobby user={user} onJoinRoom={setRoomSlug} onLogout={logout} theme={theme} onToggleTheme={toggleTheme} />;
   }
 
   // Room (existing flow)
@@ -929,5 +1098,5 @@ export default function App() {
     );
   }
 
-  return <Game roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} />;
+  return <Game roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} theme={theme} onToggleTheme={toggleTheme} />;
 }

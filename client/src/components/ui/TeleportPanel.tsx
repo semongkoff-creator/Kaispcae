@@ -91,26 +91,26 @@ export function TeleportPanel({ roomSlug, isOwner, onTeleport, onClose }: Telepo
 
   return (
     <div
-      className="absolute top-20 left-16 z-50 w-64 bg-white/95 backdrop-blur-md rounded-xl border border-purple-100 shadow-2xl p-3 pointer-events-auto"
+      className="absolute top-20 left-16 z-50 w-64 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md rounded-xl border border-purple-100 dark:border-gray-700 shadow-2xl p-3 pointer-events-auto"
       onMouseDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-gray-900 text-sm font-bold">Teleport</h3>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xs cursor-pointer">✕</button>
+        <h3 className="text-gray-900 dark:text-gray-100 text-sm font-bold">Teleport</h3>
+        <button onClick={onClose} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-xs cursor-pointer">✕</button>
       </div>
 
       {isOwner && (
         <div className="flex gap-1 mb-3">
           <button
             onClick={() => setTab('team')}
-            className={`flex-1 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${tab === 'team' ? 'bg-purple-600 text-white' : 'bg-purple-50 text-gray-500 hover:bg-purple-100'}`}
+            className={`flex-1 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${tab === 'team' ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100'}`}
           >
             Team
           </button>
           <button
             onClick={() => setTab('bookmarks')}
-            className={`flex-1 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${tab === 'bookmarks' ? 'bg-purple-600 text-white' : 'bg-purple-50 text-gray-500 hover:bg-purple-100'}`}
+            className={`flex-1 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${tab === 'bookmarks' ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100'}`}
           >
             My Bookmarks
           </button>
@@ -123,16 +123,16 @@ export function TeleportPanel({ roomSlug, isOwner, onTeleport, onClose }: Telepo
         <>
           <div className="space-y-1 mb-2 max-h-56 overflow-y-auto">
             {locations.map((loc, i) => (
-              <div key={loc.id} className="flex items-center justify-between px-2 py-1.5 rounded bg-purple-50/50 gap-1">
+              <div key={loc.id} className="flex items-center justify-between px-2 py-1.5 rounded bg-purple-50/50 dark:bg-gray-700/50 gap-1">
                 <button
                   onClick={() => onTeleport('admin', loc.id)}
-                  className="flex-1 flex items-center gap-1.5 text-left text-gray-700 text-xs truncate cursor-pointer hover:text-purple-700"
+                  className="flex-1 flex items-center gap-1.5 text-left text-gray-700 dark:text-gray-300 text-xs truncate cursor-pointer hover:text-purple-700"
                   title={`Go to ${loc.name}`}
                 >
                   <GeoAltFill size={11} className="text-purple-500 shrink-0" /> {loc.name}
                 </button>
-                <button onClick={() => moveLocation(i, -1)} disabled={i === 0} className="text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer"><ArrowUp size={10} /></button>
-                <button onClick={() => moveLocation(i, 1)} disabled={i === locations.length - 1} className="text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer"><ArrowDown size={10} /></button>
+                <button onClick={() => moveLocation(i, -1)} disabled={i === 0} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-30 cursor-pointer"><ArrowUp size={10} /></button>
+                <button onClick={() => moveLocation(i, 1)} disabled={i === locations.length - 1} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-30 cursor-pointer"><ArrowDown size={10} /></button>
                 <button
                   onClick={() => api.deleteTeleportLocation(roomSlug, loc.id).then(loadLocations)}
                   className="text-red-400 hover:text-red-600 cursor-pointer"
@@ -141,11 +141,11 @@ export function TeleportPanel({ roomSlug, isOwner, onTeleport, onClose }: Telepo
                 </button>
               </div>
             ))}
-            {locations.length === 0 && <p className="text-gray-400 text-[10px] text-center py-2">Belum ada lokasi.</p>}
+            {locations.length === 0 && <p className="text-gray-400 dark:text-gray-500 text-[10px] text-center py-2">Belum ada lokasi.</p>}
           </div>
           <button
             onClick={handleAddLocation}
-            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer"
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer"
           >
             <PlusCircle size={12} /> Add current location ({locations.length}/{MAX_TELEPORT_LOCATIONS})
           </button>
@@ -154,16 +154,16 @@ export function TeleportPanel({ roomSlug, isOwner, onTeleport, onClose }: Telepo
         <>
           <div className="space-y-1 mb-2 max-h-56 overflow-y-auto">
             {bookmarks.map((bm, i) => (
-              <div key={bm.id} className="flex items-center justify-between px-2 py-1.5 rounded bg-purple-50/50 gap-1">
+              <div key={bm.id} className="flex items-center justify-between px-2 py-1.5 rounded bg-purple-50/50 dark:bg-gray-700/50 gap-1">
                 <button
                   onClick={() => onTeleport('bookmark', bm.id)}
-                  className="flex-1 flex items-center gap-1.5 text-left text-gray-700 text-xs truncate cursor-pointer hover:text-purple-700"
+                  className="flex-1 flex items-center gap-1.5 text-left text-gray-700 dark:text-gray-300 text-xs truncate cursor-pointer hover:text-purple-700"
                   title={`Go to ${bm.label}`}
                 >
                   <BookmarkFill size={11} className="text-amber-500 shrink-0" /> {bm.label}
                 </button>
-                <button onClick={() => moveBookmark(i, -1)} disabled={i === 0} className="text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer"><ArrowUp size={10} /></button>
-                <button onClick={() => moveBookmark(i, 1)} disabled={i === bookmarks.length - 1} className="text-gray-400 hover:text-gray-700 disabled:opacity-30 cursor-pointer"><ArrowDown size={10} /></button>
+                <button onClick={() => moveBookmark(i, -1)} disabled={i === 0} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-30 cursor-pointer"><ArrowUp size={10} /></button>
+                <button onClick={() => moveBookmark(i, 1)} disabled={i === bookmarks.length - 1} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-30 cursor-pointer"><ArrowDown size={10} /></button>
                 <button
                   onClick={() => api.deleteBookmark(roomSlug, bm.id).then(loadBookmarks)}
                   className="text-red-400 hover:text-red-600 cursor-pointer"
@@ -172,15 +172,15 @@ export function TeleportPanel({ roomSlug, isOwner, onTeleport, onClose }: Telepo
                 </button>
               </div>
             ))}
-            {bookmarks.length === 0 && <p className="text-gray-400 text-[10px] text-center py-2">Belum ada bookmark.</p>}
+            {bookmarks.length === 0 && <p className="text-gray-400 dark:text-gray-500 text-[10px] text-center py-2">Belum ada bookmark.</p>}
           </div>
           <button
             onClick={handleAddBookmark}
-            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-purple-50 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer"
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer"
           >
             <PlusCircle size={12} /> Add current location
           </button>
-          <p className="text-gray-400 text-[10px] mt-2 leading-relaxed">
+          <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-2 leading-relaxed">
             Bookmark khusus room ini — tidak ikut ke room lain.
           </p>
         </>

@@ -542,3 +542,206 @@ export function createDefaultOfficeLayout(theme: RoomTheme = 'modern-interiors')
 
   return { tiles, furniture, zones };
 }
+
+/**
+ * "Small Team" template — one private meeting room, two desk clusters
+ * (8 desks total, half of Main Office's 4-cluster/16-desk zone), and a small
+ * lounge corner, sized for a handful of people rather than a full multi-team
+ * office. Reuses the exact same helpers/role system as createDefaultOfficeLayout
+ * so it re-themes (modern-interiors/scifi-office) for free.
+ *
+ *   ┌───────────────────┬┬─────────────────────────┐
+ *   │  MEETING ROOM      ││                          │
+ *   │  (2,2) 16x10       ││   DESK AREA (21,2) 27x14 │
+ *   ├───────────────────┤│   2 clusters             │
+ *   │  LOUNGE            ││                          │
+ *   │  (2,14) 16x18      │└──────────────────────────┘
+ *   │                     │
+ *   ├───────────────────┴─────────────────────────────┤
+ *   │        ENTRANCE / RECEPTION (2,33) 46x2          │
+ *   └───────────────────────────────────────────────────┘
+ */
+export function createSmallTeamLayout(theme: RoomTheme = 'modern-interiors'): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
+  const tiles: RoomTile[][] = [];
+  for (let y = 0; y < MAP_HEIGHT; y++) {
+    const row: RoomTile[] = [];
+    for (let x = 0; x < MAP_WIDTH; x++) {
+      row.push({ x, y, type: 'floor' });
+    }
+    tiles.push(row);
+  }
+  wallRect(tiles, 0, 0, MAP_WIDTH - 1, MAP_HEIGHT - 1);
+
+  const furniture: Furniture[] = [];
+  const zones: Zone[] = [];
+
+  // ── Meeting Room — (2,2) 16x10, door bottom-center ───────────────────
+  wallRect(tiles, 2, 2, 17, 11);
+  setTile(tiles, 9, 11, 'door');
+  setFloor(tiles, 3, 3, 16, 10, 'floor-maroon-carpet', theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 8, 6, theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 10, 6, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 8, 4, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 9, 4, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 11, 4, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 8, 8, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 9, 8, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 11, 8, theme);
+  placeFurniture(tiles, furniture, 'plant-potted', 3, 3, theme);
+  placeFurniture(tiles, furniture, 'decor-a', 16, 3, theme);
+  zones.push({
+    id: 'meeting-room', name: 'Meeting Room',
+    x: 2, y: 2, width: 16, height: 10,
+    label: 'MEETING ROOM', color: '#6B2FBF', type: 'meeting',
+  });
+
+  // ── Desk Area — (21,2) 27x14, open, 2 clusters ───────────────────────
+  setFloor(tiles, 21, 2, 47, 15, 'floor-tile-gray', theme);
+  setFloor(tiles, 22, 3, 25, 10, 'floor-olive-carpet', theme);
+  setFloor(tiles, 36, 3, 39, 10, 'floor-lavender', theme);
+  placeDeskIsland(tiles, furniture, 23, 4, theme, ['desk-computer-a', 'desk-basic', 'desk-basic', 'desk-computer-b']);
+  addBanner(furniture, 22, 3, 3, 'Team A', '#6B2FBF');
+  placeDeskIsland(tiles, furniture, 37, 4, theme, ['desk-computer-c', 'desk-computer-a', 'desk-computer-b', 'desk-basic']);
+  addBanner(furniture, 36, 3, 3, 'Team B', '#3b82f6');
+  placeFurniture(tiles, furniture, 'plant-tall', 21, 2, theme);
+  placeFurniture(tiles, furniture, 'pinboard', 46, 2, theme);
+
+  // ── Lounge — (2,14) 16x18, open along its top edge ───────────────────
+  setFloor(tiles, 2, 14, 17, 31, 'floor-brown-weave', theme);
+  setFloor(tiles, 4, 17, 10, 20, 'floor-maroon-carpet', theme);
+  placeFurniture(tiles, furniture, 'sofa-set', 4, 18, theme);
+  placeFurniture(tiles, furniture, 'sofa-blue', 8, 19, theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 12, 24, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 11, 22, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 14, 22, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 11, 27, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 14, 27, theme);
+  placeFurniture(tiles, furniture, 'plant-tall', 3, 15, theme);
+  placeFurniture(tiles, furniture, 'plant-accent', 15, 30, theme);
+  addBanner(furniture, 6, 30, 5, 'LOUNGE', '#7c3aed');
+
+  // ── Entrance / Reception — (2,33) 46x2, spans the bottom ─────────────
+  setTile(tiles, 25, 34, 'spawn');
+  addBanner(furniture, 20, 32, 10, 'Welcome to MeetKai', '#6B2FBF');
+  placeFurniture(tiles, furniture, 'plant-tall', 4, 33, theme);
+  placeFurniture(tiles, furniture, 'plant-accent', 45, 33, theme);
+
+  // ── Corridor — cols 19-20, connecting everything to the entrance ────
+  setFloor(tiles, 19, 2, 20, 31, 'floor-tile-gray', theme);
+
+  return { tiles, furniture, zones };
+}
+
+/**
+ * "Open Lounge" template — mostly casual/social space (three sofa groups,
+ * a couple of round tables) with a small desk nook and one private meeting
+ * room tucked in the corner, for teams that mostly hang out/co-work rather
+ * than sit at assigned desks all day.
+ *
+ *   ┌─────────────────────────────────────────────────┐
+ *   │             LOUNGE (2,2) 46x19                    │
+ *   │      3 sofa groups + 2 round tables               │
+ *   ├──────────────────┬┬───────────────────────────────┤
+ *   │  DESK NOOK        ││   MEETING ROOM (28,22) 19x10  │
+ *   │  (2,22) 15x10     ││                               │
+ *   ├──────────────────┴┴───────────────────────────────┤
+ *   │        ENTRANCE / RECEPTION (2,33) 46x2            │
+ *   └─────────────────────────────────────────────────────┘
+ */
+export function createLoungeLayout(theme: RoomTheme = 'modern-interiors'): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
+  const tiles: RoomTile[][] = [];
+  for (let y = 0; y < MAP_HEIGHT; y++) {
+    const row: RoomTile[] = [];
+    for (let x = 0; x < MAP_WIDTH; x++) {
+      row.push({ x, y, type: 'floor' });
+    }
+    tiles.push(row);
+  }
+  wallRect(tiles, 0, 0, MAP_WIDTH - 1, MAP_HEIGHT - 1);
+
+  const furniture: Furniture[] = [];
+  const zones: Zone[] = [];
+
+  // ── Lounge — (2,2) 46x19, open, spans nearly the whole top ───────────
+  setFloor(tiles, 2, 2, 47, 20, 'floor-brown-weave', theme);
+  setFloor(tiles, 4, 4, 12, 8, 'floor-maroon-carpet', theme);
+  placeFurniture(tiles, furniture, 'sofa-set', 5, 5, theme);
+  placeFurniture(tiles, furniture, 'sofa-blue', 9, 6, theme);
+  setFloor(tiles, 20, 4, 28, 8, 'floor-lavender', theme);
+  placeFurniture(tiles, furniture, 'sofa-gray', 21, 5, theme);
+  placeFurniture(tiles, furniture, 'sofa-set', 24, 5, theme);
+  setFloor(tiles, 36, 4, 44, 8, 'floor-olive-carpet', theme);
+  placeFurniture(tiles, furniture, 'sofa-blue', 37, 5, theme);
+  placeFurniture(tiles, furniture, 'sofa-gray', 40, 6, theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 12, 14, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 11, 12, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 14, 12, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 11, 17, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 14, 17, theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 34, 14, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 33, 12, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 36, 12, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 33, 17, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 36, 17, theme);
+  placeFurniture(tiles, furniture, 'plant-tall', 2, 2, theme);
+  placeFurniture(tiles, furniture, 'plant-tall', 46, 2, theme);
+  placeFurniture(tiles, furniture, 'plant-potted', 24, 18, theme);
+  addBanner(furniture, 21, 19, 5, 'LOUNGE', '#7c3aed');
+
+  // ── Desk Nook — (2,22) 15x10, open ────────────────────────────────────
+  setFloor(tiles, 2, 22, 16, 31, 'floor-tile-gray', theme);
+  placeDeskRow(tiles, furniture, 4, 24, 26, 4, theme);
+  placeFurniture(tiles, furniture, 'plant-small', 15, 23, theme);
+  addBanner(furniture, 3, 23, 4, 'Desk Nook', '#3b82f6');
+
+  // ── Meeting Room — (28,22) 19x10, door on the left ───────────────────
+  wallRect(tiles, 28, 22, 46, 31);
+  setTile(tiles, 28, 26, 'door');
+  setFloor(tiles, 29, 23, 45, 30, 'floor-maroon-carpet', theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 35, 26, theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 37, 26, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 35, 24, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 36, 24, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 38, 24, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 35, 28, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 36, 28, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 38, 28, theme);
+  placeFurniture(tiles, furniture, 'plant-potted', 29, 23, theme);
+  zones.push({
+    id: 'meeting-room', name: 'Meeting Room',
+    x: 28, y: 22, width: 19, height: 10,
+    label: 'MEETING ROOM', color: '#6B2FBF', type: 'meeting',
+  });
+
+  // ── Entrance / Reception — (2,33) 46x2, spans the bottom ─────────────
+  setTile(tiles, 25, 34, 'spawn');
+  addBanner(furniture, 20, 32, 10, 'Welcome to MeetKai', '#6B2FBF');
+  placeFurniture(tiles, furniture, 'plant-tall', 4, 33, theme);
+  placeFurniture(tiles, furniture, 'plant-accent', 45, 33, theme);
+
+  return { tiles, furniture, zones };
+}
+
+// §2 — Office Templates. Picked once at room-creation time (see Lobby.tsx);
+// unlike RoomTheme (a reskin applied to whichever layout is already there),
+// a template is a completely different tile/furniture/zone layout — the
+// room's floor plan itself, not just the art drawn over it.
+export type RoomTemplateId = 'main-office' | 'small-team' | 'open-lounge';
+
+export const ROOM_TEMPLATES: { id: RoomTemplateId; name: string; description: string }[] = [
+  { id: 'main-office', name: 'Main Office', description: '8 zones, 4 team clusters — a full multi-team office' },
+  { id: 'small-team', name: 'Small Team', description: 'One meeting room, 2 desk clusters, and a lounge corner' },
+  { id: 'open-lounge', name: 'Open Lounge', description: 'Mostly social space, a small desk nook, one meeting room' },
+];
+
+export function createRoomLayoutFromTemplate(
+  templateId: RoomTemplateId | undefined,
+  theme: RoomTheme = 'modern-interiors',
+): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
+  switch (templateId) {
+    case 'small-team': return createSmallTeamLayout(theme);
+    case 'open-lounge': return createLoungeLayout(theme);
+    case 'main-office':
+    default: return createDefaultOfficeLayout(theme);
+  }
+}

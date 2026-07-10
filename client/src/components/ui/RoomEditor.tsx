@@ -35,37 +35,37 @@ function ZoneForm({ rect, onCancel }: { rect: { x: number; y: number; width: num
   };
 
   return (
-    <div className="mb-3 p-3 rounded-lg bg-purple-50 border border-purple-200">
+    <div className="mb-3 p-3 rounded-lg bg-purple-50 dark:bg-gray-700 border border-purple-200 dark:border-gray-600">
       <p className="text-purple-700 text-xs font-semibold mb-2">New Zone</p>
-      <label className="text-gray-500 text-[10px] block mb-1">Internal name</label>
+      <label className="text-gray-500 dark:text-gray-400 text-[10px] block mb-1">Internal name</label>
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
         maxLength={30}
-        className="w-full bg-white text-gray-900 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 focus:border-purple-500"
+        className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500"
       />
 
-      <label className="text-gray-500 text-[10px] block mb-1">Type</label>
+      <label className="text-gray-500 dark:text-gray-400 text-[10px] block mb-1">Type</label>
       <select
         value={type}
         onChange={(e) => setType(e.target.value as ZoneType)}
-        className="w-full bg-white text-gray-900 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 focus:border-purple-500 cursor-pointer"
+        className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 cursor-pointer"
       >
         {ZONE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
       </select>
 
       {type !== 'general' && (
         <>
-          <label className="text-gray-500 text-[10px] block mb-1">Banner label</label>
+          <label className="text-gray-500 dark:text-gray-400 text-[10px] block mb-1">Banner label</label>
           <input
             value={label}
             onChange={(e) => setLabel(e.target.value.toUpperCase())}
             maxLength={24}
             placeholder="e.g. AI TEAM"
-            className="w-full bg-white text-gray-900 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 focus:border-purple-500"
+            className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500"
           />
 
-          <label className="text-gray-500 text-[10px] block mb-1">Color</label>
+          <label className="text-gray-500 dark:text-gray-400 text-[10px] block mb-1">Color</label>
           <div className="flex gap-1.5 mb-3">
             {ZONE_COLORS.map((c) => (
               <button
@@ -113,29 +113,29 @@ function BannerForm({ pos, onCancel }: { pos: { x: number; y: number }; onCancel
   };
 
   return (
-    <div className="mb-3 p-3 rounded-lg bg-purple-50 border border-purple-200">
+    <div className="mb-3 p-3 rounded-lg bg-purple-50 dark:bg-gray-700 border border-purple-200 dark:border-gray-600">
       <p className="text-purple-700 text-xs font-semibold mb-2">New Banner</p>
 
-      <label className="text-gray-500 text-[10px] block mb-1">Image URL (optional — skips text below if set)</label>
+      <label className="text-gray-500 dark:text-gray-400 text-[10px] block mb-1">Image URL (optional — skips text below if set)</label>
       <input
         value={imageUrl}
         onChange={(e) => setImageUrl(e.target.value)}
         placeholder="https://..."
-        className="w-full bg-white text-gray-900 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 focus:border-purple-500"
+        className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500"
       />
 
       {!imageUrl.trim() && (
         <>
-          <label className="text-gray-500 text-[10px] block mb-1">Text</label>
+          <label className="text-gray-500 dark:text-gray-400 text-[10px] block mb-1">Text</label>
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
             maxLength={60}
             placeholder="e.g. team name, tagline, announcement"
-            className="w-full bg-white text-gray-900 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 focus:border-purple-500"
+            className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs rounded px-2 py-1.5 mb-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500"
           />
 
-          <label className="text-gray-500 text-[10px] block mb-1">Background color</label>
+          <label className="text-gray-500 dark:text-gray-400 text-[10px] block mb-1">Background color</label>
           <div className="flex gap-1.5 mb-2">
             {BANNER_COLORS.map((c) => (
               <button
@@ -147,7 +147,7 @@ function BannerForm({ pos, onCancel }: { pos: { x: number; y: number }; onCancel
             ))}
           </div>
 
-          <label className="text-gray-500 text-[10px] block mb-1">Text color</label>
+          <label className="text-gray-500 dark:text-gray-400 text-[10px] block mb-1">Text color</label>
           <div className="flex gap-1.5 mb-2">
             {['#ffffff', '#1f2937'].map((c) => (
               <button
@@ -161,14 +161,14 @@ function BannerForm({ pos, onCancel }: { pos: { x: number; y: number }; onCancel
         </>
       )}
 
-      <label className="text-gray-500 text-[10px] block mb-1">Width (tiles)</label>
+      <label className="text-gray-500 dark:text-gray-400 text-[10px] block mb-1">Width (tiles)</label>
       <input
         type="number"
         min={1}
         max={10}
         value={width}
         onChange={(e) => setWidth(Number(e.target.value) || 1)}
-        className="w-full bg-white text-gray-900 text-xs rounded px-2 py-1.5 mb-3 outline-none border border-purple-100 focus:border-purple-500"
+        className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs rounded px-2 py-1.5 mb-3 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500"
       />
 
       <div className="flex gap-2">
@@ -268,14 +268,14 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
   const objectEntries = activePalette.filter((e) => e.category === objectTab);
 
   return (
-    <div className="absolute top-0 right-0 z-50 w-56 h-full bg-white/95 backdrop-blur-md border-l border-purple-100 shadow-2xl p-4 pointer-events-auto overflow-y-auto"
+    <div className="absolute top-0 right-0 z-50 w-56 h-full bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-l border-purple-100 dark:border-gray-700 shadow-2xl p-4 pointer-events-auto overflow-y-auto"
       onMouseDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >
-      <h3 className="text-gray-900 text-sm font-bold mb-3">Room Editor</h3>
+      <h3 className="text-gray-900 dark:text-gray-100 text-sm font-bold mb-3">Room Editor</h3>
 
       {/* Visual palette — floor textures */}
-      <p className="text-gray-500 text-[10px] uppercase tracking-wider mb-2">Floor Textures</p>
+      <p className="text-gray-500 dark:text-gray-400 text-[10px] uppercase tracking-wider mb-2">Floor Textures</p>
       <div className="grid grid-cols-5 gap-1.5 mb-4">
         {floorEntries.map((entry) => (
           <button
@@ -283,7 +283,7 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
             onClick={() => setSelectedPaletteId(entry.id)}
             title={entry.label}
             className={`flex items-center justify-center p-1 rounded-lg cursor-pointer transition-all ${
-              selectedPaletteId === entry.id ? 'bg-purple-100 ring-2 ring-purple-400' : 'bg-gray-50 hover:bg-purple-50'
+              selectedPaletteId === entry.id ? 'bg-purple-100 ring-2 ring-purple-400' : 'bg-gray-50 hover:bg-purple-50 dark:hover:bg-gray-700'
             }`}
           >
             <PaletteThumb entry={entry} />
@@ -294,14 +294,14 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
       {/* Visual palette — furniture/decor/electronics, split into tabs so
           the growing list of curated pieces doesn't become one long
           undifferentiated scroll. */}
-      <p className="text-gray-500 text-[10px] uppercase tracking-wider mb-2">Objects</p>
+      <p className="text-gray-500 dark:text-gray-400 text-[10px] uppercase tracking-wider mb-2">Objects</p>
       <div className="flex gap-1 mb-2">
         {(['furniture', 'decor', 'electronics'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setObjectTab(tab)}
             className={`flex-1 py-1 rounded-md text-[10px] font-medium capitalize transition-all cursor-pointer ${
-              objectTab === tab ? 'bg-purple-600 text-white' : 'bg-purple-50 text-gray-500 hover:bg-purple-100'
+              objectTab === tab ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100'
             }`}
           >
             {tab}
@@ -315,7 +315,7 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
             onClick={() => setSelectedPaletteId(entry.id)}
             title={`${entry.label} (${entry.tilesW}x${entry.tilesH})`}
             className={`flex items-center justify-center p-1 rounded-lg cursor-pointer transition-all ${
-              selectedPaletteId === entry.id ? 'bg-purple-100 ring-2 ring-purple-400' : 'bg-gray-50 hover:bg-purple-50'
+              selectedPaletteId === entry.id ? 'bg-purple-100 ring-2 ring-purple-400' : 'bg-gray-50 hover:bg-purple-50 dark:hover:bg-gray-700'
             }`}
           >
             <PaletteThumb entry={entry} />
@@ -323,14 +323,14 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
         ))}
       </div>
 
-      <p className="text-gray-400 text-[10px] mb-3 leading-relaxed">
+      <p className="text-gray-400 dark:text-gray-500 text-[10px] mb-3 leading-relaxed">
         Click to place • Right-click to erase. Objects are stamped in one click at the tile you click (its base), taller pieces extend upward and let you walk behind them. Chairs can be sat in (SPACE) once placed.
       </p>
 
-      <hr className="border-purple-100 my-3" />
+      <hr className="border-purple-100 dark:border-gray-700 my-3" />
 
       {/* Basic collision types */}
-      <p className="text-gray-500 text-[10px] uppercase tracking-wider mb-2">Basic Types (collision only)</p>
+      <p className="text-gray-500 dark:text-gray-400 text-[10px] uppercase tracking-wider mb-2">Basic Types (collision only)</p>
       <div className="space-y-1 mb-4">
         {BASIC_TYPES.map((t) => (
           <button
@@ -348,14 +348,14 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
         ))}
       </div>
 
-      <hr className="border-purple-100 my-3" />
+      <hr className="border-purple-100 dark:border-gray-700 my-3" />
 
       {/* Private zones */}
-      <p className="text-gray-500 text-[10px] uppercase tracking-wider mb-2">Private Zones</p>
+      <p className="text-gray-500 dark:text-gray-400 text-[10px] uppercase tracking-wider mb-2">Private Zones</p>
       <button
         onClick={toggleZoneDrawMode}
         className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer mb-2 ${
-          zoneDrawMode ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+          zoneDrawMode ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100'
         }`}
       >
         <LockFill size={12} /> {zoneDrawMode ? 'Drag on map to draw…' : 'Draw Zone'}
@@ -373,18 +373,18 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
           ))}
         </div>
       )}
-      <p className="text-gray-400 text-[10px] mb-3 leading-relaxed">
+      <p className="text-gray-400 dark:text-gray-500 text-[10px] mb-3 leading-relaxed">
         Players inside a zone only hear/see each other, regardless of distance — great for meeting rooms.
       </p>
 
-      <hr className="border-purple-100 my-3" />
+      <hr className="border-purple-100 dark:border-gray-700 my-3" />
 
       {/* Decorative banners/signage */}
-      <p className="text-gray-500 text-[10px] uppercase tracking-wider mb-2">Banners</p>
+      <p className="text-gray-500 dark:text-gray-400 text-[10px] uppercase tracking-wider mb-2">Banners</p>
       <button
         onClick={toggleBannerPlaceMode}
         className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer mb-2 ${
-          bannerPlaceMode ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+          bannerPlaceMode ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100'
         }`}
       >
         <MegaphoneFill size={12} /> {bannerPlaceMode ? 'Click on map to place…' : 'Add Banner'}
@@ -402,11 +402,11 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
           ))}
         </div>
       )}
-      <p className="text-gray-400 text-[10px] mb-3 leading-relaxed">
+      <p className="text-gray-400 dark:text-gray-500 text-[10px] mb-3 leading-relaxed">
         Decorative signage — team name, tagline, announcements. Purely visual, doesn't block movement.
       </p>
 
-      <hr className="border-purple-100 my-4" />
+      <hr className="border-purple-100 dark:border-gray-700 my-4" />
 
       {/* Undo / Redo */}
       <div className="flex gap-2 mb-4">

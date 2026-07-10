@@ -1,9 +1,10 @@
 import { ReactNode } from 'react';
-import { Tools, GeoAltFill, ImageFill, BoxArrowRight } from 'react-bootstrap-icons';
+import { Tools, GeoAltFill, ImageFill, BoxArrowRight, SunFill, MoonFill } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { StatusButton } from '../avatar/StatusButton';
 import { RecordingControl } from './RecordingControl';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
+import { Theme } from '@/hooks/useTheme';
 
 interface SidebarProps {
   onEditAvatar: () => void;
@@ -31,6 +32,9 @@ interface SidebarProps {
   onStopRecording: () => void;
 
   onLogout: () => void;
+
+  theme: Theme;
+  onToggleTheme: () => void;
 }
 
 // ZEP-style left icon rail — every room-level feature lives here as one
@@ -61,9 +65,11 @@ export function Sidebar({
   onStartRecording,
   onStopRecording,
   onLogout,
+  theme,
+  onToggleTheme,
 }: SidebarProps) {
   return (
-    <div className="absolute left-0 top-0 h-full w-14 z-30 bg-white/90 backdrop-blur-sm border-r border-purple-100 shadow-sm flex flex-col items-center py-4 gap-1 pointer-events-auto">
+    <div className="absolute left-0 top-0 h-full w-14 z-30 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-r border-purple-100 dark:border-gray-700 shadow-sm flex flex-col items-center py-4 gap-1 pointer-events-auto">
       <AvatarEditorButton onClick={onEditAvatar} variant="sidebar" />
       <StatusButton status={status} onSave={onSaveStatus} variant="sidebar" />
 
@@ -110,7 +116,14 @@ export function Sidebar({
         </>
       )}
 
-      <SidebarIcon title="Logout" onClick={onLogout} className="mt-auto text-red-400 hover:bg-red-50 hover:text-red-500">
+      <SidebarIcon
+        title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        onClick={onToggleTheme}
+        className="mt-auto text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
+      >
+        {theme === 'dark' ? <SunFill size={16} /> : <MoonFill size={16} />}
+      </SidebarIcon>
+      <SidebarIcon title="Logout" onClick={onLogout} className="text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500">
         <BoxArrowRight size={16} />
       </SidebarIcon>
     </div>
@@ -118,7 +131,7 @@ export function Sidebar({
 }
 
 function SidebarDivider() {
-  return <div className="w-8 border-t border-purple-100 my-1" />;
+  return <div className="w-8 border-t border-purple-100 dark:border-gray-700 my-1" />;
 }
 
 export function SidebarIcon({
@@ -139,7 +152,7 @@ export function SidebarIcon({
       onClick={onClick}
       title={title}
       className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
-        className || (active ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-purple-50')
+        className || (active ? 'bg-purple-600 text-white' : 'text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800')
       }`}
     >
       {children}

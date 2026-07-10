@@ -116,6 +116,17 @@ const GENERATOR_BASE = '/assets/characters/generator';
 // (verified: 1792x1312px, same as every generator/<Category> file).
 const PREMADE_BASE = '/assets/characters/premade/generator-premade';
 const FRAME_SIZE = 32;
+// The generator packs its 6-frame animation strips two nominal 32px rows to
+// a character: the character's own art is 44px tall (not 32), stored
+// starting 20px into the FIRST of its two rows and continuing through all
+// of the second — e.g. row 3 (IDLE_ROW) is really "half of row 2 + all of
+// row 3". Verified by scanning Body_32x32_01.png/Outfit_01_32x32_01.png/a
+// premade sheet's alpha channel directly: every populated row pair starts
+// at local-y=20 and runs 44px, never just 32. Cropping the naive 32x32 cell
+// (what this code did before) grabs only the BOTTOM 32 of those 44 pixels —
+// exactly the neck-down portion — silently decapitating every sprite.
+const FRAME_VISUAL_HEIGHT = 44;
+const FRAME_ROW_Y_OFFSET = 20;
 const FRAMES_PER_DIRECTION = 6;
 const SPRITE_DISPLAY_SIZE = 32;
 const IDLE_ROW = 3;
@@ -158,6 +169,7 @@ function drawLayeredAvatar(
   displaySize: number = SPRITE_DISPLAY_SIZE,
 ): boolean {
   const { col, row } = spriteFrameCoords(direction, isMoving, timestamp, isRunning);
+  const displayHeight = displaySize * (FRAME_VISUAL_HEIGHT / FRAME_SIZE);
   // Round to a whole pixel — the player's world position moves in
   // continuous float steps (PLAYER_SPEED * dt), so cx/cy are almost never
   // integers. With imageSmoothingEnabled off, drawImage() at a fractional
@@ -167,15 +179,20 @@ function drawLayeredAvatar(
   // flat color blocks, which reads exactly like "the head is glitched/torn"
   // even though every layer is otherwise correctly aligned.
   const dx = Math.round(cx - displaySize / 2);
-  const dy = Math.round(cy - displaySize / 2);
+  // Bottom-anchored, not centered — the extra height (see FRAME_VISUAL_HEIGHT)
+  // is headroom added ABOVE the character, so the feet stay planted on the
+  // tile instead of the whole sprite shifting down as it grows taller.
+  const dy = Math.round(cy + displaySize / 2 - displayHeight);
+  const srcX = col * FRAME_SIZE;
+  const srcY = (row - 1) * FRAME_SIZE + FRAME_ROW_Y_OFFSET;
 
   let drewAny = false;
   for (const [category, field] of LAYER_CATEGORIES) {
     const fileName = config[field] as string | undefined;
     if (!fileName) continue;
     const drew = drawSpriteFrame(ctx, `${GENERATOR_BASE}/${category}/${fileName}`, {
-      col, row, cellWidth: FRAME_SIZE, cellHeight: FRAME_SIZE,
-      dx, dy, dWidth: displaySize, dHeight: displaySize,
+      srcX, srcY, cellWidth: FRAME_SIZE, cellHeight: FRAME_VISUAL_HEIGHT,
+      dx, dy, dWidth: displaySize, dHeight: displayHeight,
     });
     drewAny = drewAny || drew;
   }
@@ -194,12 +211,15 @@ function drawPremadeAvatar(
   displaySize: number = SPRITE_DISPLAY_SIZE,
 ): boolean {
   const { col, row } = spriteFrameCoords(direction, isMoving, timestamp, isRunning);
+  const displayHeight = displaySize * (FRAME_VISUAL_HEIGHT / FRAME_SIZE);
   const dx = Math.round(cx - displaySize / 2);
-  const dy = Math.round(cy - displaySize / 2);
+  const dy = Math.round(cy + displaySize / 2 - displayHeight);
+  const srcX = col * FRAME_SIZE;
+  const srcY = (row - 1) * FRAME_SIZE + FRAME_ROW_Y_OFFSET;
 
   return drawSpriteFrame(ctx, `${PREMADE_BASE}/${premadeId}`, {
-    col, row, cellWidth: FRAME_SIZE, cellHeight: FRAME_SIZE,
-    dx, dy, dWidth: displaySize, dHeight: displaySize,
+    srcX, srcY, cellWidth: FRAME_SIZE, cellHeight: FRAME_VISUAL_HEIGHT,
+    dx, dy, dWidth: displaySize, dHeight: displayHeight,
   });
 }
 

@@ -42,8 +42,8 @@ export function StatusButton({ status, onSave, variant = 'standalone' }: StatusB
         title={isSidebar ? (status || 'Set Status') : undefined}
         className={
           isSidebar
-            ? `w-10 h-10 rounded-lg flex items-center justify-center transition-all cursor-pointer ${status ? 'text-purple-700 bg-purple-50' : 'text-purple-700 hover:bg-purple-50'}`
-            : 'bg-white/90 backdrop-blur-sm hover:bg-white text-purple-700 hover:text-purple-800 text-xs font-medium px-3 py-2 rounded-lg border border-purple-200 shadow-sm transition-all cursor-pointer inline-flex items-center gap-1.5'
+            ? `w-10 h-10 rounded-lg flex items-center justify-center transition-all cursor-pointer ${status ? 'text-purple-700 bg-purple-50 dark:bg-gray-700' : 'text-purple-700 hover:bg-purple-50 dark:hover:bg-gray-700'}`
+            : 'bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm hover:bg-white text-purple-700 hover:text-purple-800 text-xs font-medium px-3 py-2 rounded-lg border border-purple-200 dark:border-gray-600 shadow-sm transition-all cursor-pointer inline-flex items-center gap-1.5'
         }
       >
         <ChatDotsFill size={isSidebar ? 16 : 12} /> {!isSidebar && (status || 'Set Status')}
@@ -51,11 +51,11 @@ export function StatusButton({ status, onSave, variant = 'standalone' }: StatusB
 
       {open && (
         <div
-          className={isSidebar ? 'absolute top-0 left-full ml-2 w-56 bg-white rounded-xl border border-purple-100 shadow-xl p-3 z-40' : 'absolute bottom-11 left-0 w-56 bg-white rounded-xl border border-purple-100 shadow-xl p-3'}
+          className={isSidebar ? 'absolute top-0 left-full ml-2 w-56 bg-white dark:bg-gray-800 rounded-xl border border-purple-100 dark:border-gray-700 shadow-xl p-3 z-40' : 'absolute bottom-11 left-0 w-56 bg-white dark:bg-gray-800 rounded-xl border border-purple-100 dark:border-gray-700 shadow-xl p-3'}
           onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          <p className="text-gray-500 text-[10px] uppercase tracking-wider mb-2">Custom Status</p>
+          <p className="text-gray-500 dark:text-gray-400 text-[10px] uppercase tracking-wider mb-2">Custom Status</p>
           <input
             ref={inputRef}
             value={value}
@@ -63,14 +63,14 @@ export function StatusButton({ status, onSave, variant = 'standalone' }: StatusB
             onKeyDown={(e) => e.key === 'Enter' && handleSave()}
             placeholder="e.g. WFH, In a meeting"
             maxLength={24}
-            className="w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 text-xs rounded-lg px-3 py-2 mb-2 outline-none border border-purple-100 focus:border-purple-500"
+            className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded-lg px-3 py-2 mb-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500"
           />
           <div className="flex flex-wrap gap-1 mb-3">
             {QUICK_STATUSES.map((s) => (
               <button
                 key={s}
                 onClick={() => handleQuickPick(s)}
-                className="px-2 py-1 rounded-full bg-purple-50 text-purple-700 text-[10px] hover:bg-purple-100 cursor-pointer"
+                className="px-2 py-1 rounded-full bg-purple-50 dark:bg-gray-700 text-purple-700 text-[10px] hover:bg-purple-100 cursor-pointer"
               >
                 {s}
               </button>
@@ -79,7 +79,7 @@ export function StatusButton({ status, onSave, variant = 'standalone' }: StatusB
           <div className="flex gap-2">
             <button
               onClick={() => { onSave(''); setOpen(false); }}
-              className="flex-1 py-1.5 rounded-lg bg-gray-100 text-gray-500 hover:bg-gray-200 text-xs cursor-pointer"
+              className="flex-1 py-1.5 rounded-lg bg-gray-100 text-gray-500 dark:text-gray-400 hover:bg-gray-200 text-xs cursor-pointer"
             >
               Clear
             </button>

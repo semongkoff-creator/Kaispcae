@@ -66,7 +66,7 @@ export function EmoteWheel({ open, onSelect, onClose }: EmoteWheelProps) {
             <button
               key={emote}
               onClick={() => onSelect(emote)}
-              className="absolute w-9 h-9 rounded-full bg-white/90 border border-purple-200 shadow-sm flex items-center justify-center text-purple-600 hover:bg-purple-50 hover:scale-110 transition-all cursor-pointer"
+              className="absolute w-9 h-9 rounded-full bg-white/90 dark:bg-gray-800/90 border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-purple-600 hover:bg-purple-50 dark:hover:bg-gray-700 hover:scale-110 transition-all cursor-pointer"
               style={{ left: bx, top: by }}
               title={EMOTE_LABELS[emote]}
             >

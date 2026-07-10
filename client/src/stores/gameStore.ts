@@ -12,6 +12,17 @@ export interface ActiveRecordingInfo {
   title: string;
 }
 
+export interface ActivityEvent {
+  id: string;
+  message: string;
+  timestamp: number;
+}
+
+// Keeps the feed skimmable and bounds its memory — old entries just fall
+// off the end rather than needing a separate pruning pass (see
+// activityEvents's own doc comment above).
+const ACTIVITY_FEED_MAX = 50;
+
 const AVATAR_COLORS = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a786df', '#6bcb77', '#4d96ff'];
 
 function randomColor(): string {
@@ -161,6 +172,16 @@ export interface GameState {
   // instead of needing a second slot.
   jumpingPlayers: Map<string, number>;
   triggerJump: (playerId: string, timestamp: number) => void;
+
+  // Recent Activity Feed — a lightweight, client-only log of room events
+  // (join/leave, media added, notice pinned, recording start/end) built
+  // entirely from socket events this client already receives (see
+  // useSocket.ts's handlers) rather than a new server-persisted history —
+  // same "ephemeral, this session only" scope as chat itself. Capped at
+  // ACTIVITY_FEED_MAX so a long-running room doesn't grow this unbounded
+  // (unlike emoteEvents above, which never got the same treatment).
+  activityEvents: ActivityEvent[];
+  addActivity: (message: string) => void;
 
   // Room editor
   furniture: Furniture[];
@@ -411,6 +432,15 @@ export const useGameStore = create<GameState>((set, get) => ({
       next.set(playerId, timestamp);
       return { jumpingPlayers: next };
     }),
+
+  activityEvents: [],
+  addActivity: (message) =>
+    set((state) => ({
+      activityEvents: [
+        { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, message, timestamp: Date.now() },
+        ...state.activityEvents,
+      ].slice(0, ACTIVITY_FEED_MAX),
+    })),
 
   furniture: [],
   setFurniture: (f) => set({ furniture: f }),

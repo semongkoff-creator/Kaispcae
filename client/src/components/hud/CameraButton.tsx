@@ -21,7 +21,7 @@ export function CameraButton({ enabled, onToggle }: CameraButtonProps) {
   return (
     <button
       onClick={onToggle}
-      className="flex items-center justify-center w-12 h-12 rounded-full bg-white/90 backdrop-blur-sm border border-purple-200 shadow-lg transition-all hover:scale-105 cursor-pointer"
+      className="flex items-center justify-center w-12 h-12 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-lg transition-all hover:scale-105 cursor-pointer"
       title="Toggle Camera (V)"
     >
       {enabled ? <CameraVideoFill className="text-purple-700" size={20} /> : <CameraVideoOffFill className="text-red-500" size={20} />}

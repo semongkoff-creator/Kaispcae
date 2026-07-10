@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
-import { TrashFill, InfoCircle } from 'react-bootstrap-icons';
+import { TrashFill, InfoCircle, SunFill, MoonFill } from 'react-bootstrap-icons';
 import { io } from 'socket.io-client';
-import { RoomTheme } from '@virtualmeet/shared';
+import { RoomTheme, RoomTemplateId, ROOM_TEMPLATES } from '@virtualmeet/shared';
 import { api, RoomInfo } from '@/services/api';
 import { UserProfile } from '@/services/api';
 import { CreditsModal } from '@/components/ui/CreditsModal';
+import { Theme } from '@/hooks/useTheme';
 
 interface LobbyProps {
   user: UserProfile;
   onJoinRoom: (slug: string) => void;
   onLogout: () => void;
+  theme: Theme;
+  onToggleTheme: () => void;
 }
 
 // Small preview images for the theme picker below — one representative
@@ -23,12 +26,13 @@ const THEME_OPTIONS: { value: RoomTheme; label: string; preview: string }[] = [
   { value: 'scifi-office', label: 'Sci-Fi Office', preview: '/assets/tilesets/scifi-office/Machines/arcade.rsi/icon.png' },
 ];
 
-export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
+export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: LobbyProps) {
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [roomName, setRoomName] = useState('');
   const [roomTheme, setRoomTheme] = useState<RoomTheme>('modern-interiors');
+  const [roomTemplate, setRoomTemplate] = useState<RoomTemplateId>('main-office');
   const [joinCode, setJoinCode] = useState('');
   const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
   const [toast, setToast] = useState('');
@@ -66,7 +70,7 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
     // button is broken" rather than "type a name first".
     if (!roomName.trim()) { setNameError(true); return; }
     setNameError(false);
-    try { const room = await api.createRoom(roomName, undefined, undefined, roomTheme); onJoinRoom(room.slug); } catch (err) { console.error(err); }
+    try { const room = await api.createRoom(roomName, undefined, undefined, roomTheme, roomTemplate); onJoinRoom(room.slug); } catch (err) { console.error(err); }
   };
 
   const handleJoinByCode = async () => {
@@ -87,12 +91,19 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
   };
 
   return (
-    <div className="w-screen min-h-screen bg-gradient-to-br from-white to-purple-50 text-gray-900">
-      <header className="px-6 py-4 flex items-center justify-between border-b border-purple-100">
-        <h1 className="text-xl font-bold text-gray-900">VirtualMeet</h1>
+    <div className="w-screen min-h-screen bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-950 text-gray-900 dark:text-gray-100">
+      <header className="px-6 py-4 flex items-center justify-between border-b border-purple-100 dark:border-gray-800">
+        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">VirtualMeet</h1>
         <div className="flex items-center gap-3">
-          <span className="text-gray-500 text-sm">{user.displayName}</span>
-          <button onClick={onLogout} className="text-gray-400 hover:text-gray-700 text-sm cursor-pointer">Logout</button>
+          <button
+            onClick={onToggleTheme}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            className="w-8 h-8 rounded-full bg-purple-50 dark:bg-gray-800 flex items-center justify-center text-purple-700 dark:text-purple-300 cursor-pointer"
+          >
+            {theme === 'dark' ? <SunFill size={13} /> : <MoonFill size={13} />}
+          </button>
+          <span className="text-gray-500 dark:text-gray-400 text-sm">{user.displayName}</span>
+          <button onClick={onLogout} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-sm cursor-pointer">Logout</button>
         </div>
       </header>
       <main className="max-w-4xl mx-auto px-6 py-8">
@@ -100,8 +111,8 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
           <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-emerald-500/90 text-white text-xs px-3 py-1 rounded-full">{toast}</div>
         )}
         {lastRoom && (
-          <div className="flex items-center justify-between bg-purple-50 border border-purple-100 rounded-xl px-4 py-3 mb-6">
-            <p className="text-gray-700 text-sm">
+          <div className="flex items-center justify-between bg-purple-50 dark:bg-gray-800 border border-purple-100 dark:border-gray-700 rounded-xl px-4 py-3 mb-6">
+            <p className="text-gray-700 dark:text-gray-300 text-sm">
               Continue where you left off — <span className="font-semibold">{lastRoom.name}</span>
             </p>
             <button
@@ -113,42 +124,58 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
           </div>
         )}
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-semibold text-gray-900">Public Rooms</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Public Rooms</h2>
           <div className="flex gap-3">
             <input
               value={joinCode} onChange={(e) => setJoinCode(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleJoinByCode()}
               placeholder="Join with code..." maxLength={30}
-              className="bg-white text-gray-900 placeholder-gray-400 text-sm rounded-lg px-3 py-2 outline-none border border-purple-100 focus:border-purple-500 w-48 shadow-sm"
+              className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg px-3 py-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 w-48 shadow-sm"
             />
             <button onClick={() => setShowCreate(!showCreate)} className="bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium px-4 py-2 rounded-lg cursor-pointer">+ Create Room</button>
           </div>
         </div>
         {showCreate && (
-          <div className="bg-white rounded-xl p-4 mb-6 border border-purple-100 shadow-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 mb-6 border border-purple-100 dark:border-gray-700 shadow-sm">
             <div className="flex gap-3 items-end mb-3">
               <div className="flex-1">
-                <label className="text-gray-500 text-xs block mb-1">Room Name</label>
+                <label className="text-gray-500 dark:text-gray-400 text-xs block mb-1">Room Name</label>
                 <input
                   value={roomName}
                   onChange={(e) => { setRoomName(e.target.value); if (nameError) setNameError(false); }}
                   onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
                   placeholder="My Awesome Room"
                   maxLength={50}
-                  className={`w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 text-sm rounded-lg px-3 py-2 outline-none border focus:border-purple-500 ${nameError ? 'border-red-300 ring-1 ring-red-200' : 'border-purple-100'}`}
+                  className={`w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg px-3 py-2 outline-none border focus:border-purple-500 ${nameError ? 'border-red-300 ring-1 ring-red-200' : 'border-purple-100 dark:border-gray-600'}`}
                 />
                 {nameError && <p className="text-red-500 text-[11px] mt-1">Type a room name first</p>}
               </div>
               <button onClick={handleCreate} className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg cursor-pointer">Create</button>
             </div>
-            <label className="text-gray-500 text-xs block mb-1.5">Theme</label>
+            <label className="text-gray-500 dark:text-gray-400 text-xs block mb-1.5">Layout</label>
+            <div className="flex gap-2 mb-3">
+              {ROOM_TEMPLATES.map((tpl) => (
+                <button
+                  key={tpl.id}
+                  onClick={() => setRoomTemplate(tpl.id)}
+                  title={tpl.description}
+                  className={`flex-1 text-left px-3 py-2 rounded-lg border cursor-pointer transition-all ${
+                    roomTemplate === tpl.id ? 'bg-purple-50 dark:bg-gray-700 border-purple-400 ring-1 ring-purple-300' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 hover:border-purple-200'
+                  }`}
+                >
+                  <span className="text-xs font-medium text-gray-700 dark:text-gray-200 block">{tpl.name}</span>
+                  <span className="text-gray-400 dark:text-gray-500 text-[10px] block leading-snug">{tpl.description}</span>
+                </button>
+              ))}
+            </div>
+            <label className="text-gray-500 dark:text-gray-400 text-xs block mb-1.5">Theme</label>
             <div className="flex gap-2">
               {THEME_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
                   onClick={() => setRoomTheme(opt.value)}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-left cursor-pointer transition-all ${
-                    roomTheme === opt.value ? 'bg-purple-50 border-purple-400 ring-1 ring-purple-300' : 'bg-white border-gray-200 hover:border-purple-200'
+                    roomTheme === opt.value ? 'bg-purple-50 dark:bg-gray-700 border-purple-400 ring-1 ring-purple-300' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 hover:border-purple-200'
                   }`}
                 >
                   <div
@@ -159,12 +186,12 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
                       imageRendering: 'pixelated',
                     }}
                   />
-                  <span className="text-xs font-medium text-gray-700">{opt.label}</span>
+                  <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{opt.label}</span>
                 </button>
               ))}
             </div>
             {roomTheme === 'scifi-office' && (
-              <p className="text-gray-400 text-[10px] mt-2">
+              <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-2">
                 Uses art from Space Station 14 (CC-BY-SA 3.0).{' '}
                 <button onClick={() => setShowCredits(true)} className="text-purple-500 hover:text-purple-700 underline cursor-pointer">Credits</button>
               </p>
@@ -172,11 +199,11 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
           </div>
         )}
         {loading ? (
-          <p className="text-gray-400">Loading rooms...</p>
+          <p className="text-gray-400 dark:text-gray-500">Loading rooms...</p>
         ) : rooms.length === 0 ? (
           <div className="text-center py-16">
-            <p className="text-gray-400 text-lg mb-2">No rooms yet</p>
-            <p className="text-gray-400 text-sm">Create the first room to get started</p>
+            <p className="text-gray-400 dark:text-gray-500 text-lg mb-2">No rooms yet</p>
+            <p className="text-gray-400 dark:text-gray-500 text-sm">Create the first room to get started</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -188,25 +215,25 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
                 key={room.id}
                 className={`rounded-xl p-5 border shadow-sm transition-all ${
                   isConfirmingDelete
-                    ? 'bg-red-50 border-red-200 ring-2 ring-red-200'
-                    : 'bg-white border-purple-100 hover:border-purple-300 hover:shadow-md'
+                    ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 ring-2 ring-red-200 dark:ring-red-800'
+                    : 'bg-white dark:bg-gray-800 border-purple-100 dark:border-gray-700 hover:border-purple-300 hover:shadow-md'
                 }`}
               >
                 <div className="flex items-start justify-between mb-1" onClick={handleJoinClick}>
-                  <h3 className={`font-semibold text-sm text-gray-900 ${isConfirmingDelete ? '' : 'cursor-pointer'}`}>{room.name}</h3>
-                  <span className="text-[10px] text-gray-400 font-mono">{room.slug.slice(0, 8)}</span>
+                  <h3 className={`font-semibold text-sm text-gray-900 dark:text-gray-100 ${isConfirmingDelete ? '' : 'cursor-pointer'}`}>{room.name}</h3>
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono">{room.slug.slice(0, 8)}</span>
                 </div>
-                <p className="text-gray-400 text-[10px] mb-3">Created by {room.ownerDisplayName}</p>
+                <p className="text-gray-400 dark:text-gray-500 text-[10px] mb-3">Created by {room.ownerDisplayName}</p>
                 {isConfirmingDelete ? (
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-red-600 font-medium">Delete this room permanently?</span>
+                    <span className="text-red-600 dark:text-red-400 font-medium">Delete this room permanently?</span>
                     <div className="flex gap-2">
                       <button onClick={() => { handleDelete(room.slug); setDeletingSlug(null); }} className="text-[10px] font-semibold text-white bg-red-500 hover:bg-red-600 px-2 py-1 rounded cursor-pointer">Confirm</button>
-                      <button onClick={() => setDeletingSlug(null)} className="text-[10px] text-gray-500 hover:text-gray-700 bg-white border border-gray-200 px-2 py-1 rounded cursor-pointer">Cancel</button>
+                      <button onClick={() => setDeletingSlug(null)} className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 px-2 py-1 rounded cursor-pointer">Cancel</button>
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center justify-between text-xs text-gray-500">
+                  <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
                     <span onClick={handleJoinClick} className="cursor-pointer">{room.playerCount} / {room.maxPlayers} online</span>
                     {room.ownerId === user.id && (
                       <button onClick={(e) => { e.stopPropagation(); setDeletingSlug(room.slug); }} className="text-red-500/70 hover:text-red-500 text-xs cursor-pointer inline-flex items-center gap-1"><TrashFill size={11} /> Delete</button>
@@ -222,7 +249,7 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
       <footer className="max-w-4xl mx-auto px-6 py-6 flex justify-center">
         <button
           onClick={() => setShowCredits(true)}
-          className="text-gray-400 hover:text-gray-600 text-xs cursor-pointer inline-flex items-center gap-1.5"
+          className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-xs cursor-pointer inline-flex items-center gap-1.5"
         >
           <InfoCircle size={12} /> Credits / About
         </button>
