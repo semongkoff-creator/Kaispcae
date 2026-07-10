@@ -158,8 +158,16 @@ function drawLayeredAvatar(
   displaySize: number = SPRITE_DISPLAY_SIZE,
 ): boolean {
   const { col, row } = spriteFrameCoords(direction, isMoving, timestamp, isRunning);
-  const dx = cx - displaySize / 2;
-  const dy = cy - displaySize / 2;
+  // Round to a whole pixel — the player's world position moves in
+  // continuous float steps (PLAYER_SPEED * dt), so cx/cy are almost never
+  // integers. With imageSmoothingEnabled off, drawImage() at a fractional
+  // destination forces nearest-neighbor to duplicate/skip source pixel
+  // rows and columns unevenly to fill the sub-pixel-offset target — most
+  // visible on the head (dense detail: eyes, hairline) versus the outfit's
+  // flat color blocks, which reads exactly like "the head is glitched/torn"
+  // even though every layer is otherwise correctly aligned.
+  const dx = Math.round(cx - displaySize / 2);
+  const dy = Math.round(cy - displaySize / 2);
 
   let drewAny = false;
   for (const [category, field] of LAYER_CATEGORIES) {
@@ -186,8 +194,8 @@ function drawPremadeAvatar(
   displaySize: number = SPRITE_DISPLAY_SIZE,
 ): boolean {
   const { col, row } = spriteFrameCoords(direction, isMoving, timestamp, isRunning);
-  const dx = cx - displaySize / 2;
-  const dy = cy - displaySize / 2;
+  const dx = Math.round(cx - displaySize / 2);
+  const dy = Math.round(cy - displaySize / 2);
 
   return drawSpriteFrame(ctx, `${PREMADE_BASE}/${premadeId}`, {
     col, row, cellWidth: FRAME_SIZE, cellHeight: FRAME_SIZE,

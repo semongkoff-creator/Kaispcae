@@ -33,6 +33,7 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
   const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
   const [toast, setToast] = useState('');
   const [showCredits, setShowCredits] = useState(false);
+  const [nameError, setNameError] = useState(false);
 
   useEffect(() => {
     api.getRooms()
@@ -60,7 +61,11 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
   }, []);
 
   const handleCreate = async () => {
-    if (!roomName.trim()) return;
+    // Previously a silent no-op — clicking Create with an empty name did
+    // nothing at all, with zero feedback, which reads exactly like "the
+    // button is broken" rather than "type a name first".
+    if (!roomName.trim()) { setNameError(true); return; }
+    setNameError(false);
     try { const room = await api.createRoom(roomName, undefined, undefined, roomTheme); onJoinRoom(room.slug); } catch (err) { console.error(err); }
   };
 
@@ -124,7 +129,15 @@ export function Lobby({ user, onJoinRoom, onLogout }: LobbyProps) {
             <div className="flex gap-3 items-end mb-3">
               <div className="flex-1">
                 <label className="text-gray-500 text-xs block mb-1">Room Name</label>
-                <input value={roomName} onChange={(e) => setRoomName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreate()} placeholder="My Awesome Room" maxLength={50} className="w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 text-sm rounded-lg px-3 py-2 outline-none border border-purple-100 focus:border-purple-500" />
+                <input
+                  value={roomName}
+                  onChange={(e) => { setRoomName(e.target.value); if (nameError) setNameError(false); }}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+                  placeholder="My Awesome Room"
+                  maxLength={50}
+                  className={`w-full bg-purple-50/50 text-gray-900 placeholder-gray-400 text-sm rounded-lg px-3 py-2 outline-none border focus:border-purple-500 ${nameError ? 'border-red-300 ring-1 ring-red-200' : 'border-purple-100'}`}
+                />
+                {nameError && <p className="text-red-500 text-[11px] mt-1">Type a room name first</p>}
               </div>
               <button onClick={handleCreate} className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium px-4 py-2 rounded-lg cursor-pointer">Create</button>
             </div>

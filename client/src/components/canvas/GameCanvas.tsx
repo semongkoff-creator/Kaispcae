@@ -613,6 +613,29 @@ export function GameCanvas({ emitMove, emitStop, emitJump, proximityData, localS
       }
     }
 
+    // Zone/banner labels are DOM overlays (see below), painted as siblings
+    // after the canvas — so by plain DOM stacking they always render in
+    // front of it, with no regard for the canvas's own Y-sorted depth.
+    // Since these signs are anchored at the row they mark (a doorway, an
+    // entrance corridor), any avatar standing at or just below that row has
+    // its head — the top of the 32px sprite — sitting exactly in the sign's
+    // on-screen space, so the sign visually slices through it. Hiding the
+    // sign outright while an avatar is right there approximates proper
+    // Y-sorting without a full rewrite of these labels into canvas draw
+    // calls — no CSS opacity transition here on purpose: fading it out over
+    // a couple hundred ms means it sits at partial opacity for a few frames
+    // right as the avatar reaches it, which reads as the head rendering
+    // "half, then filling in" rather than a clean disappearance.
+    const isAvatarUnderLabel = (tileX: number, tileY: number, tilesW: number) => {
+      const local = localPlayerRef.current;
+      const avatars: { x: number; y: number }[] = [local, ...Object.values(playerRecordsRef.current)];
+      return avatars.some((a) => {
+        const row = Math.floor(a.y / TILE_SIZE);
+        const col = Math.floor(a.x / TILE_SIZE);
+        return row >= tileY && row <= tileY + 1 && col >= tileX - 1 && col <= tileX + tilesW;
+      });
+    };
+
     // Zone banners (DOM overlay) — position each labeled zone's floating
     // element every frame via transform, matching the canvas camera exactly.
     for (const zone of zones) {
@@ -629,6 +652,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, proximityData, localS
         el.style.transform = `translate(${zx + 6}px, ${zy - 12}px)`;
         el.style.width = 'auto';
       }
+      el.style.opacity = isAvatarUnderLabel(zone.x, zone.y, zone.width) ? '0' : '1';
     }
 
     // Banner furniture (DOM overlay) — same imperative positioning as zone
@@ -641,6 +665,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, proximityData, localS
       const by = item.y * TILE_SIZE - cameraY;
       el.style.transform = `translate(${bx}px, ${by}px)`;
       el.style.width = `${item.tilesW * TILE_SIZE}px`;
+      el.style.opacity = isAvatarUnderLabel(item.x, item.y, item.tilesW) ? '0' : '1';
     }
 
     // §6 — Media markers (DOM overlay), same imperative positioning.
