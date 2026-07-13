@@ -55,3 +55,11 @@ export const movePayloadSchema = z.object({
   y: z.number(),
   direction: z.enum(['up', 'down', 'left', 'right']),
 });
+
+export const createChannelSchema = z.object({
+  name: z.string().min(1).max(30),
+});
+
+export const startDmSchema = z.object({
+  otherUserId: z.string().min(1),
+});

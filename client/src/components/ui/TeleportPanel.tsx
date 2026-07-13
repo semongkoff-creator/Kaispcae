@@ -104,13 +104,13 @@ export function TeleportPanel({ roomSlug, isOwner, onTeleport, onClose }: Telepo
         <div className="flex gap-1 mb-3">
           <button
             onClick={() => setTab('team')}
-            className={`flex-1 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${tab === 'team' ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100'}`}
+            className={`flex-1 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${tab === 'team' ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'}`}
           >
             Team
           </button>
           <button
             onClick={() => setTab('bookmarks')}
-            className={`flex-1 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${tab === 'bookmarks' ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100'}`}
+            className={`flex-1 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${tab === 'bookmarks' ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'}`}
           >
             My Bookmarks
           </button>
@@ -145,7 +145,7 @@ export function TeleportPanel({ roomSlug, isOwner, onTeleport, onClose }: Telepo
           </div>
           <button
             onClick={handleAddLocation}
-            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer"
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-600 text-xs font-medium cursor-pointer"
           >
             <PlusCircle size={12} /> Add current location ({locations.length}/{MAX_TELEPORT_LOCATIONS})
           </button>
@@ -176,7 +176,7 @@ export function TeleportPanel({ roomSlug, isOwner, onTeleport, onClose }: Telepo
           </div>
           <button
             onClick={handleAddBookmark}
-            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer"
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-600 text-xs font-medium cursor-pointer"
           >
             <PlusCircle size={12} /> Add current location
           </button>

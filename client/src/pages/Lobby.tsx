@@ -27,6 +27,7 @@ const THEME_OPTIONS: { value: RoomTheme; label: string; preview: string }[] = [
 ];
 
 export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: LobbyProps) {
+  const isAdmin = user.accountRole === 'admin';
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -132,10 +133,12 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
               placeholder="Join with code..." maxLength={30}
               className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg px-3 py-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 w-48 shadow-sm"
             />
-            <button onClick={() => setShowCreate(!showCreate)} className="bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium px-4 py-2 rounded-lg cursor-pointer">+ Create Room</button>
+            {isAdmin && (
+              <button onClick={() => setShowCreate(!showCreate)} className="bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium px-4 py-2 rounded-lg cursor-pointer">+ Create Room</button>
+            )}
           </div>
         </div>
-        {showCreate && (
+        {showCreate && isAdmin && (
           <div className="bg-white dark:bg-gray-800 rounded-xl p-4 mb-6 border border-purple-100 dark:border-gray-700 shadow-sm">
             <div className="flex gap-3 items-end mb-3">
               <div className="flex-1">

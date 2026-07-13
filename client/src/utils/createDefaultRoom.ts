@@ -1,4 +1,4 @@
-import { Avatar, RoomTheme, createDefaultOfficeLayout, findSpawnPixel, BLOCKED_TILES, isTileBlocked } from '@virtualmeet/shared';
+import { Avatar, RoomTheme, RoomTemplateId, createRoomLayoutFromTemplate, findSpawnPixel, BLOCKED_TILES, isTileBlocked } from '@virtualmeet/shared';
 
 // Re-exported for existing consumers (GameCanvas.tsx's movement collision
 // check, App.tsx's minimap click-to-teleport handler) — the actual
@@ -11,15 +11,16 @@ export { BLOCKED_TILES, isTileBlocked };
 const AVATAR_COLORS = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a786df', '#6bcb77', '#4d96ff'];
 
 /**
- * Generates the default "Main Office" room (see shared/defaultRoomLayout.ts
- * for the actual layout). This is the optimistic local room shown before
- * the server's real room:state arrives, so it must match what a
- * freshly-created room is seeded with server-side
- * (server/src/routes/rooms.ts), otherwise the layout would visibly change
- * the moment the real state lands.
+ * Generates a room from one of shared/defaultRoomLayout.ts's ROOM_TEMPLATES.
+ * Two callers: App.tsx's optimistic local room shown before the server's
+ * real room:state arrives (now gated behind gameStore.ts's
+ * roomStateReceived so this mismatching the real room's actual template
+ * only matters for a moment, not a visible flash — see that flag's doc
+ * comment), and RoomEditor.tsx's "Reset to Default", which passes the
+ * room's own actual template so resetting doesn't silently discard it.
  */
-export function createDefaultRoom(id: string, name: string, theme: RoomTheme = 'modern-interiors') {
-  const { tiles, furniture, zones } = createDefaultOfficeLayout(theme);
+export function createDefaultRoom(templateId: RoomTemplateId, name: string, theme: RoomTheme = 'modern-interiors') {
+  const { tiles, furniture, zones } = createRoomLayoutFromTemplate(templateId, theme);
 
   // Place a default local player on the layout's actual spawn tile — not a
   // hardcoded guess, since a mismatch here would show the player standing
@@ -38,7 +39,7 @@ export function createDefaultRoom(id: string, name: string, theme: RoomTheme = '
   };
 
   return {
-    id,
+    id: templateId,
     name,
     tiles,
     furniture,

@@ -8,6 +8,7 @@ import { registerRoomHandlers, getPlayerName, getPlayerColor } from './socket/ro
 import { registerMovementHandlers } from './socket/movementHandler';
 import { registerRtcHandlers } from './socket/rtcHandler';
 import { registerChatHandlers } from './socket/chatHandler';
+import { registerChannelChatHandlers } from './socket/channelChatHandler';
 import { registerEmoteHandlers } from './socket/emoteHandler';
 import { registerZoneHandlers } from './socket/zoneHandler';
 import { registerFurnitureHandlers } from './socket/furnitureHandler';
@@ -23,6 +24,7 @@ import roomRoutes, { setIo } from './routes/rooms';
 import teleportRoutes from './routes/teleport';
 import uploadRoutes from './routes/uploads';
 import recordingRoutes from './routes/recordings';
+import chatRoutes, { setIo as setChatIo } from './routes/chat';
 
 loadConfig();
 const config = getConfig();
@@ -64,6 +66,7 @@ io.use((socket, next) => {
 });
 
 setIo(io);
+setChatIo(io);
 
 // ── REST routes ──────────────────────────────────────────────────
 app.get('/api/health', async (_req, res) => {
@@ -88,6 +91,7 @@ app.use('/api', roomRoutes);
 app.use('/api', teleportRoutes);
 app.use('/api', uploadRoutes);
 app.use('/api', recordingRoutes);
+app.use('/api', chatRoutes);
 
 // ── Socket.IO ────────────────────────────────────────────────────
 async function start() {
@@ -102,6 +106,7 @@ async function start() {
     registerMovementHandlers(io, socket);
     registerRtcHandlers(io, socket);
     registerChatHandlers(io, socket, () => getPlayerName(socket.id), () => getPlayerColor(socket.id));
+    registerChannelChatHandlers(io, socket);
     registerEmoteHandlers(io, socket);
     registerZoneHandlers(io, socket);
     registerFurnitureHandlers(io, socket);

@@ -270,7 +270,7 @@ function CyclePicker({ label, value, onPrev, onNext }: { label: string; value: s
     <div className="flex items-center justify-between bg-purple-50 dark:bg-gray-700 rounded-lg px-2 py-2 mb-2">
       <button
         onClick={onPrev}
-        className="w-7 h-7 flex items-center justify-center rounded-md bg-white dark:bg-gray-800 text-purple-600 hover:bg-purple-100 shadow-sm cursor-pointer text-sm"
+        className="w-7 h-7 flex items-center justify-center rounded-md bg-white dark:bg-gray-800 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-gray-700 shadow-sm cursor-pointer text-sm"
       >
         ◀
       </button>
@@ -280,7 +280,7 @@ function CyclePicker({ label, value, onPrev, onNext }: { label: string; value: s
       </div>
       <button
         onClick={onNext}
-        className="w-7 h-7 flex items-center justify-center rounded-md bg-white dark:bg-gray-800 text-purple-600 hover:bg-purple-100 shadow-sm cursor-pointer text-sm"
+        className="w-7 h-7 flex items-center justify-center rounded-md bg-white dark:bg-gray-800 text-purple-600 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-gray-700 shadow-sm cursor-pointer text-sm"
       >
         ▶
       </button>

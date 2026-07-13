@@ -690,7 +690,11 @@ export function createLoungeLayout(theme: RoomTheme = 'modern-interiors'): { til
 
   // ── Desk Nook — (2,22) 15x10, open ────────────────────────────────────
   setFloor(tiles, 2, 22, 16, 31, 'floor-tile-gray', theme);
-  placeDeskRow(tiles, furniture, 4, 24, 26, 4, theme);
+  // chairY=27, not 26 — both desk and chair footprints are 2 tiles tall
+  // (see FOOTPRINT), so a desk at row 24 occupies 24-25; chairY needs to be
+  // deskY+3 to actually leave row 26 open as the walking gap placeDeskRow's
+  // own doc comment promises, not deskY+2 which puts them flush together.
+  placeDeskRow(tiles, furniture, 4, 24, 27, 4, theme);
   placeFurniture(tiles, furniture, 'plant-small', 15, 23, theme);
   addBanner(furniture, 3, 23, 4, 'Desk Nook', '#3b82f6');
 

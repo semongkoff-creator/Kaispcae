@@ -1,6 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
 import { SocketEvents, RtcSignal, Role, hasFeatureAccess } from '@virtualmeet/shared';
+import { resolveRoomRole } from '../lib/roles';
 
 function getPrisma(): PrismaClient {
   return new PrismaClient();
@@ -31,11 +32,7 @@ function getRoomSpotlights(room: string): Set<string> {
 async function resolveRole(prisma: PrismaClient, userId: string, roomSlug: string): Promise<Role> {
   const dbRoom = await prisma.room.findUnique({ where: { slug: roomSlug } });
   if (!dbRoom) return 'member';
-  if (userId === dbRoom.ownerId) return 'owner';
-  const member = await prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId: dbRoom.id } } });
-  if (member?.role === 'admin') return 'admin';
-  if (member?.role === 'staff') return 'staff';
-  return 'member';
+  return resolveRoomRole(prisma, userId, dbRoom.id, dbRoom.ownerId);
 }
 
 export function registerRtcHandlers(io: Server, socket: Socket) {

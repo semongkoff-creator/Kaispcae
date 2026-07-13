@@ -47,8 +47,11 @@ function toClientShape(row: {
 
 async function canDeleteMedia(prisma: PrismaClient, userId: string, roomId: string, ownerId: string, createdBy: string): Promise<boolean> {
   if (userId === createdBy || userId === ownerId) return true;
-  const member = await prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId } } });
-  return member?.role === 'admin';
+  const [user, member] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { accountRole: true } }),
+    prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId } } }),
+  ]);
+  return member?.role === 'admin' || user?.accountRole === 'admin';
 }
 
 function isValidPayload(type: MediaType, payload: MediaPayload | undefined): boolean {

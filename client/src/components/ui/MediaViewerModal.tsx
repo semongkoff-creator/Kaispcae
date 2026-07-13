@@ -54,7 +54,7 @@ export function MediaViewerModal({ media, canDelete, onDelete, onClose, emitWhit
           <a
             href={media.payload.url}
             download={media.payload.fileName}
-            className="flex items-center justify-center gap-2 py-6 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-sm font-medium"
+            className="flex items-center justify-center gap-2 py-6 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-600 text-sm font-medium"
           >
             <Download size={16} /> Download {media.payload.fileName || 'file'}
           </a>

@@ -45,14 +45,22 @@ auth.post('/register', authRateLimit, validate(registerSchema), async (req, res:
     }
 
     const hashed = await bcrypt.hash(password, 12);
+    // The very first account ever created has no one else to grant it
+    // admin — without this, a fresh deployment would have zero accounts
+    // able to create a room at all (see shared/permissions.ts's AccountRole
+    // and routes/rooms.ts's POST /rooms gate). A tiny race (two people
+    // registering in the same instant on a brand-new deployment) could in
+    // theory both read count===0, but that's an acceptably rare edge case
+    // for a one-time bootstrap, not worth a transaction/lock for.
+    const isFirstEverUser = (await prisma.user.count()) === 0;
     const user = await prisma.user.create({
-      data: { email, password: hashed, displayName },
+      data: { email, password: hashed, displayName, accountRole: isFirstEverUser ? 'admin' : 'user' },
     });
 
     const token = signToken(user);
 
     return res.status(201).json({
-      user: { id: user.id, email: user.email, displayName: user.displayName },
+      user: { id: user.id, email: user.email, displayName: user.displayName, accountRole: user.accountRole },
       token,
     });
   } catch (err) {
@@ -85,6 +93,7 @@ auth.post('/login', authRateLimit, validate(loginSchema), async (req, res: Respo
         email: user.email,
         displayName: user.displayName,
         avatarConfig: user.avatarConfig,
+        accountRole: user.accountRole,
       },
       token,
     });
@@ -131,6 +140,7 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
         email: user.email,
         displayName: user.displayName,
         avatarConfig: user.avatarConfig,
+        accountRole: user.accountRole,
       },
       ...(refreshedToken ? { token: refreshedToken } : {}),
     });

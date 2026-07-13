@@ -13,13 +13,17 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
     currentRoom = roomId || 'main-office';
   });
 
+  // Zone-private chat only — the old whole-room broadcast case (no zoneId)
+  // is superseded by the room's persisted default Channel (see
+  // channelChatHandler.ts's CHANNEL_MESSAGE_SEND); this event now only
+  // fires for the "Private" zone tab in ChatPanel.tsx.
   socket.on(SocketEvents.CHAT_MESSAGE, (text: string, isProximity?: boolean, zoneId?: string) => {
     if (!canSendChat(socket.id)) return;
     // Reject a claimed zone chat from a sender not actually tracked as
     // being inside that zone — the client-side UI already hides the
     // private tab once you leave (see ChatPanel.tsx), but a modified
     // client could still emit this directly with a stale/spoofed zoneId.
-    if (zoneId && !(currentRoom && isSocketInZone(currentRoom, socket.id, zoneId))) return;
+    if (!zoneId || !(currentRoom && isSocketInZone(currentRoom, socket.id, zoneId))) return;
     const msg: ChatMessage = {
       id: `msg-${++messageId}`,
       senderId: socket.id,
@@ -35,18 +39,11 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
     // that zone (see zoneHandler.ts) — never the whole room/server. The
     // sender always gets their own message even if the zone-membership
     // tracking hasn't caught up yet (e.g. right at zone entry).
-    if (zoneId && currentRoom) {
-      const recipients = new Set(getSocketIdsInZone(currentRoom, zoneId));
-      recipients.add(socket.id);
-      for (const socketId of recipients) {
-        io.to(socketId).emit(SocketEvents.CHAT_BROADCAST, msg);
-      }
-      return;
+    const recipients = new Set(getSocketIdsInZone(currentRoom, zoneId));
+    recipients.add(socket.id);
+    for (const socketId of recipients) {
+      io.to(socketId).emit(SocketEvents.CHAT_BROADCAST, msg);
     }
-
-    // Scoped to the sender's room — io.emit() here would leak chat across
-    // every other room/meeting running on the same server.
-    io.to(currentRoom || 'main-office').emit(SocketEvents.CHAT_BROADCAST, msg);
   });
 
   socket.on(SocketEvents.CHAT_BUBBLE, (text: string) => {

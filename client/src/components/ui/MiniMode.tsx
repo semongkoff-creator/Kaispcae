@@ -35,7 +35,28 @@ export function isMiniModeSupported(): boolean {
 // once it already exists.
 export async function openMiniModeWindow(): Promise<Window | null> {
   if (!window.documentPictureInPicture) return null;
-  const win = await window.documentPictureInPicture.requestWindow({ width: 300, height: 220 });
+
+  // The browser tracks at most one Document PiP window per tab and throws
+  // an InvalidStateError from requestWindow() if it thinks one is already
+  // open — including a stale reference left over from a previous room (see
+  // App.tsx's key={roomSlug} remount) if its close() call raced with this
+  // one, or from the window still finishing its own close animation. Without
+  // this, that throw was completely unhandled: requestWindow() rejected, the
+  // click's async handler had no .catch, and the whole thing failed
+  // silently — the button visibly did nothing, with no error and nothing
+  // in the UI telling the user why. Closing any window the API still thinks
+  // is open first, before asking for a new one, clears that stuck state.
+  if (window.documentPictureInPicture.window) {
+    try { window.documentPictureInPicture.window.close(); } catch { /* already gone */ }
+  }
+
+  let win: Window;
+  try {
+    win = await window.documentPictureInPicture.requestWindow({ width: 300, height: 220 });
+  } catch (e) {
+    console.warn('[minimode] requestWindow failed:', e);
+    return null;
+  }
 
   // Copy every stylesheet/style tag over — the PiP window starts with a
   // blank document, so without this the portaled content would render
@@ -95,6 +116,24 @@ export function MiniMode({ pipWindow, nearby, localStream, remoteStreams, remote
     const handlePageHide = () => onCloseRef.current();
     pipWindow.addEventListener('pagehide', handlePageHide);
     return () => pipWindow.removeEventListener('pagehide', handlePageHide);
+  }, [pipWindow]);
+
+  useEffect(() => {
+    // The other direction of the same problem: this component can also
+    // disappear because the APP navigated away (left the room, logged out)
+    // while the PiP window was still open — an SPA route change never
+    // unloads the actual document, so the window has no other signal that
+    // it's meant to close. Without this, that real OS-level window is
+    // simply abandoned, blank, with nothing left in the app that could ever
+    // close it. Calling close() on a window already mid-close (the pagehide
+    // path above) is a documented no-op, so this is safe either way.
+    return () => {
+      try {
+        pipWindow.close();
+      } catch {
+        // Already closed — nothing to do.
+      }
+    };
   }, [pipWindow]);
 
   const videoTiles = getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams);

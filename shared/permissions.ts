@@ -16,6 +16,16 @@
 // the auth gate in App.tsx), so every real user is at least 'member'.
 export type Role = 'owner' | 'admin' | 'staff' | 'member' | 'guest';
 
+// Global, ACCOUNT-level role — orthogonal to the per-room Role hierarchy
+// above. 'admin' accounts are the only ones allowed to create a room at all
+// (see server/src/routes/rooms.ts's POST /rooms), and are auto-elevated to
+// at least room-level 'admin' in every room they're in (see
+// server/src/lib/roles.ts's resolveRoomRole) without needing a per-room
+// RoomMember grant. Deliberately NOT elevated to 'owner' of rooms they
+// didn't create — 'room:delete' below stays a hard ownerId match, so a
+// global admin can only delete their own rooms, same as anyone else.
+export type AccountRole = 'admin' | 'user';
+
 const ROLE_ORDER: Role[] = ['guest', 'member', 'staff', 'admin', 'owner'];
 
 export function roleAtLeast(role: Role, minRole: Role): boolean {
@@ -54,6 +64,17 @@ export const FEATURE_MIN_ROLE = {
   // video is more sensitive than the other staff+ room controls above, so
   // this is gated one tier higher at admin+ rather than reusing 'staff'.
   'recording:start': 'admin',
+  // Channel/DM/Thread chat — creating/deleting extra channels is an
+  // admin+ room-management action (like the other room-structure gates
+  // above); sending messages in an existing channel/DM/thread needs no
+  // gate at all (every real user is at least 'member').
+  'channel:create': 'admin',
+  'channel:delete': 'admin',
+  // Temporary removal from the room (not a ban — they can rejoin any time).
+  // Gated at admin+ specifically, one tier above the staff+ Summon/Spotlight
+  // controls, since forcibly ending someone's session is more disruptive
+  // than moving or spotlighting them.
+  'room:kick': 'admin',
 } as const satisfies Record<string, Role>;
 
 export type FeatureKey = keyof typeof FEATURE_MIN_ROLE;

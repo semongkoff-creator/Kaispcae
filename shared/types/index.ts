@@ -1,4 +1,5 @@
 import type { Role } from '../permissions';
+import type { RoomTemplateId } from '../defaultRoomLayout';
 
 // Direction the avatar is facing or moving
 export type Direction = 'up' | 'down' | 'left' | 'right';
@@ -117,6 +118,12 @@ export interface RoomState {
   furniture?: Furniture[];
   zones?: Zone[];
   theme?: RoomTheme;
+  // Which layout this room was created with (see defaultRoomLayout.ts's
+  // ROOM_TEMPLATES) — undefined for rooms created before this field
+  // existed. Threaded through the same way `theme` already is so
+  // RoomEditor.tsx's "Reset to Default" can rebuild the room's OWN
+  // template instead of always falling back to Main Office.
+  template?: RoomTemplateId;
   notice?: Notice | null;
   // The RECEIVING socket's own resolved role in this room (see
   // shared/permissions.ts) — computed server-side per-socket, not
@@ -276,6 +283,46 @@ export enum SocketEvents {
   RECORDING_FINALIZE = 'recording:finalize',
   RECORDING_ENDED = 'recording:ended',
   RECORDING_FAILED = 'recording:failed',
+
+  // Persisted Channel/DM/Thread chat (see ChatMessage's sibling doc comment
+  // below) — separate from CHAT_MESSAGE/CHAT_BROADCAST above, which now only
+  // carries the zone-private and proximity-bubble cases; the old whole-room
+  // broadcast is superseded by the room's default "general" Channel. JOIN/LEAVE
+  // scope a socket to one channel/DM socket.io room at a time (only the
+  // currently-open tab needs live updates), mirroring zoneHandler.ts's
+  // enter/exit tracking.
+  CHANNEL_JOIN = 'channel:join',
+  CHANNEL_LEAVE = 'channel:leave',
+  CHANNEL_MESSAGE_SEND = 'channel:message_send',
+  CHANNEL_MESSAGE_NEW = 'channel:message_new',
+  CHANNEL_CREATED = 'channel:created',
+  CHANNEL_DELETED = 'channel:deleted',
+
+  DM_JOIN = 'dm:join',
+  DM_LEAVE = 'dm:leave',
+  DM_MESSAGE_SEND = 'dm:message_send',
+  DM_MESSAGE_NEW = 'dm:message_new',
+  // Broadcast once, only when a DM conversation is first created (not on
+  // every find-or-create hit) — see routes/chat.ts's POST /rooms/:slug/dms.
+  // Without this the OTHER participant would have no live way to discover
+  // a new incoming DM at all (only the starter's own client already has
+  // it), and would only see it after their next reload.
+  DM_STARTED = 'dm:started',
+
+  // Temporary removal from the room by an admin+ user (see
+  // shared/permissions.ts's 'room:kick') — not a ban, the target can rejoin
+  // any time. PLAYER_KICK is the admin's request; PLAYER_KICKED is sent only
+  // to the removed player's own socket (never broadcast) so their client can
+  // show a "you were removed" notice — everyone else in the room just sees
+  // the ordinary PLAYER_LEFT broadcast, since roomHandler.ts's kick handler
+  // reuses handleLeave's exact same cleanup.
+  PLAYER_KICK = 'player:kick',
+  PLAYER_KICKED = 'player:kicked',
+}
+
+// Sent only to the removed player's own socket — see PLAYER_KICKED above.
+export interface PlayerKickedPayload {
+  byName: string;
 }
 
 // My own follow relationship (I am the follower) — sent only to me, never
@@ -325,8 +372,14 @@ export interface OwnerBookmark {
 }
 
 export interface TeleportRequest {
-  kind: 'admin' | 'bookmark';
-  locationId: string;
+  // 'seat' — jump straight to whichever piece of furniture in this room is
+  // currently assigned to the requester (see Furniture.assignedToUserId).
+  // No locationId: unlike admin/bookmark locations, "my seat" isn't looked
+  // up by a client-supplied id — the server resolves it directly from the
+  // requester's own uid, since a user can only ever have one meaningful
+  // answer to "where's MY seat" and there's nothing to scope/guess.
+  kind: 'admin' | 'bookmark' | 'seat';
+  locationId?: string;
 }
 
 // How long a Summon/Follow request waits for the target to respond before
@@ -573,6 +626,51 @@ export interface ChatMessage {
   zoneId?: string;
 }
 
+// Persisted Channel/DM/Thread chat — distinct from ChatMessage above (which
+// stays ephemeral, in-memory only, for zone-private/proximity-bubble chat).
+// A ChannelMessage belongs to exactly one of channelId/conversationId; a
+// reply sets parentId to its parent's id (one level deep — the UI doesn't
+// nest replies-of-replies). replyCount is only populated on top-level
+// messages returned from the list endpoints, not on individual replies.
+export interface Channel {
+  id: string;
+  roomId: string;
+  name: string;
+  isDefault: boolean;
+  createdAt: number;
+}
+
+export interface DirectConversationSummary {
+  id: string;
+  roomId: string;
+  otherUser: { id: string; displayName: string };
+  createdAt: number;
+}
+
+// Symmetric broadcast shape for DM_STARTED — carries both participants
+// since (unlike DirectConversationSummary, which is per-viewer) this is
+// the same wire payload delivered to everyone in the room; each client
+// picks out "the other one" for itself.
+export interface DirectConversationStarted {
+  id: string;
+  roomId: string;
+  userA: { id: string; displayName: string };
+  userB: { id: string; displayName: string };
+  createdAt: number;
+}
+
+export interface ChannelMessage {
+  id: string;
+  channelId?: string;
+  conversationId?: string;
+  parentId?: string;
+  senderId: string;
+  senderName: string;
+  text: string;
+  createdAt: number;
+  replyCount?: number;
+}
+
 // Emotes
 export type EmoteType = 'wave' | 'clap' | 'laugh' | 'heart' | 'party' | 'think' | 'sleep' | 'fire';
 
@@ -613,6 +711,6 @@ export interface RoomUpdatePayload {
 
 export { createDefaultOfficeLayout, findSpawnPixel, createRoomLayoutFromTemplate, ROOM_TEMPLATES } from '../defaultRoomLayout';
 export type { RoomTemplateId } from '../defaultRoomLayout';
-export { BLOCKED_TILES, isTileBlocked, findZoneEntryTile } from '../tileCollision';
+export { BLOCKED_TILES, isTileBlocked, findZoneEntryTile, findAdjacentFreeTile } from '../tileCollision';
 export type { Role, FeatureKey } from '../permissions';
 export { roleAtLeast, hasFeatureAccess, FEATURE_MIN_ROLE } from '../permissions';

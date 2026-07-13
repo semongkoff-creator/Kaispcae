@@ -1,4 +1,4 @@
-import { TeleportLocation, OwnerBookmark, Recording, RoomTemplateId } from '@virtualmeet/shared';
+import { TeleportLocation, OwnerBookmark, Recording, RoomTemplateId, Channel, ChannelMessage, DirectConversationSummary } from '@virtualmeet/shared';
 
 const API_BASE = '/api';
 
@@ -102,6 +102,10 @@ export interface UserProfile {
   email: string;
   displayName: string;
   avatarConfig?: any;
+  // Global, account-level role (see shared/permissions.ts's AccountRole) —
+  // 'admin' accounts can create rooms; everyone else can only join existing
+  // ones (see routes/rooms.ts's POST /rooms gate).
+  accountRole?: 'admin' | 'user';
 }
 
 export interface RoomInfo {
@@ -210,4 +214,37 @@ export const api = {
   getRecordings: (slug: string) => request<{ recordings: Recording[] }>(`/rooms/${slug}/recordings`),
 
   downloadRecording: (id: string, filename: string) => downloadRecordingBlob(id, filename),
+
+  // Persisted Channel/DM/Thread chat (see server/src/routes/chat.ts). Message
+  // *sending* goes over the socket (channelChatHandler.ts) for live delivery —
+  // these REST calls are for channel/DM management and loading history.
+  getChannels: (slug: string) => request<{ channels: Channel[] }>(`/rooms/${slug}/channels`),
+
+  createChannel: (slug: string, name: string) =>
+    request<{ channel: Channel }>(`/rooms/${slug}/channels`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+
+  deleteChannel: (slug: string, channelId: string) =>
+    request<{ success: boolean }>(`/rooms/${slug}/channels/${channelId}`, { method: 'DELETE' }),
+
+  getChannelMessages: (slug: string, channelId: string, before?: string) =>
+    request<{ messages: ChannelMessage[] }>(
+      `/rooms/${slug}/channels/${channelId}/messages${before ? `?before=${before}` : ''}`
+    ),
+
+  getReplies: (messageId: string, before?: string) =>
+    request<{ replies: ChannelMessage[] }>(`/messages/${messageId}/replies${before ? `?before=${before}` : ''}`),
+
+  getDMs: (slug: string) => request<{ conversations: DirectConversationSummary[] }>(`/rooms/${slug}/dms`),
+
+  startDM: (slug: string, otherUserId: string) =>
+    request<{ conversation: DirectConversationSummary }>(`/rooms/${slug}/dms`, {
+      method: 'POST',
+      body: JSON.stringify({ otherUserId }),
+    }),
+
+  getDMMessages: (conversationId: string, before?: string) =>
+    request<{ messages: ChannelMessage[] }>(`/dms/${conversationId}/messages${before ? `?before=${before}` : ''}`),
 };

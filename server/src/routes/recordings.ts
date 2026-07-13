@@ -2,21 +2,14 @@ import { Router, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { PrismaClient } from '@prisma/client';
-import { Role, hasFeatureAccess } from '@virtualmeet/shared';
+import { hasFeatureAccess } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { resolveRoomRole as resolveRole } from '../lib/roles';
 
 const recordings = Router();
 
 function getPrisma(): PrismaClient {
   return new PrismaClient();
-}
-
-async function resolveRole(prisma: PrismaClient, userId: string, roomId: string, ownerId: string): Promise<Role> {
-  if (userId === ownerId) return 'owner';
-  const member = await prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId } } });
-  if (member?.role === 'admin') return 'admin';
-  if (member?.role === 'staff') return 'staff';
-  return 'member';
 }
 
 // §7 — visible to admin+ (manage all of this room's recordings) or the

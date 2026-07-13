@@ -26,7 +26,7 @@ export function PendingRequestToast({ icon, message, onAccept, onDecline }: Pend
       </button>
       <button
         onClick={onDecline}
-        className="px-2 py-1 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-600 text-[11px] font-medium cursor-pointer"
+        className="px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 text-[11px] font-medium cursor-pointer"
       >
         Decline
       </button>

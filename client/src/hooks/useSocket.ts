@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage } from '@/services/browserNotifications';
@@ -17,7 +17,6 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   const removePlayer = useGameStore((s) => s.removePlayer);
   const setPlayerTarget = useGameStore((s) => s.setPlayerTarget);
   const interpolatePlayers = useGameStore((s) => s.interpolatePlayers);
-  const addChatMessage = useGameStore((s) => s.addChatMessage);
   const addZoneChatMessage = useGameStore((s) => s.addZoneChatMessage);
   const setSpeechBubble = useGameStore((s) => s.setSpeechBubble);
   const addEmote = useGameStore((s) => s.addEmote);
@@ -61,6 +60,17 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   }, [interpolatePlayers]);
 
   useEffect(() => {
+    // Reset for this room-join attempt — see gameStore.ts's doc comment on
+    // roomStateReceived for why Game.tsx gates the canvas on this instead
+    // of just "roomState exists" (App.tsx seeds a hardcoded placeholder
+    // room before any socket connection exists at all).
+    useGameStore.getState().setRoomStateReceived(false);
+    // Same reasoning for the Activity Feed — without this, portal travel or
+    // leaving-and-rejoining a different room left the previous room's
+    // events mixed in with the new room's own (see clearActivity's doc
+    // comment in gameStore.ts).
+    useGameStore.getState().clearActivity();
+
     // Connect directly to the game server — bypass Vite proxy entirely
     // to avoid WebSocket proxy ECONNABORTED issues. The JWT (if logged in)
     // lets the server verify our identity server-side instead of trusting
@@ -91,6 +101,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socket.on(SocketEvents.ROOM_STATE, (roomState) => {
       console.log('[socket] room:state received — players:', roomState.players?.length, 'tiles:', roomState.tiles?.length ?? 0);
       setRoomState(roomState);
+      useGameStore.getState().setRoomStateReceived(true);
 
       // setRoomState() deliberately skips the local player's own entry (it
       // only reads other players' data from room:state, so a stray re-sync
@@ -172,15 +183,49 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // playerTargets' lerp (interpolatePlayers in gameStore.ts) — sliding a
     // remote avatar across the whole map over ~200ms would look like a fast
     // walk, not a teleport.
-    socket.on(SocketEvents.PLAYER_TELEPORTED, (data: { id: string; x: number; y: number; direction: Avatar['direction'] }) => {
+    socket.on(SocketEvents.PLAYER_TELEPORTED, (data: { id: string; x: number; y: number; direction: Avatar['direction']; seatFurnitureId?: string }) => {
       console.log('[socket] player teleported:', data.id, '→', data.x, data.y);
       const state = useGameStore.getState();
       if (data.id === state.localPlayerId) {
+        if (data.seatFurnitureId) {
+          // "My Seat" — the server resolved this teleport to the requester's
+          // own assigned furniture (see roomHandler.ts's TELEPORT_REQUEST
+          // 'seat' branch); land AND sit in one action rather than just
+          // standing at the seat's tile. Mirrors GameCanvas.tsx's
+          // performSit's local bookkeeping — sitReturnPos is set together
+          // with the new position/sitting-flag in ONE store update via
+          // landOnSeat, not several separate set() calls (one to clear any
+          // previous sit state, one for sittingFurnitureId, one for
+          // localPlayer's position) — each of those is its own render, and
+          // the renders in between still had localPlayer at the OLD
+          // position, i.e. a visible flash back to where the player started
+          // before snapping to the seat.
+          //
+          // sitReturnPos here is a tile adjacent to the SEAT (via
+          // findAdjacentFreeTile), not wherever the player happened to be
+          // standing before they clicked "My Seat" — that previous spot can
+          // be anywhere on the map (a different zone, clear across the
+          // room), so standing back up (Space, or any movement key — see
+          // GameCanvas.tsx's performStandUp) used to snap the player back to
+          // that unrelated distant position instead of just stepping away
+          // from the seat they were just sitting in.
+          const seatTileX = Math.floor(data.x / TILE_SIZE);
+          const seatTileY = Math.floor(data.y / TILE_SIZE);
+          const adjacent = state.tiles.length > 0
+            ? findAdjacentFreeTile(state.tiles, seatTileX, seatTileY)
+            : { x: seatTileX, y: seatTileY + 1 };
+          const returnPos = { x: adjacent.x * TILE_SIZE + TILE_SIZE / 2, y: adjacent.y * TILE_SIZE + TILE_SIZE / 2 };
+          state.landOnSeat(data.seatFurnitureId, returnPos, data.x, data.y, data.direction);
+          socket.emit(SocketEvents.PLAYER_SIT, { sitting: true, x: data.x, y: data.y, direction: data.direction });
+          return;
+        }
         // Stand up first if sitting — otherwise x/y jumps to the teleport
         // target but isSitting stays true, so useMovement's isFrozen check
         // keeps refusing all WASD input there. Server already dropped our
         // sit state server-side implicitly (positions are independent), but
-        // the local store needs the same reset explicitly.
+        // the local store needs the same reset explicitly. (The seat-landing
+        // branch above never needs this — landOnSeat already sets a fresh
+        // sittingFurnitureId/isSitting regardless of what they were before.)
         if (state.localPlayer.isSitting) {
           state.setSittingFurnitureId(null);
           state.setSitReturnPos(null);
@@ -271,6 +316,9 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().setFurnitureAssignment(data.furnitureId, undefined, undefined);
     });
 
+    // Zone-private chat only now — the old whole-room broadcast case is
+    // superseded by CHANNEL_MESSAGE_NEW/the room's default "general" channel
+    // (see chatHandler.ts, which no longer emits this without a zoneId).
     socket.on(SocketEvents.CHAT_BROADCAST, (msg: ChatMessage) => {
       // §10 — only for messages from someone else, and notifyNewMessage
       // itself no-ops unless the tab is actually in the background (spec's
@@ -278,11 +326,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       if (msg.senderId !== useGameStore.getState().localPlayerId) {
         notifyNewMessage(msg.senderName, msg.text);
       }
-      if (msg.zoneId) {
-        addZoneChatMessage(msg.zoneId, msg);
-        return;
-      }
-      addChatMessage(msg);
+      if (msg.zoneId) addZoneChatMessage(msg.zoneId, msg);
       // Also show speech bubble above sender for 4 seconds
       if (!msg.isProximity) {
         setSpeechBubble(msg.senderId, {
@@ -290,6 +334,66 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
           text: msg.text,
           expireAt: Date.now() + 4000,
         });
+      }
+    });
+
+    // Thread replies (parentId set) go to repliesByParent/bumpReplyCount
+    // instead of messagesByTarget — see those actions' doc comments in
+    // gameStore.ts. A reply landing for a thread nobody has open is a
+    // harmless no-op in appendParentReply (only the parent's reply count
+    // updates); one landing while the sender (or anyone else) has that
+    // thread expanded shows up immediately, no refetch/timeout needed.
+    socket.on(SocketEvents.CHANNEL_MESSAGE_NEW, (msg: ChannelMessage) => {
+      if (!msg.channelId) return;
+      const state = useGameStore.getState();
+      if (msg.parentId) {
+        state.appendParentReply(msg.parentId, msg);
+        state.bumpReplyCount(`channel:${msg.channelId}`, msg.parentId);
+      } else {
+        state.appendTargetMessage(`channel:${msg.channelId}`, msg);
+      }
+      if (msg.senderId !== state.localUserId) {
+        notifyNewMessage(msg.senderName, msg.text);
+      }
+    });
+
+    socket.on(SocketEvents.DM_MESSAGE_NEW, (msg: ChannelMessage) => {
+      if (!msg.conversationId) return;
+      const state = useGameStore.getState();
+      if (msg.parentId) {
+        state.appendParentReply(msg.parentId, msg);
+        state.bumpReplyCount(`dm:${msg.conversationId}`, msg.parentId);
+      } else {
+        state.appendTargetMessage(`dm:${msg.conversationId}`, msg);
+      }
+      if (msg.senderId !== state.localUserId) {
+        notifyNewMessage(msg.senderName, msg.text);
+      }
+    });
+
+    socket.on(SocketEvents.CHANNEL_CREATED, (channel: Channel) => {
+      const state = useGameStore.getState();
+      if (!state.channels.some((c) => c.id === channel.id)) {
+        state.setChannels([...state.channels, channel]);
+      }
+    });
+
+    socket.on(SocketEvents.DM_STARTED, (data: DirectConversationStarted) => {
+      const localUid = useGameStore.getState().localUserId;
+      if (data.userA.id !== localUid && data.userB.id !== localUid) return;
+      const otherUser = data.userA.id === localUid ? data.userB : data.userA;
+      const state = useGameStore.getState();
+      if (!state.dmConversations.some((c) => c.id === data.id)) {
+        state.setDmConversations([{ id: data.id, roomId: data.roomId, otherUser, createdAt: data.createdAt }, ...state.dmConversations]);
+      }
+    });
+
+    socket.on(SocketEvents.CHANNEL_DELETED, (data: { channelId: string }) => {
+      const state = useGameStore.getState();
+      state.setChannels(state.channels.filter((c) => c.id !== data.channelId));
+      if (state.activeChatTarget?.type === 'channel' && state.activeChatTarget.id === data.channelId) {
+        const fallback = state.channels.find((c) => c.isDefault) ?? state.channels[0];
+        state.setActiveChatTarget(fallback ? { type: 'channel', id: fallback.id } : null);
       }
     });
 
@@ -333,6 +437,15 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       // React state — no alert()/reload(), so there's no multi-second
       // window where the player is just stuck looking at a stale canvas.
       useGameStore.getState().setRoomDeletedNotice('This room has been deleted by the owner.');
+    });
+
+    socket.on(SocketEvents.PLAYER_KICKED, (data: { byName: string }) => {
+      console.warn('[socket] kicked from room by', data.byName);
+      // Same "show a notice, then navigate back to the Lobby" pattern as
+      // roomDeletedNotice above — the server already ran handleLeave's
+      // cleanup for us before sending this, so there's nothing left to do
+      // here but inform the player and get them out.
+      useGameStore.getState().setKickedNotice(`You were removed from this room by ${data.byName}.`);
     });
 
     socket.on(SocketEvents.NOTICE_UPDATED, (notice: Notice | null) => {
@@ -415,6 +528,30 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.CHAT_MESSAGE, text, isProximity, zoneId);
   }, []);
 
+  const emitChannelJoin = useCallback((channelId: string) => {
+    socketRef.current?.emit(SocketEvents.CHANNEL_JOIN, channelId);
+  }, []);
+
+  const emitChannelLeave = useCallback((channelId: string) => {
+    socketRef.current?.emit(SocketEvents.CHANNEL_LEAVE, channelId);
+  }, []);
+
+  const emitChannelMessageSend = useCallback((channelId: string, text: string, parentId?: string) => {
+    socketRef.current?.emit(SocketEvents.CHANNEL_MESSAGE_SEND, { channelId, text, parentId });
+  }, []);
+
+  const emitDmJoin = useCallback((conversationId: string) => {
+    socketRef.current?.emit(SocketEvents.DM_JOIN, conversationId);
+  }, []);
+
+  const emitDmLeave = useCallback((conversationId: string) => {
+    socketRef.current?.emit(SocketEvents.DM_LEAVE, conversationId);
+  }, []);
+
+  const emitDmMessageSend = useCallback((conversationId: string, text: string, parentId?: string) => {
+    socketRef.current?.emit(SocketEvents.DM_MESSAGE_SEND, { conversationId, text, parentId });
+  }, []);
+
   const emitBubble = useCallback((text: string) => {
     socketRef.current?.emit(SocketEvents.CHAT_BUBBLE, text);
   }, []);
@@ -459,6 +596,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
   const emitRoomDelete = useCallback(() => {
     socketRef.current?.emit(SocketEvents.ROOM_DELETE);
+  }, []);
+
+  const emitKick = useCallback((targetUserId: string) => {
+    console.log('[socket] emit player:kick →', targetUserId);
+    socketRef.current?.emit(SocketEvents.PLAYER_KICK, { targetUserId });
   }, []);
 
   const emitNoticePin = useCallback((messageId: string, text: string, senderName: string) => {
@@ -525,5 +667,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend };
 }

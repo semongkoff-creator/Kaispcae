@@ -1,7 +1,8 @@
 import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { Role, hasFeatureAccess } from '@virtualmeet/shared';
+import { hasFeatureAccess } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { resolveRoomRole as resolveRole } from '../lib/roles';
 
 const teleport = Router();
 
@@ -10,22 +11,6 @@ function getPrisma(): PrismaClient {
 }
 
 const MAX_TELEPORT_LOCATIONS = 20;
-
-// Resolved fresh from the DB on every request — REST endpoints have no
-// socket connection to consult roomHandler.ts's in-memory RoomAdminState
-// (and that state may not even be populated yet if no one has joined this
-// room via socket since the last server restart), so this is the one place
-// role resolution reads RoomMember.role directly rather than going through
-// the in-memory layer the realtime handlers use. Both ultimately agree
-// because grants are persisted there too — see roomHandler.ts's
-// persistRoleGrant.
-async function resolveRole(prisma: PrismaClient, userId: string, roomId: string, ownerId: string): Promise<Role> {
-  if (userId === ownerId) return 'owner';
-  const member = await prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId } } });
-  if (member?.role === 'admin') return 'admin';
-  if (member?.role === 'staff') return 'staff';
-  return 'member';
-}
 
 async function loadRoomBySlug(prisma: PrismaClient, slug: string) {
   return prisma.room.findUnique({ where: { slug } });

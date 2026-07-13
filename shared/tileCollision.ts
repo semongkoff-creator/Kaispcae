@@ -41,3 +41,26 @@ export function findZoneEntryTile(tiles: RoomTile[][], zone: ZoneRect): { x: num
   }
   return { x: centerX, y: centerY }; // every real zone has floor somewhere; this is a last-resort fallback
 }
+
+// Picks a walkable tile immediately next to (tileX, tileY) — used to compute
+// where a player should stand up to after teleporting straight into a seat
+// via "My Seat" (client/src/hooks/useSocket.ts's PLAYER_TELEPORTED handler),
+// which has no real "position they walked from" to return to the way an
+// ordinary walk-up-and-sit does (see GameCanvas.tsx's performSit, which
+// remembers the player's actual prior tile). Tries below first — this app's
+// chair art and the server's teleport landing direction ('down') both put
+// the open/seated side facing down — then the other three neighbors, so
+// standing up always lands on real floor next to the seat instead of
+// snapping back to some unrelated spot on the far side of the map.
+export function findAdjacentFreeTile(tiles: RoomTile[][], tileX: number, tileY: number): { x: number; y: number } {
+  const candidates = [
+    { x: tileX, y: tileY + 1 },
+    { x: tileX, y: tileY - 1 },
+    { x: tileX - 1, y: tileY },
+    { x: tileX + 1, y: tileY },
+  ];
+  for (const c of candidates) {
+    if (!isTileBlocked(tiles, c.x, c.y)) return c;
+  }
+  return { x: tileX, y: tileY }; // no open neighbor (shouldn't happen for a real seat) — stand on the seat tile itself
+}

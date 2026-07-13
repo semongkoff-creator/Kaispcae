@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, StarFill, X } from 'react-bootstrap-icons';
+import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, StarFill, ChatDotsFill, PersonDashFill, X } from 'react-bootstrap-icons';
 import { roleAtLeast } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 
@@ -9,11 +9,18 @@ interface ParticipantPanelProps {
   emitFollowUnfollow: () => void;
   emitSummonUser: (nickname: string) => void;
   emitSpotlightToggle: (targetUserId: string) => void;
+  // Opens (or creates) a persisted 1:1 DM with this account — see
+  // useChannelChat.ts's startDm. Undefined for rows with no account id
+  // (unreachable today — login is mandatory before joining a room).
+  onStartDm?: (targetUserId: string) => void;
+  // Temporary removal from the room, admin+ only (see shared/permissions.ts's
+  // 'room:kick') — not a ban, the target can rejoin any time.
+  emitKick?: (targetUserId: string) => void;
 }
 
 const MAX_VIDEO_THUMBS = 3;
 
-export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSpotlightToggle }: ParticipantPanelProps) {
+export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSpotlightToggle, onStartDm, emitKick }: ParticipantPanelProps) {
   const [open, setOpen] = useState(false);
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
@@ -21,7 +28,9 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
   const followInfo = useGameStore((s) => s.followInfo);
   const followerUserIds = useGameStore((s) => s.followerUserIds);
   const spotlightedUserIds = useGameStore((s) => s.spotlightedUserIds);
-  const canModerate = roleAtLeast(useGameStore((s) => s.localRole), 'staff');
+  const localRole = useGameStore((s) => s.localRole);
+  const canModerate = roleAtLeast(localRole, 'staff');
+  const canKick = roleAtLeast(localRole, 'admin');
 
   const remotePlayers = Object.values(playerRecords);
   const totalOnline = remotePlayers.length + 1;
@@ -34,7 +43,8 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
     <>
       <button
         onClick={() => setOpen(!open)}
-        className="absolute top-14 left-16 z-40 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 hover:text-purple-800 border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
+        title="Participants"
+        className="absolute top-14 left-16 z-40 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
       >
         <PeopleFill size={13} /> {totalOnline} {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
       </button>
@@ -86,6 +96,8 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
                 onSummon={canModerate ? () => emitSummonUser(p.name) : undefined}
                 isSpotlighted={!!p.userId && spotlightedUserIds.includes(p.userId)}
                 onSpotlight={canModerate && p.userId ? () => emitSpotlightToggle(p.userId!) : undefined}
+                onMessage={p.userId && onStartDm ? () => onStartDm(p.userId!) : undefined}
+                onKick={canKick && p.userId && emitKick ? () => emitKick(p.userId!) : undefined}
               />
             ))}
           </div>
@@ -108,6 +120,8 @@ function ParticipantRow({
   onSummon,
   isSpotlighted,
   onSpotlight,
+  onMessage,
+  onKick,
 }: {
   name: string;
   color: string;
@@ -129,6 +143,11 @@ function ParticipantRow({
   // account id (guest fallback — unreachable today, login is mandatory).
   isSpotlighted?: boolean;
   onSpotlight?: () => void;
+  // Opens a persisted 1:1 DM with this participant (see useChannelChat.ts).
+  onMessage?: () => void;
+  // Temporary removal from the room — undefined (not just a no-op) when I'm
+  // below admin, same "hide, don't disable" convention as onSummon above.
+  onKick?: () => void;
 }) {
   return (
     <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50 dark:bg-gray-700/50">
@@ -176,6 +195,15 @@ function ParticipantRow({
             <MagnetFill size={12} />
           </button>
         )}
+        {!isLocal && onMessage && (
+          <button
+            onClick={onMessage}
+            title={`Message ${name}`}
+            className="text-gray-400 dark:text-gray-500 hover:text-purple-600 cursor-pointer"
+          >
+            <ChatDotsFill size={11} />
+          </button>
+        )}
         {!isLocal && onSpotlight && (
           <button
             onClick={onSpotlight}
@@ -183,6 +211,15 @@ function ParticipantRow({
             className={`cursor-pointer ${isSpotlighted ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500 hover:text-amber-500'}`}
           >
             <StarFill size={12} />
+          </button>
+        )}
+        {!isLocal && onKick && (
+          <button
+            onClick={() => { if (window.confirm(`Remove ${name} from this room? They can rejoin any time.`)) onKick(); }}
+            title={`Remove ${name} from this room`}
+            className="text-gray-400 dark:text-gray-500 hover:text-red-500 cursor-pointer"
+          >
+            <PersonDashFill size={12} />
           </button>
         )}
         {isLocal && <span className="text-gray-400 dark:text-gray-500 text-[10px]">You</span>}

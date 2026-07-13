@@ -20,7 +20,7 @@ export function CreditsModal({ onClose }: { onClose: () => void }) {
           <h3 className="text-gray-900 dark:text-gray-100 text-sm font-bold">Credits / About</h3>
           <button onClick={onClose} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer"><X size={16} /></button>
         </div>
-        <p className="text-gray-600 text-sm leading-relaxed mb-3">
+        <p className="text-gray-600 dark:text-gray-300 text-sm leading-relaxed mb-3">
           Sebagian aset visual room bertema Sci-Fi Office berasal dari{' '}
           <span className="font-medium">Space Station 14</span> (
           <a href="https://github.com/space-wizards/space-station-14" target="_blank" rel="noreferrer" className="text-purple-600 hover:underline">

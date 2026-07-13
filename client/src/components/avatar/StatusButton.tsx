@@ -42,8 +42,8 @@ export function StatusButton({ status, onSave, variant = 'standalone' }: StatusB
         title={isSidebar ? (status || 'Set Status') : undefined}
         className={
           isSidebar
-            ? `w-10 h-10 rounded-lg flex items-center justify-center transition-all cursor-pointer ${status ? 'text-purple-700 bg-purple-50 dark:bg-gray-700' : 'text-purple-700 hover:bg-purple-50 dark:hover:bg-gray-700'}`
-            : 'bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm hover:bg-white text-purple-700 hover:text-purple-800 text-xs font-medium px-3 py-2 rounded-lg border border-purple-200 dark:border-gray-600 shadow-sm transition-all cursor-pointer inline-flex items-center gap-1.5'
+            ? `w-10 h-10 rounded-lg flex items-center justify-center transition-all cursor-pointer ${status ? 'text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-gray-700' : 'text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-700'}`
+            : 'bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm hover:bg-white text-purple-700 dark:text-purple-300 hover:text-purple-800 text-xs font-medium px-3 py-2 rounded-lg border border-purple-200 dark:border-gray-600 shadow-sm transition-all cursor-pointer inline-flex items-center gap-1.5'
         }
       >
         <ChatDotsFill size={isSidebar ? 16 : 12} /> {!isSidebar && (status || 'Set Status')}
@@ -70,7 +70,7 @@ export function StatusButton({ status, onSave, variant = 'standalone' }: StatusB
               <button
                 key={s}
                 onClick={() => handleQuickPick(s)}
-                className="px-2 py-1 rounded-full bg-purple-50 dark:bg-gray-700 text-purple-700 text-[10px] hover:bg-purple-100 cursor-pointer"
+                className="px-2 py-1 rounded-full bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-300 text-[10px] hover:bg-purple-100 dark:hover:bg-gray-600 cursor-pointer"
               >
                 {s}
               </button>

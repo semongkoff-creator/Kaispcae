@@ -103,6 +103,17 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
   console.log('[rooms] POST create received — userId:', req.userId, 'body:', req.body);
   try {
     const prisma = getPrisma();
+
+    // Room creation is the one account-wide gate for the global 'admin'
+    // AccountRole (see shared/permissions.ts's doc comment) — everyone else
+    // can only join rooms that already exist. A fresh DB lookup here (not
+    // a JWT-embedded claim) so a just-demoted admin can't keep creating
+    // rooms until their token happens to expire.
+    const requester = await prisma.user.findUnique({ where: { id: req.userId! }, select: { accountRole: true } });
+    if (requester?.accountRole !== 'admin') {
+      return res.status(403).json({ error: 'Only admin accounts can create rooms' });
+    }
+
     const { name, maxPlayers = 50, isPublic = true, theme = 'modern-interiors', template } = req.body;
     const slug = generateSlug(name);
 
@@ -121,6 +132,7 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
         maxPlayers,
         isPublic,
         theme,
+        template: template ?? null,
         ownerId: req.userId!,
         tilemapData: layout.tiles as any,
         furniture: layout.furniture as any,
@@ -134,6 +146,13 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
         roomId: room.id,
         role: 'admin',
       },
+    });
+
+    // Every room gets a non-deletable "general" channel for persisted chat
+    // (see routes/chat.ts) — rooms created before this existed get one
+    // lazily backfilled on first GET /channels instead.
+    await prisma.channel.create({
+      data: { roomId: room.id, name: 'general', isDefault: true },
     });
 
     // §4.1 — Pre-fill Team Locations with the room's own named zones (its

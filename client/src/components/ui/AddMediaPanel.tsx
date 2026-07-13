@@ -93,7 +93,7 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
         <button
           onClick={() => imageInputRef.current?.click()}
           disabled={uploading}
-          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer disabled:opacity-50"
+          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-600 text-xs font-medium cursor-pointer disabled:opacity-50"
         >
           <Image size={16} /> Image
         </button>
@@ -101,7 +101,7 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
 
         <button
           onClick={handleWhiteboardAdd}
-          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer"
+          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-600 text-xs font-medium cursor-pointer"
         >
           <StickyFill size={16} /> Whiteboard
         </button>
@@ -109,7 +109,7 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer disabled:opacity-50"
+          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-600 text-xs font-medium cursor-pointer disabled:opacity-50"
         >
           <Paperclip size={16} /> File
         </button>
@@ -117,7 +117,7 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
 
         <button
           onClick={() => { onScreenshot(); onClose(); }}
-          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 text-xs font-medium cursor-pointer"
+          className="flex flex-col items-center gap-1 py-3 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-600 text-xs font-medium cursor-pointer"
         >
           <CameraFill size={16} /> Screenshot
         </button>

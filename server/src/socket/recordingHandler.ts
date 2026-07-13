@@ -1,7 +1,8 @@
 import { Server, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
-import { SocketEvents, Role, hasFeatureAccess, RECORDING_DOWNLOAD_TTL_MS, RECORDING_MAX_DOWNLOADS } from '@virtualmeet/shared';
+import { SocketEvents, hasFeatureAccess, RECORDING_DOWNLOAD_TTL_MS, RECORDING_MAX_DOWNLOADS } from '@virtualmeet/shared';
 import { getPlayerName } from './roomHandler';
+import { resolveRoomRole as resolveRole } from '../lib/roles';
 
 // §7 — Screen Recording, client-side-capture adaptation (see the Recording
 // Prisma model's doc comment for the full architectural reasoning). This
@@ -19,14 +20,6 @@ function getPrisma(): PrismaClient {
 
 const socketToUid = new Map<string, string>();
 const socketToRoom = new Map<string, string>();
-
-async function resolveRole(prisma: PrismaClient, userId: string, roomId: string, ownerId: string): Promise<Role> {
-  if (userId === ownerId) return 'owner';
-  const member = await prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId } } });
-  if (member?.role === 'admin') return 'admin';
-  if (member?.role === 'staff') return 'staff';
-  return 'member';
-}
 
 // Finds the live socket (if any) for a given account userId within a room —
 // used both to resolve the target's current display name and to confirm

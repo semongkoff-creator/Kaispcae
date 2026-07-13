@@ -13,6 +13,15 @@ model User {
   password     String
   displayName  String
   avatarConfig Json?
+  // Global, account-level role — separate from the per-room Role hierarchy
+  // (owner/admin/staff/member, see shared/permissions.ts and RoomMember.role
+  // below). 'admin' accounts can create rooms (the only account-wide gate;
+  // everyone else can only join rooms that already exist) and are also
+  // auto-elevated to at least room-level 'admin' in every room they're in,
+  // without needing a RoomMember grant — see server/src/lib/roles.ts's
+  // resolveRoomRole. Deletion stays owner-only regardless: a global admin
+  // is NOT auto-elevated to 'owner' of rooms they didn't create.
+  accountRole  String       @default("user")
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   roomMembers  RoomMember[]
@@ -33,6 +42,12 @@ model Room {
   // shared/types/index.ts. Default keeps every room created before this
   // field existed rendering exactly as before.
   theme       String       @default("modern-interiors")
+  // Which layout this room was created with (see shared/defaultRoomLayout.ts's
+  // ROOM_TEMPLATES) — null for rooms created before this field existed, or
+  // if none was specified (both cases fall back to 'main-office' at the
+  // point of use). Lets RoomEditor's "Reset to Default" rebuild the room's
+  // OWN template instead of always reverting to Main Office.
+  template    String?
   ownerId     String
   owner       User         @relation(fields: [ownerId], references: [id])
   isPublic    Boolean      @default(true)

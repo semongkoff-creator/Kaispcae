@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { GearFill, Clipboard, Link45deg, PersonWalking, X, MagnetFill, EyeFill, EyeSlashFill } from 'react-bootstrap-icons';
+import { GearFill, Clipboard, Link45deg, PersonWalking, X, MagnetFill } from 'react-bootstrap-icons';
 import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -34,6 +34,7 @@ import { api } from './services/api';
 import { createDefaultRoom, isTileBlocked } from './utils/createDefaultRoom';
 import { useGameStore } from './stores/gameStore';
 import { useSocket } from './hooks/useSocket';
+import { useChannelChat } from './hooks/useChannelChat';
 import { useProximity, findZoneAt } from './hooks/useProximity';
 import { useWebRTC } from './hooks/useWebRTC';
 import { useScreenRecording } from './hooks/useScreenRecording';
@@ -50,9 +51,39 @@ function describeConsentDecline(reason: 'declined' | 'timeout' | 'offline' | und
   return 'declined';
 }
 
+// A mouse click (e.g. the "My Seat" sidebar button) never fires a keyup for
+// whatever movement key the player happened to be physically holding at
+// that instant — useMovement.ts's keysRef only clears a key on its own
+// keyup (or the whole window losing focus, which a same-page click isn't).
+// Without this, a teleport-then-sit request sent while a key is still
+// "held" left the movement loop free to keep walking from the PRE-teleport
+// position for the round-trip's duration (using its own currentXRef, which
+// GameCanvas.tsx only resyncs to the new store position reactively, after
+// React commits) — visible as the character taking a step or two, then
+// blinking back before landing on the seat. Dispatching real keyup events
+// reuses the exact listener useMovement.ts already has on window, so no
+// change to that hook (or GameCanvas) is needed.
+function releaseMovementKeys() {
+  const keys: { key: string; code: string }[] = [
+    { key: 'ArrowUp', code: 'ArrowUp' },
+    { key: 'ArrowDown', code: 'ArrowDown' },
+    { key: 'ArrowLeft', code: 'ArrowLeft' },
+    { key: 'ArrowRight', code: 'ArrowRight' },
+    { key: 'w', code: 'KeyW' },
+    { key: 'a', code: 'KeyA' },
+    { key: 's', code: 'KeyS' },
+    { key: 'd', code: 'KeyD' },
+    { key: 'r', code: 'KeyR' },
+  ];
+  for (const { key, code } of keys) {
+    window.dispatchEvent(new KeyboardEvent('keyup', { key, code }));
+  }
+}
+
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend } = useSocket(authDisplayName, roomSlug, authUserId);
+  const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend });
   const [showEditor, setShowEditor] = useState(false);
 
   // Media state from store
@@ -117,12 +148,24 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const localPlayer = useGameStore((s) => s.localPlayer);
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
+  const roomStateReceived = useGameStore((s) => s.roomStateReceived);
   const zones = useGameStore((s) => s.zones);
   const sittingFurnitureId = useGameStore((s) => s.sittingFurnitureId);
   const furniture = useGameStore((s) => s.furniture);
   const localUserId = useGameStore((s) => s.localUserId);
   const sittingItem = sittingFurnitureId ? furniture.find((f) => f.id === sittingFurnitureId) : undefined;
   const spotlightedUserIds = useGameStore((s) => s.spotlightedUserIds);
+
+  // "My Seat" — one-click jump to whichever furniture is assigned to me in
+  // THIS room (assignment is per-room, see Furniture.assignedToUserId).
+  // If more than one piece is ever assigned to the same user (nothing stops
+  // that today), the server picks whichever it finds first — same
+  // simplification as here, not worth a seat picker for an edge case.
+  const hasMySeat = furniture.some((f) => f.assignedToUserId === localUserId);
+  const handleMySeat = useCallback(() => {
+    releaseMovementKeys();
+    emitTeleportRequest({ kind: 'seat' });
+  }, [emitTeleportRequest]);
 
   const nearby = useProximity(
     { x: localPlayer.x, y: localPlayer.y, id: localPlayerId },
@@ -135,6 +178,29 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   useEffect(() => {
     updateProximity(nearby);
   }, [nearby, updateProximity]);
+
+  // Dedicated Meeting View — only worth surfacing once there's actually a
+  // camera/screen tile to switch to a bigger layout for; otherwise it's a
+  // sidebar icon that does nothing useful.
+  const canEnterMeetingView =
+    !!webrtcService.getLocalStream() || getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams).length > 0;
+
+  // Mini Mode has to be opened directly inside a real click handler (see
+  // openMiniModeWindow's own doc comment for why it can't live in a mount
+  // effect) — this is that handler, now called from the Sidebar icon
+  // instead of its own standalone floating button.
+  const handleToggleMiniMode = useCallback(async () => {
+    const win = await openMiniModeWindow();
+    if (win) {
+      setMiniModeWindow(win);
+    } else {
+      // openMiniModeWindow already logs the underlying error — this is the
+      // user-visible half. Previously there was nothing here at all: the
+      // click just did nothing with no feedback, which is exactly what
+      // "Mini Mode sometimes won't open" looks like from the outside.
+      useGameStore.getState().addActivity('Mini Mode couldn’t be opened — try again.');
+    }
+  }, []);
 
   // §7 — Screen Recording
   const activeRecording = useGameStore((s) => s.activeRecording);
@@ -216,6 +282,19 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     }, 2500);
     return () => clearTimeout(timer);
   }, [roomDeletedNotice, onLeave]);
+
+  // Removed from the room by an admin's Kick (see shared/permissions.ts's
+  // 'room:kick') — same "show it, then navigate back to the Lobby" pattern
+  // as roomDeletedNotice above.
+  const kickedNotice = useGameStore((s) => s.kickedNotice);
+  useEffect(() => {
+    if (!kickedNotice) return;
+    const timer = setTimeout(() => {
+      useGameStore.getState().setKickedNotice(null);
+      onLeave();
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [kickedNotice, onLeave]);
 
   // Summon/Follow consent requests (see PendingRequestToast.tsx). Incoming
   // requests auto-clear on the same clock the server uses to auto-decline
@@ -383,7 +462,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const savedConfig = { ...loadAvatarConfig(), name: playerName || loadAvatarConfig().name };
 
   // Chat + emotes + minimap state
-  const chatMessages = useGameStore((s) => s.chatMessages);
   const notice = useGameStore((s) => s.notice);
   const followInfo = useGameStore((s) => s.followInfo);
   const [showEmoteWheel, setShowEmoteWheel] = useState(false);
@@ -396,10 +474,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // sidebar (a fixed corner button) since the sidebar is exactly what gets
   // hidden — there'd be no way back otherwise.
   const [simplifiedView, setSimplifiedView] = useState(false);
-
-  const handleChatSend = useCallback((text: string, isProximity?: boolean) => {
-    emitChat(text, isProximity);
-  }, [emitChat]);
 
   const handlePinNotice = useCallback((message: { id: string; text: string; senderName: string }) => {
     emitNoticePin(message.id, message.text, message.senderName);
@@ -457,6 +531,21 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
   const allPlayers = { [localPlayerId]: useGameStore.getState().localPlayer, ...playerRecords };
 
+  // Until the real room:state for THIS room arrives, `roomState` in the
+  // store is still whatever App() seeded at startup (always the Main
+  // Office layout, regardless of which room/template was actually joined
+  // — see gameStore.ts's roomStateReceived doc comment). Render a plain
+  // loading placeholder instead of GameCanvas rather than briefly showing
+  // the wrong room shape (and risking a spawn tile that's a wall in the
+  // real layout).
+  if (!roomStateReceived) {
+    return (
+      <div className="w-screen h-screen bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
+        <p className="text-gray-500 dark:text-gray-400 text-xl">Joining room…</p>
+      </div>
+    );
+  }
+
   return (
     <div className="w-screen h-screen overflow-hidden bg-purple-50">
       <GameCanvas
@@ -486,39 +575,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onMediaOpen={setViewingMediaId}
       />
 
-      {/* Simplified View — one fixed corner toggle that survives being on,
-          since everything else (including the sidebar) can disappear.
-          Hides room-meta text, the participant list, minimap, and the whole
-          feature sidebar; keeps the connection pill, video/Meeting View,
-          call controls (mic/camera/screen/notifications), and chat — the
-          "who's here and talking" essentials. */}
-      <button
-        onClick={() => setSimplifiedView((v) => !v)}
-        title={simplifiedView ? 'Exit Simplified View' : 'Simplified View'}
-        className="absolute top-14 right-4 z-30 bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 text-xs font-medium px-3 py-1.5 rounded-lg border border-purple-200 shadow-sm cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
-      >
-        {simplifiedView ? <EyeSlashFill size={12} /> : <EyeFill size={12} />} {simplifiedView ? 'Show UI' : 'Simplify'}
-      </button>
-
-      {/* Mini Mode — only offered where the browser actually supports the
-          Document Picture-in-Picture API (Chrome/Edge as of this writing);
-          there's no other way to keep a live, interactive UI on top of a
-          DIFFERENT application entirely, not just a different tab. The
-          window is opened here, directly inside the click handler (see
-          openMiniModeWindow's own doc comment for why it can't live in a
-          mount effect), not by <MiniMode> itself. */}
-      {isMiniModeSupported() && !miniModeWindow && (
-        <button
-          onClick={async () => {
-            const win = await openMiniModeWindow();
-            if (win) setMiniModeWindow(win);
-          }}
-          title="Mini Mode"
-          className="absolute top-24 right-4 z-30 bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 text-xs font-medium px-3 py-1.5 rounded-lg border border-purple-200 shadow-sm cursor-pointer pointer-events-auto"
-        >
-          Mini Mode
-        </button>
-      )}
       {miniModeWindow && (
         <MiniMode
           pipWindow={miniModeWindow}
@@ -537,14 +593,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {!simplifiedView && (
         <>
           <div className="absolute top-4 left-28 pointer-events-none">
-            <p className="text-gray-500 text-xs font-mono">WASD / Arrows to move · hold R to run · Space to jump</p>
+            <p className="text-gray-500 dark:text-gray-400 text-xs font-mono">WASD / Arrows to move · hold R to run · Space to jump</p>
           </div>
           <div className="absolute top-10 left-28 pointer-events-none">
-            <p className="text-gray-500 text-xs font-mono">
-              Playing as: <span className="text-gray-700">{playerName}</span>
+            <p className="text-gray-500 dark:text-gray-400 text-xs font-mono">
+              Playing as: <span className="text-gray-700 dark:text-gray-300">{playerName}</span>
             </p>
           </div>
-          <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSpotlightToggle={emitSpotlightToggle} />
+          <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSpotlightToggle={emitSpotlightToggle} onStartDm={channelChat.startDm} emitKick={emitKick} />
           <ActivityFeed />
         </>
       )}
@@ -612,37 +668,50 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       </div>
 
       {/* ZEP-style left icon rail — every room-level feature button used to
-          be its own absolutely-positioned bottom-left button, which had
-          started overflowing/wrapping once Teleport/Summon/Add
-          Media/Record all landed in the same session. Now it's one rail,
-          one icon per feature; each feature's own panel/popover opens to
-          the right of the rail instead of scattered across the bottom. */}
-      {!simplifiedView && (
-        <Sidebar
-          onEditAvatar={() => setShowEditor(true)}
-          status={localPlayer.status || ''}
-          onSaveStatus={handleStatusSave}
-          isAdmin={isAdmin}
-          editorMode={editorMode}
-          onToggleEditorMode={toggleEditorMode}
-          canTeleport={roleAtLeast(localRole, 'staff')}
-          showTeleportPanel={showTeleportPanel}
-          onToggleTeleport={() => setShowTeleportPanel((v) => !v)}
-          showAddMediaPanel={showAddMediaPanel}
-          onToggleAddMedia={() => setShowAddMediaPanel((v) => !v)}
-          canRecord={isAdmin}
-          recordingTargets={recordingTargets}
-          activeRecording={activeRecording}
-          isRecordingMine={isRecordingMine}
-          recordingUploading={recordingUploading}
-          roomSlug={roomSlug}
-          onStartRecording={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
-          onStopRecording={stopMyRecording}
-          onLogout={() => setShowLogoutConfirm(true)}
-          theme={theme}
-          onToggleTheme={onToggleTheme}
-        />
-      )}
+          be its own absolutely-positioned floating pill scattered around
+          the screen edges (Meeting View/Simplify/Mini Mode top-right,
+          Teleport/Add Media/Record bottom-left, ...), which had started
+          overflowing/wrapping and reading as cluttered once enough features
+          landed in the same session. Now it's one rail, one icon per
+          feature; each feature's own panel/popover opens to the right of
+          the rail instead of scattered across the screen. Always rendered
+          (not conditional on simplifiedView) — it collapses to just the
+          "Show UI" exit icon internally when simplified, since that's the
+          one thing that must always stay reachable. */}
+      <Sidebar
+        onEditAvatar={() => setShowEditor(true)}
+        status={localPlayer.status || ''}
+        onSaveStatus={handleStatusSave}
+        isAdmin={isAdmin}
+        editorMode={editorMode}
+        onToggleEditorMode={toggleEditorMode}
+        canTeleport={roleAtLeast(localRole, 'staff')}
+        showTeleportPanel={showTeleportPanel}
+        onToggleTeleport={() => setShowTeleportPanel((v) => !v)}
+        hasMySeat={hasMySeat}
+        onMySeat={handleMySeat}
+        canEnterMeetingView={canEnterMeetingView}
+        meetingViewActive={meetingViewActive}
+        onToggleMeetingView={() => setMeetingViewActive((v) => !v)}
+        simplifiedView={simplifiedView}
+        onToggleSimplifiedView={() => setSimplifiedView((v) => !v)}
+        miniModeSupported={isMiniModeSupported()}
+        miniModeActive={!!miniModeWindow}
+        onToggleMiniMode={handleToggleMiniMode}
+        showAddMediaPanel={showAddMediaPanel}
+        onToggleAddMedia={() => setShowAddMediaPanel((v) => !v)}
+        canRecord={isAdmin}
+        recordingTargets={recordingTargets}
+        activeRecording={activeRecording}
+        isRecordingMine={isRecordingMine}
+        recordingUploading={recordingUploading}
+        roomSlug={roomSlug}
+        onStartRecording={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
+        onStopRecording={stopMyRecording}
+        onLogout={() => setShowLogoutConfirm(true)}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+      />
 
       {/* Permanent seat assignment (ZEP-style "this is my desk") — only
           shown while actually sitting, since it acts on the specific chair
@@ -763,23 +832,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             recordedTargetUserId={activeRecording?.targetUserId}
             isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
           />
-          {/* Dedicated Meeting View entry point — only worth surfacing once
-              there's actually a camera/screen tile to switch to a bigger
-              layout for; otherwise it's a button that does nothing useful. */}
-          {(webrtcService.getLocalStream() || getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams).length > 0) && (
-            <button
-              onClick={() => setMeetingViewActive(true)}
-              title="Enter Meeting View"
-              className="absolute top-4 right-4 z-20 bg-white/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 text-xs font-medium px-3 py-1.5 rounded-lg border border-purple-200 shadow-sm cursor-pointer pointer-events-auto"
-            >
-              Meeting View
-            </button>
-          )}
         </>
       )}
 
-      {/* HUD Controls */}
-      <div className="absolute bottom-24 left-1/2 -translate-x-1/2 flex gap-3 z-30">
+      {/* HUD Controls — z-50 so mic/camera/screen-share stay reachable even
+          while Meeting View's z-40 full-screen overlay is active; without
+          this there was no way to mute/unmute or stop screen share without
+          exiting Meeting View first. */}
+      <div className="absolute bottom-24 left-1/2 -translate-x-1/2 flex gap-3 z-50">
         <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
         <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
         <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
@@ -788,14 +848,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
       {/* Room name HUD + code */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 pointer-events-auto">
-        <p className="text-gray-500 text-xs font-medium tracking-wider uppercase">MAIN OFFICE</p>
+        <p className="text-gray-500 dark:text-gray-400 text-xs font-medium tracking-wider uppercase">MAIN OFFICE</p>
         <button
           onClick={async () => {
             await navigator.clipboard.writeText(roomSlug);
             setRoomCodeCopied(true);
             setTimeout(() => setRoomCodeCopied(false), 2000);
           }}
-          className="text-gray-400 hover:text-gray-700 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
+          className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
           title="Copy room code"
         >
           <Clipboard size={11} /> {roomSlug.slice(0, 12)}
@@ -832,12 +892,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
       {showLogoutConfirm && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-xl p-6 shadow-xl shadow-purple-100/50 border border-purple-100 text-center">
-            <p className="text-gray-900 text-sm mb-4">Log out of your account?</p>
+          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center">
+            <p className="text-gray-900 dark:text-gray-100 text-sm mb-4">Log out of your account?</p>
             <div className="flex gap-3">
               <button
                 onClick={() => setShowLogoutConfirm(false)}
-                className="px-4 py-2 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 text-sm cursor-pointer"
+                className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 text-sm cursor-pointer"
               >
                 Cancel
               </button>
@@ -857,9 +917,18 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           is gone server-side. z-[60] so it wins over every other overlay. */}
       {roomDeletedNotice && (
         <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-xl p-6 shadow-xl shadow-purple-100/50 border border-purple-100 text-center max-w-xs">
-            <p className="text-gray-900 text-sm font-medium mb-1">{roomDeletedNotice}</p>
-            <p className="text-gray-400 text-xs">Returning to the Lobby...</p>
+          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
+            <p className="text-gray-900 dark:text-gray-100 text-sm font-medium mb-1">{roomDeletedNotice}</p>
+            <p className="text-gray-400 dark:text-gray-500 text-xs">Returning to the Lobby...</p>
+          </div>
+        </div>
+      )}
+
+      {kickedNotice && (
+        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
+            <p className="text-gray-900 dark:text-gray-100 text-sm font-medium mb-1">{kickedNotice}</p>
+            <p className="text-gray-400 dark:text-gray-500 text-xs">Returning to the Lobby...</p>
           </div>
         </div>
       )}
@@ -869,9 +938,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       )}
 
       <ChatPanel
-        messages={chatMessages}
         localPlayerName={playerName}
-        onSend={handleChatSend}
+        localUserId={authUserId}
         onBubble={emitBubble}
         onEmote={handleEmoteSelect}
         currentZone={currentZone}
@@ -879,6 +947,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onSendZone={handleSendZoneChat}
         isAdmin={isAdmin}
         onPinNotice={handlePinNotice}
+        open={channelChat.chatPanelOpen}
+        onToggleOpen={channelChat.setChatPanelOpen}
+        channels={channelChat.channels}
+        dmConversations={channelChat.dmConversations}
+        activeChatTarget={channelChat.activeChatTarget}
+        onSelectTarget={channelChat.setActiveChatTarget}
+        messages={channelChat.activeMessages}
+        onSend={channelChat.sendMessage}
+        onLoadOlder={channelChat.loadOlder}
+        onCreateChannel={channelChat.createChannel}
       />
 
       <EmoteWheel
@@ -1098,5 +1176,13 @@ export default function App() {
     );
   }
 
-  return <Game roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} theme={theme} onToggleTheme={toggleTheme} />;
+  // key={roomSlug} — portal travel (handlePortalEnter -> onPortalTravel ->
+  // setRoomSlug) previously updated roomSlug on the SAME mounted Game
+  // instance, so its own useState (meetingViewActive, simplifiedView,
+  // miniModeWindow, showMinimap, ...) all survived into the new room
+  // untouched — e.g. still full-screen in Meeting View, or a Mini Mode PiP
+  // window still open, with no signal anything changed underneath. Forcing
+  // a remount on room change gives every room a clean slate, matching what
+  // already happens when leaving to the Lobby and rejoining.
+  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} theme={theme} onToggleTheme={toggleTheme} />;
 }

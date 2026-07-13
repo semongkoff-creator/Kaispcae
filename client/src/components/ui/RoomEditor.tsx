@@ -36,7 +36,7 @@ function ZoneForm({ rect, onCancel }: { rect: { x: number; y: number; width: num
 
   return (
     <div className="mb-3 p-3 rounded-lg bg-purple-50 dark:bg-gray-700 border border-purple-200 dark:border-gray-600">
-      <p className="text-purple-700 text-xs font-semibold mb-2">New Zone</p>
+      <p className="text-purple-700 dark:text-purple-300 text-xs font-semibold mb-2">New Zone</p>
       <label className="text-gray-500 dark:text-gray-400 text-[10px] block mb-1">Internal name</label>
       <input
         value={name}
@@ -114,7 +114,7 @@ function BannerForm({ pos, onCancel }: { pos: { x: number; y: number }; onCancel
 
   return (
     <div className="mb-3 p-3 rounded-lg bg-purple-50 dark:bg-gray-700 border border-purple-200 dark:border-gray-600">
-      <p className="text-purple-700 text-xs font-semibold mb-2">New Banner</p>
+      <p className="text-purple-700 dark:text-purple-300 text-xs font-semibold mb-2">New Banner</p>
 
       <label className="text-gray-500 dark:text-gray-400 text-[10px] block mb-1">Image URL (optional — skips text below if set)</label>
       <input
@@ -249,7 +249,12 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
 
   const handleReset = useCallback(() => {
     const state = useGameStore.getState();
-    const room = createDefaultRoom('main-office', 'Main Office', state.theme);
+    // Rebuild the room's OWN template (roomTemplate, set from room:state's
+    // `template` field — see gameStore.ts) rather than always reverting to
+    // Main Office regardless of what the room was actually created with.
+    // Falls back to 'main-office' for rooms created before templates
+    // existed, same as createRoomLayoutFromTemplate's own default.
+    const room = createDefaultRoom(state.roomTemplate ?? 'main-office', 'Main Office', state.theme);
     const tileTypes = room.tiles.map((row) => row.map((t) => t.type));
     state.pushTileHistory(tileTypes);
     state.setTiles(room.tiles);
@@ -283,7 +288,7 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
             onClick={() => setSelectedPaletteId(entry.id)}
             title={entry.label}
             className={`flex items-center justify-center p-1 rounded-lg cursor-pointer transition-all ${
-              selectedPaletteId === entry.id ? 'bg-purple-100 ring-2 ring-purple-400' : 'bg-gray-50 hover:bg-purple-50 dark:hover:bg-gray-700'
+              selectedPaletteId === entry.id ? 'bg-purple-100 ring-2 ring-purple-400' : 'bg-gray-50 dark:bg-gray-800 hover:bg-purple-50 dark:hover:bg-gray-700'
             }`}
           >
             <PaletteThumb entry={entry} />
@@ -301,7 +306,7 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
             key={tab}
             onClick={() => setObjectTab(tab)}
             className={`flex-1 py-1 rounded-md text-[10px] font-medium capitalize transition-all cursor-pointer ${
-              objectTab === tab ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100'
+              objectTab === tab ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
             }`}
           >
             {tab}
@@ -315,7 +320,7 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
             onClick={() => setSelectedPaletteId(entry.id)}
             title={`${entry.label} (${entry.tilesW}x${entry.tilesH})`}
             className={`flex items-center justify-center p-1 rounded-lg cursor-pointer transition-all ${
-              selectedPaletteId === entry.id ? 'bg-purple-100 ring-2 ring-purple-400' : 'bg-gray-50 hover:bg-purple-50 dark:hover:bg-gray-700'
+              selectedPaletteId === entry.id ? 'bg-purple-100 ring-2 ring-purple-400' : 'bg-gray-50 dark:bg-gray-800 hover:bg-purple-50 dark:hover:bg-gray-700'
             }`}
           >
             <PaletteThumb entry={entry} />
@@ -338,8 +343,8 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
             onClick={() => setSelected(t.type)}
             className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
               !selectedPaletteId && selected === t.type
-                ? 'bg-purple-100 text-purple-700 border border-purple-300'
-                : 'bg-gray-50 text-gray-500 hover:bg-gray-100 border border-transparent'
+                ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-700'
+                : 'bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 border border-transparent'
             }`}
           >
             <span className="w-4 h-4 rounded" style={{ backgroundColor: t.color }} />
@@ -355,7 +360,7 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
       <button
         onClick={toggleZoneDrawMode}
         className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer mb-2 ${
-          zoneDrawMode ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100'
+          zoneDrawMode ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 dark:hover:bg-gray-600'
         }`}
       >
         <LockFill size={12} /> {zoneDrawMode ? 'Drag on map to draw…' : 'Draw Zone'}
@@ -366,8 +371,8 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
       {zones.length > 0 && (
         <div className="space-y-1 mb-3">
           {zones.map((z) => (
-            <div key={z.id} className="flex items-center justify-between px-2 py-1.5 rounded bg-gray-50 text-xs">
-              <span className="text-gray-600 truncate">{z.name}</span>
+            <div key={z.id} className="flex items-center justify-between px-2 py-1.5 rounded bg-gray-50 dark:bg-gray-800 text-xs">
+              <span className="text-gray-600 dark:text-gray-300 truncate">{z.name}</span>
               <button onClick={() => removeZone(z.id)} className="text-red-500/70 hover:text-red-500 cursor-pointer ml-2"><X size={14} /></button>
             </div>
           ))}
@@ -384,7 +389,7 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
       <button
         onClick={toggleBannerPlaceMode}
         className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer mb-2 ${
-          bannerPlaceMode ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100'
+          bannerPlaceMode ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-purple-700 hover:bg-purple-100 dark:hover:bg-gray-600'
         }`}
       >
         <MegaphoneFill size={12} /> {bannerPlaceMode ? 'Click on map to place…' : 'Add Banner'}
@@ -395,8 +400,8 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
       {banners.length > 0 && (
         <div className="space-y-1 mb-3">
           {banners.map((b) => (
-            <div key={b.id} className="flex items-center justify-between px-2 py-1.5 rounded bg-gray-50 text-xs">
-              <span className="text-gray-600 truncate">{b.text || b.imageUrl || 'Banner'}</span>
+            <div key={b.id} className="flex items-center justify-between px-2 py-1.5 rounded bg-gray-50 dark:bg-gray-800 text-xs">
+              <span className="text-gray-600 dark:text-gray-300 truncate">{b.text || b.imageUrl || 'Banner'}</span>
               <button onClick={() => removeFurnitureAt(b.x, b.y)} className="text-red-500/70 hover:text-red-500 cursor-pointer ml-2"><X size={14} /></button>
             </div>
           ))}

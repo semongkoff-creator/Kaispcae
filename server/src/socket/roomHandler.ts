@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -225,12 +225,27 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       rs.adminUserIds.add(uid);
     }
 
+    // Global admin accounts (see shared/permissions.ts's AccountRole) are
+    // auto-elevated to at least room-level 'admin' in every room, without
+    // needing a RoomMember grant — added directly into the same
+    // adminUserIds Set the master-admin/RoomMember grants above already
+    // populate, so getRole()/canAccess() treat them identically with no
+    // extra branching there. Checked per-join (not cached in RoomAdminState
+    // like the DB-backed grants) since accountRole can change between
+    // sessions and this is a one-time cost per connection, not per action.
+    try {
+      const account = await getPrisma().user.findUnique({ where: { id: uid }, select: { accountRole: true } });
+      if (account?.accountRole === 'admin') rs.adminUserIds.add(uid);
+    } catch (e) {
+      console.warn('[room] failed to check global admin status:', e);
+    }
+
     const isAdmin = rs.adminUserIds.has(uid);
     const isMasterAdmin = uid === rs.masterAdminUserId;
 
     // Fetch the saved room once — reused for spawn point lookup below and
     // for the tiles/furniture/zones sent in room:state once player data is ready.
-    let dbRoom: { tilemapData: unknown; furniture: unknown; zones: unknown; theme?: string | null } | null = null;
+    let dbRoom: { tilemapData: unknown; furniture: unknown; zones: unknown; theme?: string | null; template?: string | null } | null = null;
     try {
       dbRoom = await getPrisma().room.findUnique({ where: { slug: room } });
     } catch (e) { console.warn('[room] failed to load room from db:', e); }
@@ -266,6 +281,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     addPlayer(room, newPlayer).then(async () => {
       const state = await getRoomState(room, DEFAULT_ROOM_NAME);
       const theme: RoomTheme = dbRoom?.theme === 'scifi-office' ? 'scifi-office' : 'modern-interiors';
+      const template = (dbRoom?.template as RoomTemplateId | null) ?? undefined;
 
       let savedTiles: RoomTile[][] | undefined;
       let savedFurniture: any[] | undefined;
@@ -306,7 +322,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
       socket.emit(SocketEvents.ROOM_STATE, {
         ...state, tiles, furniture: savedFurniture || fallback!.furniture, zones: savedZones || fallback!.zones, players: playersWithMeta,
-        adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId, staffUserIds: Array.from(rs.staffUserIds), theme,
+        adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId, staffUserIds: Array.from(rs.staffUserIds), theme, template,
         notice: roomNoticeMap.get(room) ?? null,
         role: getRole(rs, uid),
       });
@@ -389,7 +405,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     if (!canTeleport(socket.id)) return;
     const room = currentRoom; if (!room) return;
     const uid = findUserIdBySocket(socket.id);
-    if (!uid || !data || (data.kind !== 'admin' && data.kind !== 'bookmark')) return;
+    if (!uid || !data || (data.kind !== 'admin' && data.kind !== 'bookmark' && data.kind !== 'seat')) return;
 
     try {
       const prisma = getPrisma();
@@ -397,8 +413,26 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       if (!dbRoom) return;
 
       let target: { x: number; y: number } | null = null;
+      // Only set for kind 'seat' — tells the client to sit down immediately
+      // after landing, instead of just standing at the seat's tile (see
+      // useSocket.ts's PLAYER_TELEPORTED handler).
+      let seatFurnitureId: string | undefined;
 
-      if (data.kind === 'admin') {
+      if (data.kind === 'seat') {
+        // No locationId to look up — resolved straight from the requester's
+        // own uid. Reads the room's furniture the same way the rest of this
+        // file loads saved map data (dbRoom.furniture JSON), not through
+        // furnitureHandler.ts's private state, matching this handler's own
+        // existing "small deliberate duplication for decoupling" convention.
+        const furnitureList = Array.isArray(dbRoom.furniture) ? (dbRoom.furniture as any[]) : [];
+        const seat = furnitureList.find((f) => f?.assignedToUserId === uid);
+        if (!seat) {
+          socket.emit('admin:error', { message: "You don't have an assigned seat in this room" });
+          return;
+        }
+        target = { x: seat.x, y: seat.y };
+        seatFurnitureId = seat.id;
+      } else if (data.kind === 'admin') {
         const rs = getRoomAdmin(room);
         if (!canAccess(rs, uid, 'teleport:admin')) {
           socket.emit('admin:error', { message: 'Staff role or higher required to use team locations' });
@@ -426,8 +460,13 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
       const pixelX = target.x * 32 + 16;
       const pixelY = target.y * 32 + 16;
+      // Skipped for kind 'seat' — a chair tile is meant to be stood/sat on
+      // by design (the ordinary sit flow already puts a player there with
+      // no server-side tile-blocked check at all, see PLAYER_SIT's handler
+      // below), unlike admin/bookmark locations which are arbitrary map
+      // points that genuinely could have been placed inside a wall since.
       const tiles = getCachedTiles(room);
-      if (tiles && isTileBlocked(tiles, target.x, target.y)) {
+      if (data.kind !== 'seat' && tiles && isTileBlocked(tiles, target.x, target.y)) {
         // Spec's own rule: if the resolved tile is invalid, leave the
         // player where they were rather than forcing them into a wall.
         socket.emit('admin:error', { message: 'That location is blocked and can’t be teleported to right now' });
@@ -435,7 +474,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       }
 
       updatePlayerPosition(room, socket.id, pixelX, pixelY, 'down');
-      io.to(room).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: pixelX, y: pixelY, direction: 'down' });
+      io.to(room).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: pixelX, y: pixelY, direction: 'down', seatFurnitureId });
     } catch (e) {
       console.error('[room] teleport error:', e);
     }
@@ -636,6 +675,37 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       console.error('[room] delete error:', e);
       socket.emit('admin:error', { message: 'Failed to delete room' });
     }
+  });
+
+  // Temporary removal from the room (not a ban — see shared/permissions.ts's
+  // 'room:kick', admin+). Reuses handleLeave's exact cleanup (remove from
+  // room store, emit PLAYER_LEFT, leave the socket.io room, broadcastRoomCount)
+  // since a kick should look identical to an ordinary leave to everyone else
+  // in the room — the only difference is the target gets a dedicated
+  // PLAYER_KICKED notice on their own socket first, so their client knows
+  // why they suddenly left instead of just silently vanishing.
+  socket.on(SocketEvents.PLAYER_KICK, async (data: { targetUserId: string }) => {
+    const room = currentRoom; if (!room) return;
+    const senderUid = findUserIdBySocket(socket.id);
+    const rs = getRoomAdmin(room);
+    if (!canAccess(rs, senderUid, 'room:kick')) {
+      socket.emit('admin:error', { message: 'Only admins can remove players' });
+      return;
+    }
+    const targetUserId = data?.targetUserId;
+    if (!targetUserId || targetUserId === senderUid) return;
+    if (targetUserId === rs.masterAdminUserId) {
+      socket.emit('admin:error', { message: 'Cannot remove the room owner' });
+      return;
+    }
+    const targetSocketId = userSocketMap.get(targetUserId);
+    if (!targetSocketId) return;
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    if (!targetSocket) return;
+
+    const byName = playerNames.get(socket.id) || 'An admin';
+    targetSocket.emit(SocketEvents.PLAYER_KICKED, { byName });
+    await handleLeave(io, targetSocket, room);
   });
 
   socket.on(SocketEvents.LEAVE_ROOM, () => {

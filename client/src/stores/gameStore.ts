@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MapMediaObject, WhiteboardStroke } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary } from '@virtualmeet/shared';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -22,6 +22,11 @@ export interface ActivityEvent {
 // off the end rather than needing a separate pruning pass (see
 // activityEvents's own doc comment above).
 const ACTIVITY_FEED_MAX = 50;
+
+// Per-channel/DM in-memory cache cap (see messagesByTarget's doc comment) —
+// older history is still on the server via GET .../messages, this just
+// bounds how much a long session keeps resident in the client store.
+const CHAT_TARGET_MAX = 200;
 
 const AVATAR_COLORS = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a786df', '#6bcb77', '#4d96ff'];
 
@@ -65,10 +70,30 @@ export interface GameState {
   // room:state (see setRoomState below); defaults to the original tileset
   // so the optimistic local room shown before that arrives still renders.
   theme: RoomTheme;
+  // Which layout this room was created with (see defaultRoomLayout.ts's
+  // ROOM_TEMPLATES) — undefined for rooms created before this existed.
+  // Lets RoomEditor.tsx's "Reset to Default" rebuild the room's OWN
+  // template instead of always reverting to Main Office.
+  roomTemplate: RoomTemplateId | undefined;
 
   // Connection
   isConnected: boolean;
   setConnected: (connected: boolean) => void;
+
+  // Whether the REAL room:state for the room currently being joined has
+  // arrived yet — distinct from roomState itself, which App.tsx also seeds
+  // once at startup with a hardcoded placeholder layout so GameCanvas has
+  // something to render before any socket connection exists at all. That
+  // placeholder is always the Main Office layout regardless of which
+  // room/template the player is actually about to join, so Game.tsx gates
+  // rendering the canvas on THIS flag instead of just "roomState exists" —
+  // otherwise every join to a non-default-template room would flash the
+  // wrong layout shape for a frame (and could even spawn the player inside
+  // a wall, since wall positions differ per template). Reset to false by
+  // useSocket.ts at the start of every new room-join attempt, set true only
+  // by its ROOM_STATE handler.
+  roomStateReceived: boolean;
+  setRoomStateReceived: (received: boolean) => void;
 
   // Set when the server reports this room was deleted (by its owner) while
   // we were in it. Game watches this and navigates back to the Lobby via
@@ -76,6 +101,12 @@ export interface GameState {
   // looking at a canvas nothing else will ever update.
   roomDeletedNotice: string | null;
   setRoomDeletedNotice: (notice: string | null) => void;
+
+  // Set when an admin removes us from the room via Kick (see
+  // shared/permissions.ts's 'room:kick') — mirrors roomDeletedNotice's
+  // "show a notice, then navigate back to the Lobby" pattern in App.tsx.
+  kickedNotice: string | null;
+  setKickedNotice: (notice: string | null) => void;
 
   // Sitting — localPlayer.isSitting/x/y/direction (Avatar fields, already
   // synced to other players) hold the visible state; these two are local
@@ -88,6 +119,15 @@ export interface GameState {
   setSittingFurnitureId: (id: string | null) => void;
   sitReturnPos: { x: number; y: number } | null;
   setSitReturnPos: (pos: { x: number; y: number } | null) => void;
+  // "My Seat" teleport-then-sit (see useSocket.ts's PLAYER_TELEPORTED
+  // handler) needs sittingFurnitureId/sitReturnPos/localPlayer's position
+  // updated together in ONE render, not three separate set() calls — each
+  // of those is its own Zustand update, so calling setSittingFurnitureId,
+  // setSitReturnPos, and setLocalPlayer back-to-back let GameCanvas render
+  // at least one frame with isSitting/sittingFurnitureId already updated
+  // but localPlayer.x/y still at the OLD position, i.e. a visible flash of
+  // the player sitting at the wrong spot before snapping to the seat.
+  landOnSeat: (furnitureId: string, returnPos: { x: number; y: number }, x: number, y: number, direction: Avatar['direction']) => void;
 
   // Media / WebRTC
   micMuted: boolean;
@@ -99,15 +139,47 @@ export interface GameState {
   speakingPlayers: Set<string>;
   setPlayerSpeaking: (id: string, speaking: boolean) => void;
 
-  // Chat
-  chatMessages: ChatMessage[];
-  addChatMessage: (msg: ChatMessage) => void;
-  // Per-zone "Private" chat history, kept separate from the general room
-  // chat above — see ChatPanel.tsx's All/Private tabs.
+  // Zone-private "Private" tab chat history in ChatPanel.tsx — the old
+  // whole-room ephemeral chat this used to sit alongside is gone, replaced
+  // by persisted Channel/DM chat (see messagesByTarget below).
   zoneChatHistory: Record<string, ChatMessage[]>;
   addZoneChatMessage: (zoneId: string, msg: ChatMessage) => void;
   speechBubbles: Record<string, SpeechBubble>;
   setSpeechBubble: (playerId: string, bubble: SpeechBubble | null) => void;
+
+  // Persisted Channel/DM/Thread chat (see ChatPanel.tsx, server/src/routes/
+  // chat.ts) — separate from the ephemeral chatMessages/zoneChatHistory
+  // above, which stay scoped to the ephemeral zone-private/proximity-bubble
+  // case only. messagesByTarget is keyed by `channel:<id>` or `dm:<id>` and
+  // holds top-level messages for whichever target is currently open in
+  // ChatPanel; capped like activityEvents so a long session doesn't grow it
+  // unbounded.
+  channels: Channel[];
+  setChannels: (channels: Channel[]) => void;
+  dmConversations: DirectConversationSummary[];
+  setDmConversations: (conversations: DirectConversationSummary[]) => void;
+  activeChatTarget: { type: 'channel' | 'dm'; id: string } | null;
+  setActiveChatTarget: (target: { type: 'channel' | 'dm'; id: string } | null) => void;
+  chatPanelOpen: boolean;
+  setChatPanelOpen: (open: boolean) => void;
+  messagesByTarget: Record<string, ChannelMessage[]>;
+  setTargetMessages: (key: string, messages: ChannelMessage[]) => void;
+  prependTargetMessages: (key: string, messages: ChannelMessage[]) => void;
+  appendTargetMessage: (key: string, message: ChannelMessage) => void;
+  // Bumps a top-level message's cached replyCount when a reply to it
+  // arrives live — without this, "N replies" on the parent goes stale the
+  // instant anyone (including the sender) replies, and never recovers
+  // without a full reload (messagesByTarget only refetches on a cache
+  // miss, and an existing target's cache is never a miss once loaded).
+  bumpReplyCount: (targetKey: string, parentId: string) => void;
+  // Thread replies, keyed by parent message id — populated once on expand
+  // (ChatPanel fetches history via GET /messages/:id/replies) and then kept
+  // live via socket, so a reply shows up immediately for the sender AND
+  // anyone else with that same thread open, with no polling/setTimeout
+  // guesswork about whether the write has landed yet.
+  repliesByParent: Record<string, ChannelMessage[]>;
+  setParentReplies: (parentId: string, replies: ChannelMessage[]) => void;
+  appendParentReply: (parentId: string, reply: ChannelMessage) => void;
 
   // Pinned notice banner (see shared/types/index.ts's Notice doc comment) —
   // set from room:state on join and kept live via notice:updated.
@@ -177,11 +249,16 @@ export interface GameState {
   // (join/leave, media added, notice pinned, recording start/end) built
   // entirely from socket events this client already receives (see
   // useSocket.ts's handlers) rather than a new server-persisted history —
-  // same "ephemeral, this session only" scope as chat itself. Capped at
-  // ACTIVITY_FEED_MAX so a long-running room doesn't grow this unbounded
-  // (unlike emoteEvents above, which never got the same treatment).
+  // scoped to "this session, in this ONE room" (unlike chat, which is now
+  // persisted per-room). Capped at ACTIVITY_FEED_MAX so a long-running room
+  // doesn't grow this unbounded (unlike emoteEvents above, which never got
+  // the same treatment). Cleared by useSocket.ts at the start of every new
+  // room-join attempt — without that, switching rooms (portal travel, or
+  // leaving and rejoining a different one) left the previous room's stale
+  // events mixed in with the new room's own.
   activityEvents: ActivityEvent[];
   addActivity: (message: string) => void;
+  clearActivity: () => void;
 
   // Room editor
   furniture: Furniture[];
@@ -320,17 +397,30 @@ export const useGameStore = create<GameState>((set, get) => ({
   roomId: 'default',
   roomName: 'Default Room',
   theme: 'modern-interiors',
+  roomTemplate: undefined,
 
   isConnected: false,
   setConnected: (connected) => set({ isConnected: connected }),
 
+  roomStateReceived: false,
+  setRoomStateReceived: (roomStateReceived) => set({ roomStateReceived }),
+
   roomDeletedNotice: null,
   setRoomDeletedNotice: (notice) => set({ roomDeletedNotice: notice }),
+
+  kickedNotice: null,
+  setKickedNotice: (notice) => set({ kickedNotice: notice }),
 
   sittingFurnitureId: null,
   setSittingFurnitureId: (id) => set({ sittingFurnitureId: id }),
   sitReturnPos: null,
   setSitReturnPos: (pos) => set({ sitReturnPos: pos }),
+  landOnSeat: (furnitureId, returnPos, x, y, direction) =>
+    set((state) => ({
+      sittingFurnitureId: furnitureId,
+      sitReturnPos: returnPos,
+      localPlayer: { ...state.localPlayer, x, y, direction, isMoving: false, isSitting: true },
+    })),
 
   micMuted: false,
   setMicMuted: (muted) => set({ micMuted: muted }),
@@ -347,12 +437,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       return { speakingPlayers: next };
     }),
 
-  chatMessages: [],
-  addChatMessage: (msg) =>
-    set((state) => ({
-      chatMessages: [...state.chatMessages.slice(-99), msg],
-    })),
-
   zoneChatHistory: {},
   addZoneChatMessage: (zoneId, msg) =>
     set((state) => {
@@ -363,6 +447,51 @@ export const useGameStore = create<GameState>((set, get) => ({
           [zoneId]: [...existing.slice(-99), msg],
         },
       };
+    }),
+
+  channels: [],
+  setChannels: (channels) => set({ channels }),
+  dmConversations: [],
+  setDmConversations: (dmConversations) => set({ dmConversations }),
+  activeChatTarget: null,
+  setActiveChatTarget: (activeChatTarget) => set({ activeChatTarget }),
+  chatPanelOpen: false,
+  setChatPanelOpen: (chatPanelOpen) => set({ chatPanelOpen }),
+  messagesByTarget: {},
+  setTargetMessages: (key, messages) =>
+    set((state) => ({ messagesByTarget: { ...state.messagesByTarget, [key]: messages.slice(-CHAT_TARGET_MAX) } })),
+  prependTargetMessages: (key, messages) =>
+    set((state) => {
+      const existing = state.messagesByTarget[key] ?? [];
+      return { messagesByTarget: { ...state.messagesByTarget, [key]: [...messages, ...existing].slice(-CHAT_TARGET_MAX) } };
+    }),
+  appendTargetMessage: (key, message) =>
+    set((state) => {
+      const existing = state.messagesByTarget[key] ?? [];
+      return { messagesByTarget: { ...state.messagesByTarget, [key]: [...existing, message].slice(-CHAT_TARGET_MAX) } };
+    }),
+  bumpReplyCount: (targetKey, parentId) =>
+    set((state) => {
+      const existing = state.messagesByTarget[targetKey];
+      if (!existing) return {};
+      const idx = existing.findIndex((m) => m.id === parentId);
+      if (idx === -1) return {};
+      const updated = [...existing];
+      updated[idx] = { ...updated[idx], replyCount: (updated[idx].replyCount ?? 0) + 1 };
+      return { messagesByTarget: { ...state.messagesByTarget, [targetKey]: updated } };
+    }),
+
+  repliesByParent: {},
+  setParentReplies: (parentId, replies) =>
+    set((state) => ({ repliesByParent: { ...state.repliesByParent, [parentId]: replies } })),
+  appendParentReply: (parentId, reply) =>
+    set((state) => {
+      const existing = state.repliesByParent[parentId];
+      // Only append if this thread has actually been loaded (someone has it
+      // expanded) — otherwise this would silently start a cache entry for
+      // every reply anywhere, defeating the point of loading on demand.
+      if (!existing) return {};
+      return { repliesByParent: { ...state.repliesByParent, [parentId]: [...existing, reply] } };
     }),
 
   speechBubbles: {},
@@ -441,6 +570,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         ...state.activityEvents,
       ].slice(0, ACTIVITY_FEED_MAX),
     })),
+  clearActivity: () => set({ activityEvents: [] }),
 
   furniture: [],
   setFurniture: (f) => set({ furniture: f }),
@@ -590,6 +720,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       roomId: roomState.id,
       roomName: roomState.name,
       theme: roomState.theme ?? prev.theme,
+      roomTemplate: roomState.template ?? prev.roomTemplate,
       tiles: roomState.tiles.length > 0 ? roomState.tiles : prev.tiles,
       furniture: roomState.furniture ?? prev.furniture,
       zones: roomState.zones ?? prev.zones,

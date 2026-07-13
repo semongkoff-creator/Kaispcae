@@ -83,11 +83,11 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
     </button>
   ) : activeRecording ? (
     isSidebar ? (
-      <div title={`REC: ${activeRecording.targetName}`} className="w-10 h-10 rounded-lg flex items-center justify-center bg-red-50 text-red-600">
+      <div title={`REC: ${activeRecording.targetName}`} className="w-10 h-10 rounded-lg flex items-center justify-center bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400">
         <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
       </div>
     ) : (
-      <div className="px-3 py-2 rounded-lg text-xs font-medium border bg-red-50 text-red-600 border-red-200 inline-flex items-center gap-1.5">
+      <div className="px-3 py-2 rounded-lg text-xs font-medium border bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 inline-flex items-center gap-1.5">
         <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> REC: {activeRecording.targetName}
       </div>
     )
@@ -97,8 +97,8 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
       disabled={recordingTargets.length === 0}
       title="Record"
       className={isSidebar
-        ? 'w-10 h-10 rounded-lg flex items-center justify-center text-purple-700 hover:bg-purple-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer'
-        : 'px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 dark:border-gray-600 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed'}
+        ? 'w-10 h-10 rounded-lg flex items-center justify-center text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer'
+        : 'px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 hover:text-purple-800 border-purple-200 dark:border-gray-600 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed'}
     >
       <RecordCircleFill size={isSidebar ? 16 : 12} /> {!isSidebar && 'Record'}
     </button>
@@ -109,8 +109,8 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
       onClick={loadRecordings}
       title="Recordings"
       className={isSidebar
-        ? 'w-10 h-10 rounded-lg flex items-center justify-center text-purple-700 hover:bg-purple-50 dark:hover:bg-gray-700 transition-all cursor-pointer'
-        : 'px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 hover:text-purple-800 border-purple-200 dark:border-gray-600 shadow-sm'}
+        ? 'w-10 h-10 rounded-lg flex items-center justify-center text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-700 transition-all cursor-pointer'
+        : 'px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 hover:text-purple-800 border-purple-200 dark:border-gray-600 shadow-sm'}
     >
       <Download size={isSidebar ? 16 : 12} /> {!isSidebar && 'Recordings'}
     </button>
