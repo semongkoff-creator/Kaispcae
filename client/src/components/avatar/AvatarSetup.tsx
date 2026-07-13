@@ -157,7 +157,13 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
   }, [config]);
 
   return (
-    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+    // z-[60] — above the persistent HUD's z-50 (mic/camera/screen-share).
+    // At z-40 those controls rendered in front of this dialog instead of
+    // behind it, visibly overlapping the Hairstyle/Accessory rows. Unlike
+    // MeetingView (intentionally z-40, so the HUD stays reachable during
+    // that full-screen mode), this is a transient, closable dialog — it
+    // should fully cover the HUD while open, not compete with it.
+    <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-gray-900 dark:text-gray-100 text-xl font-bold">Customize Avatar</h2>

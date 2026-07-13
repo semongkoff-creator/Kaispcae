@@ -245,6 +245,12 @@ export interface GameState {
   jumpingPlayers: Map<string, number>;
   triggerJump: (playerId: string, timestamp: number) => void;
 
+  // Nudge ("senggol") — same Map-of-most-recent-timestamp shape as
+  // jumpingPlayers above, keyed by the player being nudged (the one whose
+  // avatar shakes), not the one who pressed Z.
+  nudgedPlayers: Map<string, number>;
+  triggerNudge: (playerId: string, timestamp: number) => void;
+
   // Recent Activity Feed — a lightweight, client-only log of room events
   // (join/leave, media added, notice pinned, recording start/end) built
   // entirely from socket events this client already receives (see
@@ -560,6 +566,14 @@ export const useGameStore = create<GameState>((set, get) => ({
       const next = new Map(state.jumpingPlayers);
       next.set(playerId, timestamp);
       return { jumpingPlayers: next };
+    }),
+
+  nudgedPlayers: new Map(),
+  triggerNudge: (playerId, timestamp) =>
+    set((state) => {
+      const next = new Map(state.nudgedPlayers);
+      next.set(playerId, timestamp);
+      return { nudgedPlayers: next };
     }),
 
   activityEvents: [],

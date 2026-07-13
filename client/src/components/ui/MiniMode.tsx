@@ -58,28 +58,43 @@ export async function openMiniModeWindow(): Promise<Window | null> {
     return null;
   }
 
-  // Copy every stylesheet/style tag over — the PiP window starts with a
-  // blank document, so without this the portaled content would render
-  // completely unstyled (no Tailwind classes applied at all).
-  Array.from(document.styleSheets).forEach((sheet) => {
-    try {
-      const cssRules = Array.from(sheet.cssRules).map((rule) => rule.cssText).join('\n');
-      const style = win.document.createElement('style');
-      style.textContent = cssRules;
-      win.document.head.appendChild(style);
-    } catch {
-      // Cross-origin stylesheets throw on .cssRules — link it instead.
-      if (sheet.href) {
-        const link = win.document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = sheet.href;
-        win.document.head.appendChild(link);
+  // Everything below is best-effort styling/setup on a window the browser
+  // has ALREADY created — a failure here must not throw back out to the
+  // caller (that previously meant a real, visible OS window popped open
+  // with nothing in it, while the app itself treated the whole thing as if
+  // it had silently failed: no MiniMode content ever got portaled in
+  // because the exception happened before the `return win` below, and
+  // there was no visible error either, since nothing here was caught).
+  try {
+    // Copy every stylesheet/style tag over — the PiP window starts with a
+    // blank document, so without this the portaled content would render
+    // completely unstyled (no Tailwind classes applied at all).
+    Array.from(document.styleSheets).forEach((sheet) => {
+      try {
+        const cssRules = Array.from(sheet.cssRules).map((rule) => rule.cssText).join('\n');
+        const style = win.document.createElement('style');
+        style.textContent = cssRules;
+        win.document.head.appendChild(style);
+      } catch {
+        // Cross-origin stylesheets throw on .cssRules — link it instead.
+        try {
+          if (sheet.href) {
+            const link = win.document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = sheet.href;
+            win.document.head.appendChild(link);
+          }
+        } catch (linkErr) {
+          console.warn('[minimode] failed to link stylesheet, skipping:', linkErr);
+        }
       }
-    }
-  });
-  win.document.title = 'MeetKai — Mini Mode';
-  win.document.body.style.margin = '0';
-  win.document.body.style.background = '#111827';
+    });
+    win.document.title = 'MeetKai — Mini Mode';
+    win.document.body.style.margin = '0';
+    win.document.body.style.background = '#111827';
+  } catch (e) {
+    console.warn('[minimode] window setup failed (opening unstyled):', e);
+  }
   return win;
 }
 
@@ -118,6 +133,18 @@ export function MiniMode({ pipWindow, nearby, localStream, remoteStreams, remote
     return () => pipWindow.removeEventListener('pagehide', handlePageHide);
   }, [pipWindow]);
 
+  // React 18 StrictMode (see main.tsx) deliberately mounts every component
+  // twice in dev — run effect, run its cleanup, run the effect again — to
+  // surface exactly this class of bug: an effect whose cleanup has a REAL,
+  // non-idempotent side effect. requestWindow() above was already fixed for
+  // this (moved out of an effect entirely, see its own comment), but the
+  // effect below closes the window in ITS cleanup, so StrictMode's
+  // simulated first cleanup closed the freshly opened window for real
+  // before the "real" mount ever got a chance to use it — Mini Mode looked
+  // like it opened for an instant and immediately closed. skipFirstCleanup
+  // swallows exactly that one synthetic cleanup; every cleanup after it
+  // (including the eventual genuine unmount) still closes the window.
+  const skipFirstCleanupRef = useRef(true);
   useEffect(() => {
     // The other direction of the same problem: this component can also
     // disappear because the APP navigated away (left the room, logged out)
@@ -128,6 +155,10 @@ export function MiniMode({ pipWindow, nearby, localStream, remoteStreams, remote
     // close it. Calling close() on a window already mid-close (the pagehide
     // path above) is a documented no-op, so this is safe either way.
     return () => {
+      if (skipFirstCleanupRef.current) {
+        skipFirstCleanupRef.current = false;
+        return;
+      }
       try {
         pipWindow.close();
       } catch {

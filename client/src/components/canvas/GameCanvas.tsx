@@ -14,6 +14,8 @@ import {
   RoomTheme,
   JUMP_DURATION_MS,
   JUMP_HEIGHT_PX,
+  NUDGE_DURATION_MS,
+  NUDGE_SHAKE_PX,
 } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useMovement } from '@/hooks/useMovement';
@@ -139,6 +141,7 @@ interface GameCanvasProps {
   emitMove: (x: number, y: number, direction: string, isRunning?: boolean) => void;
   emitStop: (direction: string) => void;
   emitJump: () => void;
+  emitNudge: (targetId: string) => void;
   proximityData: ProximityPlayer[];
   localSpeaking: boolean;
   speakingPlayers: Set<string>;
@@ -176,7 +179,20 @@ function getJumpOffset(startTimestamp: number | undefined, timestamp: number): n
   return -JUMP_HEIGHT_PX * Math.sin((Math.PI * elapsed) / JUMP_DURATION_MS);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, onMediaOpen }: GameCanvasProps) {
+// Nudge ("senggol") — a one-shot horizontal shake (decaying side-to-side
+// wiggle: sin() gives the wiggle, the outer decay factor tapers it to 0 by
+// NUDGE_DURATION_MS instead of cutting off mid-swing). Same
+// never-explicitly-cleared / just-stops-contributing-once-expired
+// convention as getJumpOffset above.
+function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: number): number {
+  if (startTimestamp === undefined) return 0;
+  const elapsed = timestamp - startTimestamp;
+  if (elapsed < 0 || elapsed > NUDGE_DURATION_MS) return 0;
+  const decay = 1 - elapsed / NUDGE_DURATION_MS;
+  return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
+}
+
+export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, onMediaOpen }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -186,6 +202,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, proximityData, localS
   const emitMoveRef = useRef(emitMove); emitMoveRef.current = emitMove;
   const emitStopRef = useRef(emitStop); emitStopRef.current = emitStop;
   const emitJumpRef = useRef(emitJump); emitJumpRef.current = emitJump;
+  const emitNudgeRef = useRef(emitNudge); emitNudgeRef.current = emitNudge;
   const emitSitRef = useRef(emitSit); emitSitRef.current = emitSit;
   const emitFollowUnfollowRef = useRef(emitFollowUnfollow); emitFollowUnfollowRef.current = emitFollowUnfollow;
 
@@ -204,6 +221,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, proximityData, localS
   const bubblesRef = useRef(useGameStore.getState().speechBubbles);
   const emotesRef = useRef(useGameStore.getState().emoteEvents);
   const jumpingPlayersRef = useRef(useGameStore.getState().jumpingPlayers);
+  const nudgedPlayersRef = useRef(useGameStore.getState().nudgedPlayers);
   const zones = useGameStore((s) => s.zones);
   const zonesRef = useRef(zones);
   // Labeled zones render a DOM banner positioned imperatively (via transform,
@@ -231,6 +249,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, proximityData, localS
     bubblesRef.current = useGameStore.getState().speechBubbles;
     emotesRef.current = useGameStore.getState().emoteEvents;
     jumpingPlayersRef.current = useGameStore.getState().jumpingPlayers;
+    nudgedPlayersRef.current = useGameStore.getState().nudgedPlayers;
     zonesRef.current = zones;
     furnitureRef.current = furniture;
     mediaObjectsRef.current = mediaObjects;
@@ -315,6 +334,48 @@ export function GameCanvas({ emitMove, emitStop, emitJump, proximityData, localS
     emitSitRef.current(true, chairCenterX, chairCenterY, sitDirection);
   }, []);
 
+  // Nudge ("senggol", Z key) — finds whoever's roughly in front of the
+  // local player and asks the server to relay a nudge at them. No local
+  // trigger here: unlike Jump (which animates the presser's own avatar and
+  // so needs zero-latency local feedback), the visual effect lands on the
+  // TARGET, so waiting for the server's broadcast — which reaches the
+  // nudger too, see movementHandler.ts's io.to() — is both simpler (one
+  // code path drives the animation for everyone, including the nudger) and
+  // in practice instant on a same-room socket round trip.
+  //
+  // Deliberately NOT an exact-tile match: unlike sitting (where collision
+  // physically stops you at a fixed furniture tile), other players aren't
+  // grid-snapped at all — two people who've walked up "next to" each other
+  // almost never land on exactly the same tile row/column, they're a few
+  // continuous pixels off. Requiring an exact tile match meant nudge almost
+  // never found anyone in practice. Instead: is the target roughly ahead in
+  // the direction I'm facing (within NUDGE_RANGE_PX), and not too far off to
+  // the side (within NUDGE_LANE_PX)?
+  const performNudge = useCallback(() => {
+    const player = localPlayerRef.current;
+    const NUDGE_RANGE_PX = TILE_SIZE * 1.5;
+    const NUDGE_LANE_PX = TILE_SIZE * 0.75;
+
+    let target: Avatar | null = null;
+    let bestDist = Infinity;
+    for (const p of Object.values(playerRecordsRef.current)) {
+      const dx = p.x - player.x;
+      const dy = p.y - player.y;
+      let forward = 0;
+      let lane = 0;
+      switch (player.direction) {
+        case 'up': forward = -dy; lane = dx; break;
+        case 'down': forward = dy; lane = dx; break;
+        case 'left': forward = -dx; lane = dy; break;
+        case 'right': forward = dx; lane = dy; break;
+      }
+      if (forward <= 0 || forward > NUDGE_RANGE_PX || Math.abs(lane) > NUDGE_LANE_PX) continue;
+      if (forward < bestDist) { bestDist = forward; target = p; }
+    }
+    if (!target) return;
+    emitNudgeRef.current(target.id);
+  }, []);
+
   const performStandUp = useCallback(() => {
     const state = useGameStore.getState();
     const returnPos = state.sitReturnPos;
@@ -364,6 +425,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, proximityData, localS
         return;
       }
 
+      if (e.code === 'KeyZ') {
+        performNudge();
+        return;
+      }
+
       // Pressing a movement key while sitting stands you up first, instead
       // of silently eating the input (useMovement's isFrozen check would
       // otherwise just ignore it with no feedback).
@@ -374,7 +440,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, proximityData, localS
     };
     window.addEventListener('keydown', handleSitKey);
     return () => window.removeEventListener('keydown', handleSitKey);
-  }, [performSit, performStandUp]);
+  }, [performSit, performStandUp, performNudge]);
 
   const resizeCanvas = useCallback(() => {
     const container = containerRef.current;
@@ -736,7 +802,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, proximityData, localS
       const isLocal = avatar.id === localPlayerId;
       const bobOffset = isLocal ? walkOffset : avatar.isMoving ? Math.sin(timestamp * 0.008 + (avatar.id.charCodeAt(0) || 0) * 0.1) * 2 : 0;
       const jumpOffset = getJumpOffset(jumpingPlayersRef.current.get(avatar.id), now);
-      drawAvatar(ctx, { avatar, x: sx, y: sy, isLocal, timestamp,
+      const nudgeOffset = getNudgeShakeOffset(nudgedPlayersRef.current.get(avatar.id), now);
+      drawAvatar(ctx, { avatar, x: sx + nudgeOffset, y: sy, isLocal, timestamp,
         walkAnimOffset: bobOffset + jumpOffset,
       });
 

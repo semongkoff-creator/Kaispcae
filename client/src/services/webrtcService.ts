@@ -78,27 +78,61 @@ class WebRTCService {
   }
 
   async initLocalMedia(): Promise<{ success: boolean; error?: string }> {
+    // Retrying after an earlier audio-only fallback (see below) — stop
+    // those tracks first rather than leaking them once replaced.
+    if (this.localStream) {
+      this.localStream.getTracks().forEach((t) => t.stop());
+      this.localStream = null;
+    }
     try {
       this.localStream = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: { width: 320, height: 240, frameRate: 15 },
       });
-
-      this.audioContext = new AudioContext();
-      const source = this.audioContext.createMediaStreamSource(this.localStream);
-      this.analyserNode = this.audioContext.createAnalyser();
-      this.analyserNode.fftSize = 256;
-      source.connect(this.analyserNode);
-
-      this.startSpeakingDetection();
+      this.finishLocalMediaSetup();
       return { success: true };
     } catch (err: unknown) {
+      // Video-specific failures (camera already open in another app/tab,
+      // no camera present, etc.) shouldn't also take down the microphone —
+      // retry audio-only so at least mic/proximity-audio still works, and
+      // report the camera issue as a non-fatal heads-up rather than
+      // failing the whole join.
+      if (err instanceof DOMException && ['NotReadableError', 'OverconstrainedError', 'NotFoundError'].includes(err.name)) {
+        try {
+          this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          this.finishLocalMediaSetup();
+          return { success: true, error: 'Camera unavailable (already in use elsewhere?) — joined with audio only' };
+        } catch (audioErr: unknown) {
+          console.warn('[webrtc] audio-only fallback also failed:', audioErr);
+        }
+      }
       const message = err instanceof DOMException
-        ? err.name === 'NotAllowedError' ? 'Microphone/camera permission denied' : err.message
+        ? err.name === 'NotAllowedError' ? 'Camera/microphone permission denied'
+          : err.name === 'NotReadableError' ? 'Could not start camera/mic — already in use by another app or browser tab'
+          : err.name === 'NotFoundError' ? 'No camera or microphone found on this device'
+          : err.message
         : 'Failed to access media devices';
       console.warn('[webrtc]', message);
       return { success: false, error: message };
     }
+  }
+
+  private finishLocalMediaSetup(): void {
+    const stream = this.localStream!;
+    // Mic/camera should start OFF on join — getUserMedia grants the tracks
+    // enabled by default, which would otherwise broadcast audio/video the
+    // instant someone enters a room, before they've chosen to turn
+    // anything on.
+    stream.getAudioTracks().forEach((t) => { t.enabled = false; });
+    stream.getVideoTracks().forEach((t) => { t.enabled = false; });
+
+    this.audioContext = new AudioContext();
+    const source = this.audioContext.createMediaStreamSource(stream);
+    this.analyserNode = this.audioContext.createAnalyser();
+    this.analyserNode.fftSize = 256;
+    source.connect(this.analyserNode);
+
+    this.startSpeakingDetection();
   }
 
   getLocalStream(): MediaStream | null {

@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill } from 'react-bootstrap-icons';
+import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { StatusButton } from '../avatar/StatusButton';
 import { RecordingControl } from './RecordingControl';
@@ -28,7 +28,6 @@ interface SidebarProps {
   hasMySeat: boolean;
   onMySeat: () => void;
 
-  canEnterMeetingView: boolean;
   meetingViewActive: boolean;
   onToggleMeetingView: () => void;
 
@@ -51,6 +50,9 @@ interface SidebarProps {
   onStartRecording: (targetUserId: string, title: string) => void;
   onStopRecording: () => void;
 
+  // Back to the room list (Lobby) without logging out — distinct from
+  // onLogout below, which clears the session entirely.
+  onLeaveRoom: () => void;
   onLogout: () => void;
 
   theme: Theme;
@@ -82,7 +84,6 @@ export function Sidebar({
   onToggleTeleport,
   hasMySeat,
   onMySeat,
-  canEnterMeetingView,
   meetingViewActive,
   onToggleMeetingView,
   simplifiedView,
@@ -100,6 +101,7 @@ export function Sidebar({
   roomSlug,
   onStartRecording,
   onStopRecording,
+  onLeaveRoom,
   onLogout,
   theme,
   onToggleTheme,
@@ -145,16 +147,23 @@ export function Sidebar({
               </button>
             </div>
 
-            {(canEnterMeetingView || meetingViewActive) && (
-              <MenuRow icon={<Grid3x3GapFill size={15} />} label={meetingViewActive ? 'Exit Meeting View' : 'Meeting View'} active={meetingViewActive} onClick={closeAnd(onToggleMeetingView)} />
-            )}
+            {/* Always available, even with camera/mic off — MeetingView
+                itself shows a friendly "nobody's on camera" placeholder
+                rather than an empty/broken grid, so there's no need to hide
+                the entry point until someone's actually streaming. */}
+            <MenuRow icon={<Grid3x3GapFill size={15} />} label={meetingViewActive ? 'Exit Meeting View' : 'Meeting View'} active={meetingViewActive} onClick={closeAnd(onToggleMeetingView)} />
             {!miniModeActive && (
               <MenuRow
                 icon={<PipFill size={15} />}
                 label="Mini Mode"
                 onClick={closeAnd(onToggleMiniMode)}
-                disabled={!miniModeSupported}
-                title={miniModeSupported ? undefined : 'Not supported in this browser — needs Chrome or Edge 116+'}
+                // Not actually disabled — a truly disabled button gives zero
+                // feedback on click (no error, no window, nothing), which
+                // read exactly like "the feature is broken" rather than
+                // "unsupported here". It stays clickable; onToggleMiniMode
+                // itself checks support and shows a clear message when it
+                // isn't, same code path as any other failure to open.
+                title={miniModeSupported ? undefined : 'May not be supported in this browser — needs Chrome or Edge 116+'}
               />
             )}
             <MenuRow icon={<EyeFill size={15} />} label="Simplify" onClick={closeAnd(onToggleSimplifiedView)} />
@@ -206,9 +215,16 @@ export function Sidebar({
       <StatusButton status={status} onSave={onSaveStatus} variant="sidebar" />
 
       <SidebarIcon
+        title="Back to room list"
+        onClick={onLeaveRoom}
+        className="mt-auto text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
+      >
+        <HouseDoorFill size={16} />
+      </SidebarIcon>
+      <SidebarIcon
         title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
         onClick={onToggleTheme}
-        className="mt-auto text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
+        className="text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
       >
         {theme === 'dark' ? <SunFill size={16} /> : <MoonFill size={16} />}
       </SidebarIcon>

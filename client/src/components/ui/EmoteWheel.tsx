@@ -35,7 +35,7 @@ interface EmoteWheelProps {
 
 export function EmoteWheel({ open, onSelect, onClose }: EmoteWheelProps) {
   const handleKey = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'z' || e.key === 'Z') {
+    if (e.key === 'b' || e.key === 'B') {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       onClose();
     }
@@ -55,7 +55,11 @@ export function EmoteWheel({ open, onSelect, onClose }: EmoteWheelProps) {
   const r = 36;
 
   return (
-    <div className="absolute inset-0 z-40 flex items-center justify-center" onClick={onClose}>
+    // z-[60] — same reasoning as AvatarSetup's dialog: above the persistent
+    // HUD's z-50, since this is a transient overlay the HUD shouldn't
+    // render in front of while it's open (unlike MeetingView, which is
+    // deliberately z-40 so the HUD stays usable during that mode).
+    <div className="absolute inset-0 z-[60] flex items-center justify-center" onClick={onClose}>
       <div className="relative w-[220px] h-[220px]" onClick={(e) => e.stopPropagation()}>
         {EMOTE_LIST.map((emote, i) => {
           const angle = (i / EMOTE_LIST.length) * Math.PI * 2 - Math.PI / 2;
@@ -75,7 +79,7 @@ export function EmoteWheel({ open, onSelect, onClose }: EmoteWheelProps) {
           );
         })}
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white/80 text-purple-700 text-xs px-2 py-1 rounded-full shadow-sm">
-          Press Z
+          Press B
         </div>
       </div>
     </div>

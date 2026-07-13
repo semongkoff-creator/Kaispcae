@@ -6,7 +6,7 @@ import { GameCanvas } from './components/canvas/GameCanvas';
 import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
 import { NameModal } from './components/ui/NameModal';
 import { AvatarSetup } from './components/avatar/AvatarSetup';
-import { VideoGrid, getVideoTiles } from './components/ui/VideoGrid';
+import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
 import { MiniMode, isMiniModeSupported, openMiniModeWindow } from './components/ui/MiniMode';
 import { ChatPanel } from './components/ui/ChatPanel';
@@ -82,7 +82,7 @@ function releaseMovementKeys() {
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend } = useSocket(authDisplayName, roomSlug, authUserId);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -102,6 +102,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     isMicMuted,
     isCameraOn,
     isScreenSharing,
+    mediaError,
     setManualVolume,
     destroy,
   } = useWebRTC({ socketRef });
@@ -179,26 +180,37 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     updateProximity(nearby);
   }, [nearby, updateProximity]);
 
-  // Dedicated Meeting View — only worth surfacing once there's actually a
-  // camera/screen tile to switch to a bigger layout for; otherwise it's a
-  // sidebar icon that does nothing useful.
-  const canEnterMeetingView =
-    !!webrtcService.getLocalStream() || getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams).length > 0;
-
   // Mini Mode has to be opened directly inside a real click handler (see
   // openMiniModeWindow's own doc comment for why it can't live in a mount
   // effect) — this is that handler, now called from the Sidebar icon
   // instead of its own standalone floating button.
   const handleToggleMiniMode = useCallback(async () => {
-    const win = await openMiniModeWindow();
+    let win: Window | null = null;
+    try {
+      win = await openMiniModeWindow();
+    } catch (e) {
+      // Defense in depth — openMiniModeWindow shouldn't throw anymore
+      // (every failure path inside it now resolves to null instead), but a
+      // rejected promise here previously meant this whole handler crashed
+      // silently: no window, no error message, nothing — exactly what
+      // "clicking Mini Mode does nothing at all" looks like from outside.
+      console.warn('[minimode] unexpected error opening window:', e);
+    }
     if (win) {
       setMiniModeWindow(win);
     } else {
-      // openMiniModeWindow already logs the underlying error — this is the
-      // user-visible half. Previously there was nothing here at all: the
-      // click just did nothing with no feedback, which is exactly what
-      // "Mini Mode sometimes won't open" looks like from the outside.
+      // openMiniModeWindow already logs the underlying error to the
+      // console — this is the user-visible half. addActivity alone isn't
+      // enough: the Activity Feed panel starts collapsed (see
+      // ActivityFeed.tsx), so a message logged there is invisible unless the
+      // user happens to already have it open. A transient banner (same
+      // pattern as the camera/mic mediaError one below) is what actually
+      // gets seen — previously there was neither, so clicking read as
+      // "nothing happens at all" regardless of what got logged.
       useGameStore.getState().addActivity('Mini Mode couldn’t be opened — try again.');
+      setMiniModeError('Mini Mode couldn’t be opened — your browser may not support it (needs Chrome or Edge 116+), or blocked the popup.');
+      if (miniModeErrorTimerRef.current) clearTimeout(miniModeErrorTimerRef.current);
+      miniModeErrorTimerRef.current = setTimeout(() => setMiniModeError(null), 6000);
     }
   }, []);
 
@@ -468,6 +480,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const [showMinimap, setShowMinimap] = useState(true);
   const [meetingViewActive, setMeetingViewActive] = useState(false);
   const [miniModeWindow, setMiniModeWindow] = useState<Window | null>(null);
+  const [miniModeError, setMiniModeError] = useState<string | null>(null);
+  const miniModeErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Simplified View — hides everything that isn't about "who's here and
   // talking": the feature sidebar, minimap, room-meta hint text, and the
   // participant/notice panels. Its own toggle deliberately lives OUTSIDE the
@@ -513,11 +527,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     setShowEmoteWheel(false);
   }, [emitEmote, localPlayerId]);
 
-  // Z key for emote wheel, M key for minimap
+  // B key for emote wheel, M key for minimap — was Z, but Z is now the
+  // nudge/senggol key (GameCanvas.tsx), and both handlers listen on the
+  // same window keydown, so a single Z press fired the emote wheel toggle
+  // here AND the nudge attempt there at once.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === 'z' || e.key === 'Z') {
+      if (e.key === 'b' || e.key === 'B') {
         e.preventDefault();
         setShowEmoteWheel((v) => !v);
       }
@@ -552,6 +569,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         emitMove={emitMove}
         emitStop={emitStop}
         emitJump={emitJump}
+        emitNudge={emitNudge}
         proximityData={nearby}
         localSpeaking={localSpeaking}
         speakingPlayers={speakingPlayers}
@@ -593,7 +611,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {!simplifiedView && (
         <>
           <div className="absolute top-4 left-28 pointer-events-none">
-            <p className="text-gray-500 dark:text-gray-400 text-xs font-mono">WASD / Arrows to move · hold R to run · Space to jump</p>
+            <p className="text-gray-500 dark:text-gray-400 text-xs font-mono">WASD / Arrows to move · hold R to run · Space to jump · Z to nudge</p>
           </div>
           <div className="absolute top-10 left-28 pointer-events-none">
             <p className="text-gray-500 dark:text-gray-400 text-xs font-mono">
@@ -690,7 +708,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleTeleport={() => setShowTeleportPanel((v) => !v)}
         hasMySeat={hasMySeat}
         onMySeat={handleMySeat}
-        canEnterMeetingView={canEnterMeetingView}
         meetingViewActive={meetingViewActive}
         onToggleMeetingView={() => setMeetingViewActive((v) => !v)}
         simplifiedView={simplifiedView}
@@ -708,6 +725,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         roomSlug={roomSlug}
         onStartRecording={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
         onStopRecording={stopMyRecording}
+        onLeaveRoom={onLeave}
         onLogout={() => setShowLogoutConfirm(true)}
         theme={theme}
         onToggleTheme={onToggleTheme}
@@ -845,6 +863,25 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
         <NotificationSettings />
       </div>
+
+      {/* Only shown once getUserMedia has actually failed (denied / no
+          device) — otherwise clicking Mic/Camera with no stream yet just
+          silently did nothing, with no way to tell a permission problem
+          apart from "the button is broken". */}
+      {mediaError && (
+        <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/80 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none">
+          {mediaError} — click Mic or Camera below to retry
+        </div>
+      )}
+
+      {/* Self-dismissing (see handleToggleMiniMode) — a one-off action
+          failure, not an ongoing state like mediaError above, so it doesn't
+          need to stick around until the user does something about it. */}
+      {miniModeError && (
+        <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/80 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none max-w-md text-center">
+          {miniModeError}
+        </div>
+      )}
 
       {/* Room name HUD + code */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 pointer-events-auto">

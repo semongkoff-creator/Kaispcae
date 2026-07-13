@@ -180,6 +180,12 @@ export enum SocketEvents {
   // sees a jump that already finished, same as an emote.
   PLAYER_JUMP = 'player:jump',
 
+  // Nudge ("senggol") — ZEP-style poke: the client determines who's
+  // standing on the tile it's facing and names them as the target; same
+  // trust level as PLAYER_JUMP above (cosmetic, no persistent state, no
+  // server-side validation of the target).
+  PLAYER_NUDGE = 'player:nudge',
+
   ZONE_ENTER = 'zone:enter',
   ZONE_EXIT = 'zone:exit',
 
@@ -515,6 +521,18 @@ export const JUMP_HEIGHT_PX = 14;
 
 export interface JumpEvent {
   playerId: string;
+  timestamp: number;
+}
+
+// Nudge ("senggol", Z key) — cosmetic one-shot side-to-side shake on the
+// target's avatar, same rendering split as Jump above (shared constants so
+// the local shake and the remote PLAYER_NUDGE listener animate identically).
+export const NUDGE_DURATION_MS = 400;
+export const NUDGE_SHAKE_PX = 6;
+
+export interface NudgeEvent {
+  fromId: string;
+  targetId: string;
   timestamp: number;
 }
 

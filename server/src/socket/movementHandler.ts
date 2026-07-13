@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, JumpEvent } from '@virtualmeet/shared';
+import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, JumpEvent, NudgeEvent } from '@virtualmeet/shared';
 import { updatePlayerPosition, setPlayerStopped, getCachedTiles } from '../store/roomStore';
 
 // Rate limiting: max 20 updates per second per player
@@ -77,6 +77,20 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     if (!gameRoom) return;
     const event: JumpEvent = { playerId: socket.id, timestamp: Date.now() };
     socket.to(gameRoom).emit(SocketEvents.PLAYER_JUMP, event);
+  });
+
+  // Nudge ("senggol") — same trust level as Jump above: the client already
+  // decided who's standing on the tile it's facing, this just relays it.
+  // Worst case of a spoofed targetId is someone's avatar shaking with no
+  // real trigger — purely cosmetic, nothing persisted.
+  socket.on(SocketEvents.PLAYER_NUDGE, (data: { targetId?: string }) => {
+    const targetId = data?.targetId;
+    if (!targetId || targetId === socket.id) return;
+    const rooms = Array.from(socket.rooms);
+    const gameRoom = rooms.find((r) => r !== socket.id);
+    if (!gameRoom) return;
+    const event: NudgeEvent = { fromId: socket.id, targetId, timestamp: Date.now() };
+    io.to(gameRoom).emit(SocketEvents.PLAYER_NUDGE, event);
   });
 
   // Clean up rate limit map on disconnect
