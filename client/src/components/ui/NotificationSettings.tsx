@@ -46,10 +46,10 @@ export function NotificationSettings() {
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center justify-center w-12 h-12 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-lg transition-all hover:scale-105 cursor-pointer"
+        className="flex items-center justify-center w-9 h-9 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-lg transition-all hover:scale-105 cursor-pointer"
         title="Notification settings"
       >
-        {settings.browserNotifOn ? <BellFill className="text-purple-700 dark:text-purple-300" size={18} /> : <BellSlashFill className="text-gray-400 dark:text-gray-500" size={18} />}
+        {settings.browserNotifOn ? <BellFill className="text-purple-700 dark:text-purple-300" size={14} /> : <BellSlashFill className="text-gray-400 dark:text-gray-500" size={14} />}
       </button>
 
       {open && (

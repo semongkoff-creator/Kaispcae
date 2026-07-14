@@ -21,12 +21,12 @@ export function ScreenShareButton({ sharing, onToggle }: ScreenShareButtonProps)
   return (
     <button
       onClick={onToggle}
-      className={`relative flex items-center justify-center w-12 h-12 rounded-full backdrop-blur-sm border shadow-lg transition-all hover:scale-105 cursor-pointer ${
+      className={`relative flex items-center justify-center w-9 h-9 rounded-full backdrop-blur-sm border shadow-lg transition-all hover:scale-105 cursor-pointer ${
         sharing ? 'bg-purple-600 border-purple-500' : 'bg-white/90 dark:bg-gray-800/90 border-purple-200 dark:border-gray-600'
       }`}
       title="Toggle Screen Share"
     >
-      {sharing ? <DisplayFill className="text-white" size={20} /> : <WindowDesktop className="text-purple-700 dark:text-purple-300" size={20} />}
+      {sharing ? <DisplayFill className="text-white" size={15} /> : <WindowDesktop className="text-purple-700 dark:text-purple-300" size={15} />}
       {sharing && (
         <div className="absolute inset-0 rounded-full border-2 border-purple-400 animate-pulse" />
       )}

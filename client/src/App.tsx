@@ -618,8 +618,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
               Playing as: <span className="text-gray-700 dark:text-gray-300">{playerName}</span>
             </p>
           </div>
-          <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSpotlightToggle={emitSpotlightToggle} onStartDm={channelChat.startDm} emitKick={emitKick} />
-          <ActivityFeed />
+          <div className="absolute top-14 left-16 flex items-start gap-2 pointer-events-none">
+            <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSpotlightToggle={emitSpotlightToggle} onStartDm={channelChat.startDm} emitKick={emitKick} />
+            <ActivityFeed />
+          </div>
         </>
       )}
 
@@ -857,7 +859,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           while Meeting View's z-40 full-screen overlay is active; without
           this there was no way to mute/unmute or stop screen share without
           exiting Meeting View first. */}
-      <div className="absolute bottom-24 left-1/2 -translate-x-1/2 flex gap-3 z-50">
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-50">
         <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
         <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
         <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
@@ -869,7 +871,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           silently did nothing, with no way to tell a permission problem
           apart from "the button is broken". */}
       {mediaError && (
-        <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/80 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none">
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/80 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none">
           {mediaError} — click Mic or Camera below to retry
         </div>
       )}
@@ -878,7 +880,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           failure, not an ongoing state like mediaError above, so it doesn't
           need to stick around until the user does something about it. */}
       {miniModeError && (
-        <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/80 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none max-w-md text-center">
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/80 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none max-w-md text-center">
           {miniModeError}
         </div>
       )}

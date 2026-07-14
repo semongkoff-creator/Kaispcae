@@ -12,10 +12,10 @@ export function ActivityFeed() {
   const activityEvents = useGameStore((s) => s.activityEvents);
 
   return (
-    <>
+    <div className="relative z-40 pointer-events-auto">
       <button
         onClick={() => setOpen(!open)}
-        className="absolute top-14 left-32 z-40 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
+        className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer inline-flex items-center gap-1.5"
         title="Recent Activity"
       >
         <ClockHistory size={13} /> {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
@@ -23,7 +23,7 @@ export function ActivityFeed() {
 
       {open && (
         <div
-          className="absolute top-24 left-32 z-40 w-64 max-h-[60vh] bg-white/95 dark:bg-gray-900/95 backdrop-blur-md rounded-xl border border-purple-100 dark:border-gray-700 shadow-2xl flex flex-col pointer-events-auto"
+          className="absolute top-full left-0 mt-2 w-64 max-h-[60vh] bg-white/95 dark:bg-gray-900/95 backdrop-blur-md rounded-xl border border-purple-100 dark:border-gray-700 shadow-2xl flex flex-col pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
@@ -44,7 +44,7 @@ export function ActivityFeed() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 

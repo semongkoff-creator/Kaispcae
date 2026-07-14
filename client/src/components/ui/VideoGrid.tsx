@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
-import { MicMuteFill, CameraVideoOffFill, PipFill, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill } from 'react-bootstrap-icons';
+import { MicMuteFill, CameraVideoOffFill, PipFill, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill } from 'react-bootstrap-icons';
 import { ProximityPlayer } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 
@@ -48,9 +48,36 @@ export function getVideoTiles(
 export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded }: VideoGridProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const videoTiles = getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams, recordedTargetUserId);
+  const [hidden, setHidden] = useState(false);
+
+  const totalTiles = (localStream ? 1 : 0) + (localScreenStream ? 1 : 0) + videoTiles.length
+    + videoTiles.filter((t) => t.screenStream).length;
+
+  // Nothing to show (or nothing to hide) — same "don't render a control for
+  // something that doesn't exist yet" rule the rest of the HUD follows.
+  if (totalTiles === 0) return null;
+
+  if (hidden) {
+    return (
+      <button
+        onClick={() => setHidden(false)}
+        title="Show camera tiles"
+        className="absolute top-16 right-4 z-20 pointer-events-auto bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm rounded-full px-2.5 py-1.5 flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 cursor-pointer hover:bg-white"
+      >
+        <CameraVideoFill size={12} /> {totalTiles}
+      </button>
+    );
+  }
 
   return (
-    <div className="absolute top-16 right-4 z-20 flex flex-col gap-2 pointer-events-none">
+    <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 pointer-events-none">
+      <button
+        onClick={() => setHidden(true)}
+        title="Hide camera tiles"
+        className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+      >
+        <EyeSlashFill size={11} />
+      </button>
       {localStream && (
         <VideoTile name="You" stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} />
       )}
@@ -128,7 +155,7 @@ export function VideoTile({
 
   return (
     <div
-      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border border-purple-200 shadow-lg transition-all duration-300 animate-fade-in group relative ${large ? 'w-full' : 'w-40'}`}
+      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border border-purple-200 shadow-lg transition-all duration-300 animate-fade-in group relative ${large ? 'w-full' : 'w-24'}`}
       style={{ opacity: translucent ? 0.5 : 1 }}
     >
       {/* Mirror the LOCAL self-preview only — raising your right hand should
@@ -143,7 +170,7 @@ export function VideoTile({
         playsInline
         muted={isLocal}
         style={{ transform: isLocal && !isScreen ? 'scaleX(-1)' : 'none' }}
-        className={`w-full object-cover bg-purple-100 ${large ? 'h-full aspect-video' : 'h-24'}`}
+        className={`w-full object-cover bg-purple-100 ${large ? 'h-full aspect-video' : 'h-16'}`}
       />
       {/* §6 — PIP, available on every tile (local or remote, camera or
           screen) via the standard requestPictureInPicture API; shown on
@@ -151,26 +178,26 @@ export function VideoTile({
       <button
         onClick={handlePip}
         title="Picture-in-picture"
-        className="absolute top-1 right-1 w-5 h-5 rounded bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+        className={`absolute top-0.5 right-0.5 rounded bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ${large ? 'w-5 h-5' : 'w-4 h-4'}`}
       >
-        <PipFill size={11} />
+        <PipFill size={large ? 11 : 8} />
       </button>
       {isScreen && (
-        <span className="absolute top-1 left-1 bg-black/50 text-white rounded p-0.5">
-          <DisplayFill size={10} />
+        <span className="absolute top-0.5 left-0.5 bg-black/50 text-white rounded p-0.5">
+          <DisplayFill size={large ? 10 : 8} />
         </span>
       )}
       {isBeingRecorded && (
-        <span className="absolute top-1 left-1 bg-red-600/90 text-white text-[9px] font-bold rounded px-1 py-0.5 inline-flex items-center gap-0.5">
-          <RecordCircleFill size={9} /> REC
+        <span className="absolute top-0.5 left-0.5 bg-red-600/90 text-white text-[9px] font-bold rounded px-1 py-0.5 inline-flex items-center gap-0.5">
+          <RecordCircleFill size={9} /> {large && 'REC'}
         </span>
       )}
-      <div className="px-2 py-1 text-xs flex items-center justify-between gap-1">
+      <div className={`flex items-center justify-between gap-1 ${large ? 'px-2 py-1 text-xs' : 'px-1 py-0.5 text-[10px]'}`}>
         <span className="text-gray-700 truncate flex-1">{name}</span>
         {isLocal && (
           <span className="flex gap-1 shrink-0">
-            {micMuted && <MicMuteFill className="text-red-500" size={12} />}
-            {cameraOff && <CameraVideoOffFill className="text-red-500" size={12} />}
+            {micMuted && <MicMuteFill className="text-red-500" size={large ? 12 : 9} />}
+            {cameraOff && <CameraVideoOffFill className="text-red-500" size={large ? 12 : 9} />}
           </span>
         )}
       </div>
@@ -180,8 +207,8 @@ export function VideoTile({
           carries no audio track here, and muting yourself already has the
           mic button. */}
       {!isLocal && !isScreen && onVolumeChange && (
-        <div className="px-2 pb-1.5 flex items-center gap-1.5">
-          {volume === 0 ? <VolumeMuteFill size={10} className="text-gray-400 shrink-0" /> : <VolumeUpFill size={10} className="text-gray-400 shrink-0" />}
+        <div className={`flex items-center gap-1 ${large ? 'px-2 pb-1.5 gap-1.5' : 'px-1 pb-1'}`}>
+          {volume === 0 ? <VolumeMuteFill size={large ? 10 : 8} className="text-gray-400 shrink-0" /> : <VolumeUpFill size={large ? 10 : 8} className="text-gray-400 shrink-0" />}
           <input
             type="range"
             min={0}

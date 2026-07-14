@@ -1,8 +1,20 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText } from 'react-bootstrap-icons';
+import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, Paperclip, FileEarmarkFill, Download } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
+
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024; // matches server/src/routes/uploads.ts's multer limit
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
+const VIDEO_EXT_RE = /\.(mp4|webm|mov|avi)$/i;
+
+function isImageAttachment(url: string): boolean {
+  return IMAGE_EXT_RE.test(url);
+}
+
+function isVideoAttachment(url: string): boolean {
+  return VIDEO_EXT_RE.test(url);
+}
 
 const COMMON_EMOJIS = ['😀','😂','❤️','👍','🔥','🎉','😢','😡','🤔','👋','💯','✨'];
 
@@ -32,7 +44,7 @@ interface ChatPanelProps {
   activeChatTarget: { type: 'channel' | 'dm'; id: string } | null;
   onSelectTarget: (target: { type: 'channel' | 'dm'; id: string }) => void;
   messages: ChannelMessage[];
-  onSend: (text: string, parentId?: string) => void;
+  onSend: (text: string, parentId?: string, attachment?: { url: string; fileName: string }) => void;
   onLoadOlder: () => Promise<number>;
   onCreateChannel: (name: string) => Promise<Channel>;
 }
@@ -75,6 +87,9 @@ export function ChatPanel({
   const threadReplies = expandedThreadId ? repliesByParent[expandedThreadId] ?? [] : [];
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [attachError, setAttachError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Fall back to the channel/DM view the moment there's no zone chat left.
@@ -111,6 +126,35 @@ export function ChatPanel({
   const insertEmoji = (emoji: string) => {
     setText((prev) => prev + emoji);
   };
+
+  // Reuses the same POST /api/uploads endpoint Add Media uses (see
+  // server/src/routes/uploads.ts) — same 10MB limit and mime allowlist,
+  // just sent as its own chat message (empty text + attachment) instead of
+  // a map object. Only available for persisted Channel/DM tabs: zone/bubble
+  // chat (ChatMessage) has no attachment field at all.
+  const handleFileSelect = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = ''; // let picking the same file twice in a row re-fire onChange
+      if (!file) return;
+      setAttachError('');
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        setAttachError('File is too large — max 10MB.');
+        return;
+      }
+      setUploadingFile(true);
+      try {
+        const { url, fileName } = await api.uploadMedia(file);
+        onSend('', undefined, { url, fileName });
+      } catch (err) {
+        console.error('[chat] file upload failed:', err);
+        setAttachError('Upload failed — check the file type and try again.');
+      } finally {
+        setUploadingFile(false);
+      }
+    },
+    [onSend]
+  );
 
   const handleLoadOlder = useCallback(async () => {
     if (loadingOlder || !hasMoreOlder) return;
@@ -300,7 +344,12 @@ export function ChatPanel({
                           {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                         <span className={`font-medium ${isOwn ? 'text-purple-100' : 'text-gray-500 dark:text-gray-400'}`}>{m.senderName}</span>
-                        <span className={`ml-1 break-words ${isOwn ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>{m.text}</span>
+                        {m.text && (
+                          <span className={`ml-1 break-words ${isOwn ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>{m.text}</span>
+                        )}
+                        {m.attachmentUrl && (
+                          <ChatAttachment url={m.attachmentUrl} fileName={m.attachmentName} isOwn={isOwn} />
+                        )}
                       </div>
                       <button
                         onClick={() => toggleThread(m.id)}
@@ -356,19 +405,44 @@ export function ChatPanel({
             </div>
           )}
 
+          {attachError && (
+            <p className="px-3 pb-1 text-[10px] text-red-500">{attachError}</p>
+          )}
           <div className="p-3 border-t border-purple-100 dark:border-gray-700 flex gap-2 items-center">
             <button onClick={() => setShowEmoji(!showEmoji)} className="text-purple-600 dark:text-purple-400 cursor-pointer"><EmojiSmile size={16} /></button>
+            {/* File attachments only make sense for persisted Channel/DM
+                messages — zone/bubble chat (ChatMessage) has no attachment
+                field, so the button is hidden rather than silently failing. */}
+            {!viewingZone && !proximityMode && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingFile}
+                  title="Attach a file"
+                  className="text-purple-600 dark:text-purple-400 disabled:opacity-40 cursor-pointer"
+                >
+                  <Paperclip size={16} />
+                </button>
+              </>
+            )}
             <input
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder={viewingZone ? `Message ${currentZone?.name}...` : proximityMode ? 'Say nearby...' : 'Type a message...'}
+              placeholder={uploadingFile ? 'Uploading file...' : viewingZone ? `Message ${currentZone?.name}...` : proximityMode ? 'Say nearby...' : 'Type a message...'}
               maxLength={200}
-              className="flex-1 bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500"
+              disabled={uploadingFile}
+              className="flex-1 bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 disabled:opacity-60"
             />
             <button
               onClick={handleSend}
-              disabled={!text.trim()}
+              disabled={!text.trim() || uploadingFile}
               className="bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-xs px-3 py-1.5 rounded cursor-pointer"
             >
               Send
@@ -377,5 +451,43 @@ export function ChatPanel({
         </div>
       )}
     </>
+  );
+}
+
+// Image attachments render as a clickable inline preview (opens the
+// full-size image in a new tab — no in-app viewer for chat attachments,
+// unlike Add Media's MediaViewerModal, since this is a much smaller/simpler
+// surface); anything else renders as a compact download row instead of
+// trying to guess how to preview an arbitrary file type.
+function ChatAttachment({ url, fileName, isOwn }: { url: string; fileName?: string; isOwn: boolean }) {
+  if (isImageAttachment(url)) {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer" className="block mt-1">
+        {/* Fixed box + object-cover (not max-w/max-h, which only caps large
+            images and leaves a naturally-small one — a tiny icon/sticker —
+            rendering at its native size, easy to miss entirely) so every
+            thumbnail reads as a deliberate preview regardless of the
+            original image's actual resolution. */}
+        <img src={url} alt={fileName || 'Attachment'} className="w-32 h-24 rounded object-cover bg-purple-100" />
+      </a>
+    );
+  }
+  if (isVideoAttachment(url)) {
+    return <video src={url} controls className="mt-1 w-48 rounded bg-black" />;
+  }
+  return (
+    <a
+      href={url}
+      download={fileName}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`mt-1 flex items-center gap-1.5 rounded px-2 py-1 text-[11px] ${
+        isOwn ? 'bg-purple-700/60 text-white hover:bg-purple-700' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'
+      }`}
+    >
+      <FileEarmarkFill size={12} className="shrink-0" />
+      <span className="truncate flex-1">{fileName || 'Download file'}</span>
+      <Download size={11} className="shrink-0" />
+    </a>
   );
 }

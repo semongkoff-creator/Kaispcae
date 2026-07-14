@@ -237,6 +237,15 @@ model ChatMessage {
   senderId       String
   sender         User                @relation(fields: [senderId], references: [id], onDelete: Cascade)
   text           String
+  // Optional file attachment — reuses the same POST /api/uploads endpoint
+  // and storage as Add Media (server/src/routes/uploads.ts), so a chat
+  // message with a file just carries the resulting URL here. attachmentName
+  // is the ORIGINAL filename (the stored file itself is renamed to a random
+  // UUID on disk), shown as the download label and used to pick an image
+  // preview vs. a generic file icon client-side. A message can have text,
+  // an attachment, or both — never neither (enforced in channelChatHandler.ts).
+  attachmentUrl  String?
+  attachmentName String?
   createdAt      DateTime            @default(now())
 
   @@index([channelId, createdAt])

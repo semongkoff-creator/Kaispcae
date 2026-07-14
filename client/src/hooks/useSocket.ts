@@ -3,7 +3,8 @@ import { io, Socket } from 'socket.io-client';
 import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
-import { notifyNewMessage } from '@/services/browserNotifications';
+import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
+import { playNudgeSound } from '@/services/soundEffects';
 
 export function useSocket(authUserName: string = '', roomSlug: string = 'main-office', authUserId: string = '') {
   const socketRef = useRef<Socket | null>(null);
@@ -414,7 +415,15 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     });
 
     socket.on(SocketEvents.PLAYER_NUDGE, (event: NudgeEvent) => {
-      useGameStore.getState().triggerNudge(event.targetId, event.timestamp);
+      useGameStore.getState().triggerNudge(event.targetId, event.timestamp, event.fromId);
+      playNudgeSound();
+      // This broadcasts to the whole room (everyone hears the ambient
+      // blip), but the OS-level notification is only for the actual
+      // target — otherwise every bystander would get pinged too.
+      if (event.targetId === useGameStore.getState().localPlayerId) {
+        const nudgerName = useGameStore.getState().playerRecords[event.fromId]?.name ?? 'Someone';
+        notifyNudge(nudgerName);
+      }
     });
 
     socket.on(SocketEvents.ROOM_UPDATED, (data: RoomUpdatePayload) => {
@@ -540,8 +549,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.CHANNEL_LEAVE, channelId);
   }, []);
 
-  const emitChannelMessageSend = useCallback((channelId: string, text: string, parentId?: string) => {
-    socketRef.current?.emit(SocketEvents.CHANNEL_MESSAGE_SEND, { channelId, text, parentId });
+  const emitChannelMessageSend = useCallback((channelId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string) => {
+    socketRef.current?.emit(SocketEvents.CHANNEL_MESSAGE_SEND, { channelId, text, parentId, attachmentUrl, attachmentName });
   }, []);
 
   const emitDmJoin = useCallback((conversationId: string) => {
@@ -552,8 +561,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.DM_LEAVE, conversationId);
   }, []);
 
-  const emitDmMessageSend = useCallback((conversationId: string, text: string, parentId?: string) => {
-    socketRef.current?.emit(SocketEvents.DM_MESSAGE_SEND, { conversationId, text, parentId });
+  const emitDmMessageSend = useCallback((conversationId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string) => {
+    socketRef.current?.emit(SocketEvents.DM_MESSAGE_SEND, { conversationId, text, parentId, attachmentUrl, attachmentName });
   }, []);
 
   const emitBubble = useCallback((text: string) => {

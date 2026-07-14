@@ -687,6 +687,13 @@ export interface ChannelMessage {
   text: string;
   createdAt: number;
   replyCount?: number;
+  // Optional file attachment — uploaded via the same POST /api/uploads
+  // endpoint Add Media uses (see server/src/routes/uploads.ts), so this is
+  // just the resulting URL plus the original filename (the stored file
+  // itself is renamed to a random UUID on disk). A message has text, an
+  // attachment, or both — never neither.
+  attachmentUrl?: string;
+  attachmentName?: string;
 }
 
 // Emotes

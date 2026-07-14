@@ -5,10 +5,10 @@ import { api } from '@/services/api';
 interface ChannelChatEmitters {
   emitChannelJoin: (channelId: string) => void;
   emitChannelLeave: (channelId: string) => void;
-  emitChannelMessageSend: (channelId: string, text: string, parentId?: string) => void;
+  emitChannelMessageSend: (channelId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string) => void;
   emitDmJoin: (conversationId: string) => void;
   emitDmLeave: (conversationId: string) => void;
-  emitDmMessageSend: (conversationId: string, text: string, parentId?: string) => void;
+  emitDmMessageSend: (conversationId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string) => void;
 }
 
 function targetKey(target: { type: 'channel' | 'dm'; id: string }): string {
@@ -102,10 +102,10 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
   const activeMessages = activeChatTarget ? messagesByTarget[targetKey(activeChatTarget)] ?? [] : [];
 
   const sendMessage = useCallback(
-    (text: string, parentId?: string) => {
+    (text: string, parentId?: string, attachment?: { url: string; fileName: string }) => {
       if (!activeChatTarget) return;
-      if (activeChatTarget.type === 'channel') emitters.emitChannelMessageSend(activeChatTarget.id, text, parentId);
-      else emitters.emitDmMessageSend(activeChatTarget.id, text, parentId);
+      if (activeChatTarget.type === 'channel') emitters.emitChannelMessageSend(activeChatTarget.id, text, parentId, attachment?.url, attachment?.fileName);
+      else emitters.emitDmMessageSend(activeChatTarget.id, text, parentId, attachment?.url, attachment?.fileName);
     },
     [activeChatTarget, emitters]
   );

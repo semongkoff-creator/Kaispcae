@@ -247,9 +247,13 @@ export interface GameState {
 
   // Nudge ("senggol") — same Map-of-most-recent-timestamp shape as
   // jumpingPlayers above, keyed by the player being nudged (the one whose
-  // avatar shakes), not the one who pressed Z.
+  // avatar shakes + gets the spark burst), not the one who pressed Z.
   nudgedPlayers: Map<string, number>;
-  triggerNudge: (playerId: string, timestamp: number) => void;
+  // The nudge GESTURE (see GameCanvas.tsx) shows on the NUDGER's own body
+  // instead — this parallel map is keyed by fromId (who pressed Z), set
+  // together with nudgedPlayers from the same event.
+  nudgerPlayers: Map<string, number>;
+  triggerNudge: (targetId: string, timestamp: number, fromId?: string) => void;
 
   // Recent Activity Feed — a lightweight, client-only log of room events
   // (join/leave, media added, notice pinned, recording start/end) built
@@ -569,11 +573,15 @@ export const useGameStore = create<GameState>((set, get) => ({
     }),
 
   nudgedPlayers: new Map(),
-  triggerNudge: (playerId, timestamp) =>
+  nudgerPlayers: new Map(),
+  triggerNudge: (targetId, timestamp, fromId) =>
     set((state) => {
-      const next = new Map(state.nudgedPlayers);
-      next.set(playerId, timestamp);
-      return { nudgedPlayers: next };
+      const nextTargets = new Map(state.nudgedPlayers);
+      nextTargets.set(targetId, timestamp);
+      if (!fromId) return { nudgedPlayers: nextTargets };
+      const nextNudgers = new Map(state.nudgerPlayers);
+      nextNudgers.set(fromId, timestamp);
+      return { nudgedPlayers: nextTargets, nudgerPlayers: nextNudgers };
     }),
 
   activityEvents: [],

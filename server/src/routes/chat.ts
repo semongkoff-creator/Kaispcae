@@ -70,6 +70,8 @@ function toMessageDto(m: {
   senderId: string;
   sender: { displayName: string };
   text: string;
+  attachmentUrl?: string | null;
+  attachmentName?: string | null;
   createdAt: Date;
   _count?: { replies: number };
 }): ChannelMessage {
@@ -81,6 +83,8 @@ function toMessageDto(m: {
     senderId: m.senderId,
     senderName: m.sender.displayName,
     text: m.text,
+    attachmentUrl: m.attachmentUrl ?? undefined,
+    attachmentName: m.attachmentName ?? undefined,
     createdAt: m.createdAt.getTime(),
     replyCount: m._count?.replies,
   };

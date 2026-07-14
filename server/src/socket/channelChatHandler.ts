@@ -40,6 +40,8 @@ function toMessageDto(m: {
   senderId: string;
   sender: { displayName: string };
   text: string;
+  attachmentUrl: string | null;
+  attachmentName: string | null;
   createdAt: Date;
 }): ChannelMessage {
   return {
@@ -50,8 +52,19 @@ function toMessageDto(m: {
     senderId: m.senderId,
     senderName: m.sender.displayName,
     text: m.text,
+    attachmentUrl: m.attachmentUrl ?? undefined,
+    attachmentName: m.attachmentName ?? undefined,
     createdAt: m.createdAt.getTime(),
   };
+}
+
+// The attachment is always uploaded first via POST /api/uploads (see
+// routes/uploads.ts), which only ever hands back a same-origin
+// /api/uploads/<uuid+ext> path — never trust the client's attachmentUrl
+// as-is, or it could plant an arbitrary external URL (phishing/tracking
+// pixel) dressed up as a chat attachment.
+function isValidAttachmentUrl(url: unknown): url is string {
+  return typeof url === 'string' && /^\/api\/uploads\/[a-zA-Z0-9-]+\.[a-zA-Z0-9]{1,10}$/.test(url);
 }
 
 // Persisted Channel/DM/Thread chat. Self-contained, like followHandler.ts's
@@ -87,11 +100,14 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
     if (typeof conversationId === 'string' && conversationId) socket.leave(`dm:${conversationId}`);
   });
 
-  socket.on(SocketEvents.CHANNEL_MESSAGE_SEND, async (payload: { channelId: string; text: string; parentId?: string }) => {
+  socket.on(SocketEvents.CHANNEL_MESSAGE_SEND, async (payload: { channelId: string; text: string; parentId?: string; attachmentUrl?: string; attachmentName?: string }) => {
     const userId = socket.data.userId as string | undefined;
     if (!userId || !canSendChannelChat(userId)) return;
     const text = sanitizeChat(payload?.text || '');
-    if (!text || !payload?.channelId) return;
+    const hasAttachment = isValidAttachmentUrl(payload?.attachmentUrl);
+    // A message needs SOME content — text, an attachment, or both — never
+    // neither (an empty attachment-less send is just a no-op click).
+    if ((!text && !hasAttachment) || !payload?.channelId) return;
 
     try {
       const prisma = getPrisma();
@@ -112,6 +128,8 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
           parentId: payload.parentId || null,
           senderId: userId,
           text,
+          attachmentUrl: hasAttachment ? payload.attachmentUrl : null,
+          attachmentName: hasAttachment ? (payload.attachmentName || '').slice(0, 200) || null : null,
         },
         include: { sender: { select: { displayName: true } } },
       });
@@ -121,11 +139,12 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
     }
   });
 
-  socket.on(SocketEvents.DM_MESSAGE_SEND, async (payload: { conversationId: string; text: string; parentId?: string }) => {
+  socket.on(SocketEvents.DM_MESSAGE_SEND, async (payload: { conversationId: string; text: string; parentId?: string; attachmentUrl?: string; attachmentName?: string }) => {
     const userId = socket.data.userId as string | undefined;
     if (!userId || !canSendChannelChat(userId)) return;
     const text = sanitizeChat(payload?.text || '');
-    if (!text || !payload?.conversationId) return;
+    const hasAttachment = isValidAttachmentUrl(payload?.attachmentUrl);
+    if ((!text && !hasAttachment) || !payload?.conversationId) return;
 
     try {
       const prisma = getPrisma();
@@ -147,6 +166,8 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
           parentId: payload.parentId || null,
           senderId: userId,
           text,
+          attachmentUrl: hasAttachment ? payload.attachmentUrl : null,
+          attachmentName: hasAttachment ? (payload.attachmentName || '').slice(0, 200) || null : null,
         },
         include: { sender: { select: { displayName: true } } },
       });

@@ -26,10 +26,10 @@ export function MicButton({ muted, onToggle }: MicButtonProps) {
       onClick={onToggle}
       onMouseEnter={() => setShowLabel(true)}
       onMouseLeave={() => setShowLabel(false)}
-      className="relative flex items-center justify-center w-12 h-12 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-lg transition-all hover:scale-105 cursor-pointer"
+      className="relative flex items-center justify-center w-9 h-9 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-lg transition-all hover:scale-105 cursor-pointer"
       title="Toggle Microphone (M)"
     >
-      {muted ? <MicMuteFill className="text-red-500" size={20} /> : <MicFill className="text-purple-700 dark:text-purple-300" size={20} />}
+      {muted ? <MicMuteFill className="text-red-500" size={15} /> : <MicFill className="text-purple-700 dark:text-purple-300" size={15} />}
       {muted && (
         <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-pulse" />
       )}

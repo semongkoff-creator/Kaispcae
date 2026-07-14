@@ -27,7 +27,17 @@ const allowedMimeTypes = new Set([
   'text/plain', 'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo',
 ]);
+
+// Browsers don't consistently report the "correct" IANA mime type for every
+// extension — Windows Chrome in particular sends .zip as
+// application/x-zip-compressed (confirmed via direct testing), not
+// application/zip, so a mime-only check rejected legitimate zip uploads
+// outright. Accepting by EITHER a known-good mime type OR the file
+// extension (checked below) closes that gap without loosening what's
+// actually allowed — still no svg/html/js either way.
+const allowedExtensions = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.zip', '.txt', '.doc', '.docx', '.xlsx', '.mp4', '.webm', '.mov', '.avi']);
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
@@ -39,9 +49,10 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB — raised from 10MB so short video clips fit
   fileFilter: (_req, file, cb) => {
-    cb(null, allowedMimeTypes.has(file.mimetype));
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, allowedMimeTypes.has(file.mimetype) || allowedExtensions.has(ext));
   },
 });
 
@@ -83,8 +94,8 @@ uploads.get('/uploads/:filename', (req: Request, res: Response) => {
 
   res.setHeader('X-Content-Type-Options', 'nosniff');
   const ext = path.extname(filename).toLowerCase();
-  const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
-  res.setHeader('Content-Disposition', isImage ? 'inline' : 'attachment');
+  const isInlineable = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.webm', '.mov', '.avi'].includes(ext);
+  res.setHeader('Content-Disposition', isInlineable ? 'inline' : 'attachment');
   return res.sendFile(filePath);
 });
 

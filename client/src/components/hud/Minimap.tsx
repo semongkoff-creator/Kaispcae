@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Avatar, RoomTile, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 
@@ -45,6 +45,10 @@ function drawTileType(ctx: CanvasRenderingContext2D, type: RoomTile['type'], x: 
 export function Minimap({ players, localPlayerId, onTeleport, visible }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const tiles = useGameStore((s) => s.tiles);
+  // Faded out (just a subtle presence) until hovered, then fades in to full
+  // opacity — a permanently-opaque floor plan sitting over the game world
+  // reads as visual clutter once you're not actively using it to navigate.
+  const [isHovered, setIsHovered] = useState(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -106,6 +110,11 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
   }, [players, localPlayerId]);
 
   const handleClick = (e: React.MouseEvent) => {
+    // Belt-and-suspenders — you can't actually click this without the mouse
+    // having entered it first (which already set isHovered), but guarding
+    // here too means the "must hover before it's interactive" rule holds
+    // even if a click somehow fires without a prior mouseenter.
+    if (!isHovered) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const clickX = (e.clientX - rect.left) / rect.width * MM_W;
@@ -120,11 +129,17 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
     // right-aligned with it and with a clear gap — not beside it, where its
     // near-white background used to visually fuse with the button into what
     // looked like one big blank panel.
-    <div className="absolute bottom-16 right-4 z-30">
+    <div
+      className="absolute bottom-16 right-4 z-30"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
       <canvas
         ref={canvasRef}
         onClick={handleClick}
-        className="rounded-lg border border-purple-200 dark:border-gray-600 shadow-sm cursor-crosshair"
+        className={`rounded-lg border border-purple-200 dark:border-gray-600 shadow-sm transition-opacity duration-200 ${
+          isHovered ? 'opacity-100 cursor-crosshair' : 'opacity-30 cursor-default'
+        }`}
       />
     </div>
   );

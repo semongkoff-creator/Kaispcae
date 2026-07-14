@@ -93,3 +93,17 @@ export function notifyNewMessage(senderName: string, text: string): void {
   new Notification(senderName, { body: text, tag: 'meetkai-chat' });
   if (settings.soundOn) playNotificationSound();
 }
+
+// Called only for the player actually being nudged (see useSocket.ts's
+// PLAYER_NUDGE handler) — same background-tab-only rule as chat above, so
+// someone who's switched to another tab/app still gets pulled back via the
+// OS's own notification popup+sound instead of just an in-game blip they'd
+// have no way to hear/see.
+export function notifyNudge(nudgerName: string): void {
+  if (document.visibilityState === 'visible') return;
+  const settings = getNotificationSettings();
+  if (!settings.browserNotifOn || !isNotificationSupported() || Notification.permission !== 'granted') return;
+
+  new Notification('Disenggol!', { body: `${nudgerName} menyenggolmu`, tag: 'meetkai-nudge' });
+  if (settings.soundOn) playNotificationSound();
+}

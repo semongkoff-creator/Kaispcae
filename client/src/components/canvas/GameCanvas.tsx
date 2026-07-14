@@ -167,6 +167,34 @@ interface GameCanvasProps {
 
 const MEDIA_ICON: Record<string, string> = { image: '🖼️', youtube: '▶️', whiteboard: '📝', file: '📎' };
 
+// How long the nudge-impact spark burst stays on screen — longer than
+// NUDGE_DURATION_MS (the shake) since the burst reads better lingering a
+// bit after the shake itself has settled.
+const NUDGE_FX_DURATION_MS = 600;
+const NUDGE_SPARK_COUNT = 8;
+
+// Hand gesture shown on the NUDGER's own body (not the target) — a fist
+// bump reads as the closest match to "senggol" itself, and deliberately
+// isn't a single-finger pointing hand (👉).
+const NUDGE_GESTURE = '👊';
+
+// A small 4-point star ("spark"), used by the nudge burst effect above —
+// plain canvas vector shapes instead of an emoji glyph so the look doesn't
+// depend on the browser/OS having a color emoji font installed.
+function drawSpark(ctx: CanvasRenderingContext2D, x: number, y: number, size: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x, y - size);
+  ctx.lineTo(x + size * 0.35, y - size * 0.35);
+  ctx.lineTo(x + size, y);
+  ctx.lineTo(x + size * 0.35, y + size * 0.35);
+  ctx.lineTo(x, y + size);
+  ctx.lineTo(x - size * 0.35, y + size * 0.35);
+  ctx.lineTo(x - size, y);
+  ctx.lineTo(x - size * 0.35, y - size * 0.35);
+  ctx.closePath();
+  ctx.fill();
+}
+
 // Jump — a one-shot vertical hop (half a sine arc: 0 -> -JUMP_HEIGHT_PX -> 0),
 // added on top of the normal walk-bob offset below. Returns 0 once
 // JUMP_DURATION_MS has elapsed, so a stale/never-cleared jumpingPlayers
@@ -211,6 +239,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const theme = useGameStore((s) => s.theme);
   const followInfo = useGameStore((s) => s.followInfo);
+  // Reactive (not just useGameStore.getState()) so a nudge landing while
+  // nothing else on screen happens to be re-rendering still triggers one —
+  // otherwise the ref below (and the shake/pop effect it drives) can go
+  // stale until some unrelated state change happens to re-render GameCanvas.
+  const nudgedPlayers = useGameStore((s) => s.nudgedPlayers);
+  const nudgerPlayers = useGameStore((s) => s.nudgerPlayers);
 
   const tilesRef = useRef(tiles);
   const themeRef = useRef(theme);
@@ -221,7 +255,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const bubblesRef = useRef(useGameStore.getState().speechBubbles);
   const emotesRef = useRef(useGameStore.getState().emoteEvents);
   const jumpingPlayersRef = useRef(useGameStore.getState().jumpingPlayers);
-  const nudgedPlayersRef = useRef(useGameStore.getState().nudgedPlayers);
+  const nudgedPlayersRef = useRef(nudgedPlayers);
+  const nudgerPlayersRef = useRef(nudgerPlayers);
   const zones = useGameStore((s) => s.zones);
   const zonesRef = useRef(zones);
   // Labeled zones render a DOM banner positioned imperatively (via transform,
@@ -249,7 +284,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     bubblesRef.current = useGameStore.getState().speechBubbles;
     emotesRef.current = useGameStore.getState().emoteEvents;
     jumpingPlayersRef.current = useGameStore.getState().jumpingPlayers;
-    nudgedPlayersRef.current = useGameStore.getState().nudgedPlayers;
+    nudgedPlayersRef.current = nudgedPlayers;
+    nudgerPlayersRef.current = nudgerPlayers;
     zonesRef.current = zones;
     furnitureRef.current = furniture;
     mediaObjectsRef.current = mediaObjects;
@@ -334,43 +370,32 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     emitSitRef.current(true, chairCenterX, chairCenterY, sitDirection);
   }, []);
 
-  // Nudge ("senggol", Z key) — finds whoever's roughly in front of the
-  // local player and asks the server to relay a nudge at them. No local
-  // trigger here: unlike Jump (which animates the presser's own avatar and
-  // so needs zero-latency local feedback), the visual effect lands on the
-  // TARGET, so waiting for the server's broadcast — which reaches the
-  // nudger too, see movementHandler.ts's io.to() — is both simpler (one
-  // code path drives the animation for everyone, including the nudger) and
-  // in practice instant on a same-room socket round trip.
+  // Nudge ("senggol", Z key) — finds whoever's closest to the local player
+  // and asks the server to relay a nudge at them. No local trigger here:
+  // unlike Jump (which animates the presser's own avatar and so needs
+  // zero-latency local feedback), the visual effect lands on the TARGET, so
+  // waiting for the server's broadcast — which reaches the nudger too, see
+  // movementHandler.ts's io.to() — is both simpler (one code path drives
+  // the animation for everyone, including the nudger) and in practice
+  // instant on a same-room socket round trip.
   //
-  // Deliberately NOT an exact-tile match: unlike sitting (where collision
-  // physically stops you at a fixed furniture tile), other players aren't
-  // grid-snapped at all — two people who've walked up "next to" each other
-  // almost never land on exactly the same tile row/column, they're a few
-  // continuous pixels off. Requiring an exact tile match meant nudge almost
-  // never found anyone in practice. Instead: is the target roughly ahead in
-  // the direction I'm facing (within NUDGE_RANGE_PX), and not too far off to
-  // the side (within NUDGE_LANE_PX)?
+  // Deliberately NOT direction-gated: an earlier version only counted
+  // someone standing strictly ahead of the local player's facing direction,
+  // but two people who've walked up to chat almost always end up standing
+  // SIDE BY SIDE facing the same way (e.g. both facing the camera), not one
+  // behind the other — that layout has zero "forward" distance between
+  // them, so the direction check silently found no target every time.
+  // Plain nearest-within-range matches how "senggol" actually gets used.
   const performNudge = useCallback(() => {
     const player = localPlayerRef.current;
     const NUDGE_RANGE_PX = TILE_SIZE * 1.5;
-    const NUDGE_LANE_PX = TILE_SIZE * 0.75;
 
     let target: Avatar | null = null;
     let bestDist = Infinity;
     for (const p of Object.values(playerRecordsRef.current)) {
-      const dx = p.x - player.x;
-      const dy = p.y - player.y;
-      let forward = 0;
-      let lane = 0;
-      switch (player.direction) {
-        case 'up': forward = -dy; lane = dx; break;
-        case 'down': forward = dy; lane = dx; break;
-        case 'left': forward = -dx; lane = dy; break;
-        case 'right': forward = dx; lane = dy; break;
-      }
-      if (forward <= 0 || forward > NUDGE_RANGE_PX || Math.abs(lane) > NUDGE_LANE_PX) continue;
-      if (forward < bestDist) { bestDist = forward; target = p; }
+      const dist = Math.hypot(p.x - player.x, p.y - player.y);
+      if (dist > NUDGE_RANGE_PX) continue;
+      if (dist < bestDist) { bestDist = dist; target = p; }
     }
     if (!target) return;
     emitNudgeRef.current(target.id);
@@ -802,10 +827,52 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const isLocal = avatar.id === localPlayerId;
       const bobOffset = isLocal ? walkOffset : avatar.isMoving ? Math.sin(timestamp * 0.008 + (avatar.id.charCodeAt(0) || 0) * 0.1) * 2 : 0;
       const jumpOffset = getJumpOffset(jumpingPlayersRef.current.get(avatar.id), now);
-      const nudgeOffset = getNudgeShakeOffset(nudgedPlayersRef.current.get(avatar.id), now);
+      const nudgeStart = nudgedPlayersRef.current.get(avatar.id);
+      const nudgeOffset = getNudgeShakeOffset(nudgeStart, now);
       drawAvatar(ctx, { avatar, x: sx + nudgeOffset, y: sy, isLocal, timestamp,
         walkAnimOffset: bobOffset + jumpOffset,
       });
+
+      // Nudge ("senggol") impact effect — a burst of small orange sparks
+      // radiating outward AROUND the target (not a single icon floating
+      // above the head), separate from (but driven by the same timestamp
+      // as) the shake offset above since the burst reads better lasting a
+      // bit longer than the shake itself.
+      if (nudgeStart !== undefined) {
+        const nudgeElapsed = now - nudgeStart;
+        if (nudgeElapsed >= 0 && nudgeElapsed <= NUDGE_FX_DURATION_MS) {
+          const t = nudgeElapsed / NUDGE_FX_DURATION_MS;
+          const burstRadius = AVATAR_RADIUS + 4 + t * 20;
+          ctx.save();
+          ctx.globalAlpha = 1 - t;
+          ctx.fillStyle = '#FFA726';
+          for (let i = 0; i < NUDGE_SPARK_COUNT; i++) {
+            const angle = (i / NUDGE_SPARK_COUNT) * Math.PI * 2 + t * 1.2;
+            const px = sx + Math.cos(angle) * burstRadius;
+            const py = sy + Math.sin(angle) * burstRadius * 0.8;
+            drawSpark(ctx, px, py, 5 * (1 - t * 0.5));
+          }
+          ctx.restore();
+        }
+      }
+
+      // The gesture itself shows on the NUDGER's own body (whoever pressed
+      // Z), not floating above the target's head — a fist-bump right over
+      // their torso, popping/fading on the same timeline as the burst.
+      const nudgerStart = nudgerPlayersRef.current.get(avatar.id);
+      if (nudgerStart !== undefined) {
+        const nudgerElapsed = now - nudgerStart;
+        if (nudgerElapsed >= 0 && nudgerElapsed <= NUDGE_FX_DURATION_MS) {
+          const t = nudgerElapsed / NUDGE_FX_DURATION_MS;
+          const gestureScale = 1 + 0.4 * Math.sin(t * Math.PI);
+          ctx.save();
+          ctx.globalAlpha = 1 - t;
+          ctx.font = `${Math.round(20 * gestureScale)}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText(NUDGE_GESTURE, sx, sy - 4);
+          ctx.restore();
+        }
+      }
 
       // Crown for admin players
       if (avatar.isAdmin) {
