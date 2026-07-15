@@ -275,6 +275,31 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
     console.log(`[room] ${newPlayer.name} (${socket.id}) uid=${uid} ${isAdmin ? isMasterAdmin ? '⭐' : '👑' : ''} joined ${room}`);
 
+    // Evict any stale entries for the SAME account (uid) before adding this
+    // one — a reconnect or refresh comes in on a brand-new socket.id, so the
+    // previous socket's player entry lingers in the room store until its own
+    // 'disconnect' fires, which can be tens of seconds later (ping timeout)
+    // or never (hard network drop). Without this, every reconnect stacks
+    // another "ghost" avatar of the same person (the reported 15 identical
+    // players bug). One account = one avatar per room: drop the old entries
+    // now and tell everyone (including this socket) to remove those ghost
+    // ids. Guests (uid === socket.id) never collide, so they're unaffected.
+    try {
+      const existing = await getPlayers(room);
+      for (const ghost of existing) {
+        if (ghost.userId === uid && ghost.id !== socket.id) {
+          await removePlayer(room, ghost.id);
+          io.to(room).emit(SocketEvents.PLAYER_LEFT, ghost.id);
+          // Also detach the ghost socket from the room if it somehow still
+          // lingers, so it stops receiving/echoing room traffic.
+          const ghostSock = io.sockets.sockets.get(ghost.id);
+          if (ghostSock) ghostSock.leave(room);
+        }
+      }
+    } catch (e) {
+      console.warn('[room] failed to evict stale player entries:', e);
+    }
+
     socket.to(room).emit(SocketEvents.PLAYER_JOINED, newPlayer);
     broadcastRoomCount(io, room);
 
