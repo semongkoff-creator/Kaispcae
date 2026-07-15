@@ -324,7 +324,7 @@ function addBanner(furniture: Furniture[], x: number, y: number, tilesW: number,
  * lounge, so those get plain decorative Furniture banners for their labels
  * instead (Team A-D, Focus Zone, LOUNGE, the entrance welcome banner).
  */
-export function createDefaultOfficeLayout(theme: RoomTheme = 'modern-interiors'): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
+export function createDefaultOfficeLayout(theme: RoomTheme = 'scifi-office'): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
   const tiles: RoomTile[][] = [];
   for (let y = 0; y < MAP_HEIGHT; y++) {
     const row: RoomTile[] = [];
@@ -561,7 +561,7 @@ export function createDefaultOfficeLayout(theme: RoomTheme = 'modern-interiors')
  *   │        ENTRANCE / RECEPTION (2,33) 46x2          │
  *   └───────────────────────────────────────────────────┘
  */
-export function createSmallTeamLayout(theme: RoomTheme = 'modern-interiors'): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
+export function createSmallTeamLayout(theme: RoomTheme = 'scifi-office'): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
   const tiles: RoomTile[][] = [];
   for (let y = 0; y < MAP_HEIGHT; y++) {
     const row: RoomTile[] = [];
@@ -648,7 +648,7 @@ export function createSmallTeamLayout(theme: RoomTheme = 'modern-interiors'): { 
  *   │        ENTRANCE / RECEPTION (2,33) 46x2            │
  *   └─────────────────────────────────────────────────────┘
  */
-export function createLoungeLayout(theme: RoomTheme = 'modern-interiors'): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
+export function createLoungeLayout(theme: RoomTheme = 'scifi-office'): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
   const tiles: RoomTile[][] = [];
   for (let y = 0; y < MAP_HEIGHT; y++) {
     const row: RoomTile[] = [];
@@ -740,7 +740,7 @@ export const ROOM_TEMPLATES: { id: RoomTemplateId; name: string; description: st
 
 export function createRoomLayoutFromTemplate(
   templateId: RoomTemplateId | undefined,
-  theme: RoomTheme = 'modern-interiors',
+  theme: RoomTheme = 'scifi-office',
 ): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
   switch (templateId) {
     case 'small-team': return createSmallTeamLayout(theme);

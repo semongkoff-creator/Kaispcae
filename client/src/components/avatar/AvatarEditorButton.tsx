@@ -13,9 +13,9 @@ export function AvatarEditorButton({ onClick, variant = 'standalone' }: AvatarEd
       <button
         onClick={onClick}
         title="Edit Avatar"
-        className="w-10 h-10 rounded-lg flex items-center justify-center text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-700 transition-all cursor-pointer"
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-700 transition-all cursor-pointer"
       >
-        <PencilFill size={16} />
+        <PencilFill size={14} />
       </button>
     );
   }

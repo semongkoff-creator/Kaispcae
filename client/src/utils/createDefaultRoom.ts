@@ -19,7 +19,7 @@ const AVATAR_COLORS = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a786df', '#6bcb77', '#
  * comment), and RoomEditor.tsx's "Reset to Default", which passes the
  * room's own actual template so resetting doesn't silently discard it.
  */
-export function createDefaultRoom(templateId: RoomTemplateId, name: string, theme: RoomTheme = 'modern-interiors') {
+export function createDefaultRoom(templateId: RoomTemplateId, name: string, theme: RoomTheme = 'scifi-office') {
   const { tiles, furniture, zones } = createRoomLayoutFromTemplate(templateId, theme);
 
   // Place a default local player on the layout's actual spawn tile — not a

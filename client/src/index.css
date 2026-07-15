@@ -24,3 +24,20 @@ textarea {
   user-select: text;
   -webkit-user-select: text;
 }
+
+/* Soft entrance for transient UI (video tiles, toasts) — the `animate-fade-in`
+   utility is referenced in several components (VideoGrid, the nudge toast in
+   App.tsx) but was never actually defined, so it was silently a no-op until
+   now. A gentle fade + slight rise reads as "something just appeared" without
+   being distracting. */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.22s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in { animation: none; }
+}

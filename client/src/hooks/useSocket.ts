@@ -415,13 +415,21 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     });
 
     socket.on(SocketEvents.PLAYER_NUDGE, (event: NudgeEvent) => {
-      useGameStore.getState().triggerNudge(event.targetId, event.timestamp, event.fromId);
-      playNudgeSound();
-      // This broadcasts to the whole room (everyone hears the ambient
-      // blip), but the OS-level notification is only for the actual
-      // target — otherwise every bystander would get pinged too.
-      if (event.targetId === useGameStore.getState().localPlayerId) {
-        const nudgerName = useGameStore.getState().playerRecords[event.fromId]?.name ?? 'Someone';
+      const state = useGameStore.getState();
+      state.triggerNudge(event.targetId, event.timestamp, event.fromId);
+      const isMe = event.targetId === state.localPlayerId;
+      // Everyone in the room hears an ambient blip (so a nudge nearby is
+      // audible); the actual target hears a stronger, doubled version so it
+      // clearly reads as "someone poked YOU", not just ambient noise. Both
+      // respect the user's sound setting (see playNudgeSound).
+      playNudgeSound(isMe);
+      if (isMe) {
+        const nudgerName = state.playerRecords[event.fromId]?.name ?? 'Seseorang';
+        // In-app toast — shows even while the tab is focused, which the
+        // OS-level notification below deliberately does not (it only fires
+        // when the tab is in the background, to avoid double-pinging someone
+        // already looking at the screen).
+        state.setNudgedBy(nudgerName);
         notifyNudge(nudgerName);
       }
     });

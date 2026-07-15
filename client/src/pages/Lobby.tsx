@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { TrashFill, InfoCircle, SunFill, MoonFill } from 'react-bootstrap-icons';
+import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight } from 'react-bootstrap-icons';
 import { io } from 'socket.io-client';
 import { RoomTheme, RoomTemplateId, ROOM_TEMPLATES } from '@virtualmeet/shared';
 import { api, RoomInfo } from '@/services/api';
@@ -15,12 +15,7 @@ interface LobbyProps {
   onToggleTheme: () => void;
 }
 
-// Small preview images for the theme picker below — one representative
-// state per theme, not the actual in-game crop (that's PALETTE_BY_THEME in
-// themeAssets.ts). "icon" is a state Machines/arcade.rsi ships specifically
-// as a standalone representative image (its meta.json literally has an
-// "icon" state distinct from the in-game "arcade" state), which is exactly
-// what a small picker thumbnail wants.
+// Small preview images for the theme picker — one representative crop per theme.
 const THEME_OPTIONS: { value: RoomTheme; label: string; preview: string }[] = [
   { value: 'modern-interiors', label: 'Modern Interiors', preview: '/assets/tilesets/modern-office/Modern_Office_Singles_32x32/Modern_Office_Singles_32x32_205.png' },
   { value: 'scifi-office', label: 'Sci-Fi Office', preview: '/assets/tilesets/scifi-office/Machines/arcade.rsi/icon.png' },
@@ -28,11 +23,20 @@ const THEME_OPTIONS: { value: RoomTheme; label: string; preview: string }[] = [
 
 export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: LobbyProps) {
   const isAdmin = user.accountRole === 'admin';
+  // Initials for the header avatar chip — first letters of the first two
+  // words (e.g. "Budi Santoso" → "BS"), or the first two characters for a
+  // single-word name. Falls back to "?" if the display name is somehow empty.
+  const userInitials = (() => {
+    const parts = user.displayName.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return '?';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  })();
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [roomName, setRoomName] = useState('');
-  const [roomTheme, setRoomTheme] = useState<RoomTheme>('modern-interiors');
+  const [roomTheme, setRoomTheme] = useState<RoomTheme>('scifi-office');
   const [roomTemplate, setRoomTemplate] = useState<RoomTemplateId>('main-office');
   const [joinCode, setJoinCode] = useState('');
   const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
@@ -92,19 +96,40 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
   };
 
   return (
-    <div className="w-screen min-h-screen bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-950 text-gray-900 dark:text-gray-100">
-      <header className="px-6 py-4 flex items-center justify-between border-b border-purple-100 dark:border-gray-800">
-        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">VirtualMeet</h1>
-        <div className="flex items-center gap-3">
+    <div className="w-screen h-screen overflow-y-auto bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-950 text-gray-900 dark:text-gray-100">
+      <header className="px-6 py-3.5 flex items-center justify-between border-b border-purple-100 dark:border-gray-800 backdrop-blur-sm">
+        <h1 className="text-xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
+          Virtual<span className="text-purple-600 dark:text-purple-400">Meet</span>
+        </h1>
+        <div className="flex items-center gap-2">
           <button
             onClick={onToggleTheme}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            className="w-8 h-8 rounded-full bg-purple-50 dark:bg-gray-800 flex items-center justify-center text-purple-700 dark:text-purple-300 cursor-pointer"
+            className="w-9 h-9 rounded-full border border-purple-100 dark:border-gray-700 bg-white/70 dark:bg-gray-800/70 flex items-center justify-center text-purple-600 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-700 hover:border-purple-300 dark:hover:border-gray-600 transition-colors cursor-pointer"
           >
-            {theme === 'dark' ? <SunFill size={13} /> : <MoonFill size={13} />}
+            {theme === 'dark' ? <SunFill size={14} /> : <MoonFill size={14} />}
           </button>
-          <span className="text-gray-500 dark:text-gray-400 text-sm">{user.displayName}</span>
-          <button onClick={onLogout} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-sm cursor-pointer">Logout</button>
+
+          {/* User chip: initials avatar + name + role badge */}
+          <div className="flex items-center gap-2.5 pl-1 pr-2.5 py-1 rounded-full border border-purple-100 dark:border-gray-700 bg-white/70 dark:bg-gray-800/70">
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-[11px] font-bold shrink-0 shadow-sm">
+              {userInitials}
+            </div>
+            <div className="flex flex-col leading-none">
+              <span className="text-gray-800 dark:text-gray-100 text-sm font-medium max-w-[9rem] truncate">{user.displayName}</span>
+              <span className={`text-[10px] font-semibold uppercase tracking-wide mt-0.5 ${isAdmin ? 'text-purple-500 dark:text-purple-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                {isAdmin ? 'Admin' : 'Member'}
+              </span>
+            </div>
+          </div>
+
+          <button
+            onClick={onLogout}
+            title="Logout"
+            className="w-9 h-9 rounded-full border border-transparent text-gray-400 dark:text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 hover:border-red-200 dark:hover:border-red-800 flex items-center justify-center transition-colors cursor-pointer"
+          >
+            <BoxArrowRight size={16} />
+          </button>
         </div>
       </header>
       <main className="max-w-4xl mx-auto px-6 py-8">

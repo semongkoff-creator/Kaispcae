@@ -255,6 +255,14 @@ export interface GameState {
   nudgerPlayers: Map<string, number>;
   triggerNudge: (targetId: string, timestamp: number, fromId?: string) => void;
 
+  // Name of whoever last nudged ME (the local player) — drives a transient
+  // on-screen toast (see App.tsx), so being nudged is obvious even while the
+  // tab is focused, when the OS-level notification (browserNotifications.ts)
+  // deliberately stays silent. Same one-shot-then-auto-clear pattern as
+  // summonResult above.
+  nudgedBy: string | null;
+  setNudgedBy: (name: string | null) => void;
+
   // Recent Activity Feed — a lightweight, client-only log of room events
   // (join/leave, media added, notice pinned, recording start/end) built
   // entirely from socket events this client already receives (see
@@ -406,7 +414,7 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   roomId: 'default',
   roomName: 'Default Room',
-  theme: 'modern-interiors',
+  theme: 'scifi-office',
   roomTemplate: undefined,
 
   isConnected: false,
@@ -583,6 +591,9 @@ export const useGameStore = create<GameState>((set, get) => ({
       nextNudgers.set(fromId, timestamp);
       return { nudgedPlayers: nextTargets, nudgerPlayers: nextNudgers };
     }),
+
+  nudgedBy: null,
+  setNudgedBy: (name) => set({ nudgedBy: name }),
 
   activityEvents: [],
   addActivity: (message) =>

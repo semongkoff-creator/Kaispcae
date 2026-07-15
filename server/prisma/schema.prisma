@@ -41,7 +41,7 @@ model Room {
   // Which curated asset set the room renders with — see RoomTheme in
   // shared/types/index.ts. Default keeps every room created before this
   // field existed rendering exactly as before.
-  theme       String       @default("modern-interiors")
+  theme       String       @default("scifi-office")
   // Which layout this room was created with (see shared/defaultRoomLayout.ts's
   // ROOM_TEMPLATES) — null for rooms created before this field existed, or
   // if none was specified (both cases fall back to 'main-office' at the

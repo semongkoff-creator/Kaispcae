@@ -114,7 +114,7 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
       return res.status(403).json({ error: 'Only admin accounts can create rooms' });
     }
 
-    const { name, maxPlayers = 50, isPublic = true, theme = 'modern-interiors', template } = req.body;
+    const { name, maxPlayers = 50, isPublic = true, theme = 'scifi-office', template } = req.body;
     const slug = generateSlug(name);
 
     // Seed with a real office layout (walls, desk clusters, a meeting room,

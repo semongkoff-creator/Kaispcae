@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { GearFill, Clipboard, Link45deg, PersonWalking, X, MagnetFill } from 'react-bootstrap-icons';
+import { GearFill, Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill } from 'react-bootstrap-icons';
 import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -325,6 +325,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     const timer = setTimeout(() => useGameStore.getState().setSummonResult(null), 3000);
     return () => clearTimeout(timer);
   }, [summonResult]);
+
+  // "Kamu disenggol!" toast — set by useSocket.ts's PLAYER_NUDGE handler
+  // only when I'm the target; auto-clears after a few seconds, same one-shot
+  // ping pattern as summonResult above.
+  const nudgedBy = useGameStore((s) => s.nudgedBy);
+  useEffect(() => {
+    if (!nudgedBy) return;
+    const timer = setTimeout(() => useGameStore.getState().setNudgedBy(null), 3000);
+    return () => clearTimeout(timer);
+  }, [nudgedBy]);
 
   const incomingFollowRequest = useGameStore((s) => s.incomingFollowRequest);
   useEffect(() => {
@@ -683,6 +693,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             {followResult.accepted
               ? `${followResult.targetName} accepted your follow request`
               : `${followResult.targetName} ${describeConsentDecline(followResult.reason)} your follow request`}
+          </div>
+        )}
+        {nudgedBy && (
+          <div className="bg-amber-500/95 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-2 animate-fade-in">
+            <HandIndexThumbFill size={14} />
+            <span className="font-bold">{nudgedBy}</span> menyenggolmu!
           </div>
         )}
       </div>

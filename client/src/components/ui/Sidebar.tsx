@@ -115,9 +115,9 @@ export function Sidebar({
   // in the same spot a user would already be looking.
   if (simplifiedView) {
     return (
-      <div className="absolute left-0 top-0 h-full w-14 z-50 flex flex-col items-center py-4 pointer-events-none">
+      <div className="absolute left-0 top-0 h-full w-12 z-50 flex flex-col items-center py-3 pointer-events-none">
         <SidebarIcon title="Show UI" onClick={onToggleSimplifiedView} className="pointer-events-auto bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800 shadow-sm border border-purple-100 dark:border-gray-700">
-          <EyeFill size={16} />
+          <EyeFill size={14} />
         </SidebarIcon>
       </div>
     );
@@ -129,10 +129,10 @@ export function Sidebar({
   };
 
   return (
-    <div className="absolute left-0 top-0 h-full w-14 z-50 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-r border-purple-100 dark:border-gray-700 shadow-sm flex flex-col items-center py-4 gap-1 pointer-events-auto">
+    <div className="absolute left-0 top-0 h-full w-12 z-50 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-r border-purple-100 dark:border-gray-700 shadow-sm flex flex-col items-center py-3 gap-0.5 pointer-events-auto">
       <div className="relative">
         <SidebarIcon title="Room Features" active={showFeaturesMenu} onClick={() => setShowFeaturesMenu((v) => !v)}>
-          <List size={18} />
+          <List size={16} />
         </SidebarIcon>
 
         {showFeaturesMenu && (
@@ -205,7 +205,7 @@ export function Sidebar({
 
       {hasMySeat && (
         <SidebarIcon title="Go to My Seat" onClick={onMySeat}>
-          <span className="text-base leading-none">🪑</span>
+          <span className="text-xs leading-none">🪑</span>
         </SidebarIcon>
       )}
 
@@ -219,24 +219,24 @@ export function Sidebar({
         onClick={onLeaveRoom}
         className="mt-auto text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
       >
-        <HouseDoorFill size={16} />
+        <HouseDoorFill size={14} />
       </SidebarIcon>
       <SidebarIcon
         title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
         onClick={onToggleTheme}
         className="text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
       >
-        {theme === 'dark' ? <SunFill size={16} /> : <MoonFill size={16} />}
+        {theme === 'dark' ? <SunFill size={14} /> : <MoonFill size={14} />}
       </SidebarIcon>
       <SidebarIcon title="Logout" onClick={onLogout} className="text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500">
-        <BoxArrowRight size={16} />
+        <BoxArrowRight size={14} />
       </SidebarIcon>
     </div>
   );
 }
 
 function SidebarDivider() {
-  return <div className="w-8 border-t border-purple-100 dark:border-gray-700 my-1" />;
+  return <div className="w-6 border-t border-purple-100 dark:border-gray-700 my-0.5" />;
 }
 
 function MenuDivider() {
@@ -305,7 +305,7 @@ export function SidebarIcon({
     <button
       onClick={onClick}
       title={title}
-      className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+      className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
         className || (active ? 'bg-purple-600 text-white' : 'text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800')
       }`}
     >
