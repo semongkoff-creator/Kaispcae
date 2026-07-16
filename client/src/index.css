@@ -38,6 +38,21 @@ textarea {
   animation: fade-in 0.22s ease-out both;
 }
 
+/* Quick reactions floating up over a video tile (Meeting View / VideoGrid).
+   The emoji pops in, drifts upward, and fades — same "someone just reacted"
+   language as ZEP/Gather/Meet. Runs once per reaction (keyed by timestamp so
+   a new reaction restarts it). */
+@keyframes reaction-float {
+  0%   { opacity: 0; transform: translateY(4px) scale(0.6); }
+  15%  { opacity: 1; transform: translateY(0) scale(1.15); }
+  30%  { transform: translateY(-4px) scale(1); }
+  100% { opacity: 0; transform: translateY(-42px) scale(1); }
+}
+.animate-reaction-float {
+  animation: reaction-float 2.4s ease-out both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in { animation: none; }
+  .animate-reaction-float { animation: reaction-float 2.4s linear both; }
 }

@@ -189,6 +189,19 @@ export async function updatePlayerStatus(
   }
 }
 
+export async function updatePlayerHand(
+  roomId: string,
+  playerId: string,
+  raised: boolean,
+): Promise<void> {
+  const players = await getPlayers(roomId);
+  const player = players.find((p) => p.id === playerId);
+  if (player) {
+    player.handRaised = raised || undefined;
+    await setPlayers(roomId, players);
+  }
+}
+
 export async function updatePlayerSitting(
   roomId: string,
   playerId: string,

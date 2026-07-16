@@ -31,9 +31,24 @@ const config = getConfig();
 
 const app = express();
 app.use(express.json());
+
+// Allow the configured origin(s) PLUS any localhost / private-LAN address on
+// any port, so friends on the same WiFi can join by opening this machine's
+// LAN URL (http://192.168.x.x:5173) without needing that exact IP added to
+// CORS_ORIGIN by hand. Private ranges only (10/172.16-31/192.168 + loopback)
+// — this never opens the server to arbitrary public origins.
+const LAN_ORIGIN =
+  /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(?::\d+)?$/;
+const configuredOrigins = config.CORS_ORIGIN.split(',').map((s: string) => s.trim());
+const corsOrigin = (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+  // No Origin header (curl, same-origin, native socket clients) → allow.
+  if (!origin || configuredOrigins.includes(origin) || LAN_ORIGIN.test(origin)) return cb(null, true);
+  return cb(null, false);
+};
+
 app.use(
   cors({
-    origin: config.CORS_ORIGIN.split(',').map((s: string) => s.trim()),
+    origin: corsOrigin,
     credentials: true,
   }),
 );
@@ -44,7 +59,7 @@ app.use(rateLimit(config.RATE_LIMIT_WINDOW_MS, config.RATE_LIMIT_MAX));
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: config.CORS_ORIGIN.split(',').map((s: string) => s.trim()),
+    origin: corsOrigin,
     methods: ['GET', 'POST'],
     credentials: true,
   },

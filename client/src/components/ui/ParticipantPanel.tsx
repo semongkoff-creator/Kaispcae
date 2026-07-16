@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, StarFill, ChatDotsFill, PersonDashFill, X } from 'react-bootstrap-icons';
-import { roleAtLeast } from '@virtualmeet/shared';
+import { roleAtLeast, Role } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 
 interface ParticipantPanelProps {
@@ -28,7 +28,23 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
   const followInfo = useGameStore((s) => s.followInfo);
   const followerUserIds = useGameStore((s) => s.followerUserIds);
   const spotlightedUserIds = useGameStore((s) => s.spotlightedUserIds);
+  const localSpeaking = useGameStore((s) => s.localSpeaking);
+  const speakingPlayers = useGameStore((s) => s.speakingPlayers);
   const localRole = useGameStore((s) => s.localRole);
+  const masterAdminUserId = useGameStore((s) => s.masterAdminUserId);
+  const adminPlayerIds = useGameStore((s) => s.adminPlayerIds);
+  const staffPlayerIds = useGameStore((s) => s.staffPlayerIds);
+
+  // A player's live room role (see gameStore's applyAdminChanged) — keyed by
+  // account id, the authoritative source, rather than the per-record isAdmin
+  // flag which isn't refreshed on movement upserts.
+  const roleOf = (userId?: string): Role => {
+    if (!userId) return 'member';
+    if (userId === masterAdminUserId) return 'owner';
+    if (adminPlayerIds.has(userId)) return 'admin';
+    if (staffPlayerIds.has(userId)) return 'staff';
+    return 'member';
+  };
   const canModerate = roleAtLeast(localRole, 'staff');
   const canKick = roleAtLeast(localRole, 'admin');
 
@@ -87,6 +103,9 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
               name={localPlayer.name}
               color={localPlayer.color}
               status={localPlayer.status}
+              handRaised={localPlayer.handRaised}
+              speaking={localSpeaking}
+              role={localRole}
               isLocal
               inCall={false}
               followerCount={followerUserIds.length}
@@ -97,6 +116,9 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
                 name={p.name}
                 color={p.color}
                 status={p.status}
+                handRaised={p.handRaised}
+                speaking={speakingPlayers.has(p.id)}
+                role={roleOf(p.userId)}
                 isLocal={false}
                 inCall={remoteStreams.has(p.id)}
                 isFollowingThem={!!p.userId && followInfo?.targetUserId === p.userId}
@@ -120,6 +142,9 @@ function ParticipantRow({
   name,
   color,
   status,
+  handRaised,
+  speaking,
+  role,
   isLocal,
   inCall,
   followerCount,
@@ -135,6 +160,14 @@ function ParticipantRow({
   name: string;
   color: string;
   status?: string;
+  // Live presence cues, mirroring what shows over the avatar / video tile:
+  // a raised hand (see Avatar.handRaised) and whether they're currently
+  // speaking (from speakingPlayers / localSpeaking in gameStore).
+  handRaised?: boolean;
+  speaking?: boolean;
+  // Live room role (see gameStore roleOf) — renders a 👑 owner / 🛡️ admin
+  // badge by the name; 'staff'/'member' show none.
+  role?: Role;
   isLocal: boolean;
   inCall: boolean;
   // Local player row only — how many other players currently have me as
@@ -163,11 +196,20 @@ function ParticipantRow({
       <div className="flex items-center gap-2 min-w-0">
         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
         <div className="min-w-0">
-          <span className="text-gray-700 dark:text-gray-300 text-xs truncate block">{name}</span>
+          <span className="text-gray-700 dark:text-gray-300 text-xs truncate flex items-center gap-1">
+            {role === 'owner' && <span title="Room owner" className="shrink-0">👑</span>}
+            {role === 'admin' && <span title="Admin" className="shrink-0">🛡️</span>}
+            <span className="truncate">{name}</span>
+          </span>
           {status && <span className="text-gray-400 dark:text-gray-500 text-[10px] truncate block">{status}</span>}
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
+        {/* Live presence cues, glanceable per row — same signals shown over
+            the avatar (raise-hand ✋, AFK 💤) and video tile (speaking 🔊). */}
+        {handRaised && <span title="Hand raised" className="text-[11px] leading-none animate-bounce">✋</span>}
+        {speaking && <span title="Speaking" className="text-[11px] leading-none animate-pulse">🔊</span>}
+        {status?.startsWith('💤') && <span title="Away" className="text-[11px] leading-none opacity-70">💤</span>}
         {inCall && <CameraVideoFill className="text-purple-600" size={11} title="In call" />}
         {!!followerCount && (
           <span className="text-purple-500 text-[10px] inline-flex items-center gap-0.5" title={`Followed by ${followerCount}`}>

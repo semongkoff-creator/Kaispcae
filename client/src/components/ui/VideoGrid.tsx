@@ -1,7 +1,25 @@
 import { useRef, useEffect, useState } from 'react';
 import { MicMuteFill, CameraVideoOffFill, PipFill, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill } from 'react-bootstrap-icons';
-import { ProximityPlayer } from '@virtualmeet/shared';
+import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
+
+// Most recent still-active emote for a given player/socket id, as the emoji
+// to float over their video tile. Shares the in-world emote store, so the
+// same 3s lifetime applies (see gameStore.removeExpiredEmotes / GameCanvas).
+export function latestReaction(
+  emoteEvents: EmoteEvent[],
+  id: string | null,
+  now: number,
+): { emoji: string; ts: number } | null {
+  if (!id) return null;
+  let best: EmoteEvent | null = null;
+  for (const e of emoteEvents) {
+    if (e.playerId !== id) continue;
+    if (now - e.timestamp >= 3000) continue;
+    if (!best || e.timestamp > best.timestamp) best = e;
+  }
+  return best ? { emoji: EMOTE_EMOJI[best.emote] || '👍', ts: best.timestamp } : null;
+}
 
 interface VideoGridProps {
   nearby: ProximityPlayer[];
@@ -25,7 +43,7 @@ interface VideoGridProps {
 // silently drift apart.
 export function getVideoTiles(
   nearby: ProximityPlayer[],
-  playerRecords: Record<string, { name: string; userId?: string }>,
+  playerRecords: Record<string, { name: string; userId?: string; handRaised?: boolean }>,
   remoteStreams: Map<string, MediaStream>,
   remoteScreenStreams: Map<string, MediaStream>,
   recordedTargetUserId?: string,
@@ -41,14 +59,19 @@ export function getVideoTiles(
       screenStream: remoteScreenStreams.get(p.id),
       translucent: p.visibility === 'translucent',
       isBeingRecorded: !!recordedTargetUserId && playerRecords[p.id]?.userId === recordedTargetUserId,
+      handRaised: !!playerRecords[p.id]?.handRaised,
     }))
     .filter((t) => t.stream);
 }
 
 export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded }: VideoGridProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
+  const localHandRaised = useGameStore((s) => s.localPlayer.handRaised);
+  const localPlayerId = useGameStore((s) => s.localPlayerId);
+  const emoteEvents = useGameStore((s) => s.emoteEvents);
   const videoTiles = getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams, recordedTargetUserId);
   const [hidden, setHidden] = useState(false);
+  const now = Date.now();
 
   const totalTiles = (localStream ? 1 : 0) + (localScreenStream ? 1 : 0) + videoTiles.length
     + videoTiles.filter((t) => t.screenStream).length;
@@ -79,7 +102,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
         <EyeSlashFill size={11} />
       </button>
       {localStream && (
-        <VideoTile name="You" stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} />
+        <VideoTile name="You" stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} />
       )}
       {localScreenStream && (
         <VideoTile name="Your screen" stream={localScreenStream} isLocal isScreen />
@@ -93,6 +116,8 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           translucent={tile.translucent}
           onVolumeChange={(v) => onManualVolumeChange(tile.id, v)}
           isBeingRecorded={tile.isBeingRecorded}
+          handRaised={tile.handRaised}
+          reaction={latestReaction(emoteEvents, tile.id, now)}
         />
       ))}
       {videoTiles
@@ -117,6 +142,8 @@ export function VideoTile({
   translucent,
   onVolumeChange,
   isBeingRecorded,
+  handRaised,
+  reaction,
   large,
 }: {
   name: string;
@@ -128,6 +155,8 @@ export function VideoTile({
   translucent?: boolean;
   onVolumeChange?: (volume: number) => void;
   isBeingRecorded?: boolean;
+  handRaised?: boolean;
+  reaction?: { emoji: string; ts: number } | null;
   large?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -185,6 +214,29 @@ export function VideoTile({
       {isScreen && (
         <span className="absolute top-0.5 left-0.5 bg-black/50 text-white rounded p-0.5">
           <DisplayFill size={large ? 10 : 8} />
+        </span>
+      )}
+      {/* Quick reaction — a single emoji floating up from the bottom-center
+          of the tile, restarting whenever a newer reaction arrives (keyed by
+          its timestamp). Shared with the in-world emote system, so a reaction
+          here also shows above the avatar and vice-versa. */}
+      {reaction && !isScreen && (
+        <span
+          key={reaction.ts}
+          className={`absolute left-1/2 -translate-x-1/2 bottom-6 pointer-events-none select-none animate-reaction-float ${large ? 'text-4xl' : 'text-2xl'}`}
+          style={{ textShadow: '0 1px 3px rgba(0,0,0,0.4)' }}
+        >
+          {reaction.emoji}
+        </span>
+      )}
+      {/* Raised-hand cue — amber badge, top-left, gently waving so it draws
+          the eye during a meeting (the whole point of "raise hand"). */}
+      {handRaised && !isScreen && (
+        <span
+          className={`absolute left-0.5 bg-amber-400 text-white rounded-full shadow flex items-center justify-center animate-bounce ${isBeingRecorded ? 'top-6' : 'top-0.5'} ${large ? 'w-6 h-6 text-sm' : 'w-4 h-4 text-[10px]'}`}
+          title={`${isLocal ? 'You have' : `${name} has`} raised a hand`}
+        >
+          ✋
         </span>
       )}
       {isBeingRecorded && (

@@ -231,6 +231,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const emitStopRef = useRef(emitStop); emitStopRef.current = emitStop;
   const emitJumpRef = useRef(emitJump); emitJumpRef.current = emitJump;
   const emitNudgeRef = useRef(emitNudge); emitNudgeRef.current = emitNudge;
+  const onMediaOpenRef = useRef(onMediaOpen); onMediaOpenRef.current = onMediaOpen;
   const emitSitRef = useRef(emitSit); emitSitRef.current = emitSit;
   const emitFollowUnfollowRef = useRef(emitFollowUnfollow); emitFollowUnfollowRef.current = emitFollowUnfollow;
 
@@ -339,6 +340,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // so both the "press SPACE" indicator and the keydown handler read the
   // same up-to-date value without recomputing it twice.
   const nearbyChairRef = useRef<{ furniture: Furniture; tileX: number; tileY: number } | null>(null);
+  // Gather-style "press X to interact" — the nearest placed media object
+  // (image/youtube/whiteboard/file) within one tile of the player, if any.
+  // Recomputed each frame in the draw loop (same pattern as nearbyChairRef).
+  const nearbyMediaRef = useRef<{ id: string; tileX: number; tileY: number } | null>(null);
 
   const performSit = useCallback((chair: Furniture, tileX: number, tileY: number) => {
     // Seat at the exact tile faced, not always the furniture's anchor tile —
@@ -455,6 +460,16 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         return;
       }
 
+      // Open the nearest media object (Gather-style interact). Only does
+      // anything when standing next to one — see nearbyMediaRef above.
+      if (e.code === 'KeyX') {
+        if (nearbyMediaRef.current) {
+          e.preventDefault();
+          onMediaOpenRef.current(nearbyMediaRef.current.id);
+        }
+        return;
+      }
+
       // Pressing a movement key while sitting stands you up first, instead
       // of silently eating the input (useMovement's isFrozen check would
       // otherwise just ignore it with no feedback).
@@ -562,6 +577,16 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         );
         nearbyChairRef.current = chair ? { furniture: chair, tileX: facingTileX, tileY: facingTileY } : null;
       }
+
+      // Nearest interactable media within 1 tile (Chebyshev) of where the
+      // player is standing — drives the "press X to open" prompt below.
+      let best: { id: string; tileX: number; tileY: number } | null = null;
+      let bestDist = Infinity;
+      for (const m of mediaObjectsRef.current) {
+        const d = Math.max(Math.abs(m.x - baseTileX), Math.abs(m.y - baseTileY));
+        if (d <= 1 && d < bestDist) { bestDist = d; best = { id: m.id, tileX: m.x, tileY: m.y }; }
+      }
+      nearbyMediaRef.current = best;
     }
     // Rounded to whole CSS pixels — every tile/avatar screen position is
     // `n * TILE_SIZE - camera`, so a fractional camera offset put every draw
@@ -943,6 +968,34 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       ctx.font = 'bold 9px sans-serif';
       ctx.fillStyle = 'rgba(124, 58, 237, 0.9)';
       ctx.fillText('SPACE to sit', csx, csy - 22 + bob);
+    }
+
+    // "Press X to open" prompt over the nearest interactable media object
+    // (Gather-style) — walk up to a poster/video/whiteboard and a hint
+    // appears, no hunting for a tiny clickable pin.
+    if (nearbyMediaRef.current) {
+      const { tileX, tileY } = nearbyMediaRef.current;
+      const msx = tileX * TILE_SIZE - cameraX + TILE_SIZE / 2;
+      const msy = tileY * TILE_SIZE - cameraY;
+      const bob = Math.sin(timestamp * 0.005) * 2;
+      const label = 'X';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      const tw = ctx.measureText('X  Buka').width;
+      const bx = msx - tw / 2 - 8;
+      const by = msy - 40 + bob;
+      // pill background
+      ctx.fillStyle = 'rgba(124, 58, 237, 0.95)';
+      ctx.beginPath();
+      const bw = tw + 16, bh = 18, rr = 9;
+      ctx.moveTo(bx + rr, by); ctx.lineTo(bx + bw - rr, by);
+      ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + rr); ctx.lineTo(bx + bw, by + bh - rr);
+      ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - rr, by + bh); ctx.lineTo(bx + rr, by + bh);
+      ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - rr); ctx.lineTo(bx, by + rr);
+      ctx.quadraticCurveTo(bx, by, bx + rr, by); ctx.closePath(); ctx.fill();
+      // "X" key cap + label
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(`${label}  Buka`, msx, by + 13);
     }
 
     // Speech bubbles

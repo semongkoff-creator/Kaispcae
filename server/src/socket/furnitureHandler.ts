@@ -48,9 +48,25 @@ export function registerFurnitureHandlers(io: Server, socket: Socket) {
       }
 
       const name = (data.name || 'Someone').slice(0, 30);
+
+      // One assigned seat per user: release any OTHER seat this user already
+      // holds so taking a new chair MOVES their seat cleanly instead of
+      // leaving them owning two (which made "My Seat" pick an arbitrary one
+      // and felt like you couldn't switch chairs). Collect the freed ids so
+      // clients drop the old seat's badge too.
+      const freed: string[] = [];
+      for (const f of furniture) {
+        if (f.assignedToUserId === uid && f.id !== item.id) {
+          delete f.assignedToUserId;
+          delete f.assignedToName;
+          freed.push(f.id);
+        }
+      }
+
       item.assignedToUserId = uid;
       item.assignedToName = name;
       await prisma.room.update({ where: { slug: room }, data: { furniture } });
+      for (const fid of freed) io.to(room).emit(SocketEvents.FURNITURE_UNASSIGNED, { furnitureId: fid });
       io.to(room).emit(SocketEvents.FURNITURE_ASSIGNED, { furnitureId: item.id, userId: uid, name });
     } catch (e) {
       console.error('[furniture] assign error:', e);

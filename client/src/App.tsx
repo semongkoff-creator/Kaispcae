@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { GearFill, Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill } from 'react-bootstrap-icons';
+import { GearFill, Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill } from 'react-bootstrap-icons';
 import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import { GameCanvas } from './components/canvas/GameCanvas';
 import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
+import { MobileControls } from './components/hud/MobileControls';
 import { NameModal } from './components/ui/NameModal';
 import { AvatarSetup } from './components/avatar/AvatarSetup';
 import { VideoGrid } from './components/ui/VideoGrid';
@@ -23,6 +24,7 @@ import { ActivityFeed } from './components/ui/ActivityFeed';
 import { PendingRequestToast } from './components/ui/PendingRequestToast';
 import { Sidebar } from './components/ui/Sidebar';
 import { MicButton } from './components/hud/MicButton';
+import { HandButton } from './components/hud/HandButton';
 import { CameraButton } from './components/hud/CameraButton';
 import { ScreenShareButton } from './components/hud/ScreenShareButton';
 import { NotificationSettings } from './components/ui/NotificationSettings';
@@ -80,10 +82,14 @@ function releaseMovementKeys() {
   }
 }
 
+// Idle window before a player is auto-marked away, and the status text used.
+const AFK_IDLE_MS = 120000; // 2 minutes
+const AFK_STATUS = '💤 Away';
+
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend } = useSocket(authDisplayName, roomSlug, authUserId);
-  const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend });
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage } = useSocket(authDisplayName, roomSlug, authUserId);
+  const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage });
   const [showEditor, setShowEditor] = useState(false);
 
   // Media state from store
@@ -153,6 +159,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const zones = useGameStore((s) => s.zones);
   const sittingFurnitureId = useGameStore((s) => s.sittingFurnitureId);
   const furniture = useGameStore((s) => s.furniture);
+  const roomLocked = useGameStore((s) => s.roomLocked);
   const localUserId = useGameStore((s) => s.localUserId);
   const sittingItem = sittingFurnitureId ? furniture.find((f) => f.id === sittingFurnitureId) : undefined;
   const spotlightedUserIds = useGameStore((s) => s.spotlightedUserIds);
@@ -279,6 +286,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     toggleScreenShare();
   }, [toggleScreenShare]);
 
+  // Raise/lower hand — persistent toggle broadcast to the room; renders as a
+  // ✋ over the avatar and on the video tile (AvatarSprite / VideoGrid).
+  const handleHandToggle = useCallback(() => {
+    const next = !useGameStore.getState().localPlayer.handRaised;
+    useGameStore.getState().setLocalPlayer({ handRaised: next || undefined });
+    emitPlayerHand(next);
+  }, [emitPlayerHand]);
+
   // Cleanup
   useEffect(() => () => destroy(), [destroy]);
 
@@ -307,6 +322,18 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     }, 2500);
     return () => clearTimeout(timer);
   }, [kickedNotice, onLeave]);
+
+  // Join denied because the room is locked (Zoom-style "Lock Meeting", see
+  // shared SocketEvents.ROOM_LOCKED_DENIED). Unlike the deleted/kicked
+  // notices this does NOT auto-bounce — the overlay lets the user "Knock to
+  // enter" or leave. `knocked` tracks the waiting-for-host state after a knock.
+  const roomLockedNotice = useGameStore((s) => s.roomLockedNotice);
+  const [knocked, setKnocked] = useState(false);
+  useEffect(() => { if (!roomLockedNotice) setKnocked(false); }, [roomLockedNotice]);
+  const handleKnock = useCallback(() => {
+    emitKnock(roomSlug);
+    setKnocked(true);
+  }, [emitKnock, roomSlug]);
 
   // Summon/Follow consent requests (see PendingRequestToast.tsx). Incoming
   // requests auto-clear on the same clock the server uses to auto-decline
@@ -342,6 +369,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     const timer = setTimeout(() => useGameStore.getState().setIncomingFollowRequest(null), CONSENT_REQUEST_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, [incomingFollowRequest]);
+
+  // A locked-room knock, shown to admins with Admit/Ignore. Auto-clears on
+  // the same consent-timeout clock as the summon/follow requests above so a
+  // stale knock toast doesn't linger after the knocker has given up.
+  const incomingKnock = useGameStore((s) => s.incomingKnock);
+  useEffect(() => {
+    if (!incomingKnock) return;
+    const timer = setTimeout(() => useGameStore.getState().setIncomingKnock(null), CONSENT_REQUEST_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [incomingKnock]);
 
   const followResult = useGameStore((s) => s.followResult);
   useEffect(() => {
@@ -472,9 +509,50 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     setShowEditor(false);
   }, [emitAvatarUpdate]);
 
+  // ─── AFK auto-away (ZEP/Gather-style) ────────────────────────────────
+  // After AFK_IDLE_MS with no keyboard/pointer/touch input, the player's
+  // status auto-flips to "💤 Away" so others can see who's actually present;
+  // any activity flips it straight back. Deliberately never overrides a
+  // status the user set themselves — it only kicks in when they have none.
+  const autoAwayRef = useRef(false);
+  const prevStatusRef = useRef<string | undefined>(undefined);
+  const lastActivityRef = useRef(Date.now());
+
   const handleStatusSave = useCallback((status: string) => {
+    // A manual status takes over — stop any pending auto-away restore.
+    autoAwayRef.current = false;
     useGameStore.getState().setLocalPlayer({ status: status || undefined });
     emitPlayerStatus(status);
+  }, [emitPlayerStatus]);
+
+  useEffect(() => {
+    const markActive = () => {
+      lastActivityRef.current = Date.now();
+      if (autoAwayRef.current) {
+        autoAwayRef.current = false;
+        const restore = prevStatusRef.current;
+        useGameStore.getState().setLocalPlayer({ status: restore || undefined });
+        emitPlayerStatus(restore || '');
+      }
+    };
+    const events: (keyof WindowEventMap)[] = ['keydown', 'pointerdown', 'pointermove', 'touchstart', 'wheel'];
+    events.forEach((e) => window.addEventListener(e, markActive, { passive: true }));
+
+    const iv = setInterval(() => {
+      if (autoAwayRef.current) return;
+      if (Date.now() - lastActivityRef.current < AFK_IDLE_MS) return;
+      const cur = useGameStore.getState().localPlayer.status;
+      if (cur && cur !== AFK_STATUS) return; // respect a manually-set status
+      prevStatusRef.current = cur;
+      autoAwayRef.current = true;
+      useGameStore.getState().setLocalPlayer({ status: AFK_STATUS });
+      emitPlayerStatus(AFK_STATUS);
+    }, 5000);
+
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, markActive));
+      clearInterval(iv);
+    };
   }, [emitPlayerStatus]);
 
   // loadAvatarConfig()'s default `name` is the placeholder 'You' used for
@@ -558,17 +636,61 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
   const allPlayers = { [localPlayerId]: useGameStore.getState().localPlayer, ...playerRecords };
 
+  // Locked-room denial overlay (see roomLockedNotice above). Extracted so it
+  // can render in BOTH the pre-room:state loading gate below AND the main
+  // view — a denied join never receives room:state, so without rendering it
+  // in the loading branch the user would sit forever on "Joining room…".
+  const lockedDeniedOverlay = roomLockedNotice ? (
+    <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
+        <p className="text-2xl mb-1">🔒</p>
+        <p className="text-gray-900 dark:text-gray-100 text-sm font-medium mb-1">{roomLockedNotice}</p>
+        {knocked ? (
+          <>
+            <p className="text-gray-400 dark:text-gray-500 text-xs mb-4">🔔 Knocked — waiting for the host to let you in…</p>
+            <button
+              onClick={onLeave}
+              className="w-full px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium cursor-pointer"
+            >
+              Back to Lobby
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-gray-400 dark:text-gray-500 text-xs mb-4">Knock and the host can let you in.</p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleKnock}
+                className="flex-1 px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium cursor-pointer"
+              >
+                🔔 Knock to enter
+              </button>
+              <button
+                onClick={onLeave}
+                className="flex-1 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium cursor-pointer"
+              >
+                Back to Lobby
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   // Until the real room:state for THIS room arrives, `roomState` in the
   // store is still whatever App() seeded at startup (always the Main
   // Office layout, regardless of which room/template was actually joined
   // — see gameStore.ts's roomStateReceived doc comment). Render a plain
   // loading placeholder instead of GameCanvas rather than briefly showing
   // the wrong room shape (and risking a spawn tile that's a wall in the
-  // real layout).
+  // real layout). If we were denied entry (locked room), show that overlay
+  // here instead — room:state will never come, so this is the final state.
   if (!roomStateReceived) {
     return (
-      <div className="w-screen h-screen bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
+      <div className="relative w-screen h-screen bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
         <p className="text-gray-500 dark:text-gray-400 text-xl">Joining room…</p>
+        {lockedDeniedOverlay}
       </div>
     );
   }
@@ -621,7 +743,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {!simplifiedView && (
         <>
           <div className="absolute top-4 left-28 pointer-events-none">
-            <p className="text-gray-500 dark:text-gray-400 text-xs font-mono">WASD / Arrows to move · hold R to run · Space to jump · Z to nudge</p>
+            <p className="text-gray-500 dark:text-gray-400 text-xs font-mono">WASD / Arrows to move · hold R to run · Space to jump · Z to nudge · X to interact</p>
           </div>
           <div className="absolute top-10 left-28 pointer-events-none">
             <p className="text-gray-500 dark:text-gray-400 text-xs font-mono">
@@ -636,6 +758,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       )}
 
       <ConnectionIndicator />
+
+      {/* On-screen movement/action controls — self-hides on non-touch devices
+          (see MobileControls), so it only appears for phone/tablet players. */}
+      {!editorMode && <MobileControls />}
 
       {/* Follow (§3) indicator — only the ONE new thing from this pass that's
           always visible without opening a panel first. 'standby' means the
@@ -677,6 +803,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             message={<><span className="font-medium">{incomingFollowRequest.actorName}</span> wants to follow you</>}
             onAccept={() => { emitFollowRespond(incomingFollowRequest.requestId, true); useGameStore.getState().setIncomingFollowRequest(null); }}
             onDecline={() => { emitFollowRespond(incomingFollowRequest.requestId, false); useGameStore.getState().setIncomingFollowRequest(null); }}
+          />
+        )}
+        {incomingKnock && (
+          <PendingRequestToast
+            icon={<LockFill size={13} className="text-amber-500" />}
+            message={<><span className="font-medium">{incomingKnock.name}</span> is knocking to enter the locked room</>}
+            onAccept={() => { emitKnockAdmit(incomingKnock.userId); useGameStore.getState().setIncomingKnock(null); }}
+            onDecline={() => { useGameStore.getState().setIncomingKnock(null); }}
           />
         )}
         {summonResult && (
@@ -728,6 +862,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onMySeat={handleMySeat}
         meetingViewActive={meetingViewActive}
         onToggleMeetingView={() => setMeetingViewActive((v) => !v)}
+        roomLocked={roomLocked}
+        canLock={isAdmin}
+        onToggleLock={() => emitRoomLock(!roomLocked)}
         simplifiedView={simplifiedView}
         onToggleSimplifiedView={() => setSimplifiedView((v) => !v)}
         miniModeSupported={isMiniModeSupported()}
@@ -853,6 +990,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           recordedTargetUserId={activeRecording?.targetUserId}
           isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
           onClose={() => setMeetingViewActive(false)}
+          onEmote={handleEmoteSelect}
         />
       ) : (
         <>
@@ -878,6 +1016,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-50">
         <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
         <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
+        <HandButton raised={!!localPlayer.handRaised} onToggle={handleHandToggle} />
         <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
         <NotificationSettings />
       </div>
@@ -988,6 +1127,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </div>
       )}
 
+      {lockedDeniedOverlay}
+
+      {/* Everyone in a locked room sees this pill so the closed state is
+          obvious (not just the admin who toggled it). Hidden in Simplified
+          View, same as the notice banner below. */}
+      {roomLocked && !simplifiedView && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center gap-1.5 bg-amber-500/95 text-white text-xs font-medium px-3 py-1 rounded-full shadow-sm">
+          <LockFill size={11} /> Room locked
+        </div>
+      )}
+
       {notice && !simplifiedView && (
         <NoticeBanner notice={notice} isAdmin={isAdmin} onUnpin={emitNoticeUnpin} />
       )}
@@ -1010,6 +1160,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onSelectTarget={channelChat.setActiveChatTarget}
         messages={channelChat.activeMessages}
         onSend={channelChat.sendMessage}
+        onTyping={channelChat.notifyTyping}
+        onDeleteMessage={channelChat.deleteMessage}
         onLoadOlder={channelChat.loadOlder}
         onCreateChannel={channelChat.createChannel}
       />

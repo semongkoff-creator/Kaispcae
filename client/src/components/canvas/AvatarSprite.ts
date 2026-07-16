@@ -92,6 +92,21 @@ export function drawAvatar(
   // ─── Custom status (e.g. "WFH", "In a meeting") above everything else ──
   if (avatar.status) {
     drawCustomStatus(ctx, cx, nextBadgeY, avatar.status);
+    nextBadgeY -= 15;
+  }
+
+  // ─── Raised hand ✋ — the top-most cue, gently waving so it reads as an
+  // active "I want to speak" signal rather than a static icon. ──────────
+  if (avatar.handRaised) {
+    const wave = Math.sin(timestamp * 0.008) * 0.25;
+    ctx.save();
+    ctx.translate(cx, nextBadgeY - 4);
+    ctx.rotate(wave);
+    ctx.font = '16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('✋', 0, 0);
+    ctx.restore();
   }
 }
 

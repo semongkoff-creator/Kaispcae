@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, Paperclip, FileEarmarkFill, Download } from 'react-bootstrap-icons';
+import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, Paperclip, FileEarmarkFill, Download, TrashFill } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -45,6 +45,10 @@ interface ChatPanelProps {
   onSelectTarget: (target: { type: 'channel' | 'dm'; id: string }) => void;
   messages: ChannelMessage[];
   onSend: (text: string, parentId?: string, attachment?: { url: string; fileName: string }) => void;
+  // Throttled ping while composing, for the "X is typing…" indicator.
+  onTyping?: () => void;
+  // Delete one of your own persisted channel/DM messages (see MESSAGE_DELETE).
+  onDeleteMessage?: (messageId: string) => void;
   onLoadOlder: () => Promise<number>;
   onCreateChannel: (name: string) => Promise<Channel>;
 }
@@ -67,9 +71,26 @@ export function ChatPanel({
   onSelectTarget,
   messages,
   onSend,
+  onTyping,
+  onDeleteMessage,
   onLoadOlder,
   onCreateChannel,
 }: ChatPanelProps) {
+  const unreadByTarget = useGameStore((s) => s.unreadByTarget);
+  // Total unread across every target (for the collapsed Chat button badge).
+  const totalUnread = Object.values(unreadByTarget).reduce((a, b) => a + b, 0);
+
+  const typingByTarget = useGameStore((s) => s.typingByTarget);
+  const playerRecords = useGameStore((s) => s.playerRecords);
+  // 1s tick while open so typing entries lapse on their own (there's no
+  // explicit "stopped typing" event — they just pass their expiry).
+  const [, setTypingTick] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    const iv = setInterval(() => setTypingTick((t) => t + 1), 1000);
+    return () => clearInterval(iv);
+  }, [open]);
+
   const [text, setText] = useState('');
   const [proximityMode, setProximityMode] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
@@ -212,6 +233,11 @@ export function ChatPanel({
         className="absolute bottom-4 right-4 z-50 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-3 py-2 rounded-lg text-sm text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
       >
         <ChatDotsFill size={14} /> {open ? 'Hide' : 'Chat'}
+        {!open && totalUnread > 0 && (
+          <span className="ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold inline-flex items-center justify-center">
+            {totalUnread > 99 ? '99+' : totalUnread}
+          </span>
+        )}
       </button>
 
       {open && (
@@ -240,6 +266,11 @@ export function ChatPanel({
                 }`}
               >
                 #{c.name}
+                {(unreadByTarget[`channel:${c.id}`] ?? 0) > 0 && (
+                  <span className="ml-1 min-w-[14px] h-3.5 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold inline-flex items-center justify-center align-middle">
+                    {unreadByTarget[`channel:${c.id}`]}
+                  </span>
+                )}
               </button>
             ))}
             {dmConversations.map((d) => (
@@ -254,6 +285,11 @@ export function ChatPanel({
                 title={`DM with ${d.otherUser.displayName}`}
               >
                 @{d.otherUser.displayName}
+                {(unreadByTarget[`dm:${d.id}`] ?? 0) > 0 && (
+                  <span className="ml-1 min-w-[14px] h-3.5 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold inline-flex items-center justify-center align-middle">
+                    {unreadByTarget[`dm:${d.id}`]}
+                  </span>
+                )}
               </button>
             ))}
             {currentZone && (
@@ -358,13 +394,33 @@ export function ChatPanel({
                         <ChatLeftText size={9} />
                         {m.replyCount ? `${m.replyCount} ${m.replyCount === 1 ? 'reply' : 'replies'}` : 'Reply'}
                       </button>
+                      {isOwn && onDeleteMessage && (
+                        <button
+                          onClick={() => { if (window.confirm('Delete this message?')) onDeleteMessage(m.id); }}
+                          title="Delete message"
+                          className="ml-2 mt-0.5 text-[10px] text-gray-400 hover:text-red-500 cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <TrashFill size={9} /> Delete
+                        </button>
+                      )}
 
                       {expandedThreadId === m.id && (
                         <div className="ml-3 mt-1 pl-2 border-l-2 border-purple-100 dark:border-gray-700 space-y-1">
                           {threadReplies.map((r) => (
-                            <div key={r.id} className="rounded bg-purple-50/50 dark:bg-gray-700/50 px-2 py-1">
-                              <span className="font-medium text-gray-500 dark:text-gray-400 mr-1">{r.senderName}</span>
-                              <span className="text-gray-800 dark:text-gray-200 break-words">{r.text}</span>
+                            <div key={r.id} className="rounded bg-purple-50/50 dark:bg-gray-700/50 px-2 py-1 group/reply flex items-start justify-between gap-1">
+                              <span className="min-w-0">
+                                <span className="font-medium text-gray-500 dark:text-gray-400 mr-1">{r.senderName}</span>
+                                <span className="text-gray-800 dark:text-gray-200 break-words">{r.text}</span>
+                              </span>
+                              {r.senderId === localUserId && onDeleteMessage && (
+                                <button
+                                  onClick={() => { if (window.confirm('Delete this reply?')) onDeleteMessage(r.id); }}
+                                  title="Delete reply"
+                                  className="shrink-0 text-gray-400 hover:text-red-500 cursor-pointer opacity-0 group-hover/reply:opacity-100 transition-opacity"
+                                >
+                                  <TrashFill size={9} />
+                                </button>
+                              )}
                             </div>
                           ))}
                           <div className="flex gap-1 pt-1">
@@ -408,6 +464,29 @@ export function ChatPanel({
           {attachError && (
             <p className="px-3 pb-1 text-[10px] text-red-500">{attachError}</p>
           )}
+          {(() => {
+            if (viewingZone || !activeChatTarget) return null;
+            const key = `${activeChatTarget.type}:${activeChatTarget.id}`;
+            const now = Date.now();
+            const names = Object.entries(typingByTarget[key] ?? {})
+              .filter(([uid, exp]) => exp > now && uid !== localUserId)
+              .map(([uid]) => Object.values(playerRecords).find((p) => p.userId === uid)?.name ?? 'Seseorang');
+            if (names.length === 0) return null;
+            const label =
+              names.length === 1 ? `${names[0]} sedang mengetik…`
+              : names.length === 2 ? `${names[0]} dan ${names[1]} sedang mengetik…`
+              : `${names[0]} dan ${names.length - 1} lainnya sedang mengetik…`;
+            return (
+              <p className="px-3 pb-1 text-[10px] text-gray-400 dark:text-gray-500 italic flex items-center gap-1">
+                <span className="inline-flex gap-0.5">
+                  <span className="w-1 h-1 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-1 h-1 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-1 h-1 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                </span>
+                {label}
+              </p>
+            );
+          })()}
           <div className="p-3 border-t border-purple-100 dark:border-gray-700 flex gap-2 items-center">
             <button onClick={() => setShowEmoji(!showEmoji)} className="text-purple-600 dark:text-purple-400 cursor-pointer"><EmojiSmile size={16} /></button>
             {/* File attachments only make sense for persisted Channel/DM
@@ -433,7 +512,12 @@ export function ChatPanel({
             )}
             <input
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                setText(e.target.value);
+                // Only the persisted channel/DM path has a typing indicator —
+                // zone/bubble chat is a different, ephemeral concept.
+                if (e.target.value && !viewingZone && !proximityMode) onTyping?.();
+              }}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder={uploadingFile ? 'Uploading file...' : viewingZone ? `Message ${currentZone?.name}...` : proximityMode ? 'Say nearby...' : 'Type a message...'}
               maxLength={200}

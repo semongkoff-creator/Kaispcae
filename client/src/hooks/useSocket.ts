@@ -5,6 +5,18 @@ import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
 import { playNudgeSound } from '@/services/soundEffects';
+import { SERVER_URL } from '@/services/serverUrl';
+
+// Bump a chat target's unread count unless the user is actively looking at
+// it right now (panel open AND that exact target selected) — in which case
+// they've already "seen" the message so there's nothing to badge.
+function markUnreadIfHidden(key: string): void {
+  const state = useGameStore.getState();
+  const active = state.activeChatTarget;
+  const activeKey = active ? `${active.type}:${active.id}` : null;
+  if (state.chatPanelOpen && activeKey === key) return;
+  state.bumpUnread(key);
+}
 
 export function useSocket(authUserName: string = '', roomSlug: string = 'main-office', authUserId: string = '') {
   const socketRef = useRef<Socket | null>(null);
@@ -76,7 +88,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // to avoid WebSocket proxy ECONNABORTED issues. The JWT (if logged in)
     // lets the server verify our identity server-side instead of trusting
     // the userId we hand it in JOIN_ROOM below (see index.ts io.use()).
-    const socket = io('http://localhost:3001', {
+    const socket = io(SERVER_URL, {
       transports: ['websocket', 'polling'],
       autoConnect: false,
       auth: { token: localStorage.getItem('vm_token') || undefined },
@@ -169,6 +181,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       const state = useGameStore.getState();
       if (data.id === state.localPlayerId) return;
       upsertPlayer({ id: data.id, status: data.status || undefined } as Avatar);
+    });
+
+    socket.on(SocketEvents.PLAYER_HAND_UPDATED, (data: { id: string; handRaised: boolean }) => {
+      const state = useGameStore.getState();
+      if (data.id === state.localPlayerId) return;
+      upsertPlayer({ id: data.id, handRaised: data.handRaised || undefined } as Avatar);
     });
 
     socket.on(SocketEvents.PLAYER_SAT, (data: { id: string; isSitting: boolean; x: number; y: number; direction: Avatar['direction'] }) => {
@@ -355,6 +373,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       }
       if (msg.senderId !== state.localUserId) {
         notifyNewMessage(msg.senderName, msg.text);
+        markUnreadIfHidden(`channel:${msg.channelId}`);
       }
     });
 
@@ -369,7 +388,23 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       }
       if (msg.senderId !== state.localUserId) {
         notifyNewMessage(msg.senderName, msg.text);
+        markUnreadIfHidden(`dm:${msg.conversationId}`);
       }
+    });
+
+    socket.on(SocketEvents.MESSAGE_DELETED, (data: { messageId: string; channelId?: string; conversationId?: string; parentId?: string }) => {
+      const key = data.channelId ? `channel:${data.channelId}` : `dm:${data.conversationId}`;
+      useGameStore.getState().removeTargetMessage(key, data.messageId, data.parentId);
+    });
+
+    socket.on(SocketEvents.CHANNEL_TYPING_UPDATE, (data: { channelId: string; userId: string }) => {
+      if (data.userId === useGameStore.getState().localUserId) return;
+      useGameStore.getState().noteTyping(`channel:${data.channelId}`, data.userId);
+    });
+
+    socket.on(SocketEvents.DM_TYPING_UPDATE, (data: { conversationId: string; userId: string }) => {
+      if (data.userId === useGameStore.getState().localUserId) return;
+      useGameStore.getState().noteTyping(`dm:${data.conversationId}`, data.userId);
     });
 
     socket.on(SocketEvents.CHANNEL_CREATED, (channel: Channel) => {
@@ -469,6 +504,34 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().setKickedNotice(`You were removed from this room by ${data.byName}.`);
     });
 
+    socket.on(SocketEvents.ROOM_LOCK_UPDATED, (data: { locked: boolean }) => {
+      useGameStore.getState().setRoomLocked(!!data.locked);
+      useGameStore.getState().addActivity(data.locked ? '🔒 Room locked' : '🔓 Room unlocked');
+    });
+
+    socket.on(SocketEvents.ROOM_LOCKED_DENIED, () => {
+      // Unlike roomDeletedNotice/kickedNotice, this does NOT auto-bounce — the
+      // denied overlay (App.tsx) offers "Knock to enter" as well as leaving,
+      // so we just surface the state and let the user choose.
+      console.warn('[socket] join denied — room is locked');
+      useGameStore.getState().setRoomLockedNotice('This room is locked — ask the host to let you in.');
+    });
+
+    socket.on(SocketEvents.ROOM_KNOCK_REQUEST, (payload: { userId: string; name: string }) => {
+      useGameStore.getState().setIncomingKnock(payload);
+    });
+
+    socket.on(SocketEvents.ROOM_KNOCK_ADMITTED, () => {
+      // The host let us in — retry the join (this time the server's lock gate
+      // finds us on the allowlist) and clear the denied overlay.
+      console.log('[socket] admitted after knock — rejoining');
+      const config = loadAvatarConfig();
+      const uid = authUserId || localStorage.getItem('vm_userId') || socket.id;
+      const displayName = authUserName || config.name || 'Player';
+      socket.emit(SocketEvents.JOIN_ROOM, roomSlug, displayName, config, uid);
+      useGameStore.getState().setRoomLockedNotice(null);
+    });
+
     socket.on(SocketEvents.NOTICE_UPDATED, (notice: Notice | null) => {
       setNotice(notice);
       if (notice) useGameStore.getState().addActivity(`${notice.pinnedByName} pinned a notice`);
@@ -533,6 +596,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.PLAYER_STATUS_UPDATE, status);
   }, []);
 
+  const emitPlayerHand = useCallback((raised: boolean) => {
+    socketRef.current?.emit(SocketEvents.PLAYER_HAND, raised);
+  }, []);
+
   const emitSit = useCallback((sitting: boolean, x: number, y: number, direction: Avatar['direction']) => {
     socketRef.current?.emit(SocketEvents.PLAYER_SIT, { sitting, x, y, direction });
   }, []);
@@ -571,6 +638,18 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
   const emitDmMessageSend = useCallback((conversationId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string) => {
     socketRef.current?.emit(SocketEvents.DM_MESSAGE_SEND, { conversationId, text, parentId, attachmentUrl, attachmentName });
+  }, []);
+
+  const emitDeleteMessage = useCallback((messageId: string) => {
+    socketRef.current?.emit(SocketEvents.MESSAGE_DELETE, { messageId });
+  }, []);
+
+  const emitChannelTyping = useCallback((channelId: string) => {
+    socketRef.current?.emit(SocketEvents.CHANNEL_TYPING, channelId);
+  }, []);
+
+  const emitDmTyping = useCallback((conversationId: string) => {
+    socketRef.current?.emit(SocketEvents.DM_TYPING, conversationId);
   }, []);
 
   const emitBubble = useCallback((text: string) => {
@@ -626,6 +705,18 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   const emitKick = useCallback((targetUserId: string) => {
     console.log('[socket] emit player:kick →', targetUserId);
     socketRef.current?.emit(SocketEvents.PLAYER_KICK, { targetUserId });
+  }, []);
+
+  const emitRoomLock = useCallback((locked: boolean) => {
+    socketRef.current?.emit(SocketEvents.ROOM_LOCK_SET, { locked });
+  }, []);
+
+  const emitKnock = useCallback((roomId: string) => {
+    socketRef.current?.emit(SocketEvents.ROOM_KNOCK, { roomId });
+  }, []);
+
+  const emitKnockAdmit = useCallback((userId: string) => {
+    socketRef.current?.emit(SocketEvents.ROOM_KNOCK_ADMIT, { userId });
   }, []);
 
   const emitNoticePin = useCallback((messageId: string, text: string, senderName: string) => {
@@ -692,5 +783,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage };
 }

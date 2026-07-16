@@ -1,7 +1,7 @@
 import { XLg } from 'react-bootstrap-icons';
-import { ProximityPlayer } from '@virtualmeet/shared';
+import { ProximityPlayer, EmoteType, EMOTE_LIST, EMOTE_EMOJI, EMOTE_LABELS } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
-import { getVideoTiles, VideoTile } from './VideoGrid';
+import { getVideoTiles, VideoTile, latestReaction } from './VideoGrid';
 
 interface MeetingViewProps {
   nearby: ProximityPlayer[];
@@ -15,6 +15,7 @@ interface MeetingViewProps {
   recordedTargetUserId?: string;
   isLocalBeingRecorded?: boolean;
   onClose: () => void;
+  onEmote: (emote: EmoteType) => void;
 }
 
 // A focused, full-screen call layout — everyone currently visible gets a
@@ -25,9 +26,13 @@ interface MeetingViewProps {
 // not a separate "meeting room" state the server needs to know about.
 export function MeetingView({
   nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams,
-  micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, onClose,
+  micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, onClose, onEmote,
 }: MeetingViewProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
+  const localHandRaised = useGameStore((s) => s.localPlayer.handRaised);
+  const localPlayerId = useGameStore((s) => s.localPlayerId);
+  const emoteEvents = useGameStore((s) => s.emoteEvents);
+  const now = Date.now();
   const videoTiles = getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams, recordedTargetUserId);
   const screenTiles = videoTiles.filter((t) => t.screenStream);
   const totalTiles = (localStream ? 1 : 0) + (localScreenStream ? 1 : 0) + videoTiles.length + screenTiles.length;
@@ -68,7 +73,7 @@ export function MeetingView({
           // than the viewport — and scroll — once it needs to.
           <div className="grid gap-4 min-h-full" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gridAutoRows: 'minmax(160px, 1fr)' }}>
             {localStream && (
-              <VideoTile name="You" stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} large />
+              <VideoTile name="You" stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} large />
             )}
             {localScreenStream && (
               <VideoTile name="Your screen" stream={localScreenStream} isLocal isScreen large />
@@ -82,6 +87,8 @@ export function MeetingView({
                 translucent={tile.translucent}
                 onVolumeChange={(v) => onManualVolumeChange(tile.id, v)}
                 isBeingRecorded={tile.isBeingRecorded}
+                handRaised={tile.handRaised}
+                reaction={latestReaction(emoteEvents, tile.id, now)}
                 large
               />
             ))}
@@ -90,6 +97,27 @@ export function MeetingView({
             ))}
           </div>
         )}
+      </div>
+
+      {/* Quick reactions bar — a centered emoji strip (Meet/Zoom-style). Each
+          reuses the in-world emote pipeline (onEmote → emitEmote), so the
+          emoji floats up over the reactor's tile here AND above their avatar
+          in the world simultaneously — one action, one broadcast. pb-20 lifts
+          it clear of the persistent bottom-center HUD control row (Mic/Camera/
+          Hand at bottom-6, z-50) which otherwise overlaps and blocks it. */}
+      <div className="shrink-0 flex justify-center pb-20 pt-1">
+        <div className="flex items-center gap-1 bg-white/10 border border-white/15 rounded-full px-2 py-1.5 backdrop-blur-sm pointer-events-auto">
+          {EMOTE_LIST.map((emote) => (
+            <button
+              key={emote}
+              onClick={() => onEmote(emote)}
+              title={EMOTE_LABELS[emote]}
+              className="w-9 h-9 rounded-full flex items-center justify-center text-xl hover:bg-white/20 hover:scale-110 active:scale-95 transition-all cursor-pointer"
+            >
+              {EMOTE_EMOJI[emote]}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

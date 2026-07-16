@@ -75,6 +75,10 @@ export const FEATURE_MIN_ROLE = {
   // controls, since forcibly ending someone's session is more disruptive
   // than moving or spotlighting them.
   'room:kick': 'admin',
+  // Zoom-style "Lock Meeting" — an admin/owner toggles the room closed so
+  // no new non-admin can enter (people already inside stay). In-memory only
+  // (see roomHandler.ts's RoomAdminState.locked), resets on server restart.
+  'room:lock': 'admin',
 } as const satisfies Record<string, Role>;
 
 export type FeatureKey = keyof typeof FEATURE_MIN_ROLE;

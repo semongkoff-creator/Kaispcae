@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill } from 'react-bootstrap-icons';
+import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { StatusButton } from '../avatar/StatusButton';
 import { RecordingControl } from './RecordingControl';
@@ -30,6 +30,13 @@ interface SidebarProps {
 
   meetingViewActive: boolean;
   onToggleMeetingView: () => void;
+
+  // Zoom-style "Lock Meeting" — canLock gates the toggle to admins/owner;
+  // roomLocked reflects the current state (shown to everyone as an indicator,
+  // but only admins get the actionable row).
+  roomLocked: boolean;
+  canLock: boolean;
+  onToggleLock: () => void;
 
   simplifiedView: boolean;
   onToggleSimplifiedView: () => void;
@@ -86,6 +93,9 @@ export function Sidebar({
   onMySeat,
   meetingViewActive,
   onToggleMeetingView,
+  roomLocked,
+  canLock,
+  onToggleLock,
   simplifiedView,
   onToggleSimplifiedView,
   miniModeSupported,
@@ -168,7 +178,16 @@ export function Sidebar({
             )}
             <MenuRow icon={<EyeFill size={15} />} label="Simplify" onClick={closeAnd(onToggleSimplifiedView)} />
 
-            {(isAdmin || canTeleport) && <MenuDivider />}
+            {(isAdmin || canTeleport || canLock) && <MenuDivider />}
+            {canLock && (
+              <MenuRow
+                icon={roomLocked ? <LockFill size={15} /> : <UnlockFill size={15} />}
+                label={roomLocked ? 'Unlock Room' : 'Lock Room'}
+                active={roomLocked}
+                onClick={closeAnd(onToggleLock)}
+                title={roomLocked ? 'Room is locked — new members are blocked' : 'Lock the room so no new members can join'}
+              />
+            )}
             {isAdmin && (
               <MenuRow icon={<Tools size={15} />} label={editorMode ? 'Editing...' : 'Edit Room'} active={editorMode} onClick={closeAnd(onToggleEditorMode)} />
             )}

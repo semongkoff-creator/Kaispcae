@@ -3,6 +3,7 @@ import { Server } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
 import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { isRoomLocked } from '../socket/roomHandler';
 import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
 
 const rooms = Router();
@@ -43,7 +44,10 @@ rooms.get('/rooms', async (_req, res: Response) => {
         owner: { select: { displayName: true } },
       },
       orderBy: { createdAt: 'desc' },
-      take: 50,
+      // Higher cap so the Lobby's client-side search/sort covers effectively
+      // all active rooms, not just the 50 most recent. Still bounded so a
+      // runaway room count can't return an unbounded payload.
+      take: 300,
     });
 
     return res.json({
@@ -57,6 +61,7 @@ rooms.get('/rooms', async (_req, res: Response) => {
         maxPlayers: r.maxPlayers,
         theme: r.theme,
         createdAt: r.createdAt,
+        locked: isRoomLocked(r.slug),
       })),
     });
   } catch (err) {
@@ -91,6 +96,7 @@ rooms.get('/rooms/:slug', async (req, res: Response) => {
       maxPlayers: room.maxPlayers,
       isPublic: room.isPublic,
       theme: room.theme,
+      locked: isRoomLocked(room.slug),
     });
   } catch (err) {
     console.error('[rooms] get error:', err);

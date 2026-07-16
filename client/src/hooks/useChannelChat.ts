@@ -9,6 +9,9 @@ interface ChannelChatEmitters {
   emitDmJoin: (conversationId: string) => void;
   emitDmLeave: (conversationId: string) => void;
   emitDmMessageSend: (conversationId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string) => void;
+  emitChannelTyping: (channelId: string) => void;
+  emitDmTyping: (conversationId: string) => void;
+  emitDeleteMessage: (messageId: string) => void;
 }
 
 function targetKey(target: { type: 'channel' | 'dm'; id: string }): string {
@@ -33,6 +36,7 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
   const messagesByTarget = useGameStore((s) => s.messagesByTarget);
   const setTargetMessages = useGameStore((s) => s.setTargetMessages);
   const prependTargetMessages = useGameStore((s) => s.prependTargetMessages);
+  const clearUnread = useGameStore((s) => s.clearUnread);
 
   const prevTargetRef = useRef<{ type: 'channel' | 'dm'; id: string } | null>(null);
 
@@ -89,6 +93,15 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
     }
   }, [activeChatTarget?.type, activeChatTarget?.id]);
 
+  // Clear the unread badge for whatever target is currently on screen — while
+  // the panel is open and showing it, the user is reading it live, so any
+  // count for it should stay at zero (including messages arriving as they
+  // watch). Runs on open, on target switch, and on each new active message.
+  useEffect(() => {
+    if (!chatPanelOpen || !activeChatTarget) return;
+    clearUnread(targetKey(activeChatTarget));
+  }, [chatPanelOpen, activeChatTarget?.type, activeChatTarget?.id, messagesByTarget]);
+
   // Leave whatever's open when the whole room/component unmounts.
   useEffect(() => {
     return () => {
@@ -109,6 +122,23 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
     },
     [activeChatTarget, emitters]
   );
+
+  // Fire a typing ping for the active target, throttled so a burst of
+  // keystrokes only sends ~one ping per interval (the server relays each ping
+  // and the receiver's indicator lasts a few seconds, so more is wasteful).
+  const lastTypingRef = useRef(0);
+  const notifyTyping = useCallback(() => {
+    if (!activeChatTarget) return;
+    const now = Date.now();
+    if (now - lastTypingRef.current < 1500) return;
+    lastTypingRef.current = now;
+    if (activeChatTarget.type === 'channel') emitters.emitChannelTyping(activeChatTarget.id);
+    else emitters.emitDmTyping(activeChatTarget.id);
+  }, [activeChatTarget, emitters]);
+
+  const deleteMessage = useCallback((messageId: string) => {
+    emitters.emitDeleteMessage(messageId);
+  }, [emitters]);
 
   const loadOlder = useCallback(async () => {
     if (!activeChatTarget) return 0;
@@ -159,6 +189,8 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
     setChatPanelOpen,
     activeMessages,
     sendMessage,
+    notifyTyping,
+    deleteMessage,
     loadOlder,
     createChannel,
     startDm,

@@ -64,6 +64,12 @@ export interface Avatar {
   // animation) plus the actual higher PLAYER_RUN_SPEED already reflected in
   // x/y updates, no separate server validation (see movementHandler.ts).
   isRunning?: boolean;
+  // True while this player has "raised their hand" (ZEP/Gather-style meeting
+  // cue) — rendered as a ✋ badge over the avatar AND on their video tile in
+  // Meeting View. Persistent toggle (unlike the one-shot jump/nudge/emote),
+  // so it lives on the player record and is included in room:state for late
+  // joiners; cleared on the client when the player leaves.
+  handRaised?: boolean;
 }
 
 // A single tile on the room grid. `type` stays authoritative for collision
@@ -125,6 +131,10 @@ export interface RoomState {
   // template instead of always falling back to Main Office.
   template?: RoomTemplateId;
   notice?: Notice | null;
+  // Zoom-style meeting lock (see SocketEvents.ROOM_LOCK_SET) — true means no
+  // new non-admin can join. In-memory server state, sent so a joining
+  // client's UI shows the 🔒 indicator immediately.
+  locked?: boolean;
   // The RECEIVING socket's own resolved role in this room (see
   // shared/permissions.ts) — computed server-side per-socket, not
   // broadcast, so a client always gets its own current tier without
@@ -157,6 +167,27 @@ export enum SocketEvents {
 
   PLAYER_STATUS_UPDATE = 'player:status_update',
   PLAYER_STATUS_UPDATED = 'player:status_updated',
+
+  // Raise-hand toggle — same relay+persist shape as status above.
+  PLAYER_HAND = 'player:hand',
+  PLAYER_HAND_UPDATED = 'player:hand_updated',
+
+  // Zoom-style "Lock Meeting": admin toggles ROOM_LOCK_SET, everyone in the
+  // room gets ROOM_LOCK_UPDATED (for the 🔒 indicator + owner control state),
+  // and a NON-admin who tries to join a locked room gets ROOM_LOCKED_DENIED
+  // instead of room:state and is bounced back to the Lobby.
+  ROOM_LOCK_SET = 'room:lock_set',
+  ROOM_LOCK_UPDATED = 'room:lock_updated',
+  ROOM_LOCKED_DENIED = 'room:locked_denied',
+
+  // "Knock to enter": a denied joiner can knock (ROOM_KNOCK) — admins in the
+  // room get ROOM_KNOCK_REQUEST and may admit (ROOM_KNOCK_ADMIT), which
+  // adds them to the lock allowlist and pings the knocker (ROOM_KNOCK_ADMITTED)
+  // to auto-retry the join.
+  ROOM_KNOCK = 'room:knock',
+  ROOM_KNOCK_REQUEST = 'room:knock_request',
+  ROOM_KNOCK_ADMIT = 'room:knock_admit',
+  ROOM_KNOCK_ADMITTED = 'room:knock_admitted',
 
   PLAYER_SIT = 'player:sit',
   PLAYER_SAT = 'player:sat',
@@ -303,6 +334,11 @@ export enum SocketEvents {
   CHANNEL_MESSAGE_NEW = 'channel:message_new',
   CHANNEL_CREATED = 'channel:created',
   CHANNEL_DELETED = 'channel:deleted',
+  // "X is typing…" — client pings while composing (throttled), server relays
+  // to the other members of that channel's socket room. Purely transient, no
+  // persistence; the receiver auto-expires it after a few seconds.
+  CHANNEL_TYPING = 'channel:typing',
+  CHANNEL_TYPING_UPDATE = 'channel:typing_update',
 
   DM_JOIN = 'dm:join',
   DM_LEAVE = 'dm:leave',
@@ -314,6 +350,17 @@ export enum SocketEvents {
   // a new incoming DM at all (only the starter's own client already has
   // it), and would only see it after their next reload.
   DM_STARTED = 'dm:started',
+  // "X is typing…" for a 1:1 DM — same transient relay shape as the channel
+  // typing events above.
+  DM_TYPING = 'dm:typing',
+  DM_TYPING_UPDATE = 'dm:typing_update',
+
+  // Delete a persisted channel/DM message you sent (MESSAGE_DELETE, own
+  // messages only) — the server removes it (cascading any thread replies) and
+  // broadcasts MESSAGE_DELETED to that channel/DM's socket room so every
+  // client drops it live.
+  MESSAGE_DELETE = 'message:delete',
+  MESSAGE_DELETED = 'message:deleted',
 
   // Temporary removal from the room by an admin+ user (see
   // shared/permissions.ts's 'room:kick') — not a ban, the target can rejoin
@@ -398,6 +445,14 @@ export const CONSENT_REQUEST_TIMEOUT_MS = 20 * 1000;
 export interface SummonRequestPayload {
   requestId: string;
   actorName: string;
+}
+
+// A locked-room knock, shown to admins with Admit/Ignore (see
+// SocketEvents.ROOM_KNOCK_REQUEST). userId is the knocker's account id —
+// what an admit adds to the lock allowlist.
+export interface KnockRequestPayload {
+  userId: string;
+  name: string;
 }
 
 export interface SummonRespondPayload {

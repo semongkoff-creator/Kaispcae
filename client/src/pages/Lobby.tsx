@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight } from 'react-bootstrap-icons';
+import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, Search, LockFill } from 'react-bootstrap-icons';
 import { io } from 'socket.io-client';
 import { RoomTheme, RoomTemplateId, ROOM_TEMPLATES } from '@virtualmeet/shared';
 import { api, RoomInfo } from '@/services/api';
 import { UserProfile } from '@/services/api';
 import { CreditsModal } from '@/components/ui/CreditsModal';
 import { Theme } from '@/hooks/useTheme';
+import { SERVER_URL } from '@/services/serverUrl';
 
 interface LobbyProps {
   user: UserProfile;
@@ -40,9 +41,18 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
   const [roomTemplate, setRoomTemplate] = useState<RoomTemplateId>('main-office');
   const [joinCode, setJoinCode] = useState('');
   const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
-  const [toast, setToast] = useState('');
+  // In-app toast (replaces the browser's native alert() for join/delete
+  // feedback). `type` drives the color + icon.
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 2800);
+  };
   const [showCredits, setShowCredits] = useState(false);
   const [nameError, setNameError] = useState(false);
+  // Room-list search + sort (the list can grow to hundreds of rooms).
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<'recent' | 'active'>('recent');
 
   useEffect(() => {
     api.getRooms()
@@ -56,8 +66,25 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
   const lastRoomSlug = localStorage.getItem('vm_last_room_slug');
   const lastRoom = rooms.find((r) => r.slug === lastRoomSlug);
 
+  // Filter by name/slug/creator, then sort. 'recent' matches the API's own
+  // default createdAt-desc order; 'active' surfaces the busiest rooms first.
+  const q = search.trim().toLowerCase();
+  const visibleRooms = rooms
+    .filter((r) =>
+      !q ||
+      r.name.toLowerCase().includes(q) ||
+      r.slug.toLowerCase().includes(q) ||
+      r.ownerDisplayName.toLowerCase().includes(q),
+    )
+    .slice()
+    .sort((a, b) =>
+      sortBy === 'active'
+        ? b.playerCount - a.playerCount
+        : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+
   useEffect(() => {
-    const socket = io('http://localhost:3001', { transports: ['websocket', 'polling'] });
+    const socket = io(SERVER_URL, { transports: ['websocket', 'polling'] });
     socket.on('lobby:room_updated', (data: { roomId: string; playerCount: number }) => {
       setRooms((prev) => prev.map((r) =>
         (r.id === data.roomId || r.slug === data.roomId) ? { ...r, playerCount: data.playerCount } : r
@@ -65,6 +92,11 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
     });
     socket.on('lobby:room_removed', (data: { roomId: string }) => {
       setRooms((prev) => prev.filter((r) => r.id !== data.roomId && r.slug !== data.roomId));
+    });
+    socket.on('lobby:room_lock', (data: { roomId: string; locked: boolean }) => {
+      setRooms((prev) => prev.map((r) =>
+        (r.id === data.roomId || r.slug === data.roomId) ? { ...r, locked: data.locked } : r
+      ));
     });
     return () => { socket.removeAllListeners(); socket.disconnect(); };
   }, []);
@@ -81,17 +113,16 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
   const handleJoinByCode = async () => {
     const code = joinCode.trim();
     if (!code) return;
-    try { const room = await api.getRoom(code); onJoinRoom(room.slug); } catch { alert('Room not found'); }
+    try { const room = await api.getRoom(code); onJoinRoom(room.slug); } catch { showToast(`Room "${code}" tidak ditemukan — cek lagi kodenya`, 'error'); }
   };
 
   const handleDelete = async (slug: string) => {
     try {
       await api.deleteRoom(slug);
       setRooms((prev) => prev.filter((r) => r.slug !== slug));
-      setToast('Room deleted');
-      setTimeout(() => setToast(''), 2000);
+      showToast('Room dihapus', 'success');
     } catch (err) {
-      alert('Failed to delete room');
+      showToast('Gagal menghapus room', 'error');
     }
   };
 
@@ -134,7 +165,24 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
       </header>
       <main className="max-w-4xl mx-auto px-6 py-8">
         {toast && (
-          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-emerald-500/90 text-white text-xs px-3 py-1 rounded-full">{toast}</div>
+          // Outer layer does the positioning (flex), so the inner card's
+          // fade-in animation transform never fights a positioning transform.
+          // Top-center, sitting in the header band.
+          <div className="fixed inset-x-0 top-3 z-[80] flex justify-center pointer-events-none">
+            <div
+              role="status"
+              className={`flex items-center gap-2.5 pl-3.5 pr-4 py-2.5 rounded-xl shadow-2xl border text-sm font-medium animate-fade-in ${
+                toast.type === 'error'
+                  ? 'bg-white dark:bg-gray-800 border-red-200 dark:border-red-800 text-red-600 dark:text-red-400'
+                  : 'bg-white dark:bg-gray-800 border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400'
+              }`}
+            >
+              <span className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${toast.type === 'error' ? 'bg-red-100 dark:bg-red-900/40' : 'bg-emerald-100 dark:bg-emerald-900/40'}`}>
+                {toast.type === 'error' ? <XLg size={12} /> : <Check2 size={14} />}
+              </span>
+              {toast.msg}
+            </div>
+          </div>
         )}
         {lastRoom && (
           <div className="flex items-center justify-between bg-purple-50 dark:bg-gray-800 border border-purple-100 dark:border-gray-700 rounded-xl px-4 py-3 mb-6">
@@ -163,6 +211,40 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
             )}
           </div>
         </div>
+
+        {/* Search + sort — the room list can be hundreds of rooms long. */}
+        {!loading && rooms.length > 0 && (
+          <div className="flex items-center gap-2 mb-5 flex-wrap">
+            <div className="relative flex-1 min-w-[12rem] max-w-sm">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 pointer-events-none" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Cari room (nama / kode / pembuat)..."
+                className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg pl-8 pr-8 py-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 shadow-sm"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} title="Clear" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
+                  <XLg size={11} />
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-1 bg-purple-50 dark:bg-gray-800 rounded-lg p-0.5 border border-purple-100 dark:border-gray-700">
+              {(['recent', 'active'] as const).map((key) => (
+                <button
+                  key={key}
+                  onClick={() => setSortBy(key)}
+                  className={`text-xs font-medium px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
+                    sortBy === key ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                  }`}
+                >
+                  {key === 'recent' ? 'Terbaru' : 'Paling ramai'}
+                </button>
+              ))}
+            </div>
+            <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto tabular-nums">{visibleRooms.length} room</span>
+          </div>
+        )}
         {showCreate && isAdmin && (
           <div className="bg-white dark:bg-gray-800 rounded-xl p-4 mb-6 border border-purple-100 dark:border-gray-700 shadow-sm">
             <div className="flex gap-3 items-end mb-3">
@@ -233,9 +315,14 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
             <p className="text-gray-400 dark:text-gray-500 text-lg mb-2">No rooms yet</p>
             <p className="text-gray-400 dark:text-gray-500 text-sm">Create the first room to get started</p>
           </div>
+        ) : visibleRooms.length === 0 ? (
+          <div className="text-center py-16">
+            <p className="text-gray-400 dark:text-gray-500 text-lg mb-2">Tidak ada room yang cocok</p>
+            <p className="text-gray-400 dark:text-gray-500 text-sm">Coba kata kunci lain, atau <button onClick={() => setSearch('')} className="text-purple-500 hover:text-purple-700 underline cursor-pointer">hapus pencarian</button>.</p>
+          </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {rooms.map((room) => {
+            {visibleRooms.map((room) => {
               const isConfirmingDelete = deletingSlug === room.slug;
               const handleJoinClick = () => { if (!isConfirmingDelete) onJoinRoom(room.slug); };
               return (
@@ -248,7 +335,14 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
                 }`}
               >
                 <div className="flex items-start justify-between mb-1" onClick={handleJoinClick}>
-                  <h3 className={`font-semibold text-sm text-gray-900 dark:text-gray-100 ${isConfirmingDelete ? '' : 'cursor-pointer'}`}>{room.name}</h3>
+                  <h3 className={`font-semibold text-sm text-gray-900 dark:text-gray-100 inline-flex items-center gap-1.5 ${isConfirmingDelete ? '' : 'cursor-pointer'}`}>
+                    {room.locked && (
+                      <span title="Locked — knock to enter" className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 shrink-0">
+                        <LockFill size={9} />
+                      </span>
+                    )}
+                    {room.name}
+                  </h3>
                   <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono">{room.slug.slice(0, 8)}</span>
                 </div>
                 <p className="text-gray-400 dark:text-gray-500 text-[10px] mb-3">Created by {room.ownerDisplayName}</p>

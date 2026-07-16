@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary } from '@virtualmeet/shared';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -108,6 +108,15 @@ export interface GameState {
   kickedNotice: string | null;
   setKickedNotice: (notice: string | null) => void;
 
+  // Zoom-style "Lock Meeting" (see shared SocketEvents.ROOM_LOCK_SET).
+  // roomLocked drives the 🔒 indicator + the owner's Lock/Unlock control;
+  // roomLockedNotice bounces a denied joiner back to the Lobby, same
+  // mechanism as roomDeletedNotice/kickedNotice above.
+  roomLocked: boolean;
+  setRoomLocked: (locked: boolean) => void;
+  roomLockedNotice: string | null;
+  setRoomLockedNotice: (notice: string | null) => void;
+
   // Sitting — localPlayer.isSitting/x/y/direction (Avatar fields, already
   // synced to other players) hold the visible state; these two are local
   // bookkeeping only, never broadcast. sittingFurnitureId names which chair
@@ -162,10 +171,27 @@ export interface GameState {
   setActiveChatTarget: (target: { type: 'channel' | 'dm'; id: string } | null) => void;
   chatPanelOpen: boolean;
   setChatPanelOpen: (open: boolean) => void;
+  // Unread message counts per chat target ("channel:<id>"/"dm:<id>") — bumped
+  // when a message arrives for a target the user isn't currently viewing, and
+  // cleared when they open/switch to it. Drives the badges on the Chat button
+  // and the channel/DM pills (deferred in the original chat plan).
+  unreadByTarget: Record<string, number>;
+  bumpUnread: (key: string) => void;
+  clearUnread: (key: string) => void;
+  // "X is typing…" — per target ("channel:<id>"/"dm:<id>"), a map of the
+  // typer's userId to an expiry timestamp. noteTyping refreshes the expiry on
+  // each ping; the UI treats entries past their expiry as no longer typing
+  // (there's no explicit "stopped typing" event — it just lapses).
+  typingByTarget: Record<string, Record<string, number>>;
+  noteTyping: (key: string, userId: string) => void;
   messagesByTarget: Record<string, ChannelMessage[]>;
   setTargetMessages: (key: string, messages: ChannelMessage[]) => void;
   prependTargetMessages: (key: string, messages: ChannelMessage[]) => void;
   appendTargetMessage: (key: string, message: ChannelMessage) => void;
+  // Remove a deleted message live (see shared MESSAGE_DELETED). parentId set
+  // → it was a thread reply (also decrements the parent's replyCount);
+  // otherwise a top-level message (also drops its cached thread).
+  removeTargetMessage: (key: string, messageId: string, parentId?: string) => void;
   // Bumps a top-level message's cached replyCount when a reply to it
   // arrives live — without this, "N replies" on the parent goes stale the
   // instant anyone (including the sender) replies, and never recovers
@@ -207,6 +233,9 @@ export interface GameState {
   setFollowResult: (result: FollowResultPayload | null) => void;
   incomingSummonRequest: SummonRequestPayload | null;
   setIncomingSummonRequest: (req: SummonRequestPayload | null) => void;
+  // A locked-room "knock" shown to admins (see shared KnockRequestPayload).
+  incomingKnock: KnockRequestPayload | null;
+  setIncomingKnock: (req: KnockRequestPayload | null) => void;
   summonResult: SummonResultPayload | null;
   setSummonResult: (result: SummonResultPayload | null) => void;
 
@@ -429,6 +458,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   kickedNotice: null,
   setKickedNotice: (notice) => set({ kickedNotice: notice }),
 
+  roomLocked: false,
+  setRoomLocked: (locked) => set({ roomLocked: locked }),
+  roomLockedNotice: null,
+  setRoomLockedNotice: (notice) => set({ roomLockedNotice: notice }),
+
   sittingFurnitureId: null,
   setSittingFurnitureId: (id) => set({ sittingFurnitureId: id }),
   sitReturnPos: null,
@@ -475,6 +509,24 @@ export const useGameStore = create<GameState>((set, get) => ({
   setActiveChatTarget: (activeChatTarget) => set({ activeChatTarget }),
   chatPanelOpen: false,
   setChatPanelOpen: (chatPanelOpen) => set({ chatPanelOpen }),
+  unreadByTarget: {},
+  bumpUnread: (key) =>
+    set((state) => ({ unreadByTarget: { ...state.unreadByTarget, [key]: (state.unreadByTarget[key] ?? 0) + 1 } })),
+  clearUnread: (key) =>
+    set((state) => {
+      if (!state.unreadByTarget[key]) return {};
+      const next = { ...state.unreadByTarget };
+      delete next[key];
+      return { unreadByTarget: next };
+    }),
+  typingByTarget: {},
+  noteTyping: (key, userId) =>
+    set((state) => ({
+      typingByTarget: {
+        ...state.typingByTarget,
+        [key]: { ...(state.typingByTarget[key] ?? {}), [userId]: Date.now() + 3500 },
+      },
+    })),
   messagesByTarget: {},
   setTargetMessages: (key, messages) =>
     set((state) => ({ messagesByTarget: { ...state.messagesByTarget, [key]: messages.slice(-CHAT_TARGET_MAX) } })),
@@ -499,6 +551,36 @@ export const useGameStore = create<GameState>((set, get) => ({
       return { messagesByTarget: { ...state.messagesByTarget, [targetKey]: updated } };
     }),
 
+  removeTargetMessage: (key, messageId, parentId) =>
+    set((state) => {
+      const patch: Partial<GameState> = {};
+      if (parentId) {
+        // A reply: drop it from its thread cache and decrement the parent's
+        // cached reply count so "N replies" stays accurate.
+        const replies = state.repliesByParent[parentId];
+        if (replies) patch.repliesByParent = { ...state.repliesByParent, [parentId]: replies.filter((r) => r.id !== messageId) };
+        const list = state.messagesByTarget[key];
+        if (list) {
+          const idx = list.findIndex((m) => m.id === parentId);
+          if (idx !== -1) {
+            const updated = [...list];
+            updated[idx] = { ...updated[idx], replyCount: Math.max(0, (updated[idx].replyCount ?? 0) - 1) };
+            patch.messagesByTarget = { ...state.messagesByTarget, [key]: updated };
+          }
+        }
+      } else {
+        // A top-level message: remove it, and drop any expanded-thread cache
+        // it owned (its replies are cascade-deleted server-side anyway).
+        const list = state.messagesByTarget[key];
+        if (list) patch.messagesByTarget = { ...state.messagesByTarget, [key]: list.filter((m) => m.id !== messageId) };
+        if (state.repliesByParent[messageId]) {
+          const nextReplies = { ...state.repliesByParent };
+          delete nextReplies[messageId];
+          patch.repliesByParent = nextReplies;
+        }
+      }
+      return patch;
+    }),
   repliesByParent: {},
   setParentReplies: (parentId, replies) =>
     set((state) => ({ repliesByParent: { ...state.repliesByParent, [parentId]: replies } })),
@@ -535,6 +617,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   setFollowResult: (result) => set({ followResult: result }),
   incomingSummonRequest: null,
   setIncomingSummonRequest: (req) => set({ incomingSummonRequest: req }),
+  incomingKnock: null,
+  setIncomingKnock: (req) => set({ incomingKnock: req }),
   summonResult: null,
   setSummonResult: (result) => set({ summonResult: result }),
 
@@ -767,6 +851,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       localRole: roomState.role ?? (localIsAdmin ? 'admin' : prev.localRole),
       masterAdminUserId: roomState.masterAdminUserId ?? prev.masterAdminUserId,
       notice: roomState.notice !== undefined ? roomState.notice : prev.notice,
+      roomLocked: roomState.locked ?? false,
     }));
 
     console.log('[store] setRoomState — adminPlayerIds:', Array.from(adminIds), 'masterAdminUserId:', roomState.masterAdminUserId, 'localIsAdmin:', localIsAdmin);

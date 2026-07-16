@@ -13,6 +13,7 @@ function getPrisma(): PrismaClient {
 // than for the zone-chat limiter it mirrors (chatHandler.ts's canSendChat)
 // since these messages are persisted permanently rather than just relayed.
 const canSendChannelChat = socketRateLimit(5); // max 5 messages/sec per user
+const canSignalTyping = socketRateLimit(4); // typing pings are client-throttled; this just caps abuse
 
 // Mirrors routes/chat.ts's canAccessRoomChat (small deliberate duplication
 // for decoupling, same convention as followHandler.ts's own uid/socket
@@ -94,6 +95,48 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
 
   socket.on(SocketEvents.DM_JOIN, (conversationId: string) => {
     if (typeof conversationId === 'string' && conversationId) socket.join(`dm:${conversationId}`);
+  });
+
+  // Typing relays — transient, no DB. The sender must already have JOINed the
+  // target's socket room (so it's the same access-gated room the messages flow
+  // through); we just forward the sender's userId to the OTHER members, who
+  // resolve the display name locally. socket.to(...) excludes the sender.
+  socket.on(SocketEvents.CHANNEL_TYPING, (channelId: string) => {
+    const userId = socket.data.userId as string | undefined;
+    if (!userId || typeof channelId !== 'string' || !channelId || !canSignalTyping(userId)) return;
+    socket.to(`channel:${channelId}`).emit(SocketEvents.CHANNEL_TYPING_UPDATE, { channelId, userId });
+  });
+
+  socket.on(SocketEvents.DM_TYPING, (conversationId: string) => {
+    const userId = socket.data.userId as string | undefined;
+    if (!userId || typeof conversationId !== 'string' || !conversationId || !canSignalTyping(userId)) return;
+    socket.to(`dm:${conversationId}`).emit(SocketEvents.DM_TYPING_UPDATE, { conversationId, userId });
+  });
+
+  socket.on(SocketEvents.MESSAGE_DELETE, async (payload: { messageId: string }) => {
+    const userId = socket.data.userId as string | undefined;
+    if (!userId || typeof payload?.messageId !== 'string') return;
+    try {
+      const prisma = getPrisma();
+      const msg = await prisma.chatMessage.findUnique({ where: { id: payload.messageId } });
+      // Own messages only — no admin-delete in this pass. A missing/foreign
+      // message is silently ignored (nothing to do, and we don't leak whether
+      // an id exists).
+      if (!msg || msg.senderId !== userId) return;
+      // Deleting a parent cascades its thread replies (see schema's
+      // ThreadReplies onDelete: Cascade), so one delete cleans the whole
+      // subtree; clients drop replies on their own when the parent goes.
+      await prisma.chatMessage.delete({ where: { id: msg.id } });
+      const room = msg.channelId ? `channel:${msg.channelId}` : `dm:${msg.conversationId}`;
+      io.to(room).emit(SocketEvents.MESSAGE_DELETED, {
+        messageId: msg.id,
+        channelId: msg.channelId ?? undefined,
+        conversationId: msg.conversationId ?? undefined,
+        parentId: msg.parentId ?? undefined,
+      });
+    } catch (e) {
+      console.error('[channelChat] failed to delete message:', e);
+    }
   });
 
   socket.on(SocketEvents.DM_LEAVE, (conversationId: string) => {

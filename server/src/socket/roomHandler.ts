@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload } from '@virtualmeet/shared';
 import {
-  addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerSitting,
+  addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
 } from '../store/roomStore';
 import { PrismaClient } from '@prisma/client';
@@ -12,6 +12,7 @@ const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec
 const canTeleport = socketRateLimit(2); // max 2 teleport requests/sec per socket
 const canUpdateRoom = socketRateLimit(2); // max 2 room:update (DB write) calls/sec per socket
 const canSummonUser = socketRateLimit(3); // max 3 single-target summon requests/sec per socket
+const canKnock = socketRateLimit(1); // max 1 knock/sec per socket — no spamming the host
 
 // §5.1 — Summon now requires the target's consent, so the actual move only
 // happens once they accept. Keyed by TARGET socket id — a new request from
@@ -61,6 +62,15 @@ interface RoomAdminState {
   // instead of each inventing their own mid-tier role.
   staffUserIds: Set<string>;
   loadedFromDb: boolean;
+  // Zoom-style "Lock Meeting" (see SocketEvents.ROOM_LOCK_SET) — when true,
+  // JOIN_ROOM denies any non-admin. In-memory only, so a server restart
+  // reopens every room; that's intentional (a lock is a live moderation
+  // action for an ongoing session, not persistent room config).
+  locked?: boolean;
+  // Uids admitted past the lock via "Knock to enter" (see
+  // SocketEvents.ROOM_KNOCK_ADMIT). Cleared whenever the room is unlocked, so
+  // a re-lock requires knocking again.
+  knockAllowlist?: Set<string>;
 }
 
 const roomAdminMap = new Map<string, RoomAdminState>();
@@ -190,6 +200,14 @@ export function getPlayerColor(id: string): string {
   return playerColors.get(id) || '#4ecdc4';
 }
 
+// Read-only lock check for the REST rooms list (routes/rooms.ts) so the Lobby
+// can show a 🔒 badge. Deliberately does NOT use getRoomAdmin() — that would
+// CREATE an empty admin-state entry for every room merely listed, and a room
+// with no in-memory state has never been locked, so treat missing as false.
+export function isRoomLocked(slug: string): boolean {
+  return roomAdminMap.get(slug)?.locked === true;
+}
+
 export function registerRoomHandlers(io: Server, socket: Socket) {
   let currentRoom: string | null = null;
 
@@ -242,6 +260,21 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
     const isAdmin = rs.adminUserIds.has(uid);
     const isMasterAdmin = uid === rs.masterAdminUserId;
+
+    // Zoom-style "Lock Meeting" gate — a locked room turns away any non-admin
+    // BEFORE they're added to the player store or announced to the room, so a
+    // denied joiner never appears to anyone (no ghost avatar, no PLAYER_JOINED
+    // broadcast). Admins/owner always get in (someone has to be able to unlock
+    // it, and moderators need to reach a room they're managing). We undo the
+    // socket.join(room) done at the top of this handler and clear currentRoom
+    // so this socket receives no further room traffic.
+    if (rs.locked && !isAdmin && !rs.knockAllowlist?.has(uid)) {
+      console.log(`[room] denied ${name} (${socket.id}) — ${room} is locked`);
+      socket.emit(SocketEvents.ROOM_LOCKED_DENIED, { roomId: room });
+      socket.leave(room);
+      currentRoom = null;
+      return;
+    }
 
     // Fetch the saved room once — reused for spawn point lookup below and
     // for the tiles/furniture/zones sent in room:state once player data is ready.
@@ -349,9 +382,70 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         ...state, tiles, furniture: savedFurniture || fallback!.furniture, zones: savedZones || fallback!.zones, players: playersWithMeta,
         adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId, staffUserIds: Array.from(rs.staffUserIds), theme, template,
         notice: roomNoticeMap.get(room) ?? null,
+        locked: !!rs.locked,
         role: getRole(rs, uid),
       });
     });
+  });
+
+  socket.on(SocketEvents.ROOM_LOCK_SET, (data: { locked: boolean }) => {
+    const room = currentRoom; if (!room) return;
+    const senderUid = findUserIdBySocket(socket.id);
+    const rs = getRoomAdmin(room);
+    if (!canAccess(rs, senderUid, 'room:lock')) {
+      socket.emit('admin:error', { message: 'Only admins can lock the room' });
+      return;
+    }
+    rs.locked = !!data?.locked;
+    // Unlocking wipes the knock allowlist — a fresh lock shouldn't silently
+    // still admit whoever was let in during a previous lock session.
+    if (!rs.locked) rs.knockAllowlist?.clear();
+    // Everyone in the room (including the toggler) gets the new state so the
+    // 🔒 indicator and the owner's Lock/Unlock control stay in sync.
+    io.to(room).emit(SocketEvents.ROOM_LOCK_UPDATED, { locked: rs.locked });
+    // Also tell every Lobby socket so its 🔒 badge updates live, same channel
+    // the playerCount/removed lobby events already use (see Lobby.tsx).
+    io.emit('lobby:room_lock', { roomId: room, locked: rs.locked });
+    console.log(`[room] ${room} ${rs.locked ? 'LOCKED' : 'unlocked'} by uid=${senderUid}`);
+  });
+
+  socket.on(SocketEvents.ROOM_KNOCK, (data: { roomId: string }) => {
+    if (!canKnock(socket.id)) return; // rate-limited: no knock-spamming the host
+    const room = data?.roomId;
+    if (!room || typeof room !== 'string') return;
+    const rs = getRoomAdmin(room);
+    if (!rs.locked) return; // nothing to knock on
+    const uid = (socket.data as { userId?: string }).userId || socket.id;
+    const name = playerNames.get(socket.id) || 'Someone';
+    // Ring only the admins currently connected to that room (resolved via the
+    // uid→socket map) — the knock UI is admin-only, so this avoids leaking the
+    // knocker's identity to every member.
+    let reached = 0;
+    for (const adminUid of rs.adminUserIds) {
+      const adminSocketId = userSocketMap.get(adminUid);
+      if (adminSocketId && io.sockets.sockets.get(adminSocketId)) {
+        io.to(adminSocketId).emit(SocketEvents.ROOM_KNOCK_REQUEST, { userId: uid, name });
+        reached++;
+      }
+    }
+    console.log(`[room] ${name} (uid=${uid}) knocked on ${room} — ${reached} admin(s) notified`);
+  });
+
+  socket.on(SocketEvents.ROOM_KNOCK_ADMIT, (data: { userId: string }) => {
+    const room = currentRoom; if (!room) return;
+    const senderUid = findUserIdBySocket(socket.id);
+    const rs = getRoomAdmin(room);
+    if (!canAccess(rs, senderUid, 'room:lock')) {
+      socket.emit('admin:error', { message: 'Only admins can admit knockers' });
+      return;
+    }
+    if (typeof data?.userId !== 'string') return;
+    if (!rs.knockAllowlist) rs.knockAllowlist = new Set();
+    rs.knockAllowlist.add(data.userId);
+    // Ping the knocker's socket so their client can auto-retry the join.
+    const knockerSocketId = userSocketMap.get(data.userId);
+    if (knockerSocketId) io.to(knockerSocketId).emit(SocketEvents.ROOM_KNOCK_ADMITTED, { roomId: room });
+    console.log(`[room] uid=${data.userId} admitted to ${room} by uid=${senderUid}`);
   });
 
   socket.on(SocketEvents.ADMIN_GRANT, (data: { targetUserId: string }) => {
@@ -589,6 +683,13 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const trimmed = (status || '').slice(0, 24);
     socket.to(room).emit(SocketEvents.PLAYER_STATUS_UPDATED, { id: socket.id, status: trimmed });
     updatePlayerStatus(room, socket.id, trimmed);
+  });
+
+  socket.on(SocketEvents.PLAYER_HAND, (raised: boolean) => {
+    const room = currentRoom; if (!room) return;
+    const val = !!raised;
+    socket.to(room).emit(SocketEvents.PLAYER_HAND_UPDATED, { id: socket.id, handRaised: val });
+    updatePlayerHand(room, socket.id, val);
   });
 
   socket.on(SocketEvents.PLAYER_SIT, (data: { sitting: boolean; x: number; y: number; direction: Avatar['direction'] }) => {

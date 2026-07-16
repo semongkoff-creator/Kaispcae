@@ -119,6 +119,9 @@ export interface RoomInfo {
   isPublic: boolean;
   createdAt: string;
   theme?: 'modern-interiors' | 'scifi-office';
+  // Zoom-style meeting lock (in-memory, see server roomHandler.isRoomLocked) —
+  // drives the 🔒 badge on the Lobby room card.
+  locked?: boolean;
 }
 
 export const api = {
