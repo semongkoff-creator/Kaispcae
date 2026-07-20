@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from 'react';
+import { isTypingTarget } from '@/utils/hotkeys';
 import {
   HandIndexThumbFill,
   HandThumbsUpFill,
@@ -36,7 +37,8 @@ interface EmoteWheelProps {
 export function EmoteWheel({ open, onSelect, onClose }: EmoteWheelProps) {
   const handleKey = useCallback((e: KeyboardEvent) => {
     if (e.key === 'b' || e.key === 'B') {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // Same guard as App.tsx's opener — see utils/hotkeys.ts.
+      if (isTypingTarget(e.target)) return;
       onClose();
     }
   }, [onClose]);

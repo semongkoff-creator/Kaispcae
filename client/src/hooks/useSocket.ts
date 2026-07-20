@@ -397,6 +397,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().removeTargetMessage(key, data.messageId, data.parentId);
     });
 
+    socket.on(SocketEvents.MESSAGE_EDITED, (data: { messageId: string; channelId?: string; conversationId?: string; parentId?: string; text: string }) => {
+      const key = data.channelId ? `channel:${data.channelId}` : `dm:${data.conversationId}`;
+      useGameStore.getState().editTargetMessage(key, data.messageId, data.text, data.parentId);
+    });
+
     socket.on(SocketEvents.CHANNEL_TYPING_UPDATE, (data: { channelId: string; userId: string }) => {
       if (data.userId === useGameStore.getState().localUserId) return;
       useGameStore.getState().noteTyping(`channel:${data.channelId}`, data.userId);
@@ -624,8 +629,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.CHANNEL_LEAVE, channelId);
   }, []);
 
-  const emitChannelMessageSend = useCallback((channelId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string) => {
-    socketRef.current?.emit(SocketEvents.CHANNEL_MESSAGE_SEND, { channelId, text, parentId, attachmentUrl, attachmentName });
+  const emitChannelMessageSend = useCallback((channelId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string, clientId?: string) => {
+    socketRef.current?.emit(SocketEvents.CHANNEL_MESSAGE_SEND, { channelId, text, parentId, attachmentUrl, attachmentName, clientId });
   }, []);
 
   const emitDmJoin = useCallback((conversationId: string) => {
@@ -636,12 +641,16 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.DM_LEAVE, conversationId);
   }, []);
 
-  const emitDmMessageSend = useCallback((conversationId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string) => {
-    socketRef.current?.emit(SocketEvents.DM_MESSAGE_SEND, { conversationId, text, parentId, attachmentUrl, attachmentName });
+  const emitDmMessageSend = useCallback((conversationId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string, clientId?: string) => {
+    socketRef.current?.emit(SocketEvents.DM_MESSAGE_SEND, { conversationId, text, parentId, attachmentUrl, attachmentName, clientId });
   }, []);
 
   const emitDeleteMessage = useCallback((messageId: string) => {
     socketRef.current?.emit(SocketEvents.MESSAGE_DELETE, { messageId });
+  }, []);
+
+  const emitEditMessage = useCallback((messageId: string, text: string) => {
+    socketRef.current?.emit(SocketEvents.MESSAGE_EDIT, { messageId, text });
   }, []);
 
   const emitChannelTyping = useCallback((channelId: string) => {
@@ -783,5 +792,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage };
 }

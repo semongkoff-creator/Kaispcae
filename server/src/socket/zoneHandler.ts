@@ -1,5 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { SocketEvents } from '@virtualmeet/shared';
+import { mayEnterZone, isZoneLocked, isSealedIn } from './zoneLock';
 
 // Actual A/V zone restriction is computed client-side (see useProximity.ts —
 // every client already knows every player's position and the room's zones,
@@ -24,6 +25,11 @@ export function getSocketIdsInZone(room: string, zoneId: string): string[] {
 // since only the RECIPIENTS were computed from real zone membership, never
 // the sender's own claim (see §1.3's "reject send_chat kalau
 // player.currentAreaId tidak sesuai" rule).
+// The zone a socket is currently tracked in (null when it's in none).
+export function zoneIdOfSocket(socketId: string): string | null {
+  return socketZone.get(socketId)?.zoneId ?? null;
+}
+
 export function isSocketInZone(room: string, socketId: string, zoneId: string): boolean {
   const loc = socketZone.get(socketId);
   return !!loc && loc.room === room && loc.zoneId === zoneId;
@@ -38,12 +44,30 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
 
   socket.on(SocketEvents.ZONE_ENTER, (zoneId: string) => {
     if (!currentRoom) return;
+    // A locked zone is enforced HERE, not just drawn in the UI. Without this
+    // the padlock would be decoration: zone membership drives zone-scoped
+    // chat and A/V, so an uninvited socket could still join the meeting's
+    // audio by claiming ZONE_ENTER.
+    const uid = socket.data.userId as string | undefined;
+    if (isZoneLocked(currentRoom, zoneId) && !mayEnterZone(currentRoom, zoneId, uid)) {
+      socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'locked' });
+      return;
+    }
     socketZone.set(socket.id, { room: currentRoom, zoneId });
     socket.to(currentRoom).emit(SocketEvents.ZONE_ENTER, { playerId: socket.id, zoneId });
   });
 
   socket.on(SocketEvents.ZONE_EXIT, (zoneId: string) => {
     if (!currentRoom) return;
+    // Locked zones hold you in: only the keyholder can open the door. The
+    // client also blocks the walk, but membership is what drives zone chat and
+    // A/V — so it must be refused HERE too, or someone could leave the meeting's
+    // audio while still standing in it.
+    const uid = socket.data.userId as string | undefined;
+    if (isSealedIn(currentRoom, zoneId, uid)) {
+      socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'sealed_in' });
+      return;
+    }
     socketZone.delete(socket.id);
     socket.to(currentRoom).emit(SocketEvents.ZONE_EXIT, { playerId: socket.id, zoneId });
   });

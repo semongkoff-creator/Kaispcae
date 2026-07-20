@@ -1,0 +1,104 @@
+import { WorkspaceRole } from '@virtualmeet/shared';
+
+const API_BASE = '/api';
+
+async function req<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = localStorage.getItem('vm_token');
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...((options.headers as Record<string, string>) || {}),
+    },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error || `Gagal: ${res.status}`);
+  }
+  return res.json();
+}
+
+export interface AdminMember {
+  id: string;
+  email: string;
+  displayName: string;
+  workspaceRole: WorkspaceRole;
+  timezone: string;
+  active: boolean;
+  createdAt: string;
+  department: { id: string; name: string } | null;
+  manager: { id: string; displayName: string } | null;
+}
+
+export interface AdminDepartment { id: string; name: string; memberCount: number }
+
+export interface WorkspacePolicy {
+  basePublicLinksAllowed: boolean;
+  baseExportAllowed: boolean;
+  docsPublicLinksAllowed: boolean;
+  docsLinkPasswordRequired: boolean;
+  maxShareLinkDays: number | null;
+}
+
+export interface AuditEntry {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  meta: Record<string, unknown> | null;
+  reason: string | null;
+  ip: string | null;
+  createdAt: string;
+  actor: { id: string; displayName: string };
+  targetUser: { id: string; displayName: string } | null;
+}
+
+export interface AuditFilter {
+  actorId?: string;
+  targetUserId?: string;
+  action?: string;
+  from?: string;
+  to?: string;
+}
+
+export const adminApi = {
+  getMembers: () => req<{ members: AdminMember[] }>('/admin/members'),
+
+  // Pending room-join requests across the whole workspace (see
+  // server/src/routes/roomMembers.ts). Unwrapped to the array here because
+  // every caller wants the list, not the envelope.
+  listRoomsApproval: () =>
+    req<{ rooms: { slug: string; name: string; requiresApproval: boolean; isPublic: boolean }[] }>('/admin/rooms-approval')
+      .then((r) => r.rooms),
+
+  setRoomApproval: (slug: string, requiresApproval: boolean) =>
+    req<{ slug: string; requiresApproval: boolean }>(`/rooms/${slug}/approval`, {
+      method: 'PATCH',
+      body: JSON.stringify({ requiresApproval }),
+    }),
+
+  listJoinRequests: () =>
+    req<{ requests: { userId: string; displayName: string; email: string; roomSlug: string; roomName: string; requestedAt: number }[] }>(
+      '/admin/join-requests',
+    ).then((r) => r.requests),
+  updateMember: (userId: string, patch: Partial<{ workspaceRole: WorkspaceRole; active: boolean; departmentId: string | null; managerId: string | null }>) =>
+    req<Record<string, unknown>>(`/admin/members/${userId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+
+  getDepartments: () => req<{ departments: AdminDepartment[] }>('/admin/departments'),
+  createDepartment: (name: string) => req<AdminDepartment>('/admin/departments', { method: 'POST', body: JSON.stringify({ name }) }),
+  deleteDepartment: (id: string) => req<{ success: boolean }>(`/admin/departments/${id}`, { method: 'DELETE' }),
+
+  getPolicy: () => req<{ policy: WorkspacePolicy }>('/workspace/policy'),
+  updatePolicy: (patch: Partial<WorkspacePolicy>) => req<{ policy: WorkspacePolicy }>('/admin/policy', { method: 'PATCH', body: JSON.stringify(patch) }),
+
+  takeoverBase: (baseId: string, reason: string) =>
+    req<{ success: boolean }>(`/admin/bases/${baseId}/takeover`, { method: 'POST', body: JSON.stringify({ reason }) }),
+
+  getAudit: (filter: AuditFilter = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(filter)) if (v) qs.set(k, v);
+    const q = qs.toString();
+    return req<{ entries: AuditEntry[]; actions: string[] }>(`/admin/audit${q ? `?${q}` : ''}`);
+  },
+};

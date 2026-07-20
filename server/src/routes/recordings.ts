@@ -1,16 +1,13 @@
 import { Router, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { PrismaClient } from '@prisma/client';
+import { getPrisma } from '../lib/prisma';
 import { hasFeatureAccess } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole as resolveRole } from '../lib/roles';
 
 const recordings = Router();
 
-function getPrisma(): PrismaClient {
-  return new PrismaClient();
-}
 
 // §7 — visible to admin+ (manage all of this room's recordings) or the
 // person who was recorded (wants their own copy) — same "creator or admin"
@@ -27,7 +24,15 @@ recordings.get('/rooms/:slug/recordings', authenticateToken, async (req: AuthReq
       ? rows
       : rows.filter((r) => r.targetUserId === req.userId);
 
-    return res.json({ recordings: visible });
+    // fileUrl is withheld on purpose. It points at /api/uploads/<uuid>.webm —
+    // the raw file, which the download route below deliberately gates behind
+    // a role check, an expiry, and an atomically-incremented maxDownloads
+    // counter. Handing the direct path to the client made every one of those
+    // checks optional: burn the three downloads, then fetch the uuid forever.
+    // No client reads this field (it's only ever sent UP, at
+    // RECORDING_FINALIZE), so nothing needs it on the way down. Download
+    // strictly via GET /recordings/:id/download.
+    return res.json({ recordings: visible.map(({ fileUrl: _fileUrl, ...r }) => r) });
   } catch (err) {
     console.error('[recordings] list error:', err);
     return res.status(500).json({ error: 'Failed to list recordings' });

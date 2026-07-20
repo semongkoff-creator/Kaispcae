@@ -1,16 +1,16 @@
 import { Router, Response } from 'express';
 import { Server } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
-import { SocketEvents, Channel, ChannelMessage, DirectConversationSummary, DirectConversationStarted, Role, hasFeatureAccess } from '@virtualmeet/shared';
+import { getPrisma } from '../lib/prisma';
+import { SocketEvents, Channel, ChannelMessage, ConversationPreview, DirectConversationSummary, DirectConversationStarted, Role, hasFeatureAccess } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { validate, createChannelSchema, startDmSchema, sanitizeChat } from '../middleware/validate';
 import { resolveRoomRole as resolveRoomRoleShared } from '../lib/roles';
+import { ensureGroupConversation, ensureDmConversation, groupConversationId, dmConversationId } from '../lib/conversations';
+import { canAccessRoomChat } from '../lib/chatAccess';
 
 const chat = Router();
 
-function getPrisma(): PrismaClient {
-  return new PrismaClient();
-}
 
 // Set once from index.ts, same pattern as routes/rooms.ts's ioRef — lets
 // channel create/delete notify every connected client in the room so their
@@ -36,30 +36,40 @@ async function resolveRoomRole(prisma: PrismaClient, room: { id: string; ownerId
   return resolveRoomRoleShared(prisma, userId, room.id, room.ownerId);
 }
 
-// Gate for reading/sending in a room's chat — public rooms are open to any
-// authenticated user (matches how joining a public room works everywhere
-// else in this app: Socket.IO's JOIN_ROOM has no isPublic check either).
-// Private rooms are unlisted-by-slug the same way everywhere else too, but
-// unlike joining via socket (which is at least visible — an avatar appears,
-// "X joined" fires), these are silent REST reads with zero trace, so they
-// get one extra bar: owner, an explicit RoomMember row (any role), or a
-// global admin account (see shared/permissions.ts's AccountRole).
-// Without this, anyone who merely knows/guesses a private room's slug could
-// silently read (and post into) its chat without ever "being" in the room
-// in any way another participant could notice.
-async function canAccessRoomChat(prisma: PrismaClient, room: { id: string; ownerId: string; isPublic: boolean }, userId: string): Promise<boolean> {
-  if (room.isPublic) return true;
-  if (userId === room.ownerId) return true;
-  const [user, member] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { accountRole: true } }),
-    prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId: room.id } } }),
-  ]);
-  if (user?.accountRole === 'admin') return true;
-  return !!member;
+function toChannelDto(c: { id: string; roomId: string; name: string; isDefault: boolean; createdAt: Date }, lastMessage?: ConversationPreview): Channel {
+  return { id: c.id, roomId: c.roomId, name: c.name, isDefault: c.isDefault, createdAt: c.createdAt.getTime(), ...(lastMessage ? { lastMessage } : {}) };
 }
 
-function toChannelDto(c: { id: string; roomId: string; name: string; isDefault: boolean; createdAt: Date }): Channel {
-  return { id: c.id, roomId: c.roomId, name: c.name, isDefault: c.isDefault, createdAt: c.createdAt.getTime() };
+// The newest top-level message for each of the given conversations, in ONE
+// query — the messenger sidebar needs a preview per row, and doing that per
+// row would be a query per conversation on every list load.
+//
+// Keyed by conversationId2 (the new column), so this is also a live check
+// that the backfill is complete: a conversation whose messages never got one
+// would silently preview as empty.
+async function lastMessagesByConversation(
+  prisma: PrismaClient,
+  conversationIds: string[],
+): Promise<Map<string, ConversationPreview>> {
+  if (conversationIds.length === 0) return new Map();
+  const rows = await prisma.chatMessage.findMany({
+    where: { conversationId2: { in: conversationIds }, parentId: null },
+    orderBy: { createdAt: 'desc' },
+    distinct: ['conversationId2'],
+    include: { sender: { select: { displayName: true } } },
+  });
+  return new Map(
+    rows.map((m) => [
+      m.conversationId2!,
+      {
+        senderName: m.sender.displayName,
+        // An attachment-only message has empty text — preview the filename
+        // instead of a blank row.
+        text: m.text || m.attachmentName || 'Lampiran',
+        createdAt: m.createdAt.getTime(),
+      },
+    ]),
+  );
 }
 
 function toMessageDto(m: {
@@ -100,10 +110,17 @@ function toDmSummaryDto(
     userA: { id: string; displayName: string };
     userB: { id: string; displayName: string };
   },
-  viewerId: string
+  viewerId: string,
+  lastMessage?: ConversationPreview
 ): DirectConversationSummary {
   const other = c.userAId === viewerId ? c.userB : c.userA;
-  return { id: c.id, roomId: c.roomId, otherUser: { id: other.id, displayName: other.displayName }, createdAt: c.createdAt.getTime() };
+  return {
+    id: c.id,
+    roomId: c.roomId,
+    otherUser: { id: other.id, displayName: other.displayName },
+    createdAt: c.createdAt.getTime(),
+    ...(lastMessage ? { lastMessage } : {}),
+  };
 }
 
 // GET /api/rooms/:slug/channels — lazily backfills a "general" channel for
@@ -121,9 +138,11 @@ chat.get('/rooms/:slug/channels', authenticateToken, async (req: AuthRequest, re
     let channels = await prisma.channel.findMany({ where: { roomId: room.id }, orderBy: { createdAt: 'asc' } });
     if (channels.length === 0) {
       const general = await prisma.channel.create({ data: { roomId: room.id, name: 'general', isDefault: true } });
+      await ensureGroupConversation(prisma, general);
       channels = [general];
     }
-    return res.json({ channels: channels.map(toChannelDto) });
+    const previews = await lastMessagesByConversation(prisma, channels.map((c) => groupConversationId(c.id)));
+    return res.json({ channels: channels.map((c) => toChannelDto(c, previews.get(groupConversationId(c.id)))) });
   } catch (err) {
     console.error('[chat] list channels error:', err);
     return res.status(500).json({ error: 'Failed to list channels' });
@@ -144,6 +163,7 @@ chat.post('/rooms/:slug/channels', authenticateToken, validate(createChannelSche
 
     const name = sanitizeChat(req.body.name).slice(0, 30) || 'channel';
     const channel = await prisma.channel.create({ data: { roomId: room.id, name } });
+    await ensureGroupConversation(prisma, channel);
 
     if (ioRef) ioRef.to(room.slug).emit(SocketEvents.CHANNEL_CREATED, toChannelDto(channel));
     return res.status(201).json({ channel: toChannelDto(channel) });
@@ -200,8 +220,12 @@ chat.get('/rooms/:slug/channels/:channelId/messages', authenticateToken, async (
     if (!channel || channel.roomId !== room.id) return res.status(404).json({ error: 'Channel not found' });
 
     const before = typeof req.query.before === 'string' ? req.query.before : undefined;
+    // Reads through the new column; channelId is still written alongside it
+    // (see channelChatHandler.ts's dual-write) and stays the rollback path.
+    // Every pre-existing message was backfilled, so this returns the same set
+    // — verified against the live database before the switch, not assumed.
     const messages = await prisma.chatMessage.findMany({
-      where: { channelId: channel.id, parentId: null },
+      where: { conversationId2: groupConversationId(channel.id), parentId: null },
       orderBy: { createdAt: 'desc' },
       take: parseLimit(req.query.limit),
       ...(before ? { cursor: { id: before }, skip: 1 } : {}),
@@ -272,7 +296,15 @@ chat.get('/rooms/:slug/dms', authenticateToken, async (req: AuthRequest, res: Re
       },
       orderBy: { createdAt: 'desc' },
     });
-    return res.json({ conversations: conversations.map((c) => toDmSummaryDto(c, req.userId!)) });
+    const previews = await lastMessagesByConversation(
+      prisma,
+      conversations.map((c) => dmConversationId(c.userAId, c.userBId)),
+    );
+    return res.json({
+      conversations: conversations.map((c) =>
+        toDmSummaryDto(c, req.userId!, previews.get(dmConversationId(c.userAId, c.userBId))),
+      ),
+    });
   } catch (err) {
     console.error('[chat] list dms error:', err);
     return res.status(500).json({ error: 'Failed to load DMs' });
@@ -329,6 +361,18 @@ chat.post('/rooms/:slug/dms', authenticateToken, validate(startDmSchema), async 
         }
         if (!conversation) throw createErr;
       }
+      // The pair's workspace-level mirror. Note this is deliberately OUTSIDE
+      // the room-scoped find-or-create above: the same pair starting a DM in
+      // a second room makes another DirectConversation row, but resolves to
+      // the SAME Conversation — which is precisely the room-independence the
+      // migration is for. ensureDmConversation upserts, so the second room is
+      // a no-op here rather than a duplicate.
+      await ensureDmConversation(prisma, {
+        userAId,
+        userBId,
+        roomId: room.id,
+        createdAt: conversation.createdAt,
+      });
       // Only on genuine creation — the other participant has no other live
       // way to discover this DM exists (see DM_STARTED's doc comment).
       // Targeted at the two participants' own sockets specifically (not
@@ -368,8 +412,16 @@ chat.get('/dms/:conversationId/messages', authenticateToken, async (req: AuthReq
     }
 
     const before = typeof req.query.before === 'string' ? req.query.before : undefined;
+    // Reads by PAIR, not by this room's DirectConversation row. That is the
+    // behavioural change the whole migration is for: if these two ever talked
+    // from another room, that history is one conversation, not two. No pair
+    // in this database has DMs in more than one room today, so nothing
+    // visibly changes yet — this is the path that makes it true going forward.
     const messages = await prisma.chatMessage.findMany({
-      where: { conversationId: conversation.id, parentId: null },
+      where: {
+        conversationId2: dmConversationId(conversation.userAId, conversation.userBId),
+        parentId: null,
+      },
       orderBy: { createdAt: 'desc' },
       take: parseLimit(req.query.limit),
       ...(before ? { cursor: { id: before }, skip: 1 } : {}),

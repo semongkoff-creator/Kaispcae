@@ -1,4 +1,6 @@
 import { randomUUID } from 'crypto';
+import { isUserInLockedZone } from './zoneLock';
+import { zoneIdOfSocket } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, FollowInfo, CONSENT_REQUEST_TIMEOUT_MS, FollowRespondPayload } from '@virtualmeet/shared';
 import { getPlayerName } from './roomHandler';
@@ -119,6 +121,14 @@ export function registerFollowHandlers(io: Server, socket: Socket): void {
     const followerUid = socketToUid.get(socket.id); if (!followerUid) return;
     const targetUid = data?.targetUserId;
     if (!targetUid || targetUid === followerUid) return;
+
+    // Someone in a locked zone is in a closed meeting: they can't be followed.
+    // Otherwise "follow" would be a side door into a room you were refused.
+    const lockedTargetSocket = [...socketToUid.entries()].find(([, uid]) => uid === targetUid)?.[0];
+    if (lockedTargetSocket && isUserInLockedZone(room, targetUid, zoneIdOfSocket(lockedTargetSocket))) {
+      socket.emit('admin:error', { message: 'Orang itu sedang di zona terkunci — tidak bisa diikuti.' });
+      return;
+    }
 
     const follows = getRoomFollows(room);
 

@@ -1,5 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
+import { getPrisma } from '../lib/prisma';
 import { SocketEvents, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke } from '@virtualmeet/shared';
 import { getPlayerName } from './roomHandler';
 import { socketRateLimit } from '../middleware/rateLimit';
@@ -23,9 +24,6 @@ const canDrawStroke = socketRateLimit(30); // freehand drawing needs much higher
 const socketToUid = new Map<string, string>();
 const socketToRoom = new Map<string, string>();
 
-function getPrisma(): PrismaClient {
-  return new PrismaClient();
-}
 
 function toClientShape(row: {
   id: string; roomId: string; type: string; x: number; y: number;

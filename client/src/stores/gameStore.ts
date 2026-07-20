@@ -192,6 +192,9 @@ export interface GameState {
   // → it was a thread reply (also decrements the parent's replyCount);
   // otherwise a top-level message (also drops its cached thread).
   removeTargetMessage: (key: string, messageId: string, parentId?: string) => void;
+  // Rewrite a message's text live (see shared MESSAGE_EDITED) + flag it
+  // edited. parentId set → a thread reply; otherwise a top-level message.
+  editTargetMessage: (key: string, messageId: string, text: string, parentId?: string) => void;
   // Bumps a top-level message's cached replyCount when a reply to it
   // arrives live — without this, "N replies" on the parent goes stale the
   // instant anyone (including the sender) replies, and never recovers
@@ -535,9 +538,19 @@ export const useGameStore = create<GameState>((set, get) => ({
       const existing = state.messagesByTarget[key] ?? [];
       return { messagesByTarget: { ...state.messagesByTarget, [key]: [...messages, ...existing].slice(-CHAT_TARGET_MAX) } };
     }),
+  // Idempotent by message id. A message id is the server's, so the same id
+  // arriving twice is always the same message — never two — and appending it
+  // blindly paints a duplicate that no reload reproduces, which is a
+  // miserable bug to chase.
+  //
+  // The concrete second delivery: a send retried with the same clientId is
+  // deduped server-side and echoed back to the sender alone (see
+  // channelChatHandler.ts's createMessageDeduped), so the sender can legitimately
+  // see the same id twice — once from the original broadcast, once from the echo.
   appendTargetMessage: (key, message) =>
     set((state) => {
       const existing = state.messagesByTarget[key] ?? [];
+      if (existing.some((m) => m.id === message.id)) return {};
       return { messagesByTarget: { ...state.messagesByTarget, [key]: [...existing, message].slice(-CHAT_TARGET_MAX) } };
     }),
   bumpReplyCount: (targetKey, parentId) =>
@@ -551,6 +564,32 @@ export const useGameStore = create<GameState>((set, get) => ({
       return { messagesByTarget: { ...state.messagesByTarget, [targetKey]: updated } };
     }),
 
+  editTargetMessage: (key, messageId, text, parentId) =>
+    set((state) => {
+      const patch: Partial<GameState> = {};
+      if (parentId) {
+        const replies = state.repliesByParent[parentId];
+        if (replies) {
+          const idx = replies.findIndex((r) => r.id === messageId);
+          if (idx !== -1) {
+            const updated = [...replies];
+            updated[idx] = { ...updated[idx], text, edited: true };
+            patch.repliesByParent = { ...state.repliesByParent, [parentId]: updated };
+          }
+        }
+      } else {
+        const list = state.messagesByTarget[key];
+        if (list) {
+          const idx = list.findIndex((m) => m.id === messageId);
+          if (idx !== -1) {
+            const updated = [...list];
+            updated[idx] = { ...updated[idx], text, edited: true };
+            patch.messagesByTarget = { ...state.messagesByTarget, [key]: updated };
+          }
+        }
+      }
+      return patch;
+    }),
   removeTargetMessage: (key, messageId, parentId) =>
     set((state) => {
       const patch: Partial<GameState> = {};

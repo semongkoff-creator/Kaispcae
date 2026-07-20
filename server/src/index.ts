@@ -11,6 +11,7 @@ import { registerChatHandlers } from './socket/chatHandler';
 import { registerChannelChatHandlers } from './socket/channelChatHandler';
 import { registerEmoteHandlers } from './socket/emoteHandler';
 import { registerZoneHandlers } from './socket/zoneHandler';
+import { registerZoneLockHandlers } from './socket/zoneLock';
 import { registerFurnitureHandlers } from './socket/furnitureHandler';
 import { registerFollowHandlers } from './socket/followHandler';
 import { registerMediaHandlers, startMediaExpirySweep } from './socket/mediaHandler';
@@ -21,10 +22,22 @@ import { rateLimit } from './middleware/rateLimit';
 import { verifyToken } from './middleware/auth';
 import authRoutes from './routes/auth';
 import roomRoutes, { setIo } from './routes/rooms';
+import roomMemberRoutes, { setMembersIo } from './routes/roomMembers';
 import teleportRoutes from './routes/teleport';
 import uploadRoutes from './routes/uploads';
 import recordingRoutes from './routes/recordings';
 import chatRoutes, { setIo as setChatIo } from './routes/chat';
+import baseRoutes, { setBaseIo } from './routes/bases';
+import baseCommentRoutes, { setCommentsIo } from './routes/baseComments';
+import adminRoutes, { setAdminIo } from './routes/admin';
+import attendanceRoutes from './routes/attendance';
+import attendanceAdminRoutes from './routes/attendanceAdmin';
+import calendarRoutes, { setCalendarIo } from './routes/calendar';
+import meetingRoomRoutes from './routes/meetingRooms';
+import baseShareRoutes from './routes/baseShare';
+import { registerBaseHandlers } from './socket/baseHandler';
+import { startReminderSweep } from './socket/reminderSweep';
+import { startAttendanceSweep } from './socket/attendanceSweep';
 
 loadConfig();
 const config = getConfig();
@@ -81,7 +94,12 @@ io.use((socket, next) => {
 });
 
 setIo(io);
+setMembersIo(io);
 setChatIo(io);
+setBaseIo(io);
+setCommentsIo(io);
+setAdminIo(io);
+setCalendarIo(io);
 
 // ── REST routes ──────────────────────────────────────────────────
 app.get('/api/health', async (_req, res) => {
@@ -103,10 +121,19 @@ app.get('/api/metrics', (_req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api', roomRoutes);
+app.use('/api', roomMemberRoutes);
 app.use('/api', teleportRoutes);
 app.use('/api', uploadRoutes);
 app.use('/api', recordingRoutes);
 app.use('/api', chatRoutes);
+app.use('/api', baseRoutes);
+app.use('/api', baseCommentRoutes);
+app.use('/api', baseShareRoutes);
+app.use('/api', adminRoutes);
+app.use('/api', attendanceRoutes);
+app.use('/api', attendanceAdminRoutes);
+app.use('/api', calendarRoutes);
+app.use('/api', meetingRoomRoutes);
 
 // ── Socket.IO ────────────────────────────────────────────────────
 async function start() {
@@ -124,13 +151,17 @@ async function start() {
     registerChannelChatHandlers(io, socket);
     registerEmoteHandlers(io, socket);
     registerZoneHandlers(io, socket);
+    registerZoneLockHandlers(io, socket);
     registerFurnitureHandlers(io, socket);
     registerFollowHandlers(io, socket);
     registerMediaHandlers(io, socket);
     registerRecordingHandlers(io, socket);
+    registerBaseHandlers(io, socket);
   });
 
   startMediaExpirySweep(io);
+  startReminderSweep(io);
+  startAttendanceSweep(io);
 
   httpServer.listen(config.PORT, () => {
     console.log(`[server] VirtualMeet running on http://localhost:${config.PORT}`);

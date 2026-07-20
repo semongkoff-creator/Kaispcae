@@ -220,6 +220,20 @@ export enum SocketEvents {
   ZONE_ENTER = 'zone:enter',
   ZONE_EXIT = 'zone:exit',
 
+  // Per-ZONE lock ("lagi rapat, jangan diganggu"), separate from the
+  // whole-room lock above. Anyone standing in a zone may lock it and becomes
+  // its keyholder; someone who walks in afterwards is bounced and may knock
+  // (ZONE_KNOCK). The keyholder — NOT an admin — decides (ZONE_KNOCK_DECIDE).
+  // Two independent gates: the room lock is the front door of the map, a zone
+  // lock is the door of a meeting room inside it.
+  ZONE_LOCK_SET = 'zone:lock_set',
+  ZONE_LOCK_UPDATED = 'zone:lock_updated',
+  ZONE_LOCKED_DENIED = 'zone:locked_denied',
+  ZONE_KNOCK = 'zone:knock',
+  ZONE_KNOCK_REQUEST = 'zone:knock_request',
+  ZONE_KNOCK_DECIDE = 'zone:knock_decide',
+  ZONE_KNOCK_DECIDED = 'zone:knock_decided',
+
   ROOM_UPDATE = 'room:update',
   ROOM_UPDATED = 'room:updated',
 
@@ -340,6 +354,11 @@ export enum SocketEvents {
   CHANNEL_TYPING = 'channel:typing',
   CHANNEL_TYPING_UPDATE = 'channel:typing_update',
 
+  // Room join approval (see server/src/lib/roomMembership.ts).
+  JOIN_DENIED = 'room:join_denied',
+  JOIN_REQUESTED = 'room:join_requested',
+  JOIN_DECISION = 'room:join_decision',
+  JOIN_QUEUE_CHANGED = 'room:join_queue_changed',
   DM_JOIN = 'dm:join',
   DM_LEAVE = 'dm:leave',
   DM_MESSAGE_SEND = 'dm:message_send',
@@ -361,6 +380,12 @@ export enum SocketEvents {
   // client drops it live.
   MESSAGE_DELETE = 'message:delete',
   MESSAGE_DELETED = 'message:deleted',
+
+  // Edit a persisted channel/DM message you sent (MESSAGE_EDIT, own messages
+  // only) — the server rewrites its text and broadcasts MESSAGE_EDITED so
+  // every client updates it live.
+  MESSAGE_EDIT = 'message:edit',
+  MESSAGE_EDITED = 'message:edited',
 
   // Temporary removal from the room by an admin+ user (see
   // shared/permissions.ts's 'room:kick') — not a ban, the target can rejoin
@@ -543,7 +568,13 @@ export interface Recording {
   status: RecordingStatus;
   startedAt: string;
   endedAt: string | null;
-  fileUrl: string | null;
+  // Never sent to the client: GET /rooms/:slug/recordings strips it, because
+  // the raw /api/uploads/<uuid>.webm path bypasses the role/expiry/
+  // maxDownloads gate on GET /recordings/:id/download (see
+  // server/src/routes/recordings.ts). Optional here because this type also
+  // describes the row server-side, where the field is real — a client reading
+  // it gets undefined, and should use the download route instead.
+  fileUrl?: string | null;
   downloadExpiresAt: string | null;
   downloadCount: number;
   maxDownloads: number;
@@ -672,6 +703,24 @@ export interface Furniture {
 // already there.
 export type ZoneType = 'meeting' | 'desk' | 'focus' | 'general';
 
+// Live lock state of one zone, broadcast to the room so every client can draw
+// the padlock and know who to knock on. `allowedUserIds` is the admit list the
+// keyholder has built up; it is never sent from the client.
+export interface ZoneLockState {
+  zoneId: string;
+  locked: boolean;
+  lockedByUserId?: string;
+  lockedByName?: string;
+}
+
+export interface ZoneKnockRequest {
+  zoneId: string;
+  zoneName: string;
+  userId: string;
+  playerId: string;
+  playerName: string;
+}
+
 export interface Zone {
   id: string;
   name: string;
@@ -705,12 +754,25 @@ export interface ChatMessage {
 // reply sets parentId to its parent's id (one level deep — the UI doesn't
 // nest replies-of-replies). replyCount is only populated on top-level
 // messages returned from the list endpoints, not on individual replies.
+// A conversation list row's preview line — "Rizal: lu coba tanya". Carried on
+// the LIST endpoints so the messenger's sidebar can render every row on first
+// paint; without it a conversation stays blank until it's been opened once,
+// since message history is only fetched per-target on open.
+export interface ConversationPreview {
+  senderName: string;
+  // Already collapsed to a single line by the server: an attachment-only
+  // message previews as its filename rather than as empty text.
+  text: string;
+  createdAt: number;
+}
+
 export interface Channel {
   id: string;
   roomId: string;
   name: string;
   isDefault: boolean;
   createdAt: number;
+  lastMessage?: ConversationPreview;
 }
 
 export interface DirectConversationSummary {
@@ -718,6 +780,7 @@ export interface DirectConversationSummary {
   roomId: string;
   otherUser: { id: string; displayName: string };
   createdAt: number;
+  lastMessage?: ConversationPreview;
 }
 
 // Symmetric broadcast shape for DM_STARTED — carries both participants
@@ -742,6 +805,11 @@ export interface ChannelMessage {
   text: string;
   createdAt: number;
   replyCount?: number;
+  // Set by the server's MESSAGE_EDITED broadcast so the UI can show an
+  // "(edited)" marker for the live session. Not persisted (no schema column),
+  // so it resets on reload — the edited TEXT itself is persisted, only the
+  // marker is session-scoped.
+  edited?: boolean;
   // Optional file attachment — uploaded via the same POST /api/uploads
   // endpoint Add Media uses (see server/src/routes/uploads.ts), so this is
   // just the resulting URL plus the original filename (the stored file
@@ -794,3 +862,21 @@ export type { RoomTemplateId } from '../defaultRoomLayout';
 export { BLOCKED_TILES, isTileBlocked, findZoneEntryTile, findAdjacentFreeTile } from '../tileCollision';
 export type { Role, FeatureKey } from '../permissions';
 export { roleAtLeast, hasFeatureAccess, FEATURE_MIN_ROLE } from '../permissions';
+export type { BaseRole, BaseAction, PermissionCtx, FieldAccess, RecordEditRule } from '../basePermissions';
+export { baseRoleAtLeast, can, canViewField, canEditField, canEditRecord, BASE_ROLE_LABELS } from '../basePermissions';
+export type { ShiftDef, AttendanceStatus, WorkTotals, Geofence, Coords, GeofenceResult } from '../attendanceRules';
+export {
+  STATUS_LABELS, shiftBounds, isWorkday, lateMinutes, clockInStatus, earlyLeaveMinutes,
+  computeTotals, finalStatus, workDayOf, distanceM, checkGeofence, canViewAttendanceOf,
+  MAX_ACCURACY_M, LOCATION_RETENTION_DAYS,
+} from '../attendanceRules';
+export type { CalendarRole, CalendarAction, CalendarCtx, Rsvp } from '../calendarPermissions';
+export { calendarRoleAtLeast, canCalendar, canSeeEventDetails, CALENDAR_ROLE_LABELS, RSVP_LABELS } from '../calendarPermissions';
+export type { EditScope, RecurringMaster, Occurrence } from '../recurrence';
+export { expandOccurrences, truncateRuleBefore, normaliseRule, describeRule } from '../recurrence';
+export type { DocRole, DocAction, DocCtx } from '../docPermissions';
+export { docRoleAtLeast, canDoc, DOC_ROLE_LABELS } from '../docPermissions';
+export type { WorkspaceRole, WorkspaceAction, WorkspaceCtx } from '../workspacePermissions';
+export { canWorkspace, WORKSPACE_ACTIONS, WORKSPACE_ROLE_LABELS } from '../workspacePermissions';
+export type { BaseCellValue, BaseOp, BaseOpType, MutationRequest, WsOpsMessage, WsPresenceMessage, PresenceUser } from '../baseOps';
+export { OP_ACTION } from '../baseOps';

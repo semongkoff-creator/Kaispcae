@@ -1,11 +1,8 @@
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, hasFeatureAccess } from '@virtualmeet/shared';
-import { PrismaClient } from '@prisma/client';
+import { getPrisma } from '../lib/prisma';
 import { socketRateLimit } from '../middleware/rateLimit';
 
-function getPrisma(): PrismaClient {
-  return new PrismaClient();
-}
 
 const canAssign = socketRateLimit(2); // max 2 assign/unassign calls/sec per socket
 

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, Paperclip, FileEarmarkFill, Download, TrashFill } from 'react-bootstrap-icons';
+import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, Paperclip, FileEarmarkFill, Download, TrashFill, PencilFill } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -49,6 +49,8 @@ interface ChatPanelProps {
   onTyping?: () => void;
   // Delete one of your own persisted channel/DM messages (see MESSAGE_DELETE).
   onDeleteMessage?: (messageId: string) => void;
+  // Edit the text of one of your own messages (see MESSAGE_EDIT).
+  onEditMessage?: (messageId: string, text: string) => void;
   onLoadOlder: () => Promise<number>;
   onCreateChannel: (name: string) => Promise<Channel>;
 }
@@ -73,9 +75,19 @@ export function ChatPanel({
   onSend,
   onTyping,
   onDeleteMessage,
+  onEditMessage,
   onLoadOlder,
   onCreateChannel,
 }: ChatPanelProps) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const beginEdit = (id: string, current: string) => { setEditingId(id); setEditText(current); };
+  const commitEdit = () => {
+    const t = editText.trim();
+    if (editingId && t) onEditMessage?.(editingId, t);
+    setEditingId(null);
+    setEditText('');
+  };
   const unreadByTarget = useGameStore((s) => s.unreadByTarget);
   // Total unread across every target (for the collapsed Chat button badge).
   const totalUnread = Object.values(unreadByTarget).reduce((a, b) => a + b, 0);
@@ -380,8 +392,23 @@ export function ChatPanel({
                           {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                         <span className={`font-medium ${isOwn ? 'text-purple-100' : 'text-gray-500 dark:text-gray-400'}`}>{m.senderName}</span>
-                        {m.text && (
-                          <span className={`ml-1 break-words ${isOwn ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>{m.text}</span>
+                        {editingId === m.id ? (
+                          <input
+                            autoFocus
+                            value={editText}
+                            onChange={(e) => setEditText(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); else if (e.key === 'Escape') { setEditingId(null); setEditText(''); } }}
+                            onBlur={commitEdit}
+                            maxLength={200}
+                            className="ml-1 bg-white/90 text-gray-900 text-xs rounded px-1 py-0.5 outline-none border border-purple-300 w-40"
+                          />
+                        ) : (
+                          m.text && (
+                            <span className={`ml-1 break-words ${isOwn ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>
+                              {m.text}
+                              {m.edited && <span className={`ml-1 text-[9px] ${isOwn ? 'text-purple-200' : 'text-gray-400 dark:text-gray-500'}`}>(diedit)</span>}
+                            </span>
+                          )
                         )}
                         {m.attachmentUrl && (
                           <ChatAttachment url={m.attachmentUrl} fileName={m.attachmentName} isOwn={isOwn} />
@@ -394,6 +421,15 @@ export function ChatPanel({
                         <ChatLeftText size={9} />
                         {m.replyCount ? `${m.replyCount} ${m.replyCount === 1 ? 'reply' : 'replies'}` : 'Reply'}
                       </button>
+                      {isOwn && onEditMessage && m.text && editingId !== m.id && (
+                        <button
+                          onClick={() => beginEdit(m.id, m.text)}
+                          title="Edit message"
+                          className="ml-2 mt-0.5 text-[10px] text-gray-400 hover:text-purple-600 cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <PencilFill size={9} /> Edit
+                        </button>
+                      )}
                       {isOwn && onDeleteMessage && (
                         <button
                           onClick={() => { if (window.confirm('Delete this message?')) onDeleteMessage(m.id); }}
@@ -410,16 +446,36 @@ export function ChatPanel({
                             <div key={r.id} className="rounded bg-purple-50/50 dark:bg-gray-700/50 px-2 py-1 group/reply flex items-start justify-between gap-1">
                               <span className="min-w-0">
                                 <span className="font-medium text-gray-500 dark:text-gray-400 mr-1">{r.senderName}</span>
-                                <span className="text-gray-800 dark:text-gray-200 break-words">{r.text}</span>
+                                {editingId === r.id ? (
+                                  <input
+                                    autoFocus
+                                    value={editText}
+                                    onChange={(e) => setEditText(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); else if (e.key === 'Escape') { setEditingId(null); setEditText(''); } }}
+                                    onBlur={commitEdit}
+                                    maxLength={200}
+                                    className="bg-white text-gray-900 text-[11px] rounded px-1 py-0.5 outline-none border border-purple-300 w-32"
+                                  />
+                                ) : (
+                                  <span className="text-gray-800 dark:text-gray-200 break-words">
+                                    {r.text}
+                                    {r.edited && <span className="ml-1 text-[9px] text-gray-400 dark:text-gray-500">(diedit)</span>}
+                                  </span>
+                                )}
                               </span>
-                              {r.senderId === localUserId && onDeleteMessage && (
-                                <button
-                                  onClick={() => { if (window.confirm('Delete this reply?')) onDeleteMessage(r.id); }}
-                                  title="Delete reply"
-                                  className="shrink-0 text-gray-400 hover:text-red-500 cursor-pointer opacity-0 group-hover/reply:opacity-100 transition-opacity"
-                                >
-                                  <TrashFill size={9} />
-                                </button>
+                              {r.senderId === localUserId && editingId !== r.id && (
+                                <span className="shrink-0 flex items-center gap-1 opacity-0 group-hover/reply:opacity-100 transition-opacity">
+                                  {onEditMessage && (
+                                    <button onClick={() => beginEdit(r.id, r.text)} title="Edit reply" className="text-gray-400 hover:text-purple-600 cursor-pointer">
+                                      <PencilFill size={9} />
+                                    </button>
+                                  )}
+                                  {onDeleteMessage && (
+                                    <button onClick={() => { if (window.confirm('Delete this reply?')) onDeleteMessage(r.id); }} title="Delete reply" className="text-gray-400 hover:text-red-500 cursor-pointer">
+                                      <TrashFill size={9} />
+                                    </button>
+                                  )}
+                                </span>
                               )}
                             </div>
                           ))}

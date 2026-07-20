@@ -1,14 +1,12 @@
 import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { getPrisma } from '../lib/prisma';
 import { hasFeatureAccess } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole as resolveRole } from '../lib/roles';
 
 const teleport = Router();
 
-function getPrisma(): PrismaClient {
-  return new PrismaClient();
-}
 
 const MAX_TELEPORT_LOCATIONS = 20;
 

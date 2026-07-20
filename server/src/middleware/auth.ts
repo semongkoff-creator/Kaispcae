@@ -2,8 +2,94 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { getConfig } from '../config';
 
+// A browser loading <img src="/api/uploads/<uuid>.png"> cannot attach an
+// Authorization header, and passing the token as a query param would leak it
+// into server logs and browser history — the exact tradeoff routes/uploads.ts
+// used to justify serving uploads to anyone at all. The session therefore
+// ALSO rides as an HttpOnly cookie, minted alongside every token we hand out.
+//
+// Path is deliberately narrowed to /api/uploads: the browser never attaches
+// this cookie to any other route, so it adds no CSRF surface to the
+// state-changing endpoints — those stay Bearer-only. JS can't read it either,
+// so it doesn't widen XSS impact beyond the token already in localStorage.
+export const UPLOAD_COOKIE_NAME = 'mk_upload_sess';
+const UPLOAD_COOKIE_PATH = '/api/uploads';
+
+// Secure is keyed off the request's ACTUAL protocol, not NODE_ENV. Tying it
+// to NODE_ENV would be a trap: nginx/nginx.conf currently terminates on plain
+// `listen 80` with no TLS, so a production deploy would set Secure on a
+// cookie the browser then refuses to send back over http — every image and
+// attachment 401s, in production only, with dev and typecheck both clean.
+// Reading the real scheme means this flips itself on the day TLS lands and
+// needs no follow-up. Spoofing X-Forwarded-Proto only sets Secure on your own
+// cookie over http, i.e. breaks your own session — not a way in.
+function uploadCookieOptions(req: Request) {
+  const forwarded = req.headers['x-forwarded-proto'];
+  const proto = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(',')[0].trim() || req.protocol;
+  return {
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    secure: proto === 'https',
+    path: UPLOAD_COOKIE_PATH,
+  };
+}
+
+// Mirrors the token's own `exp` rather than a fixed duration, so the cookie
+// and the Bearer token can never outlive each other.
+export function setUploadSessionCookie(req: Request, res: Response, token: string) {
+  const claims = verifyTokenClaims(token);
+  if (!claims) return;
+  const maxAge = Math.max(0, claims.exp * 1000 - Date.now());
+  res.cookie(UPLOAD_COOKIE_NAME, token, { ...uploadCookieOptions(req), maxAge });
+}
+
+// HttpOnly means client-side logout can't clear this itself — POST
+// /auth/logout exists purely so the cookie dies with the localStorage token.
+export function clearUploadSessionCookie(req: Request, res: Response) {
+  res.clearCookie(UPLOAD_COOKIE_NAME, uploadCookieOptions(req));
+}
+
+function readCookie(req: Request, name: string): string | null {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === name) return decodeURIComponent(part.slice(eq + 1).trim());
+  }
+  return null;
+}
+
+// Read-side auth for uploaded files. Accepts the cookie (browser tag loads)
+// or a Bearer token (programmatic fetches), so both callers work without
+// either mechanism being special-cased at the call site.
+//
+// This authenticates only — it does not authorize per-conversation. Any
+// logged-in user can still read any upload they know the URL of, which is
+// what map media already assumes (a media object's url is broadcast to
+// everyone in the room). Narrowing DM attachments to their participants needs
+// the Conversation/Participant model that doesn't exist yet.
+export function authenticateUploadRead(req: AuthRequest, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const token = bearer ?? readCookie(req, UPLOAD_COOKIE_NAME);
+
+  if (!token) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const decoded = verifyTokenClaims(token);
+  if (!decoded) {
+    return res.status(403).json({ error: 'Invalid or expired session' });
+  }
+  req.userId = decoded.userId;
+  next();
+}
+
 export interface AuthRequest extends Request {
   userId?: string;
+  // Set by requireWorkspace() (server/src/lib/workspace.ts) after it resolves
+  // the role FROM THE DB. Never populated from the token or the body.
+  workspaceRole?: 'admin' | 'member';
   // Unix seconds the current token expires at (JWT `exp` claim) — used by
   // GET /auth/me to decide whether this session is close enough to expiry
   // to hand back a freshly-signed replacement token (see auth.ts).

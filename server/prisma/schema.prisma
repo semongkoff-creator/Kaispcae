@@ -8,11 +8,11 @@ datasource db {
 }
 
 model User {
-  id           String       @id @default(cuid())
-  email        String       @unique
-  password     String
-  displayName  String
-  avatarConfig Json?
+  id                      String                    @id @default(cuid())
+  email                   String                    @unique
+  password                String
+  displayName             String
+  avatarConfig            Json?
   // Global, account-level role — separate from the per-room Role hierarchy
   // (owner/admin/staff/member, see shared/permissions.ts and RoomMember.role
   // below). 'admin' accounts can create rooms (the only account-wide gate;
@@ -21,46 +21,675 @@ model User {
   // without needing a RoomMember grant — see server/src/lib/roles.ts's
   // resolveRoomRole. Deletion stays owner-only regardless: a global admin
   // is NOT auto-elevated to 'owner' of rooms they didn't create.
-  accountRole  String       @default("user")
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  roomMembers  RoomMember[]
-  ownedRooms   Room[]
-  sentChatMessages    ChatMessage[]
-  dmConversationsAsA  DirectConversation[] @relation("DMUserA")
-  dmConversationsAsB  DirectConversation[] @relation("DMUserB")
+  accountRole             String                    @default("user")
+  // Workspace (organisation) role — a THIRD, independent layer from both
+  // accountRole above and RoomMember.role. See shared/workspacePermissions.ts.
+  // Deliberately NOT merged with accountRole: that one means "may create
+  // rooms", which is far narrower than "may configure the whole workspace,
+  // set shift rules, and read everyone's attendance".
+  workspaceRole           String                    @default("member")
+  // IANA zone (e.g. "Asia/Jakarta"). All timestamps are stored UTC in the DB
+  // and rendered in this zone — Calendar and Attendance both depend on it.
+  timezone                String                    @default("Asia/Jakarta")
+  active                  Boolean                   @default(true)
+  departmentId            String?
+  department              Department?               @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  managerId               String?
+  manager                 User?                     @relation("UserManager", fields: [managerId], references: [id], onDelete: SetNull)
+  reports                 User[]                    @relation("UserManager")
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  auditEntries            AuditLog[]                @relation("AuditActor")
+  auditTargets            AuditLog[]                @relation("AuditTargetUser")
+  // Attendance module — reverse relations
+  shiftAssignments        ShiftAssignment[]         @relation("ShiftUser")
+  attendanceRecords       AttendanceRecord[]        @relation("AttendanceUser")
+  leaves                  Leave[]                   @relation("LeaveUser")
+  leavesApproved          Leave[]                   @relation("LeaveApprover")
+  corrections             Correction[]              @relation("CorrectionUser")
+  correctionsApproved     Correction[]              @relation("CorrectionApprover")
+  // Calendar module — reverse relations
+  ownedCalendars          Calendar[]                @relation("CalendarOwner")
+  calendarMemberships     CalendarMember[]          @relation("CalendarMemberUser")
+  organizedEvents         CalendarEvent[]           @relation("EventOrganizer")
+  eventInvites            EventAttendee[]           @relation("EventAttendeeUser")
+  // Docs module — reverse relations
+  ownedDocs               Doc[]                     @relation("DocOwner")
+  ownedFolders            Folder[]                  @relation("FolderOwner")
+  docComments             DocComment[]              @relation("DocCommentAuthor")
+  docVersions             DocVersion[]              @relation("DocVersionAuthor")
+  roomMembers             RoomMember[]
+  ownedRooms              Room[]
+  sentChatMessages        ChatMessage[]
+  dmConversationsAsA      DirectConversation[]      @relation("DMUserA")
+  dmConversationsAsB      DirectConversation[]      @relation("DMUserB")
+  // Messenger migration step 2 — replaces the As-A/As-B pair above with one
+  // membership list that isn't scoped to a room (see Conversation).
+  conversationMemberships ConversationParticipant[]
+  // Lark Base (collaborative database) — reverse relations
+  ownedBases              Base[]                    @relation("BaseOwner")
+  baseMemberships         BaseMember[]
+  baseComments            RecordComment[]
+  baseNotifications       Notification[]            @relation("NotifRecipient")
+  baseHistoryActs         RecordHistory[]           @relation("HistoryActor")
+}
+
+// ─── Workspace foundation (shared by Base / Calendar / Attendance / Docs) ───
+
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  members   User[]
+}
+
+// ONE audit table for every module. Anything a workspace admin does that
+// touches someone else's data lands here — takeovers, attendance edits and
+// reads, policy changes, role changes. Append-only by convention: there is
+// no update/delete route, and there must never be one.
+model AuditLog {
+  id           String   @id @default(cuid())
+  actorId      String
+  actor        User     @relation("AuditActor", fields: [actorId], references: [id], onDelete: Cascade)
+  // The workspace action performed — a WorkspaceAction from
+  // shared/workspacePermissions.ts, or a module verb like 'base:transfer'.
+  action       String
+  // What was acted on: 'base' | 'doc' | 'attendance' | 'user' | 'policy' | ...
+  targetType   String
+  targetId     String?
+  // Set when the subject is a person (attendance reads/edits, role changes)
+  // so "who looked at whose data" is filterable without parsing `meta`.
+  targetUserId String?
+  targetUser   User?    @relation("AuditTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  // Free-form detail. For mutations this carries { before, after } so the
+  // old value → new value is recoverable; for reads, what was queried.
+  meta         Json?
+  // Required by policy for attendance record edits — server rejects without it.
+  reason       String?
+  ip           String?
+  createdAt    DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([targetUserId, createdAt])
+  @@index([targetType, targetId])
+  @@index([action, createdAt])
+}
+
+// Workspace-wide policy, a single row (id = "singleton"). Admin-editable;
+// enforced server-side. Base/Docs share-link limits live here so both the
+// Base module and the future Docs module read one source of truth.
+model WorkspacePolicy {
+  id                       String   @id @default("singleton")
+  // Base
+  basePublicLinksAllowed   Boolean  @default(true)
+  baseExportAllowed        Boolean  @default(true)
+  // Docs (consumed by the Docs module; stored now so policy is one table)
+  docsPublicLinksAllowed   Boolean  @default(true)
+  docsLinkPasswordRequired Boolean  @default(false)
+  // Max share-link lifetime in days for both; null = no cap.
+  maxShareLinkDays         Int?
+  updatedAt                DateTime @updatedAt
+  updatedById              String?
+}
+
+// ─── Attendance ─────────────────────────────────────────────────────
+// Every timestamp here is set by the SERVER (Date.now() on the server), never
+// from the client — the browser clock is the number-one cheating vector, so
+// nothing in this module ever trusts a client-supplied time.
+//
+// Location is stored ONLY at clock in/out, never continuously, and is purged
+// after LOCATION_RETENTION_DAYS (see socket/attendanceSweep.ts). There is no
+// movement history in this schema by design.
+
+model Shift {
+  id              String   @id @default(cuid())
+  name            String
+  // Wall-clock "HH:mm" in the shift's zone — NOT instants: a shift is
+  // "09:00 every workday", which a UTC timestamp cannot express.
+  startTime       String
+  endTime         String
+  timezone        String   @default("Asia/Jakarta")
+  breakMinutes    Int      @default(60)
+  graceMinutes    Int      @default(10)
+  // ISO weekdays worked: 1 = Monday … 7 = Sunday
+  workdays        Int[]    @default([1, 2, 3, 4, 5])
+  // none | after_shift | manual
+  overtimeRule    String   @default("after_shift")
+  // Optional geofence. Validated SERVER-side; a null centre means no fence.
+  geofenceLat     Float?
+  geofenceLng     Float?
+  geofenceRadiusM Int?
+  // Optional office IP allowlist (CIDR or plain IPs).
+  allowedIps      String[] @default([])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  assignments ShiftAssignment[]
+  records     AttendanceRecord[]
+}
+
+model ShiftAssignment {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation("ShiftUser", fields: [userId], references: [id], onDelete: Cascade)
+  shiftId       String
+  shift         Shift     @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId, effectiveFrom])
+}
+
+model AttendanceRecord {
+  id                String    @id @default(cuid())
+  userId            String
+  user              User      @relation("AttendanceUser", fields: [userId], references: [id], onDelete: Cascade)
+  // The work DAY this belongs to, as a date in the shift's zone (stored at
+  // 00:00 UTC of that local date) — a night shift crossing midnight still
+  // belongs to one day.
+  date              DateTime
+  clockIn           DateTime?
+  clockOut          DateTime?
+  shiftId           String?
+  shift             Shift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  // ontime | late | early_leave | absent | leave | holiday | auto_closed
+  status            String    @default("absent")
+  workMinutes       Int       @default(0)
+  overtimeMinutes   Int       @default(0)
+  // Captured at the moment of clock in/out only. Purged by the retention sweep.
+  clockInLat        Float?
+  clockInLng        Float?
+  clockInAccuracyM  Float?
+  clockOutLat       Float?
+  clockOutLng       Float?
+  clockOutAccuracyM Float?
+  locationPurgedAt  DateTime?
+  clockInMethod     String    @default("web")
+  clockInIp         String?
+  note              String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  corrections Correction[]
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
+model LeaveType {
+  id               String   @id @default(cuid())
+  name             String   @unique
+  quotaPerYear     Int      @default(12)
+  paid             Boolean  @default(true)
+  requiresApproval Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  leaves Leave[]
+}
+
+model Leave {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation("LeaveUser", fields: [userId], references: [id], onDelete: Cascade)
+  typeId       String
+  type         LeaveType @relation(fields: [typeId], references: [id], onDelete: Restrict)
+  startDate    DateTime
+  endDate      DateTime
+  halfDay      Boolean   @default(false)
+  reason       String
+  status       String    @default("pending") // pending | approved | rejected
+  approverId   String?
+  approver     User?     @relation("LeaveApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  decidedAt    DateTime?
+  decisionNote String?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, startDate])
+  @@index([status])
+}
+
+model Correction {
+  id                String           @id @default(cuid())
+  recordId          String
+  record            AttendanceRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User             @relation("CorrectionUser", fields: [userId], references: [id], onDelete: Cascade)
+  // What the member ASKS for — never applied directly; an approver decides.
+  requestedClockIn  DateTime?
+  requestedClockOut DateTime?
+  reason            String
+  status            String           @default("pending") // pending | approved | rejected
+  approverId        String?
+  approver          User?            @relation("CorrectionApprover", fields: [approverId], references: [id], onDelete: SetNull)
+  decidedAt         DateTime?
+  createdAt         DateTime         @default(now())
+
+  @@index([userId, status])
+  @@index([status])
+}
+
+model Holiday {
+  id   String   @id @default(cuid())
+  date DateTime @unique
+  name String
+}
+
+// ─── Calendar ───────────────────────────────────────────────────────
+// Times are stored as UTC instants (`start`/`end`). `timezone` is the zone the
+// event was AUTHORED in — needed because a recurring 09:00 meeting must stay
+// 09:00 local across a DST boundary, which a fixed UTC offset cannot express.
+// Recurrence is an RFC 5545 RRULE string; instances are expanded on read, not
+// stored — except overrides (see CalendarEvent.recurrenceId below).
+
+model Calendar {
+  id        String   @id @default(cuid())
+  name      String
+  color     String   @default("#a855f7")
+  // personal | team | resource. Creating a `team` calendar is a workspace-admin
+  // action (shared/workspacePermissions.ts: calendar:manageTeamCalendars).
+  type      String   @default("personal")
+  ownerId   String
+  owner     User     @relation("CalendarOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members CalendarMember[]
+  events  CalendarEvent[]
+
+  @@index([ownerId])
+}
+
+model CalendarMember {
+  id         String   @id @default(cuid())
+  calendarId String
+  calendar   Calendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation("CalendarMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  role       String // editor | viewer (see shared/calendarPermissions.ts)
+  createdAt  DateTime @default(now())
+
+  @@unique([calendarId, userId])
+  @@index([userId])
+}
+
+model MeetingRoom {
+  id         String   @id @default(cuid())
+  name       String
+  capacity   Int      @default(4)
+  location   String?
+  equipment  String[] @default([])
+  // Minimum workspace role allowed to book: 'member' (anyone) or 'admin'.
+  bookableBy String   @default("member")
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  events CalendarEvent[]
+}
+
+model CalendarEvent {
+  id          String       @id @default(cuid())
+  calendarId  String
+  calendar    Calendar     @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  // UTC instants. Always. Rendering happens in the viewer's zone.
+  start       DateTime
+  end         DateTime
+  allDay      Boolean      @default(false)
+  // IANA zone the event was authored in (e.g. "Asia/Jakarta").
+  timezone    String       @default("Asia/Jakarta")
+  location    String?
+  roomId      String?
+  room        MeetingRoom? @relation(fields: [roomId], references: [id], onDelete: SetNull)
+
+  // RFC 5545 rule on the SERIES master (null for one-off events).
+  rrule        String?
+  // Set on an OVERRIDE row: points at the master and pins which occurrence it
+  // replaces (`recurrenceId` = that occurrence's original UTC start). This is
+  // how "edit only this event" works without materialising the whole series.
+  masterId     String?
+  master       CalendarEvent?  @relation("EventOverrides", fields: [masterId], references: [id], onDelete: Cascade)
+  overrides    CalendarEvent[] @relation("EventOverrides")
+  recurrenceId DateTime?
+  // Occurrences removed from the series (by "delete only this" or by a
+  // "this and following" split). Stored as their original UTC starts.
+  exdates      DateTime[]      @default([])
+
+  organizerId     String
+  organizer       User    @relation("EventOrganizer", fields: [organizerId], references: [id], onDelete: Cascade)
+  visibility      String  @default("default") // default | private
+  // Link back to a MeetKai room session started from this event.
+  meetkaiRoomSlug String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attendees EventAttendee[]
+  reminders EventReminder[]
+
+  @@index([calendarId, start])
+  @@index([roomId, start])
+  @@index([masterId])
+}
+
+model EventAttendee {
+  id       String        @id @default(cuid())
+  eventId  String
+  event    CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User          @relation("EventAttendeeUser", fields: [userId], references: [id], onDelete: Cascade)
+  rsvp     String        @default("needsAction") // needsAction | accepted | declined | tentative
+  optional Boolean       @default(false)
+
+  @@unique([eventId, userId])
+  @@index([userId])
+}
+
+model EventReminder {
+  id            String        @id @default(cuid())
+  eventId       String
+  event         CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  minutesBefore Int
+  method        String        @default("inapp") // inapp | email
+  // Set once fired so the sweeper never double-notifies for the same instance.
+  lastFiredFor  DateTime?
+
+  @@index([eventId])
+}
+
+// ─── Docs (collaborative documents module) ──────────────────────────
+// Content is a Yjs document, stored as its binary state vector in
+// `content` — NOT as HTML/JSON. Yjs is the source of truth for the text so
+// concurrent typing merges by CRDT instead of last-write-wins. The server
+// keeps an authoritative Y.Doc per open document (see socket/docsHandler.ts)
+// and persists snapshots of it here.
+
+model Folder {
+  id        String   @id @default(cuid())
+  parentId  String?
+  parent    Folder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Folder[] @relation("FolderTree")
+  name      String
+  ownerId   String
+  owner     User     @relation("FolderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  docs      Doc[]
+
+  @@index([ownerId])
+  @@index([parentId])
+}
+
+model Doc {
+  id          String   @id @default(cuid())
+  folderId    String?
+  folder      Folder?  @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  title       String   @default("Dokumen Tanpa Judul")
+  icon        String?
+  coverImage  String?
+  // Yjs binary update (Y.encodeStateAsUpdate). Empty for a brand-new doc.
+  content     Bytes?
+  ownerId     String
+  owner       User     @relation("DocOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+
+  permissions DocPermission[]
+  comments    DocComment[]
+  versions    DocVersion[]
+  shareLinks  DocShareLink[]
+
+  @@index([ownerId, updatedAt])
+  @@index([folderId])
+}
+
+// Per-doc access grant. subjectType 'user' is the only one wired today;
+// 'team' is reserved for when departments become shareable subjects.
+// Link-based access lives in DocShareLink, not here.
+model DocPermission {
+  id          String   @id @default(cuid())
+  docId       String
+  doc         Doc      @relation(fields: [docId], references: [id], onDelete: Cascade)
+  subjectType String   @default("user") // user | team
+  subjectId   String
+  role        String // editor | commenter | viewer (see shared/docPermissions.ts)
+  createdAt   DateTime @default(now())
+
+  @@unique([docId, subjectType, subjectId])
+  @@index([subjectId])
+}
+
+model DocShareLink {
+  id           String    @id @default(cuid())
+  token        String    @unique
+  docId        String
+  doc          Doc       @relation(fields: [docId], references: [id], onDelete: Cascade)
+  role         String // viewer | commenter | editor
+  passwordHash String?
+  allowCopy    Boolean   @default(true)
+  expiresAt    DateTime?
+  lastOpenedAt DateTime?
+  createdById  String
+  createdAt    DateTime  @default(now())
+
+  @@index([docId])
+}
+
+model DocComment {
+  id         String       @id @default(cuid())
+  docId      String
+  doc        Doc          @relation(fields: [docId], references: [id], onDelete: Cascade)
+  parentId   String?
+  parent     DocComment?  @relation("DocCommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies    DocComment[] @relation("DocCommentReplies")
+  authorId   String
+  author     User         @relation("DocCommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  body       String
+  // Anchor into the text. The quoted excerpt is kept so a comment stays
+  // legible even after the text it pointed at is edited away.
+  anchorFrom Int?
+  anchorTo   Int?
+  quoted     String?
+  resolved   Boolean      @default(false)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@index([docId, resolved, createdAt])
+}
+
+model DocVersion {
+  id          String   @id @default(cuid())
+  docId       String
+  doc         Doc      @relation(fields: [docId], references: [id], onDelete: Cascade)
+  // Full Yjs state at snapshot time — restoring is "apply this update",
+  // which keeps restore itself a normal CRDT merge rather than a clobber.
+  content     Bytes
+  name        String?
+  // Plain-text rendering at snapshot time, so the version list and diffs
+  // don't need to boot a Y.Doc per row.
+  preview     String?
+  createdById String?
+  createdBy   User?    @relation("DocVersionAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([docId, createdAt])
+}
+
+// ─── Lark Base (collaborative database module) ──────────────────────
+// A Base is a standalone, user-owned database (its own member list, share
+// links, comments, history) — independent of Rooms. Field/view definitions
+// live as JSON on BaseTable (flexible, mirrors Room.tilemapData); records are
+// individual rows so pagination + per-cell last-write-wins merging work.
+
+model Base {
+  id            String         @id @default(cuid())
+  name          String
+  ownerId       String
+  owner         User           @relation("BaseOwner", fields: [ownerId], references: [id])
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  tables        BaseTable[]
+  members       BaseMember[]
+  shareLinks    ShareLink[]
+  notifications Notification[]
+}
+
+model BaseMember {
+  id        String   @id @default(cuid())
+  baseId    String
+  base      Base     @relation(fields: [baseId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String // owner | editor | commenter | viewer (see shared/basePermissions.ts)
+  createdAt DateTime @default(now())
+
+  @@unique([baseId, userId])
+  @@index([userId])
+}
+
+model BaseTable {
+  id         String       @id @default(cuid())
+  baseId     String
+  base       Base         @relation(fields: [baseId], references: [id], onDelete: Cascade)
+  name       String
+  icon       String?
+  orderIndex Int          @default(0)
+  fields     Json // Field[]
+  views      Json // View[]
+  // Optional per-record edit rule (7d): { personFieldId } — editors may only
+  // modify records whose person field equals themselves. Owner bypasses.
+  // Enforced in lib/baseOps.ts against the DB's cells, never the client's.
+  recordRule Json?
+  createdAt  DateTime     @default(now())
+  records    BaseRecord[]
+
+  @@index([baseId])
+}
+
+model BaseRecord {
+  id          String          @id @default(cuid())
+  tableId     String
+  table       BaseTable       @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  cells       Json // { [fieldId]: value }
+  orderIndex  Float           @default(0)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  comments    RecordComment[]
+  history     RecordHistory[]
+
+  @@index([tableId, orderIndex])
+}
+
+model ShareLink {
+  token        String    @id // random ≥32 chars
+  baseId       String
+  base         Base      @relation(fields: [baseId], references: [id], onDelete: Cascade)
+  viewId       String // points at ONE view
+  role         String // viewer | commenter | editor
+  passwordHash String?
+  expiresAt    DateTime?
+  allowCopy    Boolean   @default(true)
+  createdById  String
+  createdAt    DateTime  @default(now())
+  lastOpenedAt DateTime?
+
+  @@index([baseId])
+}
+
+model RecordComment {
+  id        String     @id @default(cuid())
+  recordId  String
+  record    BaseRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  body      String
+  mentions  Json? // userId[]
+  parentId  String? // reply threading
+  resolved  Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([recordId, createdAt])
+}
+
+model RecordHistory {
+  id        String     @id @default(cuid())
+  recordId  String
+  record    BaseRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  actorId   String
+  actor     User       @relation("HistoryActor", fields: [actorId], references: [id], onDelete: Cascade)
+  fieldId   String
+  oldValue  Json?
+  newValue  Json?
+  createdAt DateTime   @default(now())
+
+  @@index([recordId, createdAt])
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  baseId      String?
+  base        Base?    @relation(fields: [baseId], references: [id], onDelete: Cascade)
+  recipientId String
+  recipient   User     @relation("NotifRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  kind        String // mention | assigned | invited
+  body        String
+  recordId    String?
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([recipientId, read, createdAt])
 }
 
 model Room {
-  id          String       @id @default(cuid())
-  name        String
-  slug        String       @unique
-  tilemapData Json
-  furniture   Json?
-  zones       Json?
+  id                String               @id @default(cuid())
+  name              String
+  slug              String               @unique
+  tilemapData       Json
+  furniture         Json?
+  zones             Json?
   // Which curated asset set the room renders with — see RoomTheme in
   // shared/types/index.ts. Default keeps every room created before this
   // field existed rendering exactly as before.
-  theme       String       @default("scifi-office")
+  theme             String               @default("scifi-office")
   // Which layout this room was created with (see shared/defaultRoomLayout.ts's
   // ROOM_TEMPLATES) — null for rooms created before this field existed, or
   // if none was specified (both cases fall back to 'main-office' at the
   // point of use). Lets RoomEditor's "Reset to Default" rebuild the room's
   // OWN template instead of always reverting to Main Office.
-  template    String?
-  ownerId     String
-  owner       User         @relation(fields: [ownerId], references: [id])
-  isPublic    Boolean      @default(true)
-  maxPlayers  Int          @default(50)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  members     RoomMember[]
+  template          String?
+  ownerId           String
+  owner             User                 @relation(fields: [ownerId], references: [id])
+  isPublic          Boolean              @default(true)
+  // Invite-link joins land in an admin approval queue instead of walking
+  // straight in (see RoomMember.status). Separate from isPublic on purpose:
+  // isPublic controls whether a room is LISTED, this controls whether
+  // entering it needs a decision — an office can be findable and still not be
+  // walk-in.
+  //
+  // Defaults true so every NEW room is approval-gated, which is the intent.
+  // Rooms that already existed are backfilled to false by the migration:
+  // silently locking 190 live rooms behind an empty approval queue would
+  // strand everyone currently using them.
+  requiresApproval  Boolean              @default(true)
+  maxPlayers        Int                  @default(50)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  members           RoomMember[]
   teleportLocations TeleportLocation[]
-  ownerBookmarks     OwnerBookmark[]
-  mediaObjects       MapMediaObject[]
-  recordings         Recording[]
-  channels           Channel[]
-  dmConversations    DirectConversation[]
+  ownerBookmarks    OwnerBookmark[]
+  mediaObjects      MapMediaObject[]
+  recordings        Recording[]
+  channels          Channel[]
+  dmConversations   DirectConversation[]
+  // Provenance back-relation only — these survive the room's deletion
+  // (onDelete: SetNull), unlike everything else on this list.
+  conversationsV2   Conversation[]
 }
 
 model RoomMember {
@@ -69,10 +698,27 @@ model RoomMember {
   role     String   @default("member")
   joinedAt DateTime @default(now())
 
+  // Membership approval. 'active' is the default so every row that existed
+  // before this column keeps working exactly as it did — this is additive,
+  // it does not retroactively suspend anyone.
+  //
+  // 'pending' means the person followed an invite link into a room that
+  // requires approval and is waiting on an admin. A pending row is NOT
+  // membership: every access check treats it as "not a member", and it exists
+  // only so the request is durable and shows up in the admin's queue.
+  status     String    @default("active") // 'active' | 'pending' | 'rejected'
+  requestedAt DateTime @default(now())
+  // Who decided, and when — an audit trail for "why is this person in the
+  // room", which is the question that actually gets asked later.
+  decidedById String?
+  decidedAt   DateTime?
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
   @@id([userId, roomId])
+  // The admin's pending queue for one room — the only query this column adds.
+  @@index([roomId, status])
 }
 
 // §4.1 — Teleport (Admin): staff+ role, shared across everyone with access
@@ -120,25 +766,25 @@ model OwnerBookmark {
 // isn't a valid `type` here — this app's portal is a permanent Room Editor
 // tile, not a media object (see the SocketEvents doc comment for why).
 model MapMediaObject {
-  id        String    @id @default(cuid())
-  roomId    String
-  room      Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  type      String
-  x         Int
-  y         Int
+  id            String    @id @default(cuid())
+  roomId        String
+  room          Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  type          String
+  x             Int
+  y             Int
   createdBy     String
   // Captured once at creation from the live socket's display name — NOT
   // resolved lazily from createdBy later, since getPlayerName() is keyed by
   // socket id (which changes every reconnect and is meaningless once the
   // creator disconnects), not by this user id.
   createdByName String
-  createdAt DateTime  @default(now())
+  createdAt     DateTime  @default(now())
   // null = permanent (youtube, whiteboard). image/file get now+24h at
   // creation; a periodic sweep (see mediaHandler.ts) deletes expired rows
   // (and, for image/file, the uploaded file on disk) — there's no separate
   // job queue in this app to run a real cron against.
-  expiresAt DateTime?
-  payload   Json
+  expiresAt     DateTime?
+  payload       Json
 
   @@index([roomId])
 }
@@ -155,24 +801,24 @@ model MapMediaObject {
 // "starter refresh tetap jalan" requirement — there's no server-side
 // process to keep it alive independent of that browser tab.
 model Recording {
-  id        String    @id @default(cuid())
-  roomId    String
-  room      Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  startedBy String
+  id                String    @id @default(cuid())
+  roomId            String
+  room              Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  startedBy         String
   // Captured at creation the same way MapMediaObject.createdByName is —
   // see that model's doc comment for why (getPlayerName is socket-id keyed).
-  startedByName String
-  targetUserId  String
-  targetName    String
-  title     String
+  startedByName     String
+  targetUserId      String
+  targetName        String
+  title             String
   // recording -> processing (Stop clicked, upload in flight) -> done
   // (uploaded successfully), or -> failed at any point if the starter
   // disconnects (see recordingHandler.ts's DISCONNECT handler — capture
   // genuinely dies with that browser tab).
-  status    String    @default("recording")
-  startedAt DateTime  @default(now())
-  endedAt   DateTime?
-  fileUrl   String?
+  status            String    @default("recording")
+  startedAt         DateTime  @default(now())
+  endedAt           DateTime?
+  fileUrl           String?
   // Set once status becomes "done": now + 3 days / 3 downloads, matching
   // the spec's own numbers even though there's no real S3 signed-URL here
   // (see routes/recordings.ts's own download-gate enforcing these).
@@ -248,7 +894,94 @@ model ChatMessage {
   attachmentName String?
   createdAt      DateTime            @default(now())
 
+  // ── Messenger migration, step 2 (see Conversation below) ──────────
+  // The new home for this message's thread. Nullable and populated by
+  // backfill alongside channelId/conversationId, which stay authoritative
+  // until every read path has moved over and been verified — so any step of
+  // this migration can be rolled back by simply ignoring these two columns.
+  conversationId2 String?
+  conversationV2  Conversation? @relation("ConversationV2Messages", fields: [conversationId2], references: [id], onDelete: Cascade)
+
+  // Sender-generated id for the send that produced this message. A messenger
+  // has to survive a socket reconnect mid-send: without this, a client that
+  // retries an unacked send has no way to say "this is the same message, not
+  // a second one", and the retry silently double-posts. Null for every
+  // backfilled row (they predate the concept) — Postgres allows unlimited
+  // NULLs under a UNIQUE, so those rows don't collide with each other.
+  clientId String?
+
+  @@unique([conversationId2, clientId])
   @@index([channelId, createdAt])
   @@index([conversationId, createdAt])
   @@index([parentId])
+  @@index([conversationId2, createdAt])
+  // Looked up on every attachment download: GET /api/uploads/:filename
+  // resolves a URL back to its message to decide who may read it (see
+  // routes/uploads.ts). Without this, that check is a full scan of every
+  // message ever sent, on every single image load.
+  @@index([attachmentUrl])
+}
+
+// ── Messenger migration, step 2: workspace-level conversations ────────
+// Chat is currently pinned to a Room: Channel.roomId and
+// DirectConversation.roomId are both required, both Cascade. That makes a DM
+// a property of a room rather than of the two people in it — leave the room
+// and the conversation goes with it. A workspace messenger can't work that
+// way, so a Conversation deliberately has no required room.
+//
+// Added alongside Channel/DirectConversation rather than replacing them:
+// every row here is derived by backfill, the old tables stay authoritative,
+// and nothing reads these columns until step 3 verifies the backfill.
+//
+// id is DETERMINISTIC, not a cuid, so the backfill is idempotent — re-running
+// it can only re-derive the same rows, never fork duplicates:
+//   dm:<userAId>:<userBId>   with the pair sorted (userAId < userBId)
+//   grp:<channelId>
+// The sorted-pair form is also what finally makes a DM one conversation
+// per PAIR instead of one per (pair, room). Verified against live data before
+// choosing it: no pair currently holds DMs in more than one room, so this
+// merges nothing that exists today — it only decides what happens next.
+model Conversation {
+  id    String  @id
+  kind  String // 'dm' | 'group'
+  title String? // group only — a DM is named after the other person
+
+  // PROVENANCE ONLY — never an access boundary, and deliberately SetNull
+  // rather than Cascade. A Cascade here would rebuild the exact bug this
+  // model exists to fix: deleting a room would delete the DMs of people who
+  // merely happened to talk while in it.
+  //
+  // Group conversations still resolve access through this room for now (see
+  // routes/chat.ts's canAccessRoomChat). That is NOT laziness: 190 of 191
+  // rooms are public, where chat is open to any authenticated user with no
+  // RoomMember row at all. Gating groups on the participant list below would
+  // silently lock every one of those rooms down — a product decision, not
+  // something an additive migration gets to do as a side effect.
+  roomId String?
+  room   Room?   @relation(fields: [roomId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  participants ConversationParticipant[]
+  messages     ChatMessage[]             @relation("ConversationV2Messages")
+
+  @@index([roomId])
+  @@index([kind])
+}
+
+// Explicit membership — the thing that lets a conversation outlive the room
+// it was born in. Authoritative for DMs (it encodes exactly the pair check
+// routes/chat.ts already does today); informational for groups until group
+// membership becomes a real product concept.
+model ConversationParticipant {
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt       DateTime     @default(now())
+
+  @@id([conversationId, userId])
+  // "every conversation this user is in", the messenger's home screen query —
+  // it has no room to scope by, which is the whole point.
+  @@index([userId])
 }

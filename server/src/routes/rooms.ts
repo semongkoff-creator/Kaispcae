@@ -1,16 +1,14 @@
 import { Router, Response } from 'express';
 import { Server } from 'socket.io';
-import { PrismaClient } from '@prisma/client';
+import { getPrisma } from '../lib/prisma';
 import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { isRoomLocked } from '../socket/roomHandler';
 import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
+import { ensureGroupConversation } from '../lib/conversations';
 
 const rooms = Router();
 
-function getPrisma(): PrismaClient {
-  return new PrismaClient();
-}
 
 // Set once from index.ts after the Socket.IO server is created, so the
 // DELETE route below can notify/kick players currently in the room being
@@ -157,9 +155,13 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
     // Every room gets a non-deletable "general" channel for persisted chat
     // (see routes/chat.ts) — rooms created before this existed get one
     // lazily backfilled on first GET /channels instead.
-    await prisma.channel.create({
+    const general = await prisma.channel.create({
       data: { roomId: room.id, name: 'general', isDefault: true },
     });
+    // Mirror Conversation must exist before any message can point at it —
+    // ChatMessage.conversationId2 is a real FK, so a channel without one
+    // would make every send into it fail. See lib/conversations.ts.
+    await ensureGroupConversation(prisma, general);
 
     // §4.1 — Pre-fill Team Locations with the room's own named zones (its
     // "denah") instead of leaving staff to walk to each one manually and

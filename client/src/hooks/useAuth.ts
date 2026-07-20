@@ -70,6 +70,10 @@ export function useAuth() {
   const logout = useCallback(() => {
     localStorage.removeItem('vm_token');
     setUser(null);
+    // The upload-session cookie is HttpOnly, so only the server can clear it.
+    // Fire-and-forget: a failed call must not keep the user on a screen they
+    // just asked to leave, and the cookie expires with the token regardless.
+    api.logout().catch(() => {});
   }, []);
 
   return { user, loading, error, sessionExpiredMessage, login, register, logout, setError };

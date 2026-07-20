@@ -1,12 +1,12 @@
 import { Server, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
+import { getPrisma } from '../lib/prisma';
 import { SocketEvents, ChannelMessage } from '@virtualmeet/shared';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { sanitizeChat } from '../middleware/validate';
+import { ensureGroupConversation, ensureDmConversation } from '../lib/conversations';
+import { canAccessRoomChat } from '../lib/chatAccess';
 
-function getPrisma(): PrismaClient {
-  return new PrismaClient();
-}
 
 // Keyed by userId, not socket.id — a per-connection key means disconnecting
 // and reconnecting resets the counter for free, which matters more here
@@ -15,22 +15,18 @@ function getPrisma(): PrismaClient {
 const canSendChannelChat = socketRateLimit(5); // max 5 messages/sec per user
 const canSignalTyping = socketRateLimit(4); // typing pings are client-throttled; this just caps abuse
 
-// Mirrors routes/chat.ts's canAccessRoomChat (small deliberate duplication
-// for decoupling, same convention as followHandler.ts's own uid/socket
-// tracking) — without this, joining a channel's socket room or sending
-// into it required nothing but a guessed/leaked channelId, letting anyone
-// silently eavesdrop on (or post into) a private room's chat they were
-// never part of. Also lets a global admin account (see shared/permissions.ts's
-// AccountRole) into any room's chat, same as routes/chat.ts's copy.
-async function canAccessRoomChat(prisma: PrismaClient, room: { id: string; ownerId: string; isPublic: boolean }, userId: string): Promise<boolean> {
-  if (room.isPublic) return true;
-  if (userId === room.ownerId) return true;
-  const [user, member] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { accountRole: true } }),
-    prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId: room.id } } }),
-  ]);
-  if (user?.accountRole === 'admin') return true;
-  return !!member;
+// Is this user actually in this DM? DirectConversation is still the
+// authoritative store during the Conversation migration, so it answers first;
+// the ConversationParticipant fallback means an id already in the new
+// dm:<userAId>:<userBId> form resolves too. Step 4 deletes the first branch
+// and leaves the second.
+async function canAccessDm(prisma: PrismaClient, conversationId: string, userId: string): Promise<boolean> {
+  const dm = await prisma.directConversation.findUnique({ where: { id: conversationId } });
+  if (dm) return dm.userAId === userId || dm.userBId === userId;
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: { conversationId_userId: { conversationId, userId } },
+  });
+  return !!participant;
 }
 
 function toMessageDto(m: {
@@ -68,6 +64,48 @@ function isValidAttachmentUrl(url: unknown): url is string {
   return typeof url === 'string' && /^\/api\/uploads\/[a-zA-Z0-9-]+\.[a-zA-Z0-9]{1,10}$/.test(url);
 }
 
+// A client-generated send id (see ChatMessage.clientId). Bounded because it
+// lands in a UNIQUE index: unbounded client-supplied strings there are an
+// easy way to bloat it. Absent/malformed just means "no dedup for this send"
+// — never a rejection, so an older client that doesn't send one still works.
+function normalizeClientId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 64) return null;
+  return trimmed;
+}
+
+// Persist a send, but treat a repeat of the same (conversation, clientId) as
+// the SAME message rather than a second one.
+//
+// The dedup is the database's, not a check-then-insert: two retries racing
+// each other would both pass a findFirst before either commits, and the
+// second would still double-post. Letting the UNIQUE index reject the loser
+// and then reading back the winner is the only version without that window.
+//
+// Returns duplicate:true when the row already existed, so the caller can tell
+// the sender's own client about it without re-broadcasting a message everyone
+// else already has on screen.
+async function createMessageDeduped(
+  prisma: PrismaClient,
+  data: Parameters<PrismaClient['chatMessage']['create']>[0]['data'] & { conversationId2: string },
+  clientId: string | null,
+) {
+  const include = { sender: { select: { displayName: true } } } as const;
+  try {
+    const message = await prisma.chatMessage.create({ data: { ...data, clientId }, include });
+    return { message, duplicate: false };
+  } catch (e: any) {
+    if (e?.code !== 'P2002' || !clientId) throw e;
+    const existing = await prisma.chatMessage.findFirst({
+      where: { conversationId2: data.conversationId2, clientId },
+      include,
+    });
+    if (!existing) throw e;
+    return { message: existing, duplicate: true };
+  }
+}
+
 // Persisted Channel/DM/Thread chat. Self-contained, like followHandler.ts's
 // own uid/socket tracking — doesn't reach into chatHandler.ts's or
 // roomHandler.ts's private maps, just trusts socket.data.userId (set at
@@ -93,8 +131,28 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
     if (typeof channelId === 'string' && channelId) socket.leave(`channel:${channelId}`);
   });
 
-  socket.on(SocketEvents.DM_JOIN, (conversationId: string) => {
-    if (typeof conversationId === 'string' && conversationId) socket.join(`dm:${conversationId}`);
+  // Authorized exactly like CHANNEL_JOIN above. This check was missing
+  // entirely: joining a DM's socket room took nothing but the conversationId,
+  // so anyone holding one received that pair's messages and typing signals
+  // live. Sending was already gated (DM_MESSAGE_SEND re-checks the pair) —
+  // it was reading that was open, which is the quieter half to miss.
+  //
+  // Random cuids made that hard to exploit by guesswork. That was luck, not a
+  // control, and it is about to run out: conversation ids become
+  // dm:<userAId>:<userBId> (see the Conversation model), i.e. derivable by
+  // anyone who has seen two user ids — and user ids travel in ordinary socket
+  // payloads. An unauthorized join must be impossible before the ids become
+  // predictable, not after.
+  socket.on(SocketEvents.DM_JOIN, async (conversationId: string) => {
+    const userId = socket.data.userId as string | undefined;
+    if (!userId || typeof conversationId !== 'string' || !conversationId) return;
+    try {
+      const prisma = getPrisma();
+      if (!(await canAccessDm(prisma, conversationId, userId))) return;
+      socket.join(`dm:${conversationId}`);
+    } catch (e) {
+      console.error('[channelChat] failed to authorize DM join:', e);
+    }
   });
 
   // Typing relays — transient, no DB. The sender must already have JOINed the
@@ -139,11 +197,37 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
     }
   });
 
+  socket.on(SocketEvents.MESSAGE_EDIT, async (payload: { messageId: string; text: string }) => {
+    const userId = socket.data.userId as string | undefined;
+    if (!userId || typeof payload?.messageId !== 'string') return;
+    const text = sanitizeChat(payload?.text || '');
+    if (!text) return; // an empty edit would be a delete — use MESSAGE_DELETE for that
+    try {
+      const prisma = getPrisma();
+      const msg = await prisma.chatMessage.findUnique({ where: { id: payload.messageId } });
+      if (!msg || msg.senderId !== userId) return; // own messages only
+      // Attachment-only messages have no text to edit — skip rather than
+      // silently blanking the message body next to its file.
+      if (!msg.text) return;
+      await prisma.chatMessage.update({ where: { id: msg.id }, data: { text } });
+      const room = msg.channelId ? `channel:${msg.channelId}` : `dm:${msg.conversationId}`;
+      io.to(room).emit(SocketEvents.MESSAGE_EDITED, {
+        messageId: msg.id,
+        channelId: msg.channelId ?? undefined,
+        conversationId: msg.conversationId ?? undefined,
+        parentId: msg.parentId ?? undefined,
+        text,
+      });
+    } catch (e) {
+      console.error('[channelChat] failed to edit message:', e);
+    }
+  });
+
   socket.on(SocketEvents.DM_LEAVE, (conversationId: string) => {
     if (typeof conversationId === 'string' && conversationId) socket.leave(`dm:${conversationId}`);
   });
 
-  socket.on(SocketEvents.CHANNEL_MESSAGE_SEND, async (payload: { channelId: string; text: string; parentId?: string; attachmentUrl?: string; attachmentName?: string }) => {
+  socket.on(SocketEvents.CHANNEL_MESSAGE_SEND, async (payload: { channelId: string; text: string; parentId?: string; attachmentUrl?: string; attachmentName?: string; clientId?: string }) => {
     const userId = socket.data.userId as string | undefined;
     if (!userId || !canSendChannelChat(userId)) return;
     const text = sanitizeChat(payload?.text || '');
@@ -165,24 +249,34 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
         if (!parent || parent.channelId !== payload.channelId) return;
       }
 
-      const message = await prisma.chatMessage.create({
-        data: {
-          channelId: payload.channelId,
-          parentId: payload.parentId || null,
-          senderId: userId,
-          text,
-          attachmentUrl: hasAttachment ? payload.attachmentUrl : null,
-          attachmentName: hasAttachment ? (payload.attachmentName || '').slice(0, 200) || null : null,
-        },
-        include: { sender: { select: { displayName: true } } },
-      });
-      io.to(`channel:${payload.channelId}`).emit(SocketEvents.CHANNEL_MESSAGE_NEW, toMessageDto(message));
+      // Dual-write: channelId stays authoritative, conversationId2 is kept in
+      // lockstep so the two never disagree about where a message lives. The
+      // ensure* call is what makes this safe for a channel created before the
+      // Conversation model existed — its mirror row may not exist yet, and
+      // conversationId2 is a real FK.
+      const conversationId2 = await ensureGroupConversation(prisma, channel);
+
+      const { message, duplicate } = await createMessageDeduped(prisma, {
+        channelId: payload.channelId,
+        conversationId2,
+        parentId: payload.parentId || null,
+        senderId: userId,
+        text,
+        attachmentUrl: hasAttachment ? payload.attachmentUrl : null,
+        attachmentName: hasAttachment ? (payload.attachmentName || '').slice(0, 200) || null : null,
+      }, normalizeClientId(payload?.clientId));
+
+      // A duplicate goes back to the sender alone: everyone else in the
+      // channel already received this message from the send that won, and
+      // re-broadcasting would paint it twice on their screens.
+      const target = duplicate ? socket : io.to(`channel:${payload.channelId}`);
+      target.emit(SocketEvents.CHANNEL_MESSAGE_NEW, toMessageDto(message));
     } catch (e) {
       console.error('[channelChat] failed to persist channel message:', e);
     }
   });
 
-  socket.on(SocketEvents.DM_MESSAGE_SEND, async (payload: { conversationId: string; text: string; parentId?: string; attachmentUrl?: string; attachmentName?: string }) => {
+  socket.on(SocketEvents.DM_MESSAGE_SEND, async (payload: { conversationId: string; text: string; parentId?: string; attachmentUrl?: string; attachmentName?: string; clientId?: string }) => {
     const userId = socket.data.userId as string | undefined;
     if (!userId || !canSendChannelChat(userId)) return;
     const text = sanitizeChat(payload?.text || '');
@@ -203,18 +297,26 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
         if (!parent || parent.conversationId !== payload.conversationId) return;
       }
 
-      const message = await prisma.chatMessage.create({
-        data: {
-          conversationId: payload.conversationId,
-          parentId: payload.parentId || null,
-          senderId: userId,
-          text,
-          attachmentUrl: hasAttachment ? payload.attachmentUrl : null,
-          attachmentName: hasAttachment ? (payload.attachmentName || '').slice(0, 200) || null : null,
-        },
-        include: { sender: { select: { displayName: true } } },
+      // Dual-write, same as the channel handler above.
+      const conversationId2 = await ensureDmConversation(prisma, {
+        userAId: conversation.userAId,
+        userBId: conversation.userBId,
+        roomId: conversation.roomId,
+        createdAt: conversation.createdAt,
       });
-      io.to(`dm:${payload.conversationId}`).emit(SocketEvents.DM_MESSAGE_NEW, toMessageDto(message));
+
+      const { message, duplicate } = await createMessageDeduped(prisma, {
+        conversationId: payload.conversationId,
+        conversationId2,
+        parentId: payload.parentId || null,
+        senderId: userId,
+        text,
+        attachmentUrl: hasAttachment ? payload.attachmentUrl : null,
+        attachmentName: hasAttachment ? (payload.attachmentName || '').slice(0, 200) || null : null,
+      }, normalizeClientId(payload?.clientId));
+
+      const target = duplicate ? socket : io.to(`dm:${payload.conversationId}`);
+      target.emit(SocketEvents.DM_MESSAGE_NEW, toMessageDto(message));
     } catch (e) {
       console.error('[channelChat] failed to persist DM message:', e);
     }

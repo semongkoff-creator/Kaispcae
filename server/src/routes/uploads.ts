@@ -3,7 +3,9 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import multer from 'multer';
-import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { authenticateToken, authenticateUploadRead, AuthRequest } from '../middleware/auth';
+import { getPrisma } from '../lib/prisma';
+import { canAccessConversation } from '../lib/chatAccess';
 
 const uploads = Router();
 
@@ -83,14 +85,55 @@ uploads.post('/uploads/recording', authenticateToken, recordingUpload.single('fi
   return res.status(201).json({ url: `/api/uploads/${req.file.filename}` });
 });
 
-// Public GET (no auth) — a media object's url is shared with everyone in
-// the room via socket broadcast, and re-checking auth per <img> tag load
-// would need the token in a query param (leaking it into server logs/
-// browser history), a worse tradeoff than a guessable-only-by-uuid path.
-uploads.get('/uploads/:filename', (req: Request, res: Response) => {
+// Requires a logged-in session. This was deliberately public once, on the
+// reasoning that re-checking auth per <img> load would need the token in a
+// query param (leaking it into logs/history) — a worse trade than a
+// guessable-only-by-uuid path. That reasoning had a hole: "guessable only by
+// uuid" is not a secret when the uuid is handed to clients. Recording.fileUrl
+// was returned in full by GET /rooms/:slug/recordings, so anyone who could
+// list a recording could re-fetch the file here forever and walk straight
+// past the role check, expiry, and maxDownloads counter that
+// routes/recordings.ts enforces on the real download route.
+//
+// authenticateUploadRead resolves the session from an HttpOnly cookie
+// (see middleware/auth.ts), so the query-param leak the original comment
+// worried about never happens and <img>/<video> tags keep working untouched.
+uploads.get('/uploads/:filename', authenticateUploadRead, async (req: AuthRequest, res: Response) => {
   const filename = path.basename(req.params.filename); // strip any path traversal attempt
   const filePath = path.join(UPLOAD_DIR, filename);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+
+  // Step 1b — being logged in is not enough for a chat attachment. A file
+  // sent into a DM must be readable only by that DM's participants, so
+  // resolve the URL back to its message and ask the conversation.
+  //
+  // Files with no message behind them (Add Media objects, recordings) keep
+  // the old rule of "any authenticated user", which is what map media already
+  // assumes: a media object's url is broadcast to everyone in the room.
+  // Falling through is therefore deliberate, not an oversight — but it is
+  // also why this lookup keys off attachmentUrl rather than trusting the
+  // caller to say which conversation they want.
+  try {
+    const prisma = getPrisma();
+    const message = await prisma.chatMessage.findFirst({
+      where: { attachmentUrl: `/api/uploads/${filename}` },
+      select: { conversationId2: true },
+    });
+    if (message) {
+      // A chat attachment whose message somehow has no conversation is
+      // unreachable rather than public — there is no one to authorize against.
+      if (!message.conversationId2) return res.status(403).json({ error: 'Not authorized to read this file' });
+      if (!(await canAccessConversation(prisma, message.conversationId2, req.userId!))) {
+        return res.status(403).json({ error: 'Not authorized to read this file' });
+      }
+    }
+  } catch (err) {
+    // Fail CLOSED. An error here means we could not establish that the caller
+    // is allowed to read this file, and "the check threw" must never be a way
+    // to serve a private attachment.
+    console.error('[uploads] attachment authorization check failed:', err);
+    return res.status(500).json({ error: 'Failed to serve file' });
+  }
 
   res.setHeader('X-Content-Type-Options', 'nosniff');
   const ext = path.extname(filename).toLowerCase();

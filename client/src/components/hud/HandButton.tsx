@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { isTypingTarget } from '@/utils/hotkeys';
 
 interface HandButtonProps {
   raised: boolean;
@@ -14,6 +15,9 @@ export function HandButton({ raised, onToggle }: HandButtonProps) {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Don't fire while the user is typing — the Docs editor is
+      // contenteditable, so this key would be swallowed mid-word.
+      if (isTypingTarget(e.target)) return;
       if (e.key === 'h' || e.key === 'H') {
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
         onToggle();

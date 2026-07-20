@@ -1,17 +1,14 @@
 import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
+import { getPrisma } from '../lib/prisma';
 import { getConfig } from '../config';
-import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { authenticateToken, setUploadSessionCookie, clearUploadSessionCookie, AuthRequest } from '../middleware/auth';
 import { validate, registerSchema, loginSchema } from '../middleware/validate';
 import { rateLimit } from '../middleware/rateLimit';
 
 const auth = Router();
 
-function getPrisma(): PrismaClient {
-  return new PrismaClient();
-}
 
 function signToken(user: { id: string; email: string }): string {
   const config = getConfig();
@@ -54,13 +51,21 @@ auth.post('/register', authRateLimit, validate(registerSchema), async (req, res:
     // for a one-time bootstrap, not worth a transaction/lock for.
     const isFirstEverUser = (await prisma.user.count()) === 0;
     const user = await prisma.user.create({
-      data: { email, password: hashed, displayName, accountRole: isFirstEverUser ? 'admin' : 'user' },
+      // The first-ever account also bootstraps the workspace admin. Without
+      // this nobody would ever hold 'admin', so /admin and every
+      // /api/admin/* route would be permanently unreachable.
+      data: {
+        email, password: hashed, displayName,
+        accountRole: isFirstEverUser ? 'admin' : 'user',
+        workspaceRole: isFirstEverUser ? 'admin' : 'member',
+      },
     });
 
     const token = signToken(user);
+    setUploadSessionCookie(req, res, token);
 
     return res.status(201).json({
-      user: { id: user.id, email: user.email, displayName: user.displayName, accountRole: user.accountRole },
+      user: { id: user.id, email: user.email, displayName: user.displayName, accountRole: user.accountRole, workspaceRole: user.workspaceRole, timezone: user.timezone },
       token,
     });
   } catch (err) {
@@ -84,8 +89,14 @@ auth.post('/login', authRateLimit, validate(loginSchema), async (req, res: Respo
     if (!valid) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
+    // A deactivated account keeps its row (audit history must survive) but
+    // must not be able to get back in.
+    if (!user.active) {
+      return res.status(403).json({ error: 'Akun ini dinonaktifkan. Hubungi admin.' });
+    }
 
     const token = signToken(user);
+    setUploadSessionCookie(req, res, token);
 
     return res.json({
       user: {
@@ -94,6 +105,8 @@ auth.post('/login', authRateLimit, validate(loginSchema), async (req, res: Respo
         displayName: user.displayName,
         avatarConfig: user.avatarConfig,
         accountRole: user.accountRole,
+        workspaceRole: user.workspaceRole,
+        timezone: user.timezone,
       },
       token,
     });
@@ -120,6 +133,13 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
       );
       return res.status(404).json({ error: 'User not found' });
     }
+    // Deactivation must take effect on an ALREADY-ISSUED token, not only at
+    // the next login — otherwise a deactivated account keeps working until
+    // its JWT happens to expire. /me is the chokepoint every client hits on
+    // load, so a 403 here ends the session.
+    if (!user.active) {
+      return res.status(403).json({ error: 'Akun ini dinonaktifkan. Hubungi admin.' });
+    }
 
     // Sliding-expiry refresh: an actively-returning user with a token still
     // valid but within REFRESH_THRESHOLD_SECONDS of expiring gets a new
@@ -134,6 +154,16 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
       }
     }
 
+    // Unconditionally re-mint the upload cookie here, not just when the token
+    // was refreshed above. /me is the one route every client hits on load, so
+    // this is what gives a session that predates the cookie (token already in
+    // localStorage, no cookie ever set) a working one — without it, existing
+    // logins would silently lose every image and attachment until they logged
+    // out and back in. Also re-arms the cookie's maxAge on each visit.
+    const currentToken = refreshedToken
+      ?? (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
+    if (currentToken) setUploadSessionCookie(req, res, currentToken);
+
     return res.json({
       user: {
         id: user.id,
@@ -141,6 +171,8 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
         displayName: user.displayName,
         avatarConfig: user.avatarConfig,
         accountRole: user.accountRole,
+        workspaceRole: user.workspaceRole,
+        timezone: user.timezone,
       },
       ...(refreshedToken ? { token: refreshedToken } : {}),
     });
@@ -148,6 +180,17 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
     console.error('[auth] me error:', err);
     return res.status(500).json({ error: 'Failed to fetch profile' });
   }
+});
+
+// POST /auth/logout — the upload cookie is HttpOnly, so the client dropping
+// its localStorage token can't clear it; without this the cookie would
+// outlive the visible session and keep serving uploads to a "logged out"
+// browser. Deliberately not authenticated: clearing a cookie is safe to do
+// for anyone, and requiring a valid token would leave the cookie stranded in
+// exactly the case that matters most (an already-expired session).
+auth.post('/logout', (req, res: Response) => {
+  clearUploadSessionCookie(req, res);
+  return res.status(204).end();
 });
 
 export default auth;

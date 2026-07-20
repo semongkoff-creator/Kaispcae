@@ -9,8 +9,19 @@ import { NameModal } from './components/ui/NameModal';
 import { AvatarSetup } from './components/avatar/AvatarSetup';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
+import { BasesLauncher } from './components/LarkBase/BasesLauncher';
+import { AdminConsole } from './admin/AdminConsole';
+import { CalendarApp } from './components/Calendar/CalendarApp';
+import { AttendanceApp } from './components/Attendance/AttendanceApp';
+import { toCurrentUser, type CurrentUser } from './hooks/useCurrentUser';
+import { isTypingTarget, shouldIgnoreRoomHotkey } from './utils/hotkeys';
+import { useZoneLock } from './hooks/useZoneLock';
+import { ZoneLockBar } from './components/ui/ZoneLockBar';
+import { SharePage } from './components/LarkBase/SharePage';
 import { MiniMode, isMiniModeSupported, openMiniModeWindow } from './components/ui/MiniMode';
 import { ChatPanel } from './components/ui/ChatPanel';
+import { JoinGate, JoinRequestPanel } from './components/ui/JoinApproval';
+import { MessengerApp } from './components/Messenger/MessengerApp';
 import { NoticeBanner } from './components/ui/NoticeBanner';
 import { EmoteWheel } from './components/ui/EmoteWheel';
 import { Minimap } from './components/hud/Minimap';
@@ -86,10 +97,10 @@ function releaseMovementKeys() {
 const AFK_IDLE_MS = 120000; // 2 minutes
 const AFK_STATUS = '💤 Away';
 
-function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; theme: Theme; onToggleTheme: () => void }) {
+function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage } = useSocket(authDisplayName, roomSlug, authUserId);
-  const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage });
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage } = useSocket(authDisplayName, roomSlug, authUserId);
+  const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage });
   const [showEditor, setShowEditor] = useState(false);
 
   // Media state from store
@@ -258,14 +269,46 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // it changes. State (not a ref) so the Private tab can actually appear.
   const currentZoneIdRef = useRef<string | null>(null);
   const [currentZone, setCurrentZone] = useState<{ id: string; name: string } | null>(null);
+  const zoneLock = useZoneLock(socketRef, authUserId);
+
+  // Put the player back on the nearest tile inside the zone they may not leave.
+  const pushBackInside = useCallback((zoneId: string) => {
+    const z = zones.find((x) => x.id === zoneId);
+    if (!z) return;
+    const TILE = 32;
+    const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+    const setLocal = useGameStore.getState().setLocalPlayer;
+    const p = useGameStore.getState().localPlayer;
+    setLocal({
+      ...p,
+      x: clamp(p.x, (z.x + 0.5) * TILE, (z.x + z.width - 0.5) * TILE),
+      y: clamp(p.y, (z.y + 0.5) * TILE, (z.y + z.height - 0.5) * TILE),
+      isMoving: false,
+    });
+  }, [zones]);
   useEffect(() => {
     const zone = findZoneAt(localPlayer, zones);
     const zoneId = zone?.id ?? null;
     if (zoneId === currentZoneIdRef.current) return;
-    if (currentZoneIdRef.current) emitZoneExit(currentZoneIdRef.current);
+
+    // A locked zone holds you in until its keyholder opens it. The server
+    // refuses the zone:exit anyway (membership drives zone chat + A/V), so
+    // without this the avatar would stand outside while still being IN the
+    // meeting — worse than not letting them walk out at all.
+    const leaving = currentZoneIdRef.current;
+    if (leaving) {
+      const lock = zoneLock.lockOf(leaving);
+      if (lock && !zoneLock.isKeyholder(leaving)) {
+        pushBackInside(leaving);
+        return;
+      }
+      emitZoneExit(leaving);
+    }
     if (zoneId) emitZoneEnter(zoneId);
     currentZoneIdRef.current = zoneId;
     setCurrentZone(zone ? { id: zone.id, name: zone.name } : null);
+    // Walking out of the zone you were bounced from clears the knock prompt.
+    if (!zoneId) zoneLock.clearDenied();
   }, [localPlayer.x, localPlayer.y, zones, emitZoneEnter, emitZoneExit]);
 
   const zoneChatHistory = useGameStore((s) => s.zoneChatHistory);
@@ -409,10 +452,46 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
   const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
+  const [baseViewActive, setBaseViewActive] = useState(false);
+  const [adminViewActive, setAdminViewActive] = useState(false);
+  const [calendarViewActive, setCalendarViewActive] = useState(false);
+  const [attendanceViewActive, setAttendanceViewActive] = useState(false);
+  const [messengerViewActive, setMessengerViewActive] = useState(false);
+  // Join-approval queue (admin). pendingJoinCount only drives the menu badge;
+  // the panel refetches from the server when opened, so a stale count can
+  // never turn into a stale decision.
+  const [joinQueueActive, setJoinQueueActive] = useState(false);
+  const [pendingJoinCount, setPendingJoinCount] = useState(0);
+
+  // Keep the badge fresh for admins. Polled rather than driven by the
+  // JOIN_REQUESTED broadcast the server already sends: wiring a new listener
+  // means threading it through useSocket, and a 20s badge lag costs nothing —
+  // the panel itself always refetches on open, so a decision is never made
+  // against a stale list. Worth revisiting if the delay ever feels slow.
+  useEffect(() => {
+    if (!isAdmin || !roomSlug) { setPendingJoinCount(0); return; }
+    let cancelled = false;
+    const refresh = () => {
+      api.getJoinRequests(roomSlug)
+        .then((r) => { if (!cancelled) setPendingJoinCount(r.requests.length); })
+        .catch(() => {}); // a failed count is not worth surfacing
+    };
+    refresh();
+    const iv = setInterval(refresh, 20000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [isAdmin, roomSlug, joinQueueActive]);
+
+  // True while any full-screen suite module covers the room. Room affordances
+  // (hotkeys, the floating Chat button) must stand down while it's open —
+  // they belong to the office, not to a spreadsheet or a document.
+  const moduleOpen = baseViewActive || calendarViewActive || adminViewActive || attendanceViewActive || messengerViewActive;
+
   // E key for editor, Tab for admin panel
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // Inert while typing AND while a suite module covers the room: pressing
+      // "e" inside the Calendar's title field used to open the Room Editor.
+      if (shouldIgnoreRoomHotkey(e.target, moduleOpen)) return;
       if (e.key === 'e' || e.key === 'E') {
         if (isAdmin) toggleEditorMode();
       }
@@ -423,7 +502,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isAdmin, toggleEditorMode]);
+  }, [isAdmin, toggleEditorMode, moduleOpen]);
 
   const handleTilePaint = useCallback((x: number, y: number, type: TileType) => {
     const state = useGameStore.getState();
@@ -621,7 +700,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // here AND the nudge attempt there at once.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // Inert while typing (the Docs editor is contenteditable, so "B" used
+      // to open the emote wheel and eat the character) and while a suite
+      // module is covering the room.
+      if (shouldIgnoreRoomHotkey(e.target, moduleOpen)) return;
       if (e.key === 'b' || e.key === 'B') {
         e.preventDefault();
         setShowEmoteWheel((v) => !v);
@@ -632,7 +714,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [moduleOpen]);
 
   const allPlayers = { [localPlayerId]: useGameStore.getState().localPlayer, ...playerRecords };
 
@@ -867,6 +949,28 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleLock={() => emitRoomLock(!roomLocked)}
         simplifiedView={simplifiedView}
         onToggleSimplifiedView={() => setSimplifiedView((v) => !v)}
+        currentZoneName={currentZone?.name ?? null}
+        zoneLocked={!!zoneLock.lockOf(currentZone?.id ?? null)}
+        zoneLockedByName={zoneLock.lockOf(currentZone?.id ?? null)?.lockedByName ?? null}
+        canToggleZoneLock={!zoneLock.lockOf(currentZone?.id ?? null) || zoneLock.isKeyholder(currentZone?.id ?? null)}
+        onToggleZoneLock={() => {
+          if (!currentZone) return;
+          zoneLock.setLock(currentZone.id, !zoneLock.lockOf(currentZone.id), currentZone.name);
+        }}
+        baseViewActive={baseViewActive}
+        calendarViewActive={calendarViewActive}
+        onToggleCalendarView={() => setCalendarViewActive((v) => !v)}
+        attendanceViewActive={attendanceViewActive}
+        onToggleAttendanceView={() => setAttendanceViewActive((v) => !v)}
+        messengerViewActive={messengerViewActive}
+        onToggleMessengerView={() => setMessengerViewActive((v) => !v)}
+        joinQueueActive={joinQueueActive}
+        onToggleJoinQueue={() => setJoinQueueActive((v) => !v)}
+        pendingJoinCount={pendingJoinCount}
+        isWorkspaceAdmin={currentUser.workspaceRole === 'admin'}
+        adminViewActive={adminViewActive}
+        onToggleAdminView={() => setAdminViewActive((v) => !v)}
+        onToggleBaseView={() => setBaseViewActive((v) => !v)}
         miniModeSupported={isMiniModeSupported()}
         miniModeActive={!!miniModeWindow}
         onToggleMiniMode={handleToggleMiniMode}
@@ -930,6 +1034,45 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-emerald-500/90 text-white text-xs font-bold px-4 py-2 rounded-full animate-fade-in pointer-events-none">
           {editorToast}
         </div>
+      )}
+
+      {/* Lark Base (database) module — full-screen in-room panel, same z-40
+          layer as Meeting View; the room's Sidebar rail (z-50) stays reachable
+          and the launcher offsets itself by pl-14 to clear it. */}
+      {baseViewActive && <BasesLauncher currentUser={{ id: authUserId, name: authDisplayName }} onClose={() => setBaseViewActive(false)} />}
+      {adminViewActive && <AdminConsole currentUser={currentUser} onClose={() => setAdminViewActive(false)} />}
+      {attendanceViewActive && <AttendanceApp onClose={() => setAttendanceViewActive(false)} />}
+      {joinQueueActive && isAdmin && (
+        <JoinRequestPanel roomSlug={roomSlug} onClose={() => setJoinQueueActive(false)} />
+      )}
+      {/* Messenger — the full-screen chat surface. Shares every bit of state
+          with the floating ChatPanel below (same useChannelChat instance), so
+          the two are two views of one conversation, not two inboxes. */}
+      {messengerViewActive && (
+        <MessengerApp
+          localUserId={authUserId}
+          isAdmin={isAdmin}
+          roomSlug={roomSlug}
+          onClose={() => setMessengerViewActive(false)}
+          channels={channelChat.channels}
+          dmConversations={channelChat.dmConversations}
+          activeChatTarget={channelChat.activeChatTarget}
+          onSelectTarget={channelChat.setActiveChatTarget}
+          messages={channelChat.activeMessages}
+          onSend={channelChat.sendMessage}
+          onTyping={channelChat.notifyTyping}
+          onDeleteMessage={channelChat.deleteMessage}
+          onEditMessage={channelChat.editMessage}
+          onLoadOlder={channelChat.loadOlder}
+          onCreateChannel={channelChat.createChannel}
+        />
+      )}
+      {calendarViewActive && (
+        <CalendarApp
+          currentUser={{ id: authUserId, name: authDisplayName, timezone: currentUser.timezone }}
+          onClose={() => setCalendarViewActive(false)}
+          onStartMeeting={(slug) => { setCalendarViewActive(false); onPortalTravel(slug); }}
+        />
       )}
 
       {showAdminPanel && (
@@ -1012,7 +1155,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {/* HUD Controls — z-50 so mic/camera/screen-share stay reachable even
           while Meeting View's z-40 full-screen overlay is active; without
           this there was no way to mute/unmute or stop screen share without
-          exiting Meeting View first. */}
+          exiting Meeting View first.
+
+          Hidden while a SUITE module is open (moduleOpen). Meeting View is
+          deliberately NOT part of moduleOpen, so the "stay reachable over
+          Meeting View" behaviour above is untouched — but a full-screen
+          module is a different thing: the bar lands squarely on the
+          messenger's composer, covering the input you're trying to type in. */}
+      {!moduleOpen && (
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-50">
         <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
         <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
@@ -1020,12 +1170,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
         <NotificationSettings />
       </div>
+      )}
 
       {/* Only shown once getUserMedia has actually failed (denied / no
           device) — otherwise clicking Mic/Camera with no stream yet just
           silently did nothing, with no way to tell a permission problem
-          apart from "the button is broken". */}
-      {mediaError && (
+          apart from "the button is broken". Gated on !moduleOpen for the same
+          reason as the bar it points at — it sits just above that bar. */}
+      {mediaError && !moduleOpen && (
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/80 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none">
           {mediaError} — click Mic or Camera below to retry
         </div>
@@ -1034,7 +1186,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {/* Self-dismissing (see handleToggleMiniMode) — a one-off action
           failure, not an ongoing state like mediaError above, so it doesn't
           need to stick around until the user does something about it. */}
-      {miniModeError && (
+      {miniModeError && !moduleOpen && (
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/80 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none max-w-md text-center">
           {miniModeError}
         </div>
@@ -1142,6 +1294,25 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         <NoticeBanner notice={notice} isAdmin={isAdmin} onUnpin={emitNoticeUnpin} />
       )}
 
+      {!moduleOpen && (
+        <ZoneLockBar
+          currentZone={currentZone}
+          lock={zoneLock.lockOf(currentZone?.id ?? null)}
+          isKeyholder={zoneLock.isKeyholder(currentZone?.id ?? null)}
+          knocks={zoneLock.knocks}
+          deniedZoneId={zoneLock.deniedZoneId}
+          deniedZoneName={zones.find((z) => z.id === zoneLock.deniedZoneId)?.name ?? null}
+          toast={zoneLock.toast}
+          onKnock={() => zoneLock.deniedZoneId && zoneLock.knock(zoneLock.deniedZoneId, zones.find((z) => z.id === zoneLock.deniedZoneId)?.name)}
+          onDecide={zoneLock.decide}
+        />
+      )}
+
+      {/* The floating Chat button belongs to the room. While a suite module
+          covers the screen it just sits on top of that module's UI (it landed
+          over the Calendar's "Buat acara" button), so it stands down — same
+          rule as the room hotkeys above. */}
+      {!moduleOpen && (
       <ChatPanel
         localPlayerName={playerName}
         localUserId={authUserId}
@@ -1162,9 +1333,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onSend={channelChat.sendMessage}
         onTyping={channelChat.notifyTyping}
         onDeleteMessage={channelChat.deleteMessage}
+        onEditMessage={channelChat.editMessage}
         onLoadOlder={channelChat.loadOlder}
         onCreateChannel={channelChat.createChannel}
       />
+      )}
 
       <EmoteWheel
         open={showEmoteWheel}
@@ -1235,6 +1408,12 @@ export default function App() {
   const { user, loading, error, sessionExpiredMessage, login, register, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [roomSlug, setRoomSlug] = useState<string | null>(null);
+  // Room join approval (see server/src/lib/roomMembership.ts). The socket
+  // gate denies the join for a room that needs approval, so entry is checked
+  // BEFORE rendering the room — otherwise the user stares at a room that
+  // never loads and has no idea a decision is pending on them.
+  const [entryBlock, setEntryBlock] = useState<{ slug: string; reason: string } | null>(null);
+  const [entryChecking, setEntryChecking] = useState(false);
 
   // Invite links (see the "Copy invite link" button in Game() above) are
   // just this app's own URL with ?join=<slug> appended. Also mirrored into
@@ -1342,6 +1521,30 @@ export default function App() {
     persistAvatar(config);
   }, [setLocalPlayer, persistAvatar]);
 
+  // Ask before entering. A room that takes walk-ins answers immediately and
+  // this is one extra request; a gated one is caught here instead of at the
+  // socket, which is the difference between an explanation and a blank room.
+  useEffect(() => {
+    if (!roomSlug || !user) { setEntryBlock(null); return; }
+    let cancelled = false;
+    setEntryChecking(true);
+    api.getMembership(roomSlug)
+      .then((m) => {
+        if (cancelled) return;
+        setEntryBlock(m.allowed ? null : { slug: roomSlug, reason: m.reason });
+      })
+      // A failed check must not lock someone out of a room they can enter —
+      // the socket gate is the real enforcement, so fall through to it.
+      .catch(() => { if (!cancelled) setEntryBlock(null); })
+      .finally(() => { if (!cancelled) setEntryChecking(false); });
+    return () => { cancelled = true; };
+  }, [roomSlug, user]);
+
+  // Public share link (?share=<token>) — a read-only Base view openable
+  // WITHOUT logging in. Checked before the auth gate below.
+  const params = new URLSearchParams(window.location.search);
+  const shareToken = params.get('share');
+  if (shareToken) return <SharePage token={shareToken} />;
   // Loading
   if (loading) {
     return (
@@ -1359,6 +1562,25 @@ export default function App() {
   // Lobby
   if (!roomSlug) {
     return <Lobby user={user} onJoinRoom={setRoomSlug} onLogout={logout} theme={theme} onToggleTheme={toggleTheme} />;
+  }
+
+  // Blocked from entering — show why, and how to ask.
+  if (roomSlug && entryBlock && entryBlock.slug === roomSlug) {
+    return (
+      <JoinGate
+        roomSlug={roomSlug}
+        reason={entryBlock.reason}
+        onBack={() => { setEntryBlock(null); setRoomSlug(null); }}
+        onAdmitted={() => setEntryBlock(null)}
+      />
+    );
+  }
+  if (roomSlug && entryChecking) {
+    return (
+      <div className="w-screen h-screen bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
+        <p className="text-gray-500 text-sm">Memeriksa akses room...</p>
+      </div>
+    );
   }
 
   // Room (existing flow)
@@ -1391,5 +1613,5 @@ export default function App() {
   // window still open, with no signal anything changed underneath. Forcing
   // a remount on room change gives every room a clean slate, matching what
   // already happens when leaving to the Lobby and rejoining.
-  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} theme={theme} onToggleTheme={toggleTheme} />;
+  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} />;
 }

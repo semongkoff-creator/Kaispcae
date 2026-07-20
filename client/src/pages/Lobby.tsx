@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, Search, LockFill } from 'react-bootstrap-icons';
+import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, LockFill } from 'react-bootstrap-icons';
 import { io } from 'socket.io-client';
 import { RoomTheme, RoomTemplateId, ROOM_TEMPLATES } from '@virtualmeet/shared';
 import { api, RoomInfo } from '@/services/api';
@@ -50,9 +50,6 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
   };
   const [showCredits, setShowCredits] = useState(false);
   const [nameError, setNameError] = useState(false);
-  // Room-list search + sort (the list can grow to hundreds of rooms).
-  const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState<'recent' | 'active'>('recent');
 
   useEffect(() => {
     api.getRooms()
@@ -66,22 +63,10 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
   const lastRoomSlug = localStorage.getItem('vm_last_room_slug');
   const lastRoom = rooms.find((r) => r.slug === lastRoomSlug);
 
-  // Filter by name/slug/creator, then sort. 'recent' matches the API's own
-  // default createdAt-desc order; 'active' surfaces the busiest rooms first.
-  const q = search.trim().toLowerCase();
+  // Newest first — matches the API's own createdAt-desc order.
   const visibleRooms = rooms
-    .filter((r) =>
-      !q ||
-      r.name.toLowerCase().includes(q) ||
-      r.slug.toLowerCase().includes(q) ||
-      r.ownerDisplayName.toLowerCase().includes(q),
-    )
     .slice()
-    .sort((a, b) =>
-      sortBy === 'active'
-        ? b.playerCount - a.playerCount
-        : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-    );
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   useEffect(() => {
     const socket = io(SERVER_URL, { transports: ['websocket', 'polling'] });
@@ -212,39 +197,6 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
           </div>
         </div>
 
-        {/* Search + sort — the room list can be hundreds of rooms long. */}
-        {!loading && rooms.length > 0 && (
-          <div className="flex items-center gap-2 mb-5 flex-wrap">
-            <div className="relative flex-1 min-w-[12rem] max-w-sm">
-              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 pointer-events-none" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Cari room (nama / kode / pembuat)..."
-                className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg pl-8 pr-8 py-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 shadow-sm"
-              />
-              {search && (
-                <button onClick={() => setSearch('')} title="Clear" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
-                  <XLg size={11} />
-                </button>
-              )}
-            </div>
-            <div className="flex items-center gap-1 bg-purple-50 dark:bg-gray-800 rounded-lg p-0.5 border border-purple-100 dark:border-gray-700">
-              {(['recent', 'active'] as const).map((key) => (
-                <button
-                  key={key}
-                  onClick={() => setSortBy(key)}
-                  className={`text-xs font-medium px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
-                    sortBy === key ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-                  }`}
-                >
-                  {key === 'recent' ? 'Terbaru' : 'Paling ramai'}
-                </button>
-              ))}
-            </div>
-            <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto tabular-nums">{visibleRooms.length} room</span>
-          </div>
-        )}
         {showCreate && isAdmin && (
           <div className="bg-white dark:bg-gray-800 rounded-xl p-4 mb-6 border border-purple-100 dark:border-gray-700 shadow-sm">
             <div className="flex gap-3 items-end mb-3">
@@ -317,8 +269,8 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
           </div>
         ) : visibleRooms.length === 0 ? (
           <div className="text-center py-16">
-            <p className="text-gray-400 dark:text-gray-500 text-lg mb-2">Tidak ada room yang cocok</p>
-            <p className="text-gray-400 dark:text-gray-500 text-sm">Coba kata kunci lain, atau <button onClick={() => setSearch('')} className="text-purple-500 hover:text-purple-700 underline cursor-pointer">hapus pencarian</button>.</p>
+            <p className="text-gray-400 dark:text-gray-500 text-lg mb-2">Belum ada room</p>
+            <p className="text-gray-400 dark:text-gray-500 text-sm">{isAdmin ? 'Buat room pertama lewat tombol "Create Room" di atas.' : 'Tunggu admin membuat room, atau masuk lewat kode.'}</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

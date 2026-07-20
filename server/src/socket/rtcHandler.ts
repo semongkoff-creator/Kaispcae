@@ -1,11 +1,9 @@
 import { Server, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
+import { getPrisma } from '../lib/prisma';
 import { SocketEvents, RtcSignal, Role, hasFeatureAccess } from '@virtualmeet/shared';
 import { resolveRoomRole } from '../lib/roles';
 
-function getPrisma(): PrismaClient {
-  return new PrismaClient();
-}
 
 // A socket only ever joins one room (the room slug) via socket.join() in
 // roomHandler.ts's JOIN_ROOM — socket.io also auto-joins every socket to a

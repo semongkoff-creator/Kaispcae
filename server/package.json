@@ -22,8 +22,11 @@
     "express": "^4.19.2",
     "ioredis": "^5.4.1",
     "jsonwebtoken": "^9.0.3",
+    "luxon": "^3.7.2",
     "multer": "^2.2.0",
+    "rrule": "^2.8.1",
     "socket.io": "^4.7.5",
+    "yjs": "^13.6.31",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -31,6 +34,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/luxon": "^3.7.2",
     "@types/multer": "^2.2.0",
     "@types/node": "^20.12.12",
     "esbuild": "^0.28.0",

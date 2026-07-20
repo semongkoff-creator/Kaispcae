@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill } from 'react-bootstrap-icons';
+import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { StatusButton } from '../avatar/StatusButton';
 import { RecordingControl } from './RecordingControl';
@@ -38,8 +38,49 @@ interface SidebarProps {
   canLock: boolean;
   onToggleLock: () => void;
 
+  // Zone-aware lock: while you're standing inside a zone, this same row locks
+  // THAT zone instead of the whole room — "Lock Room" means the room you're
+  // in. Anyone in the zone may lock it (they become its keyholder); locking
+  // the whole map stays admin-only.
+  currentZoneName: string | null;
+  zoneLocked: boolean;
+  zoneLockedByName: string | null;
+  canToggleZoneLock: boolean;
+  onToggleZoneLock: () => void;
+
   simplifiedView: boolean;
   onToggleSimplifiedView: () => void;
+
+  // Lark Base (database) module — opens as a full-screen in-room panel.
+  baseViewActive: boolean;
+  onToggleBaseView: () => void;
+
+  // Workspace admin console. `isWorkspaceAdmin` is cosmetic only — every
+  // /api/admin/* route re-checks the role from the DB (see
+  // server/src/lib/workspace.ts). The row is HIDDEN, not disabled, for
+  // members, per the suite's permission rules.
+  // Calendar module — same pattern again.
+  calendarViewActive: boolean;
+  onToggleCalendarView: () => void;
+
+  // Attendance module.
+  attendanceViewActive: boolean;
+  onToggleAttendanceView: () => void;
+
+  // Messenger — the full-screen chat surface. The floating ChatPanel stays
+  // for chatting while walking around; this is the one you sit down in.
+  messengerViewActive: boolean;
+  onToggleMessengerView: () => void;
+
+  // Room join approval queue — admin+ only, and hidden entirely (not
+  // disabled) for everyone else, same convention as the admin console row.
+  joinQueueActive: boolean;
+  onToggleJoinQueue: () => void;
+  pendingJoinCount: number;
+
+  isWorkspaceAdmin: boolean;
+  adminViewActive: boolean;
+  onToggleAdminView: () => void;
 
   miniModeSupported: boolean;
   miniModeActive: boolean;
@@ -96,8 +137,27 @@ export function Sidebar({
   roomLocked,
   canLock,
   onToggleLock,
+  currentZoneName,
+  zoneLocked,
+  zoneLockedByName,
+  canToggleZoneLock,
+  onToggleZoneLock,
   simplifiedView,
   onToggleSimplifiedView,
+  baseViewActive,
+  onToggleBaseView,
+  calendarViewActive,
+  onToggleCalendarView,
+  attendanceViewActive,
+  onToggleAttendanceView,
+  messengerViewActive,
+  onToggleMessengerView,
+  joinQueueActive,
+  onToggleJoinQueue,
+  pendingJoinCount,
+  isWorkspaceAdmin,
+  adminViewActive,
+  onToggleAdminView,
   miniModeSupported,
   miniModeActive,
   onToggleMiniMode,
@@ -177,17 +237,45 @@ export function Sidebar({
               />
             )}
             <MenuRow icon={<EyeFill size={15} />} label="Simplify" onClick={closeAnd(onToggleSimplifiedView)} />
-
-            {(isAdmin || canTeleport || canLock) && <MenuDivider />}
-            {canLock && (
+            <MenuRow icon={<TableIcon size={15} />} label={baseViewActive ? 'Tutup Base' : 'Base (Database)'} active={baseViewActive} onClick={closeAnd(onToggleBaseView)} />
+            <MenuRow icon={<ChatDotsFill size={15} />} label={messengerViewActive ? 'Tutup Chat' : 'Chat'} active={messengerViewActive} onClick={closeAnd(onToggleMessengerView)} />
+            {isAdmin && (
               <MenuRow
-                icon={roomLocked ? <LockFill size={15} /> : <UnlockFill size={15} />}
-                label={roomLocked ? 'Unlock Room' : 'Lock Room'}
-                active={roomLocked}
-                onClick={closeAnd(onToggleLock)}
-                title={roomLocked ? 'Room is locked — new members are blocked' : 'Lock the room so no new members can join'}
+                icon={<PersonCheck size={15} />}
+                label={pendingJoinCount > 0 ? `Permintaan bergabung (${pendingJoinCount})` : 'Permintaan bergabung'}
+                active={joinQueueActive}
+                onClick={closeAnd(onToggleJoinQueue)}
               />
             )}
+            <MenuRow icon={<CalendarEvent size={15} />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
+            <MenuRow icon={<ClockHistory size={15} />} label={attendanceViewActive ? 'Tutup Absensi' : 'Absensi'} active={attendanceViewActive} onClick={closeAnd(onToggleAttendanceView)} />
+            {isWorkspaceAdmin && (
+              <MenuRow icon={<ShieldLock size={15} />} label={adminViewActive ? 'Tutup Konsol Admin' : 'Konsol Admin'} active={adminViewActive} onClick={closeAnd(onToggleAdminView)} />
+            )}
+
+            {(isAdmin || canTeleport || canLock) && <MenuDivider />}
+            {/* Standing in a zone → this locks the ZONE (Meeting Room B, …).
+                Anyone inside may lock it and becomes its keyholder; people who
+                walk in afterwards must knock and be admitted BY THEM. */}
+            {currentZoneName && (
+              <MenuRow
+                icon={zoneLocked ? <LockFill size={15} /> : <UnlockFill size={15} />}
+                label={zoneLocked ? `Buka ${currentZoneName}` : `Kunci ${currentZoneName}`}
+                active={zoneLocked}
+                onClick={canToggleZoneLock ? closeAnd(onToggleZoneLock) : () => {}}
+                title={
+                  zoneLocked && !canToggleZoneLock
+                    ? `Dikunci ${zoneLockedByName ?? 'orang lain'} — hanya dia yang bisa membuka`
+                    : zoneLocked
+                      ? 'Buka zona ini supaya siapa pun bisa masuk lagi'
+                      : 'Kunci zona ini — orang lain harus ketuk dan kamu yang mengizinkan'
+                }
+              />
+            )}
+            {/* The whole-room "Lock Room" row was removed on request: locking
+                is per-zone now (the row above), which is what people actually
+                meant by "lock the room". The server-side room lock still
+                exists and still guards JOIN_ROOM — it just has no UI. */}
             {isAdmin && (
               <MenuRow icon={<Tools size={15} />} label={editorMode ? 'Editing...' : 'Edit Room'} active={editorMode} onClick={closeAnd(onToggleEditorMode)} />
             )}

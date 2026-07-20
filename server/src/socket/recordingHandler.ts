@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { PrismaClient } from '@prisma/client';
+import { getPrisma } from '../lib/prisma';
 import { SocketEvents, hasFeatureAccess, RECORDING_DOWNLOAD_TTL_MS, RECORDING_MAX_DOWNLOADS } from '@virtualmeet/shared';
 import { getPlayerName } from './roomHandler';
 import { resolveRoomRole as resolveRole } from '../lib/roles';
@@ -14,12 +14,15 @@ import { resolveRoomRole as resolveRole } from '../lib/roles';
 // reaching into roomHandler.ts's private state — same "small deliberate
 // duplication for decoupling" precedent as followHandler.ts/mediaHandler.ts.
 
-function getPrisma(): PrismaClient {
-  return new PrismaClient();
-}
 
 const socketToUid = new Map<string, string>();
 const socketToRoom = new Map<string, string>();
+
+// Mirrors channelChatHandler.ts's isValidAttachmentUrl, narrowed to the .webm
+// that POST /uploads/recording is the only producer of.
+function isValidRecordingUrl(url: unknown): url is string {
+  return typeof url === 'string' && /^\/api\/uploads\/[a-zA-Z0-9-]+\.webm$/.test(url);
+}
 
 // Finds the live socket (if any) for a given account userId within a room —
 // used both to resolve the target's current display name and to confirm
@@ -162,6 +165,17 @@ export function registerRecordingHandlers(io: Server, socket: Socket): void {
       if (!data.fileUrl) {
         await prisma.recording.update({ where: { id: row.id }, data: { status: 'failed', endedAt: new Date() } });
         io.to(room).emit(SocketEvents.RECORDING_FAILED, { recordingId: row.id, targetUserId: row.targetUserId });
+        return;
+      }
+
+      // The upload itself already happened over POST /uploads/recording,
+      // which only ever hands back a same-origin /api/uploads/<uuid>.webm
+      // path — so anything else here is a client inventing a URL rather than
+      // reporting one. Same guard, same reason, as channelChatHandler.ts's
+      // isValidAttachmentUrl: an arbitrary URL stored on a Recording row is a
+      // planted external URL wearing a recording's name.
+      if (!isValidRecordingUrl(data.fileUrl)) {
+        console.warn(`[recording] rejected finalize with non-upload fileUrl from user ${uid}`);
         return;
       }
 

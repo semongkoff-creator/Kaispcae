@@ -5,13 +5,14 @@ import { api } from '@/services/api';
 interface ChannelChatEmitters {
   emitChannelJoin: (channelId: string) => void;
   emitChannelLeave: (channelId: string) => void;
-  emitChannelMessageSend: (channelId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string) => void;
+  emitChannelMessageSend: (channelId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string, clientId?: string) => void;
   emitDmJoin: (conversationId: string) => void;
   emitDmLeave: (conversationId: string) => void;
-  emitDmMessageSend: (conversationId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string) => void;
+  emitDmMessageSend: (conversationId: string, text: string, parentId?: string, attachmentUrl?: string, attachmentName?: string, clientId?: string) => void;
   emitChannelTyping: (channelId: string) => void;
   emitDmTyping: (conversationId: string) => void;
   emitDeleteMessage: (messageId: string) => void;
+  emitEditMessage: (messageId: string, text: string) => void;
 }
 
 function targetKey(target: { type: 'channel' | 'dm'; id: string }): string {
@@ -117,8 +118,14 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
   const sendMessage = useCallback(
     (text: string, parentId?: string, attachment?: { url: string; fileName: string }) => {
       if (!activeChatTarget) return;
-      if (activeChatTarget.type === 'channel') emitters.emitChannelMessageSend(activeChatTarget.id, text, parentId, attachment?.url, attachment?.fileName);
-      else emitters.emitDmMessageSend(activeChatTarget.id, text, parentId, attachment?.url, attachment?.fileName);
+      // One id per user-intended send. The server stores it and treats a
+      // repeat of the same id as the same message rather than a second one
+      // (see ChatMessage.clientId), so a resend can never double-post. It has
+      // to be generated HERE, once per send — regenerating it on a retry
+      // would defeat the entire purpose.
+      const clientId = crypto.randomUUID();
+      if (activeChatTarget.type === 'channel') emitters.emitChannelMessageSend(activeChatTarget.id, text, parentId, attachment?.url, attachment?.fileName, clientId);
+      else emitters.emitDmMessageSend(activeChatTarget.id, text, parentId, attachment?.url, attachment?.fileName, clientId);
     },
     [activeChatTarget, emitters]
   );
@@ -138,6 +145,10 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
 
   const deleteMessage = useCallback((messageId: string) => {
     emitters.emitDeleteMessage(messageId);
+  }, [emitters]);
+
+  const editMessage = useCallback((messageId: string, text: string) => {
+    emitters.emitEditMessage(messageId, text);
   }, [emitters]);
 
   const loadOlder = useCallback(async () => {
@@ -191,6 +202,7 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
     sendMessage,
     notifyTyping,
     deleteMessage,
+    editMessage,
     loadOlder,
     createChannel,
     startDm,

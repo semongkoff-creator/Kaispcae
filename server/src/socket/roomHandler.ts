@@ -1,11 +1,14 @@
 import { randomUUID } from 'crypto';
+import { isUserInLockedZone } from './zoneLock';
+import { zoneIdOfSocket } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
 } from '../store/roomStore';
-import { PrismaClient } from '@prisma/client';
+import { getPrisma } from '../lib/prisma';
+import { resolveEntry } from '../lib/roomMembership';
 import { socketRateLimit } from '../middleware/rateLimit';
 
 const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec per socket
@@ -37,9 +40,6 @@ function clearPendingSummon(targetSocketId: string) {
   }
 }
 
-function getPrisma(): PrismaClient {
-  return new PrismaClient();
-}
 
 const AVATAR_COLORS = ['#4ecdc4', '#ffe66d', '#a786df', '#6bcb77', '#4d96ff', '#ff6b6b'];
 
@@ -213,6 +213,73 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
   socket.on(SocketEvents.JOIN_ROOM, async (roomId: string, playerName?: string, avatarConfig?: AvatarConfig, userId?: string) => {
     const room = roomId || DEFAULT_ROOM;
+
+    // Approval gate — BEFORE socket.join, or a rejected user still lands in
+    // the socket.io room and keeps receiving everything broadcast to it. The
+    // REST routes alone would be theatre: this is the door.
+    //
+    // socket.data.userId only (never the `userId` param, which the client
+    // supplies and can lie about — the comment further down explains why that
+    // distinction already mattered here).
+    const enteringUid = (socket.data as { userId?: string }).userId;
+    const prisma = getPrisma();
+
+    // Two lookups, two different failure policies — deliberately not one
+    // try/catch around both. A single catch that denied on any error would
+    // fail closed for the ~191 walk-in rooms too, so a DB blip would lock
+    // everyone out of rooms that never asked to be gated.
+    let approvalRoom: { id: string; ownerId: string; requiresApproval: boolean; slug: string } | null = null;
+    try {
+      approvalRoom = await prisma.room.findUnique({ where: { slug: room } });
+    } catch (e) {
+      // Can't tell whether this room is gated. Unknown slugs (DEFAULT_ROOM,
+      // ad-hoc rooms) have always been walk-in, and this lookup is the only
+      // thing that distinguishes them, so treat an unreadable answer the same
+      // way — matching pre-existing behaviour rather than inventing a lockout.
+      console.error('[room] could not read room for approval check:', e);
+    }
+
+    if (approvalRoom?.requiresApproval) {
+      // Past this point the room HAS asked to be gated, so errors fail closed:
+      // an unverifiable entry into an approval-required room is exactly what
+      // the gate exists to prevent.
+      if (!enteringUid) {
+        socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'needs-request' });
+        return;
+      }
+      try {
+        const entry = await resolveEntry(prisma, approvalRoom, enteringUid);
+        if (!entry.allowed) {
+          socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: entry.reason });
+          return;
+        }
+      } catch (e) {
+        console.error('[room] approval check failed:', e);
+        socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'error' });
+        return;
+      }
+    }
+
+    // Entering a walk-in room records membership. Without this, nobody who
+    // ever walked into an open room has a RoomMember row — so the moment an
+    // admin switches that room to require approval, every single person in it
+    // is re-classified as a stranger and locked out on their next join. The
+    // gate is meant to filter who comes in NEXT, not evict the office.
+    //
+    // Fire-and-forget: this is bookkeeping, and a failed write must never stop
+    // someone entering a room that has no gate on it.
+    if (approvalRoom && !approvalRoom.requiresApproval && enteringUid) {
+      prisma.roomMember
+        .upsert({
+          where: { userId_roomId: { userId: enteringUid, roomId: approvalRoom.id } },
+          create: { userId: enteringUid, roomId: approvalRoom.id, status: 'active', role: 'member' },
+          // Never touches role or an existing status — a 'rejected' row must
+          // not be laundered into 'active' just by the room being open today.
+          update: {},
+        })
+        .catch((e) => console.error('[room] failed to record membership:', e));
+    }
+
     socket.join(room);
     currentRoom = room;
 
@@ -631,6 +698,13 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       return;
     }
     const target = matches[matches.length - 1];
+    // A locked zone holds its people: they can't be summoned out of a meeting
+    // any more than they could walk out of it. Staff rank doesn't override the
+    // keyholder — that's the whole point of the lock.
+    if (isUserInLockedZone(room, findUserIdBySocket(target.id) ?? undefined, zoneIdOfSocket(target.id))) {
+      socket.emit('admin:error', { message: `${target.name} sedang di zona terkunci — tidak bisa dipanggil.` });
+      return;
+    }
 
     clearPendingSummon(target.id);
     const requestId = randomUUID();

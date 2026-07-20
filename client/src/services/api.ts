@@ -1,4 +1,4 @@
-import { TeleportLocation, OwnerBookmark, Recording, RoomTemplateId, Channel, ChannelMessage, DirectConversationSummary } from '@virtualmeet/shared';
+import { TeleportLocation, OwnerBookmark, Recording, RoomTemplateId, Channel, ChannelMessage, DirectConversationSummary, WorkspaceRole } from '@virtualmeet/shared';
 
 const API_BASE = '/api';
 
@@ -106,6 +106,13 @@ export interface UserProfile {
   // 'admin' accounts can create rooms; everyone else can only join existing
   // ones (see routes/rooms.ts's POST /rooms gate).
   accountRole?: 'admin' | 'user';
+  // Workspace (organisation) role — a SEPARATE layer from accountRole above:
+  // this one gates /admin and every /api/admin/* route. See
+  // shared/workspacePermissions.ts. Cosmetic on the client; the server
+  // re-checks it from the DB on every request.
+  workspaceRole?: WorkspaceRole;
+  // IANA zone, e.g. "Asia/Jakarta". Times are stored UTC and rendered here.
+  timezone?: string;
 }
 
 export interface RoomInfo {
@@ -142,7 +149,47 @@ export const api = {
   // server/src/routes/auth.ts and useAuth.ts, which persists it.
   getMe: () => request<{ user: UserProfile; token?: string }>('/auth/me'),
 
+  // Clears the HttpOnly upload-session cookie server-side — JS can't touch it
+  // itself. Not routed through request(): the server answers 204 with no
+  // body, which res.json() would choke on.
+  logout: () => fetch(`${API_BASE}/auth/logout`, { method: 'POST' }),
+
   getRooms: () => request<{ rooms: RoomInfo[] }>('/rooms'),
+
+  // ── Room join approval (see server/src/lib/roomMembership.ts) ──────
+  // What the client checks BEFORE trying to enter: a room that requires
+  // approval denies the socket join outright, so walking in and discovering
+  // that from a denial event would flash a broken room first.
+  getMembership: (slug: string) =>
+    request<{ allowed: boolean; reason: string; requiresApproval: boolean }>(`/rooms/${slug}/membership`),
+
+  requestJoin: (slug: string) =>
+    request<{ status: 'active' | 'pending' | 'rejected' }>(`/rooms/${slug}/join-request`, { method: 'POST' }),
+
+  getJoinRequests: (slug: string) =>
+    request<{ requests: { userId: string; displayName: string; email: string; requestedAt: number }[] }>(
+      `/rooms/${slug}/join-requests`,
+    ),
+
+  // Room members + group participants — the "add to group like WhatsApp"
+  // flow: pick from people already approved into the room.
+  getRoomMembers: (slug: string) =>
+    request<{ members: { id: string; displayName: string; email: string; role: string }[] }>(`/rooms/${slug}/members`),
+
+  getChannelParticipants: (channelId: string) =>
+    request<{ participants: { id: string; displayName: string; email: string }[] }>(`/channels/${channelId}/participants`),
+
+  addChannelParticipants: (channelId: string, userIds: string[]) =>
+    request<{ added: string[]; rejected: string[] }>(`/channels/${channelId}/participants`, {
+      method: 'POST',
+      body: JSON.stringify({ userIds }),
+    }),
+
+  decideJoinRequest: (slug: string, userId: string, decision: 'approve' | 'reject') =>
+    request<{ status: string }>(`/rooms/${slug}/join-requests/${userId}`, {
+      method: 'POST',
+      body: JSON.stringify({ decision }),
+    }),
 
   getRoom: (slug: string) => request<RoomInfo>(`/rooms/${slug}`),
 

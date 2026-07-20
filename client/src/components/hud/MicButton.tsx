@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { MicFill, MicMuteFill } from 'react-bootstrap-icons';
+import { isTypingTarget } from '@/utils/hotkeys';
 
 interface MicButtonProps {
   muted: boolean;
@@ -12,6 +13,9 @@ export function MicButton({ muted, onToggle }: MicButtonProps) {
   // M key shortcut
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Don't fire while the user is typing — the Docs editor is
+      // contenteditable, so this key would be swallowed mid-word.
+      if (isTypingTarget(e.target)) return;
       if (e.key === 'm' || e.key === 'M') {
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
         onToggle();

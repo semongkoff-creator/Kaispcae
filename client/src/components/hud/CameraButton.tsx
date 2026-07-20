@@ -1,5 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import { CameraVideoFill, CameraVideoOffFill } from 'react-bootstrap-icons';
+import { isTypingTarget } from '@/utils/hotkeys';
 
 interface CameraButtonProps {
   enabled: boolean;
@@ -9,6 +10,9 @@ interface CameraButtonProps {
 export function CameraButton({ enabled, onToggle }: CameraButtonProps) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Don't fire while the user is typing — the Docs editor is
+      // contenteditable, so this key would be swallowed mid-word.
+      if (isTypingTarget(e.target)) return;
       if (e.key === 'v' || e.key === 'V') {
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
         onToggle();
