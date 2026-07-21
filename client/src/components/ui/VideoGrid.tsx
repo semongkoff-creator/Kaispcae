@@ -1,53 +1,58 @@
 import { useRef, useEffect, useState } from 'react';
 import { MicMuteFill, CameraVideoOffFill, PipFill, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill } from 'react-bootstrap-icons';
-import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI, Avatar } from '@virtualmeet/shared';
+import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
-import { drawAvatar } from '@/components/canvas/AvatarSprite';
 
-// Shown in place of a black rectangle when someone's camera is off — the
-// same character they're walking around as, so a tile still says WHO is
-// there. Reuses the canvas renderer the avatar editor previews with rather
-// than a second drawing path that could drift from the in-world look.
-function AvatarPlaceholder({ avatar, name }: { avatar?: Avatar; name: string }) {
-  const ref = useRef<HTMLCanvasElement>(null);
+// Accent colours for initial bubbles, drawn from the palette already used
+// across MeetKai (the purple the HUD is built on, plus the teal/amber/rose
+// used for zones, badges and alerts) so a tile never introduces a colour the
+// rest of the app doesn't use.
+const INITIAL_COLORS = ['#7c3aed', '#0d9488', '#d97706', '#e11d48', '#4f46e5', '#059669'];
 
-  useEffect(() => {
-    const canvas = ref.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
+// Same name → same colour, on every screen, for the whole session. A random
+// pick would give the same person a different colour in each viewer's window,
+// which quietly destroys the "colour helps me recognise who this is" benefit
+// that is the entire reason for colouring them at all.
+function colorForName(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return INITIAL_COLORS[hash % INITIAL_COLORS.length];
+}
 
-    const W = 96, H = 64;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.imageSmoothingEnabled = false;
+// One letter from a single-word name, first + last for a full name.
+// Array.from (not [0]) because indexing a string splits surrogate pairs —
+// an emoji or non-Latin name would render as half a broken character.
+function initialsOf(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '?';
+  const first = Array.from(words[0])[0] ?? '?';
+  if (words.length === 1) return first.toUpperCase();
+  const last = Array.from(words[words.length - 1])[0] ?? '';
+  return (first + last).toUpperCase();
+}
 
-    // Sprite parts load asynchronously, so a single draw can land before the
-    // images are ready and freeze half-composed — the avatar editor hit this
-    // exact problem and solved it with a loop; this needs the same.
-    let raf = 0;
-    const loop = (timestamp: number) => {
-      ctx.clearRect(0, 0, W, H);
-      drawAvatar(ctx, {
-        avatar: avatar ?? { id: 'placeholder', name, x: 0, y: 0, direction: 'down', color: '#a78bfa', isMoving: false },
-        x: W / 2,
-        // y=20 puts drawAvatar's name pill (drawn at y-23, 14px tall) fully
-        // above the canvas top, where it clips away — the tile already
-        // prints the name underneath, and drawNameLabel has no empty-name
-        // early return, so passing '' would leave a small black pill instead.
-        y: 20,
-        isLocal: false,
-        walkAnimOffset: 0,
-        timestamp,
-      });
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [avatar, name]);
-
-  return <canvas ref={ref} className="w-full h-full object-contain bg-purple-100" />;
+// What a tile shows while someone's camera is off. Replaces an earlier
+// attempt that drew their in-world pixel character here: on the map that
+// sprite IS the person, but shrunk into a 96px tile next to real webcam
+// video it read as decoration rather than as "this is who is here".
+//
+// No photo branch exists because there is no photo to show — the User model
+// has avatarConfig (pixel-avatar parts) and no image field anywhere in the
+// schema. When profile photos are added, they slot in above the initials as
+// the preferred case; nothing here needs restructuring for that.
+function InitialsAvatar({ name, large }: { name: string; large?: boolean }) {
+  const initials = initialsOf(name);
+  return (
+    <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-gray-700">
+      <div
+        className={`rounded-full flex items-center justify-center font-semibold text-white select-none ${large ? 'w-20 h-20 text-2xl' : 'w-9 h-9 text-xs'}`}
+        style={{ backgroundColor: colorForName(name) }}
+        title={name}
+      >
+        {initials}
+      </div>
+    </div>
+  );
 }
 
 // Most recent still-active emote for a given player/socket id, as the emoji
@@ -111,22 +116,23 @@ export function getVideoTiles(
     .filter((t) => t.stream);
 }
 
-// A presented screen as its own floating, draggable panel — deliberately NOT
-// a tile in the camera column. Previously both lived in one centred flex
+// A presented screen as its own panel, pinned in place — deliberately NOT a
+// tile in the camera column. Previously both lived in one centred flex
 // container, so enlarging the screen shoved the camera strip around and the
 // two fought for the same space. Separate containers can't collide.
 //
-// The panel is a fixed 16:9 box with the video object-contain inside it. The
-// earlier version set width from the viewport (82vw) but capped height
+// Position is FIXED and not draggable: during a presentation everyone should
+// be looking at the same thing in the same place, and a panel each viewer has
+// nudged somewhere different is just clutter. An earlier version made it
+// draggable; that was reversed deliberately, so don't reintroduce it without
+// the same decision being made again.
+//
+// The panel is a fixed 16:9 box with the video object-contain inside it. An
+// even earlier version set width from the viewport (82vw) but capped height
 // independently, so box and content disagreed on aspect ratio: the video
 // letterboxed correctly while the box around it stayed enormously wide.
 function ScreenSharePanel({ name, stream, isLocal }: { name: string; stream: MediaStream; isLocal: boolean }) {
-  const boxRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  // null = "wherever CSS centres it". Only once dragged does it become real
-  // coordinates, so the panel doesn't need to measure anything to appear.
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  const grab = useRef<{ dx: number; dy: number } | null>(null);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -135,41 +141,6 @@ function ScreenSharePanel({ name, stream, isLocal }: { name: string; stream: Med
     video.play().catch(() => {});
     return () => { video.srcObject = null; };
   }, [stream]);
-
-  const frame = () => {
-    const el = boxRef.current;
-    const parent = el?.offsetParent as HTMLElement | null;
-    return el && parent ? { el, rect: el.getBoundingClientRect(), parent: parent.getBoundingClientRect() } : null;
-  };
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    const f = frame();
-    if (!f) return;
-    // Convert the CSS-centred position into concrete coordinates on the first
-    // grab, so the drag starts exactly where the panel already appears rather
-    // than jumping.
-    setPos({ x: f.rect.left - f.parent.left, y: f.rect.top - f.parent.top });
-    grab.current = { dx: e.clientX - f.rect.left, dy: e.clientY - f.rect.top };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    const g = grab.current;
-    const f = frame();
-    if (!g || !f) return;
-    const w = f.el.offsetWidth;
-    // Always leave a graspable strip on screen — a panel dragged fully out of
-    // view could never be dragged back.
-    const KEEP = 140;
-    const x = Math.max(KEEP - w, Math.min(e.clientX - f.parent.left - g.dx, f.parent.width - KEEP));
-    const y = Math.max(0, Math.min(e.clientY - f.parent.top - g.dy, f.parent.height - 36));
-    setPos({ x, y });
-  };
-
-  const endDrag = (e: React.PointerEvent) => {
-    grab.current = null;
-    e.currentTarget.releasePointerCapture?.(e.pointerId);
-  };
 
   const togglePip = () => {
     const video = videoRef.current;
@@ -180,19 +151,15 @@ function ScreenSharePanel({ name, stream, isLocal }: { name: string; stream: Med
 
   return (
     <div
-      ref={boxRef}
-      className="absolute z-30 pointer-events-auto w-[640px] max-w-[calc(100vw-2rem)] rounded-lg overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in"
-      style={pos ? { left: pos.x, top: pos.y } : { left: '50%', top: '45%', transform: 'translate(-50%, -50%)' }}
+      // Pinned top-centre. The 9rem cap is not arbitrary: the camera column
+      // is a 6rem-wide rail at right-4, so anything wider would slide under
+      // the participant tiles on a narrow window — the exact "participants
+      // covering the screen" this layout exists to prevent. top-16 clears the
+      // HUD strip along the top edge.
+      className="absolute z-30 top-16 left-1/2 -translate-x-1/2 pointer-events-auto w-[min(640px,calc(100vw-9rem))] rounded-lg overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in"
     >
-      {/* Drag by the title bar only — grabbing the whole panel would make the
-          PIP button and any future control impossible to click. */}
-      <div
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        className="flex items-center gap-1.5 px-2 py-1 bg-purple-50 dark:bg-gray-700 cursor-move select-none touch-none"
-      >
+      {/* A label, not a handle — the panel does not move. */}
+      <div className="flex items-center gap-1.5 px-2 py-1 bg-purple-50 dark:bg-gray-700 select-none">
         <DisplayFill size={10} className="text-purple-600 dark:text-purple-300 shrink-0" />
         <span className="text-[11px] text-gray-700 dark:text-gray-200 truncate flex-1">{name}</span>
         <button onClick={togglePip} title="Picture-in-picture" className="shrink-0 text-gray-500 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer">
@@ -273,7 +240,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   const cameraTiles = (
     <>
       {localStream && (
-        <VideoTile name="You" stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} avatar={localPlayer} />
+        <VideoTile name="You" stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} />
       )}
       {videoTiles.map((tile) => (
         <VideoTile
@@ -281,7 +248,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           name={tile.name}
           stream={tile.stream}
           isLocal={false}
-          avatar={playerRecords[tile.id]}
+
           translucent={tile.translucent}
           onVolumeChange={(v) => onManualVolumeChange(tile.id, v)}
           isBeingRecorded={tile.isBeingRecorded}
@@ -337,12 +304,12 @@ export function VideoTile({
   handRaised,
   reaction,
   large,
-  avatar,
+
 }: {
   name: string;
   stream: MediaStream;
   isLocal: boolean;
-  avatar?: Avatar;
+
   micMuted?: boolean;
   cameraOff?: boolean;
   isScreen?: boolean;
@@ -432,7 +399,7 @@ export function VideoTile({
           a black rectangle tells you nothing, the avatar tells you who. */}
       {showAvatar && (
         <div className={`absolute top-0 left-0 right-0 ${large ? 'aspect-video' : 'h-16'}`}>
-          <AvatarPlaceholder avatar={avatar} name={name} />
+          <InitialsAvatar name={name} large={large} />
         </div>
       )}
       {/* §6 — PIP, available on every tile (local or remote, camera or
