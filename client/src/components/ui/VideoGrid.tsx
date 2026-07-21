@@ -179,6 +179,11 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localHandRaised = localPlayer.handRaised;
+  // The same two pieces of state the map already uses to ring a speaking
+  // avatar (see GameCanvas) — the tile just renders them differently. No
+  // second source of truth for who is talking.
+  const speakingPlayers = useGameStore((s) => s.speakingPlayers);
+  const localSpeaking = useGameStore((s) => s.localSpeaking);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const emoteEvents = useGameStore((s) => s.emoteEvents);
   const videoTiles = getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams, recordedTargetUserId);
@@ -240,7 +245,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   const cameraTiles = (
     <>
       {localStream && (
-        <VideoTile name="You" stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} />
+        <VideoTile name="You" stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} speaking={localSpeaking && !micMuted} />
       )}
       {videoTiles.map((tile) => (
         <VideoTile
@@ -248,6 +253,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           name={tile.name}
           stream={tile.stream}
           isLocal={false}
+          speaking={speakingPlayers.has(tile.id)}
 
           translucent={tile.translucent}
           onVolumeChange={(v) => onManualVolumeChange(tile.id, v)}
@@ -304,7 +310,7 @@ export function VideoTile({
   handRaised,
   reaction,
   large,
-
+  speaking,
 }: {
   name: string;
   stream: MediaStream;
@@ -319,6 +325,7 @@ export function VideoTile({
   handRaised?: boolean;
   reaction?: { emoji: string; ts: number } | null;
   large?: boolean;
+  speaking?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [volume, setVolume] = useState(1);
@@ -368,7 +375,13 @@ export function VideoTile({
 
   return (
     <div
-      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border border-purple-200 shadow-lg transition-all duration-300 animate-fade-in group relative ${large ? 'w-full' : 'w-24'}`}
+      // Speaking ring: a coloured border plus a soft outer glow, in the same
+      // purple the rest of the HUD uses for "active". Drawn with ring/border
+      // colour rather than an extra element so it can't shift the tile's size
+      // and nudge its neighbours every time someone starts talking.
+      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border shadow-lg transition-all duration-300 animate-fade-in group relative ${large ? 'w-full' : 'w-24'} ${
+        speaking ? 'border-purple-500 ring-2 ring-purple-400/60 shadow-purple-400/40' : 'border-purple-200'
+      }`}
       style={{ opacity: translucent ? 0.5 : 1 }}
     >
       {/* Mirror the LOCAL self-preview only — raising your right hand should

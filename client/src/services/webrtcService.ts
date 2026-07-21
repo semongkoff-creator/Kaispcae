@@ -40,6 +40,11 @@ const ICE_SERVERS: RTCConfiguration = {
   ],
 };
 
+// Mean sample deviation above which someone counts as talking. Kept as one
+// constant so the local mic and remote peers can never disagree about what
+// "speaking" means.
+const SPEAKING_THRESHOLD = 15;
+
 // ── DIAGNOSTIC INSTRUMENTATION (temporary) ───────────────────────────────
 // Purely observational: added to locate where two-way audio breaks, after
 // two code-reading fixes failed to resolve it. Remove once the real cause is
@@ -78,6 +83,12 @@ interface PeerConnection {
   // audioGain stays wired up for the recording tap and keeps mirroring the
   // volume, so §7 recording is unaffected.
   audioEl: HTMLAudioElement | null;
+  // Read-only loudness tap for the speaking indicator — see ontrack. Never
+  // connected onward, so it can't affect what anyone hears.
+  analyser: AnalyserNode | null;
+  // Last emitted speaking state, so the callback only fires on a change
+  // rather than ten times a second.
+  speaking: boolean;
   videoStream: MediaStream | null;
   // §6 (RTC upgrade) — the peer's incoming SCREEN video, tracked separately
   // from videoStream (their camera) so both can render as distinct boxes at
@@ -431,6 +442,8 @@ class WebRTCService {
       pc,
       audioGain,
       audioEl: null,
+      analyser: null,
+      speaking: false,
       videoStream: null,
       remoteScreenStream: null,
       screenSender: null,
@@ -505,7 +518,22 @@ class WebRTCService {
         const audioCtx2 = this.audioContext;
         if (audioCtx2 && peer.audioGain) {
           try {
-            audioCtx2.createMediaStreamSource(inboundStream).connect(peer.audioGain);
+            const src = audioCtx2.createMediaStreamSource(inboundStream);
+            src.connect(peer.audioGain);
+            // Second branch off the SAME source, purely to measure loudness
+            // for the "is this person talking" ring on their tile. It is a
+            // leaf — nothing is connected onward from it — so it reads the
+            // signal without being part of any path that produces sound.
+            // Same shape as the local-mic analyser in finishLocalMediaSetup.
+            //
+            // Tapped BEFORE audioGain deliberately: gain carries the
+            // proximity falloff, so reading after it would make someone
+            // standing a few tiles away register as silent even while they
+            // are clearly speaking.
+            const analyser = audioCtx2.createAnalyser();
+            analyser.fftSize = 256;
+            src.connect(analyser);
+            peer.analyser = analyser;
           } catch { /* already connected for this peer */ }
         }
         return;
@@ -707,6 +735,14 @@ class WebRTCService {
         peer.audioEl.srcObject = null;
         peer.audioEl = null;
       }
+      // A peer who walks out of range mid-sentence would otherwise leave
+      // their tile glowing forever, since no further tick can clear it.
+      if (peer.speaking) {
+        peer.speaking = false;
+        this.onSpeakingChange?.(id, false);
+      }
+      peer.analyser?.disconnect();
+      peer.analyser = null;
       this.peers.delete(id);
       this.audioDestNodes.get(id)?.disconnect();
       this.audioDestNodes.delete(id);
@@ -787,25 +823,61 @@ class WebRTCService {
     });
   }
 
+  // Mean deviation from the 128 midpoint of an 8-bit waveform. Extracted so
+  // local and remote are judged by the exact same measure — two thresholds
+  // that drifted apart would make one person's ring behave differently from
+  // another's for no visible reason.
+  // Uint8Array<ArrayBuffer>, not plain Uint8Array: the default parameter is
+  // ArrayBufferLike, which includes SharedArrayBuffer, and
+  // getByteTimeDomainData refuses that.
+  private static loudness(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number {
+    analyser.getByteTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum += Math.abs(buf[i] - 128);
+    return sum / buf.length;
+  }
+
   private startSpeakingDetection() {
     if (!this.analyserNode) return;
     const data = new Uint8Array(this.analyserNode.frequencyBinCount);
     let localSpeaking = false;
+    // Rising edge fires immediately (the ring should appear the moment
+    // someone starts talking), but it takes several consecutive quiet ticks
+    // to drop again — otherwise the gap between two words switches it off
+    // and back on, which reads as flicker rather than speech.
+    const QUIET_TICKS_TO_STOP = 4; // ~400ms at the 100ms interval below
+    const quiet = new Map<string, number>();
 
     this.analyserInterval = setInterval(() => {
-      if (!this.analyserNode) return;
-      this.analyserNode.getByteTimeDomainData(data);
-
-      let sum = 0;
-      for (let i = 0; i < data.length; i++) {
-        sum += Math.abs(data[i] - 128);
+      if (this.analyserNode) {
+        const speaking = WebRTCService.loudness(this.analyserNode, data) > SPEAKING_THRESHOLD;
+        if (speaking !== localSpeaking) {
+          localSpeaking = speaking;
+          this.onSpeakingChange?.('local', speaking);
+        }
       }
-      const avg = sum / data.length;
-      const speaking = avg > 15;
 
-      if (speaking !== localSpeaking) {
-        localSpeaking = speaking;
-        this.onSpeakingChange?.('local', speaking);
+      // Same measurement for every connected peer. Reads only — see the
+      // analyser's doc comment on PeerConnection.
+      for (const [id, peer] of this.peers) {
+        if (!peer.analyser) continue;
+        const buf = new Uint8Array(peer.analyser.frequencyBinCount);
+        const loud = WebRTCService.loudness(peer.analyser, buf) > SPEAKING_THRESHOLD;
+
+        if (loud) {
+          quiet.set(id, 0);
+          if (!peer.speaking) {
+            peer.speaking = true;
+            this.onSpeakingChange?.(id, true);
+          }
+        } else if (peer.speaking) {
+          const n = (quiet.get(id) ?? 0) + 1;
+          quiet.set(id, n);
+          if (n >= QUIET_TICKS_TO_STOP) {
+            peer.speaking = false;
+            this.onSpeakingChange?.(id, false);
+          }
+        }
       }
     }, 100);
   }
