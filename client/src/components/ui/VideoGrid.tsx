@@ -472,8 +472,22 @@ export function VideoTile({
           Not shown for screen-share tiles or my own tiles — screen share
           carries no audio track here, and muting yourself already has the
           mic button. */}
+      {/* Revealed on hover once it's at full volume, but kept visible the
+          moment it isn't: a turned-down or silenced person whose slider is
+          hidden looks identical to a normal one, so you'd have no way to tell
+          why they've gone quiet — and no reason to suspect you did it.
+          //
+          Faded rather than unmounted/collapsed. These tiles stack in a
+          vertical column, so removing the row would shorten the tile and jerk
+          every tile below it upward on hover — chasing a target that moves
+          because you pointed at it. Reserving the space costs a thin strip
+          and keeps the column still. */}
       {!isLocal && !isScreen && onVolumeChange && (
-        <div className={`flex items-center gap-1 ${large ? 'px-2 pb-1.5 gap-1.5' : 'px-1 pb-1'}`}>
+        <div
+          className={`flex items-center gap-1 transition-opacity duration-200 ${large ? 'px-2 pb-1.5 gap-1.5' : 'px-1 pb-1'} ${
+            volume < 1 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          }`}
+        >
           {volume === 0 ? <VolumeMuteFill size={large ? 10 : 8} className="text-gray-400 shrink-0" /> : <VolumeUpFill size={large ? 10 : 8} className="text-gray-400 shrink-0" />}
           <input
             type="range"
