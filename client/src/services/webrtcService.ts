@@ -1,13 +1,83 @@
 import { Socket } from 'socket.io-client';
 import { SocketEvents } from '@virtualmeet/shared';
 
+// STUN alone only tells a peer its public address — it can't help when the
+// network refuses direct peer-to-peer traffic at all, which is the norm on
+// office/campus WiFi and symmetric-NAT mobile networks. That's the case where
+// someone's camera silently never appears while everything else works. A TURN
+// server relays the media instead, at the cost of bandwidth.
+//
+// Credentials come from the environment and are NEVER committed: Vite inlines
+// VITE_* into the client bundle, so anyone can read them in DevTools — that's
+// inherent to browser-side TURN, not something this code can prevent. Keeping
+// them in env still matters, because it means they can be rotated or revoked
+// without touching source. A server-issued short-lived credential is the real
+// fix if this ever needs to be locked down.
+//
+// STUN stays FIRST and TURN is only listed alongside it: ICE already prefers
+// a direct path and falls back to relay only when direct fails, so normal
+// connections cost no relay bandwidth. With the env unset this degrades
+// cleanly to exactly the previous STUN-only behaviour.
+const TURN_URL = import.meta.env.VITE_TURN_URL as string | undefined;
+const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME as string | undefined;
+const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL as string | undefined;
+
 const ICE_SERVERS: RTCConfiguration = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    // All three are required — a TURN entry missing username/credential is
+    // rejected by the browser and would take the whole ICE config down with it.
+    ...(TURN_URL && TURN_USERNAME && TURN_CREDENTIAL
+      ? [{
+          // Comma-separated env allows listing several transports at once
+          // (Open Relay publishes :443 over both UDP and TCP/TLS — the TCP one
+          // is what gets through firewalls that drop UDP entirely).
+          urls: TURN_URL.split(',').map((u) => u.trim()).filter(Boolean),
+          username: TURN_USERNAME,
+          credential: TURN_CREDENTIAL,
+        }]
+      : []),
+  ],
 };
+
+// ── DIAGNOSTIC INSTRUMENTATION (temporary) ───────────────────────────────
+// Purely observational: added to locate where two-way audio breaks, after
+// two code-reading fixes failed to resolve it. Remove once the real cause is
+// found and fixed — it must not become permanent noise in the console.
+function diag(event: string, data?: unknown): void {
+  if (data === undefined) console.log(`[webrtc-diag] ${event}`);
+  else console.log(`[webrtc-diag] ${event}`, data);
+}
+
+// Whether an SDP actually carries an audio m-line, and which direction it
+// declares. "sendrecv"/"sendonly" on both sides is what two-way audio needs;
+// "recvonly" or a missing m=audio means this side is not sending at all.
+function sdpAudioInfo(sdp: string | undefined): { hasAudio: boolean; direction: string } {
+  if (!sdp) return { hasAudio: false, direction: 'no-sdp' };
+  const idx = sdp.indexOf('m=audio');
+  if (idx === -1) return { hasAudio: false, direction: 'none' };
+  const section = sdp.slice(idx, sdp.indexOf('m=', idx + 1) === -1 ? undefined : sdp.indexOf('m=', idx + 1));
+  const dir = ['sendrecv', 'sendonly', 'recvonly', 'inactive'].find((d) => section.includes(`a=${d}`));
+  return { hasAudio: true, direction: dir ?? 'unspecified' };
+}
 
 interface PeerConnection {
   pc: RTCPeerConnection;
   audioGain: GainNode;
+  // The peer's voice is played through a real <audio> element, NOT through
+  // the Web Audio graph. Two independent reasons, both fatal on their own:
+  //
+  //  1. An AudioContext built outside a user gesture starts "suspended" and
+  //     stays silent forever — the exact trap soundEffects.ts documents and
+  //     already works around for in-game SFX. Voice was still walking into it.
+  //  2. Chrome does not pull audio out of a REMOTE MediaStream through
+  //     createMediaStreamSource unless that stream is also attached to a
+  //     media element. A peer who is audio-only (their camera failed) gets no
+  //     video tile at all, so nothing else was ever holding their stream.
+  //
+  // audioGain stays wired up for the recording tap and keeps mirroring the
+  // volume, so §7 recording is unaffected.
+  audioEl: HTMLAudioElement | null;
   videoStream: MediaStream | null;
   // §6 (RTC upgrade) — the peer's incoming SCREEN video, tracked separately
   // from videoStream (their camera) so both can render as distinct boxes at
@@ -57,6 +127,12 @@ class WebRTCService {
     this.setupSignaling(socket);
   }
 
+  // Lets callers detect that the socket they hold is no longer the one
+  // signalling runs on — see the rebind effect in useWebRTC.
+  getBoundSocket(): Socket | null {
+    return this.socket;
+  }
+
   setOnRemoteStream(cb: (id: string, stream: MediaStream) => void) {
     this.onRemoteStream = cb;
   }
@@ -90,6 +166,7 @@ class WebRTCService {
         video: { width: 320, height: 240, frameRate: 15 },
       });
       this.finishLocalMediaSetup();
+      this.syncTracksToPeers();
       return { success: true };
     } catch (err: unknown) {
       // Video-specific failures (camera already open in another app/tab,
@@ -101,6 +178,7 @@ class WebRTCService {
         try {
           this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
           this.finishLocalMediaSetup();
+          this.syncTracksToPeers();
           return { success: true, error: 'Camera unavailable (already in use elsewhere?) — joined with audio only' };
         } catch (audioErr: unknown) {
           console.warn('[webrtc] audio-only fallback also failed:', audioErr);
@@ -119,6 +197,14 @@ class WebRTCService {
 
   private finishLocalMediaSetup(): void {
     const stream = this.localStream!;
+    // [webrtc-diag] §1 — what getUserMedia actually handed back. A track that
+    // is missing, already 'ended', or permanently disabled explains silence
+    // before any peer connection is even involved.
+    diag('local media', {
+      audioTracks: stream.getAudioTracks().length,
+      videoTracks: stream.getVideoTracks().length,
+      audio: stream.getAudioTracks().map((t) => ({ enabled: t.enabled, readyState: t.readyState, muted: t.muted, label: t.label })),
+    });
     // Mic/camera should start OFF on join — getUserMedia grants the tracks
     // enabled by default, which would otherwise broadcast audio/video the
     // instant someone enters a room, before they've chosen to turn
@@ -126,13 +212,61 @@ class WebRTCService {
     stream.getAudioTracks().forEach((t) => { t.enabled = false; });
     stream.getVideoTracks().forEach((t) => { t.enabled = false; });
 
-    this.audioContext = new AudioContext();
+    // Reused across re-acquires, never recreated: every already-connected
+    // peer's audioGain node belongs to THIS context, and nodes from two
+    // different AudioContexts can't be wired together — building a fresh one
+    // on a camera retry would orphan every existing peer's audio graph.
+    if (!this.audioContext) this.audioContext = new AudioContext();
     const source = this.audioContext.createMediaStreamSource(stream);
+    // Same reason the context is reused: the old analyser was fed by the now
+    // stopped stream, so re-point the speaking detector at the new one.
     this.analyserNode = this.audioContext.createAnalyser();
     this.analyserNode.fftSize = 256;
     source.connect(this.analyserNode);
 
+    if (this.analyserInterval) clearInterval(this.analyserInterval);
     this.startSpeakingDetection();
+  }
+
+  // Re-acquiring media (the camera-retry path) builds a BRAND-NEW MediaStream
+  // and stops every track of the old one — including the audio track that
+  // existing RTCPeerConnections are still sending. Without this, clicking
+  // "Camera" after the audio-only fallback left every peer receiving a dead
+  // audio track and no video at all, permanently, until a page reload: the
+  // one action a user takes to fix their camera was silently cutting their
+  // voice to everyone nearby.
+  //
+  // replaceTrack() swaps the outgoing track in place with no renegotiation,
+  // so the common case (audio sender already exists) is instant. Only a
+  // genuinely new camera track needs addTrack, which fires
+  // onnegotiationneeded and renegotiates — the same path screen sharing
+  // already uses.
+  private syncTracksToPeers(): void {
+    const stream = this.localStream;
+    if (!stream) return;
+    const audioTrack = stream.getAudioTracks()[0] ?? null;
+    const videoTrack = stream.getVideoTracks()[0] ?? null;
+
+    for (const [remoteId, peer] of this.peers) {
+      const senders = peer.pc.getSenders();
+      const audioSender = senders.find((s) => s.track?.kind === 'audio');
+      // Exclude the screen-share sender — that one carries the display
+      // capture, not the camera, and must not be overwritten by it.
+      const videoSender = senders.find((s) => s.track?.kind === 'video' && s !== peer.screenSender);
+
+      try {
+        if (audioTrack) {
+          if (audioSender) audioSender.replaceTrack(audioTrack).catch(() => {});
+          else peer.pc.addTrack(audioTrack, stream);
+        }
+        if (videoTrack) {
+          if (videoSender) videoSender.replaceTrack(videoTrack).catch(() => {});
+          else peer.pc.addTrack(videoTrack, stream);
+        }
+      } catch (err) {
+        console.error('[webrtc] failed to sync tracks to', remoteId, err);
+      }
+    }
   }
 
   getLocalStream(): MediaStream | null {
@@ -144,7 +278,98 @@ class WebRTCService {
   }
 
   private applyGain(peer: PeerConnection) {
-    peer.audioGain.gain.value = Math.max(0, Math.min(1, peer.proximityGain * peer.manualVolume));
+    const volume = Math.max(0, Math.min(1, peer.proximityGain * peer.manualVolume));
+    // The element is what the user actually hears, so proximity falloff has
+    // to land here — the gain node alone only affects the recording tap.
+    if (peer.audioEl) peer.audioEl.volume = volume;
+    // A peer created before the AudioContext existed (offer arrived ahead of
+    // local media) has no gain node — proximity ticks must not throw on it.
+    if (!peer.audioGain) return;
+    peer.audioGain.gain.value = volume;
+  }
+
+  // Browsers refuse both AudioContext.resume() and <audio>.play() until the
+  // page has seen a real user gesture, and a peer can easily connect before
+  // that ever happens. Called from the mic/camera buttons — themselves
+  // gestures — to un-stick anything that was blocked earlier.
+  resumeAudio(): void {
+    diag('resumeAudio (user gesture)', { ctxBefore: this.audioContext?.state, peers: this.peers.size });
+    if (this.audioContext?.state === 'suspended') this.audioContext.resume().catch(() => {});
+    for (const peer of this.peers.values()) {
+      peer.audioEl?.play()
+        .then(() => diag('resume play() OK', { volume: peer.audioEl?.volume }))
+        .catch((err) => diag('resume play() BLOCKED', { name: err?.name }));
+    }
+  }
+
+  // [webrtc-diag] Names the winning candidate pair in plain terms, so "is TURN
+  // being used?" is answerable from one log line instead of inference.
+  private async reportSelectedPath(remoteId: string, pc: RTCPeerConnection): Promise<void> {
+    try {
+      const stats = await pc.getStats();
+      let pairLocal: string | undefined;
+      let pairRemote: string | undefined;
+      const types: Record<string, string> = {};
+      stats.forEach((r: Record<string, unknown>) => {
+        if (r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated) {
+          pairLocal = r.localCandidateId as string;
+          pairRemote = r.remoteCandidateId as string;
+        }
+        if (r.type === 'local-candidate' || r.type === 'remote-candidate') {
+          types[r.id as string] = r.candidateType as string;
+        }
+      });
+      const local = pairLocal ? types[pairLocal] : undefined;
+      const remote = pairRemote ? types[pairRemote] : undefined;
+      const viaTurn = local === 'relay' || remote === 'relay';
+      diag(viaTurn ? 'PATH via TURN (relay)' : 'PATH direct (no TURN needed)', {
+        peer: remoteId, localType: local, remoteType: remote,
+      });
+    } catch (err) {
+      diag('path check failed', { peer: remoteId, err: String(err) });
+    }
+  }
+
+  // [webrtc-diag] The decisive measurement, and the reason this whole pass
+  // exists: whether audio BYTES are actually crossing the wire.
+  //   bytesReceived climbing  → transport is fine, the fault is playback.
+  //   bytesReceived stuck at 0 → nothing is arriving; transport (ICE/TURN) or
+  //                              the sending side is at fault.
+  // Guessing between those two without measuring is exactly what went wrong
+  // in the previous two attempts.
+  async reportStats(): Promise<void> {
+    if (!this.peers.size) { diag('stats: no peers connected'); return; }
+    for (const [id, peer] of this.peers) {
+      const out: Record<string, unknown> = {
+        ice: peer.pc.iceConnectionState,
+        conn: peer.pc.connectionState,
+        elVolume: peer.audioEl?.volume,
+        elPaused: peer.audioEl?.paused,
+        ctx: this.audioContext?.state,
+      };
+      try {
+        const stats = await peer.pc.getStats();
+        stats.forEach((r: Record<string, unknown>) => {
+          if (r.type === 'inbound-rtp' && r.kind === 'audio') {
+            out.audioIn_bytes = r.bytesReceived;
+            out.audioIn_packets = r.packetsReceived;
+          }
+          if (r.type === 'outbound-rtp' && r.kind === 'audio') {
+            out.audioOut_bytes = r.bytesSent;
+            out.audioOut_packets = r.packetsSent;
+          }
+          if (r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated) {
+            out.pathLocal = r.localCandidateId;
+            out.pathRemote = r.remoteCandidateId;
+          }
+          if (r.type === 'local-candidate' && r.id === out.pathLocal) out.localType = r.candidateType;
+          if (r.type === 'remote-candidate' && r.id === out.pathRemote) out.remoteType = r.candidateType;
+        });
+      } catch (err) {
+        out.statsError = String(err);
+      }
+      diag(`stats [peer ${id}]`, out);
+    }
   }
 
   // Proximity-driven — called on every proximity tick (see useWebRTC.ts).
@@ -195,12 +420,17 @@ class WebRTCService {
 
   private createPeer(remoteId: string): PeerConnection {
     const pc = new RTCPeerConnection(ICE_SERVERS);
+    // A peer can now be created before local media exists (see handleOffer),
+    // so the context can't be assumed — without one, this peer would have no
+    // gain node and their incoming audio would never reach the speakers.
+    if (!this.audioContext) this.audioContext = new AudioContext();
     const audioCtx = this.audioContext;
     const audioGain = audioCtx ? audioCtx.createGain() : (null as unknown as GainNode);
 
     const peer: PeerConnection = {
       pc,
       audioGain,
+      audioEl: null,
       videoStream: null,
       remoteScreenStream: null,
       screenSender: null,
@@ -236,13 +466,47 @@ class WebRTCService {
     };
 
     pc.ontrack = (event) => {
-      if (!event.streams[0]) return;
+      // Fall back to wrapping the bare track: a sender that never associated
+      // a MediaStream (or a track added by a later renegotiation) arrives
+      // with an empty event.streams, and dropping it here silently lost the
+      // peer's voice or picture entirely.
+      const inboundStream = event.streams[0] ?? new MediaStream([event.track]);
+
+      // [webrtc-diag] §3 — proof a remote track arrived at all, and in what
+      // condition. 'muted: true' here is normal for a moment right after
+      // arrival; still muted seconds later means no media is flowing.
+      diag('ontrack', {
+        from: remoteId, kind: event.track.kind,
+        readyState: event.track.readyState, muted: event.track.muted,
+        enabled: event.track.enabled, hadStream: !!event.streams[0],
+      });
 
       if (event.track.kind === 'audio') {
+        // Real element = actual playback (see audioEl's doc comment).
+        const el = peer.audioEl ?? document.createElement('audio');
+        el.srcObject = inboundStream;
+        el.autoplay = true;
+        // Never route the peer's voice back into the mic that is capturing
+        // this machine's own speakers.
+        (el as HTMLAudioElement & { playsInline?: boolean }).playsInline = true;
+        peer.audioEl = el;
+        this.applyGain(peer);
+        // Rejects only when no gesture has happened yet; resumeAudio() below
+        // retries on the next click, exactly as soundEffects.ts does.
+        // [webrtc-diag] §5 — a rejection here IS the autoplay policy blocking
+        // playback, which is otherwise completely invisible.
+        el.play()
+          .then(() => diag('audio play() OK', { from: remoteId, volume: el.volume, muted: el.muted, ctx: this.audioContext?.state }))
+          .catch((err) => diag('audio play() BLOCKED', { from: remoteId, name: err?.name, message: err?.message }));
+
+        // Kept purely so getRecordingStream()'s tap still has a live source.
+        // Deliberately NOT connected to audioCtx.destination — that would
+        // play the same voice a second time on top of the element.
         const audioCtx2 = this.audioContext;
         if (audioCtx2 && peer.audioGain) {
-          const audioSource = audioCtx2.createMediaStreamSource(event.streams[0]);
-          audioSource.connect(peer.audioGain).connect(audioCtx2.destination);
+          try {
+            audioCtx2.createMediaStreamSource(inboundStream).connect(peer.audioGain);
+          } catch { /* already connected for this peer */ }
         }
         return;
       }
@@ -290,6 +554,17 @@ class WebRTCService {
     };
 
     pc.oniceconnectionstatechange = () => {
+      // [webrtc-diag] §4 — the single most decisive signal. Never reaching
+      // 'connected'/'completed' means no media path exists at all, which is a
+      // TURN problem, not an audio-code problem.
+      diag('ICE state', { peer: remoteId, ice: pc.iceConnectionState, conn: pc.connectionState });
+      // The only honest proof that TURN is doing anything: which candidate
+      // pair actually won. 'relay' on either end means media is going through
+      // the TURN server; 'host'/'srflx' means it connected directly and TURN
+      // was never needed (so a successful call proves nothing about TURN).
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        void this.reportSelectedPath(remoteId, pc);
+      }
       if (pc.iceConnectionState === 'failed' && peer.retryCount < 1) {
         peer.retryCount++;
         console.log('[webrtc] retrying connection to', remoteId);
@@ -301,10 +576,15 @@ class WebRTCService {
     return peer;
   }
 
-  connectToPlayer(remoteId: string) {
-    if (this.peers.has(remoteId)) return;
-    if (!this.socket?.connected) return;
-    if (!this.localStream) return;
+  // Returns false when the connection could NOT be started — the caller must
+  // then leave this peer un-marked so a later proximity tick retries. Marking
+  // it connected regardless meant that anyone whose media was still being
+  // acquired when a neighbour first came into range was never connected to
+  // for the rest of the session: no audio, no video, no error, no retry.
+  connectToPlayer(remoteId: string): boolean {
+    if (this.peers.has(remoteId)) return true;
+    if (!this.socket?.connected) return false;
+    if (!this.localStream) return false;
 
     console.log('[webrtc] connecting to', remoteId);
     const peer = this.createPeer(remoteId);
@@ -318,6 +598,13 @@ class WebRTCService {
       peer.pc.createOffer()
         .then((offer) => peer.pc.setLocalDescription(offer))
         .then(() => {
+          // [webrtc-diag] §2 — does the offer we send actually contain audio,
+          // and do we declare ourselves as sending it?
+          diag('OFFER sent', {
+            from: localId, to: remoteId,
+            ...sdpAudioInfo(peer.pc.localDescription?.sdp),
+            senders: peer.pc.getSenders().map((s) => s.track?.kind ?? 'null-track'),
+          });
           this.socket?.emit(SocketEvents.RTC_OFFER, {
             fromId: localId,
             toId: remoteId,
@@ -327,10 +614,17 @@ class WebRTCService {
         })
         .catch((err) => console.error('[webrtc] offer error:', err));
     }
+    return true;
   }
 
   handleOffer(fromId: string, sdp: RTCSessionDescriptionInit) {
-    if (!this.localStream) return;
+    // Deliberately NOT gated on localStream being ready. Dropping the offer
+    // here was silent and final — the offering side sits waiting for an
+    // answer that never comes, with no retry, so whoever's mic/camera
+    // permission was still pending when a neighbour walked up stayed
+    // permanently mute and invisible to them. Answer now with whatever
+    // tracks exist (possibly none); syncTracksToPeers() attaches them the
+    // moment media is acquired.
     console.log('[webrtc] received offer from', fromId);
 
     // If PC already exists (from connectToPlayer, or an earlier
@@ -355,6 +649,15 @@ class WebRTCService {
       })
       .then((answer) => pc.setLocalDescription(answer))
       .then(() => {
+        // [webrtc-diag] §2 — the mirror of the offer log: an offer that
+        // carried audio but an answer that does not (or says recvonly)
+        // pinpoints which side stopped sending.
+        diag('ANSWER sent', {
+          from: this.socket?.id, to: fromId,
+          offerHad: sdpAudioInfo(sdp.sdp),
+          answerHas: sdpAudioInfo(pc.localDescription?.sdp),
+          senders: pc.getSenders().map((s) => s.track?.kind ?? 'null-track'),
+        });
         this.socket?.emit(SocketEvents.RTC_ANSWER, {
           fromId: this.socket!.id,
           toId: fromId,
@@ -396,6 +699,14 @@ class WebRTCService {
     const peer = this.peers.get(id);
     if (peer) {
       peer.pc.close();
+      // Detach before dropping the reference — an <audio> still holding a
+      // srcObject keeps the stream (and its decoder) alive after the peer
+      // is gone.
+      if (peer.audioEl) {
+        peer.audioEl.pause();
+        peer.audioEl.srcObject = null;
+        peer.audioEl = null;
+      }
       this.peers.delete(id);
       this.audioDestNodes.get(id)?.disconnect();
       this.audioDestNodes.delete(id);
@@ -501,3 +812,15 @@ class WebRTCService {
 }
 
 export const webrtcService = new WebRTCService();
+
+// [webrtc-diag] Auto-report every 5s so the log captures the whole session
+// without anyone having to remember to run anything, plus a manual hook
+// (`webrtcDiag()` in the console) for checking a specific moment — e.g.
+// right while the other person is speaking.
+if (typeof window !== 'undefined') {
+  // Printed once at load so "did my .env.local actually get picked up?" is
+  // answerable without guessing — the URL is shown, the credential never is.
+  console.log('[webrtc-diag] TURN configured:', !!(TURN_URL && TURN_USERNAME && TURN_CREDENTIAL), TURN_URL ? `(${TURN_URL})` : '(STUN only)');
+  (window as unknown as { webrtcDiag: () => void }).webrtcDiag = () => { void webrtcService.reportStats(); };
+  setInterval(() => { void webrtcService.reportStats(); }, 5000);
+}

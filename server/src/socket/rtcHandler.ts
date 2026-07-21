@@ -55,7 +55,22 @@ export function registerRtcHandlers(io: Server, socket: Socket) {
   function relay(event: string, signal: RtcSignal) {
     const myRoom = getSocketRoom(socket);
     const targetSocket = io.sockets.sockets.get(signal.toId);
-    if (!myRoom || !targetSocket || !targetSocket.rooms.has(myRoom)) return;
+    const ok = !!myRoom && !!targetSocket && targetSocket.rooms.has(myRoom);
+    // [webrtc-diag] TEMPORARY — this relay drops signals silently, so a
+    // mismatch here is invisible from the client: offers simply never
+    // arrive, no error anywhere. Logging both sides' room sets makes a drop
+    // (and WHY) readable straight from the server log. Remove once the
+    // two-way audio cause is confirmed and fixed.
+    console.log('[webrtc-diag]', ok ? 'relay OK' : 'relay DROPPED', {
+      event: event.replace('rtc:', ''),
+      from: socket.id,
+      to: signal.toId,
+      myRoom,
+      myRooms: Array.from(socket.rooms).filter((r) => r !== socket.id),
+      targetFound: !!targetSocket,
+      targetRooms: targetSocket ? Array.from(targetSocket.rooms).filter((r) => r !== targetSocket.id) : null,
+    });
+    if (!ok) return;
     io.to(signal.toId).emit(event, { ...signal, fromId: socket.id });
   }
 

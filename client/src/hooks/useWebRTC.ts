@@ -56,16 +56,42 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     setMediaError(streamRef.current ? (result.error ?? null) : (result.error || 'Camera/microphone unavailable'));
   }, []);
 
+  // Deliberately has NO dependency array: it must re-check after every render.
+  //
+  // useSocket builds a BRAND-NEW socket whenever roomSlug/auth changes (see
+  // its effect deps) — which is exactly what happens when you enter a room
+  // from the lobby. socketRef is a ref, so that swap fires no effect at all.
+  // Binding once on mount therefore left webrtcService signalling over the
+  // lobby's dead socket for the entire session: every offer, answer and ICE
+  // candidate went out on the new socket while the listeners sat on the old
+  // one, so no peer connection ever completed — no camera, no audio, and no
+  // error anywhere to explain it. Whether it worked came down to whether you
+  // happened to reload while already inside the room (first socket is the
+  // right one) or walked in from the lobby (it isn't), which is why it looked
+  // like it worked for one person and not the other.
+  //
+  // The identity guard keeps this to a cheap comparison on the vast majority
+  // of renders; setSocket only re-runs when the socket genuinely changed.
   useEffect(() => {
     const socket = socketRef.current;
-    if (socket) {
-      webrtcService.setSocket(socket);
-      webrtcService.setOnRemoteStream((id, stream) => {
-        onRemoteStream?.(id, stream);
-      });
-      webrtcService.setOnScreenShareEnded(() => setIsScreenSharing(false));
+    if (!socket || webrtcService.getBoundSocket() === socket) return;
+
+    // Peers negotiated over the previous socket can never recover — their
+    // signalling path is gone. Tear them down and let the next proximity
+    // tick rebuild against the live socket.
+    webrtcService.disconnectAll();
+    connectedRef.current.clear();
+
+    webrtcService.setSocket(socket);
+    // Only override the app's own handler when a caller actually supplied
+    // one — registering an unconditional wrapper here would clobber the real
+    // handler App.tsx installs (there is a single callback slot, last
+    // registration wins).
+    if (onRemoteStream) {
+      webrtcService.setOnRemoteStream((id, stream) => onRemoteStream(id, stream));
     }
-  }, [onRemoteStream]);
+    webrtcService.setOnScreenShareEnded(() => setIsScreenSharing(false));
+  });
 
   // §6 — connect for both 'full_visible' and 'translucent' (still shown,
   // just dimmed); only 'not_visible' disconnects. Disconnect is debounced
@@ -85,8 +111,17 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
         }
 
         if (!connectedIds.has(p.id)) {
-          webrtcService.connectToPlayer(p.id);
-          connectedIds.add(p.id);
+          // Only mark them connected if the attempt actually started — when
+          // local media isn't ready yet connectToPlayer is a no-op, and
+          // marking them anyway meant this branch never ran again for that
+          // player, stranding them silent for the rest of the session.
+          // Leaving them unmarked lets the next proximity tick retry.
+          // [webrtc-diag] Proximity fired for this player — did a connection
+          // attempt actually start, or was it refused (no local media / no
+          // socket)? A refusal here means nothing downstream ever runs.
+          const started = webrtcService.connectToPlayer(p.id);
+          console.log('[webrtc-diag] proximity connect', { peer: p.id, started, visibility: p.visibility });
+          if (started) connectedIds.add(p.id);
         }
 
         // Zone-mates always get full volume; otherwise fall off with distance.
@@ -109,6 +144,9 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   }, []);
 
   const toggleMic = useCallback(async () => {
+    // This click is a user gesture — the one thing the browser was waiting
+    // for before it would let any peer audio actually play.
+    webrtcService.resumeAudio();
     let track = streamRef.current?.getAudioTracks()[0];
     // No track yet — either initMedia hasn't run, or it failed (e.g. the
     // browser's permission prompt on mount got missed/dismissed before the
@@ -129,6 +167,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   }, [initMedia]);
 
   const toggleCamera = useCallback(async () => {
+    webrtcService.resumeAudio();
     let track = streamRef.current?.getVideoTracks()[0];
     if (!track) {
       // If mic was already unmuted on the previous (audio-only fallback)

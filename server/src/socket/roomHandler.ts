@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone } from './zoneLock';
 import { zoneIdOfSocket } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -741,8 +741,23 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       return;
     }
 
-    updatePlayerPosition(room, socket.id, stillRequester.x, stillRequester.y, stillRequester.direction);
-    io.to(room).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: stillRequester.x, y: stillRequester.y, direction: stillRequester.direction });
+    // Land BESIDE the requester, not on top of them. Teleporting to their
+    // exact x/y stacked both avatars on one tile — the summoned player was
+    // there, but hidden underneath, so someone had to walk a step before it
+    // looked like anything had happened at all. Same helper (and the same
+    // "no tiles cached → assume the tile below" fallback) the My Seat
+    // landing already uses, so both land the same way.
+    const tiles = getCachedTiles(room);
+    const tileX = Math.floor(stillRequester.x / TILE_SIZE);
+    const tileY = Math.floor(stillRequester.y / TILE_SIZE);
+    const spot = tiles && tiles.length > 0
+      ? findAdjacentFreeTile(tiles, tileX, tileY)
+      : { x: tileX, y: tileY + 1 };
+    const landX = spot.x * TILE_SIZE + TILE_SIZE / 2;
+    const landY = spot.y * TILE_SIZE + TILE_SIZE / 2;
+
+    updatePlayerPosition(room, socket.id, landX, landY, stillRequester.direction);
+    io.to(room).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: landX, y: landY, direction: stillRequester.direction });
     io.to(pending.fromSocketId).emit(SocketEvents.SUMMON_RESULT, { targetName, accepted: true });
   });
 
