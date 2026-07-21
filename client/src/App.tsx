@@ -643,6 +643,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // Chat + emotes + minimap state
   const notice = useGameStore((s) => s.notice);
   const followInfo = useGameStore((s) => s.followInfo);
+  const followerUserIds = useGameStore((s) => s.followerUserIds);
   const [showEmoteWheel, setShowEmoteWheel] = useState(false);
   const [showMinimap, setShowMinimap] = useState(true);
   const [meetingViewActive, setMeetingViewActive] = useState(false);
@@ -850,27 +851,46 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           target went offline; movement pauses but the relationship is kept
           server-side (see followHandler.ts) and resumes automatically the
           moment they reconnect, no need to click Follow again. */}
-      {followInfo && (
-        <div className="absolute bottom-28 left-16 z-30 pointer-events-auto">
-          <div className="bg-white/90 backdrop-blur-sm border border-purple-200 shadow-sm rounded-lg px-3 py-2 flex items-center gap-2 text-xs">
-            <PersonWalking size={13} className="text-purple-600" />
-            <span className="text-gray-700">
-              {followInfo.status === 'active' ? 'Following ' : 'Waiting for '}
-              <span className="font-medium">{followInfo.targetName}</span>
-              {followInfo.status === 'standby' && <span className="text-gray-400"> (offline)</span>}
-            </span>
-            <button onClick={emitFollowUnfollow} title="Stop following" className="text-gray-400 hover:text-red-500 cursor-pointer">
-              <X size={14} />
-            </button>
-          </div>
+      {(followInfo || followerUserIds.length > 0) && (
+        <div className="absolute bottom-28 left-16 z-30 pointer-events-auto flex flex-col items-start gap-1.5">
+          {followInfo && (
+            <div className="bg-white/90 backdrop-blur-sm border border-purple-200 shadow-sm rounded-lg px-3 py-2 flex items-center gap-2 text-xs">
+              <PersonWalking size={13} className="text-purple-600" />
+              <span className="text-gray-700">
+                {followInfo.status === 'active' ? 'Mengikuti ' : 'Menunggu '}
+                <span className="font-medium">{followInfo.targetName}</span>
+                {followInfo.status === 'standby' && <span className="text-gray-400"> (offline)</span>}
+              </span>
+              <button onClick={emitFollowUnfollow} title="Berhenti mengikuti" className="text-gray-400 hover:text-red-500 cursor-pointer">
+                <X size={14} />
+              </button>
+            </div>
+          )}
+          {/* The other half of the relationship, which had no UI at all until
+              now: followerUserIds has been in the store all along (its own
+              comment even says "for a small UI indicator") but nothing ever
+              rendered it, so being followed was completely invisible to the
+              person being followed. Deliberately quieter than the row above —
+              this is information, not something to act on. */}
+          {followerUserIds.length > 0 && (
+            <div className="bg-white/80 backdrop-blur-sm border border-gray-200 shadow-sm rounded-lg px-3 py-1.5 flex items-center gap-2 text-[11px]">
+              <PersonWalking size={11} className="text-gray-400" />
+              <span className="text-gray-500">
+                <span className="font-medium text-gray-600">{followerUserIds.length}</span> orang mengikutimu
+              </span>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Summon/Follow consent toasts — z-50 so they win over the Follow
-          indicator below, which sits at the same bottom-28 corner. Incoming
-          requests need Accept/Decline; results are a one-off ping about a
-          request I sent. */}
-      <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2">
+      {/* Summon/Follow consent cards. Moved from bottom-centre to the top:
+          down there they sat directly on top of the mic/camera toolbar, in
+          the one strip the eye ignores while steering an avatar — the worst
+          place for something that needs a decision. top-16 clears the room
+          name strip at top-4. z-50 keeps them above the screen-share panel;
+          during a presentation the card does overlap its title bar, which is
+          the intended trade: a request waiting on you should interrupt. */}
+      <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2">
         {incomingSummonRequest && (
           <PendingRequestToast
             icon={<MagnetFill size={13} className="text-amber-500" />}
