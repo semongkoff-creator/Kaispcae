@@ -1,0 +1,83 @@
+# Render Blueprint — backend MeetKai (Express + Socket.IO + Prisma).
+#
+# CATATAN PENTING soal root directory: sengaja TIDAK diset ke `server`.
+# server/package.json bergantung pada "@virtualmeet/shared": "*", yang merupakan
+# paket workspace dan tidak pernah diterbitkan ke npm (private: true — sudah
+# diuji: registry mengembalikan 404). Kalau `npm install` dijalankan di dalam
+# server/, folder itu bukan workspace root, npm mencari paketnya di registry
+# publik, dan build mati sebelum sempat menyentuh Prisma. 36 berkas di
+# server/src mengimpornya.
+#
+# Maka build dijalankan dari akar repo, tempat `npm install` men-symlink
+# shared ke node_modules, lalu perintahnya diarahkan ke workspace server.
+#
+# Frontend TIDAK ada di sini — dideploy terpisah ke Vercel.
+
+services:
+  - type: web
+    name: meetkai-server
+    runtime: node
+    region: singapore
+    plan: free
+
+    # db:generate wajib sebelum build: `tsc --noEmit` di dalam script build
+    # memeriksa tipe hasil generate Prisma Client. Tanpa itu, typecheck gagal.
+    buildCommand: npm install && npm run db:generate --workspace=server && npm run build --workspace=server
+    startCommand: npm start --workspace=server
+
+    # Didefinisikan di server/src/index.ts. Mengembalikan status, koneksi
+    # redis, dan uptime. Tidak butuh autentikasi.
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Server bind ke port ini (server/src/config/index.ts). Render mendeteksi
+      # port yang terbuka, jadi nilai eksplisit ini aman.
+      - key: PORT
+        value: 3001
+
+      # WAJIB diisi manual di dashboard Render — jangan pernah ditulis di sini,
+      # berkas ini masuk git.
+      #
+      # Gunakan connection string Neon versi POOLED — host-nya mengandung
+      # "-pooler" (mis. ep-xxx-pooler.ap-southeast-1.aws.neon.tech).
+      # Kalau tertukar dengan yang direct, koneksi habis saat ramai karena
+      # tiap instance membuka koneksi sendiri tanpa pooling.
+      # Pastikan juga akhiran ?sslmode=require ikut tersalin.
+      - key: DATABASE_URL
+        sync: false
+
+      # Render membuat nilai acak yang kuat saat Blueprint pertama kali dibuat.
+      # Server MENOLAK boot kalau ini masih nilai default bawaan saat
+      # NODE_ENV=production (validasi Zod di server/src/config/index.ts).
+      #
+      # Efek samping yang disengaja: rahasia ini berbeda dari yang dipakai
+      # server lokal, jadi semua token login lama tidak lagi valid —
+      # semua pengguna perlu login ulang di deployment ini.
+      - key: JWT_SECRET
+        generateValue: true
+
+      - key: JWT_EXPIRES_IN
+        value: 30d
+
+      # Keduanya diisi BELAKANGAN, setelah frontend dideploy ke Vercel dan
+      # URL-nya diketahui (mis. https://meetkai.vercel.app — tanpa garis miring
+      # di akhir). Biarkan kosong dulu; server punya default localhost yang
+      # tidak akan cocok dengan siapa pun di produksi, jadi selama belum diisi
+      # browser akan ditolak CORS. Itu wajar sampai frontend online.
+      - key: CORS_ORIGIN
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 60000
+      - key: RATE_LIMIT_MAX
+        value: 100
+
+      # REDIS_URL sengaja TIDAK didaftarkan. Server memperlakukannya sebagai
+      # opsional dan jatuh ke mode in-memory kalau tidak ada. Konsekuensinya:
+      # state presence/room tidak terbagi antar instance, jadi jangan naikkan
+      # jumlah instance di atas 1 sebelum Redis tersedia.
