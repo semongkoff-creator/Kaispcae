@@ -1,7 +1,27 @@
-import { useEffect, useRef, useState } from 'react';
-import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, StarFill, ChatDotsFill, PersonDashFill, X } from 'react-bootstrap-icons';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, StarFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical } from 'react-bootstrap-icons';
 import { roleAtLeast, Role } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
+
+// One labelled row inside a participant's action menu. Icon plus wording,
+// because five bare icons crowded into a row said nothing until you hovered
+// each one to find out what it did.
+function MenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left cursor-pointer transition-colors ${
+        danger
+          ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30'
+          : 'text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'
+      }`}
+    >
+      <span className="shrink-0 w-4 flex justify-center">{icon}</span>
+      {label}
+    </button>
+  );
+}
 
 interface ParticipantPanelProps {
   remoteStreams: Map<string, MediaStream>;
@@ -191,6 +211,59 @@ function ParticipantRow({
   // below admin, same "hide, don't disable" convention as onSummon above.
   onKick?: () => void;
 }) {
+  // Menu coordinates in viewport space, measured from the trigger when it
+  // opens. null = closed.
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const menuOpen = menuPos !== null;
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  // Closing needs BOTH refs: the menu lives in a portal on document.body, so
+  // as far as the DOM tree is concerned a click inside it is outside the row.
+  // Checking only one would make the menu dismiss itself the instant you
+  // tried to click one of its own items.
+  const closeMenu = useCallback(() => setMenuPos(null), []);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!triggerRef.current?.contains(t) && !popRef.current?.contains(t)) closeMenu();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMenu(); };
+    // Position is measured once on open, so any scroll or resize would leave
+    // the menu floating away from its row — close instead of chasing it.
+    document.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', closeMenu);
+      window.removeEventListener('scroll', closeMenu, true);
+    };
+  }, [menuOpen, closeMenu]);
+
+  const openMenu = () => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const MENU_W = 176; // w-44
+    const MENU_H = 190; // generous estimate; only used to decide flip direction
+    // Flip above the trigger when there isn't room below, and keep the right
+    // edge on screen — a participant near the bottom of a tall list would
+    // otherwise get a menu running off the viewport.
+    const openUp = r.bottom + MENU_H > window.innerHeight && r.top > MENU_H;
+    const right = Math.max(8, Math.min(window.innerWidth - r.right, window.innerWidth - MENU_W - 8));
+    setMenuPos({ top: openUp ? r.top - MENU_H - 4 : r.bottom + 4, right });
+  };
+
+  // Every action wrapped so the menu closes as soon as one is chosen —
+  // leaving it open over a row whose state just changed reads as if the
+  // click didn't register.
+  const pick = (fn?: () => void) => () => { closeMenu(); fn?.(); };
+  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onMessage || onSpotlight || onKick);
+
   return (
     <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50 dark:bg-gray-700/50">
       <div className="flex items-center gap-2 min-w-0">
@@ -216,64 +289,78 @@ function ParticipantRow({
             <PersonWalking size={10} /> {followerCount}
           </span>
         )}
-        {!isLocal && (
-          isFollowingThem ? (
+        {/* "Following" stays outside the menu: it's the one item that is a
+            STATE as much as an action, and having to open a menu to discover
+            you're already following someone defeats the point of showing it. */}
+        {!isLocal && isFollowingThem && (
+          <button
+            onClick={onUnfollow}
+            title="Berhenti mengikuti"
+            className="text-purple-600 hover:text-purple-800 cursor-pointer inline-flex items-center gap-0.5 text-[10px] font-medium bg-purple-100 px-1.5 py-0.5 rounded"
+          >
+            <X size={10} /> Mengikuti
+          </button>
+        )}
+        {hasActions && (
+          <>
             <button
-              onClick={onUnfollow}
-              title="Stop following"
-              className="text-purple-600 hover:text-purple-800 cursor-pointer inline-flex items-center gap-0.5 text-[10px] font-medium bg-purple-100 px-1.5 py-0.5 rounded"
+              ref={triggerRef}
+              onClick={() => (menuOpen ? closeMenu() : openMenu())}
+              title={`Aksi untuk ${name}`}
+              className={`cursor-pointer rounded px-0.5 ${menuOpen ? 'text-purple-600 bg-purple-100 dark:bg-gray-600' : 'text-gray-400 dark:text-gray-500 hover:text-purple-600'}`}
             >
-              <X size={10} /> Following
+              <ThreeDotsVertical size={13} />
             </button>
-          ) : (
-            onFollow && (
-              <button
-                onClick={onFollow}
-                title={`Follow ${name}`}
-                className="text-gray-400 dark:text-gray-500 hover:text-purple-600 cursor-pointer"
+            {menuPos && createPortal(
+              // Rendered on document.body, NOT inside the row. An absolutely
+              // positioned menu is clipped by any ancestor whose overflow
+              // isn't visible, and the participant list is overflow-y-auto —
+              // so the menu was being cut off AND counted as scrollable
+              // content, which is what made the scrollbar appear. z-index
+              // cannot fix clipping; only leaving the container can.
+              //
+              // position: fixed alone would not have been enough either: the
+              // panel uses backdrop-blur, and backdrop-filter establishes a
+              // containing block, so a fixed child would still be trapped
+              // inside it.
+              <div
+                ref={popRef}
+                style={{ top: menuPos.top, right: menuPos.right }}
+                className="fixed z-[60] w-44 py-1 rounded-lg bg-white dark:bg-gray-800 border border-purple-200 dark:border-gray-600 shadow-xl overflow-hidden"
               >
-                <PersonWalking size={12} />
-              </button>
-            )
-          )
+                {!isFollowingThem && onFollow && (
+                  <MenuItem icon={<PersonWalking size={12} />} label="Ikuti" onClick={pick(onFollow)} />
+                )}
+                {onSummon && (
+                  <MenuItem icon={<MagnetFill size={12} />} label="Panggil ke sini" onClick={pick(onSummon)} />
+                )}
+                {onMessage && (
+                  <MenuItem icon={<ChatDotsFill size={11} />} label="Kirim pesan" onClick={pick(onMessage)} />
+                )}
+                {onSpotlight && (
+                  <MenuItem
+                    icon={<StarFill size={12} className={isSpotlighted ? 'text-amber-500' : ''} />}
+                    label={isSpotlighted ? 'Hapus sorotan' : 'Sorot'}
+                    onClick={pick(onSpotlight)}
+                  />
+                )}
+                {onKick && (
+                  <>
+                    <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+                    <MenuItem
+                      icon={<PersonDashFill size={12} />}
+                      label="Keluarkan"
+                      danger
+                      onClick={pick(() => { if (window.confirm(`Keluarkan ${name} dari room ini? Dia bisa masuk lagi kapan saja.`)) onKick(); })}
+                    />
+                  </>
+                )}
+              </div>,
+              document.body,
+            )}
+          </>
         )}
-        {!isLocal && onSummon && (
-          <button
-            onClick={onSummon}
-            title={`Summon ${name} to me`}
-            className="text-gray-400 dark:text-gray-500 hover:text-purple-600 cursor-pointer"
-          >
-            <MagnetFill size={12} />
-          </button>
-        )}
-        {!isLocal && onMessage && (
-          <button
-            onClick={onMessage}
-            title={`Message ${name}`}
-            className="text-gray-400 dark:text-gray-500 hover:text-purple-600 cursor-pointer"
-          >
-            <ChatDotsFill size={11} />
-          </button>
-        )}
-        {!isLocal && onSpotlight && (
-          <button
-            onClick={onSpotlight}
-            title={isSpotlighted ? `Remove spotlight from ${name}` : `Spotlight ${name} (visible to everyone regardless of distance)`}
-            className={`cursor-pointer ${isSpotlighted ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500 hover:text-amber-500'}`}
-          >
-            <StarFill size={12} />
-          </button>
-        )}
-        {!isLocal && onKick && (
-          <button
-            onClick={() => { if (window.confirm(`Remove ${name} from this room? They can rejoin any time.`)) onKick(); }}
-            title={`Remove ${name} from this room`}
-            className="text-gray-400 dark:text-gray-500 hover:text-red-500 cursor-pointer"
-          >
-            <PersonDashFill size={12} />
-          </button>
-        )}
-        {isLocal && <span className="text-gray-400 dark:text-gray-500 text-[10px]">You</span>}
+        {isLocal && <span className="text-gray-400 dark:text-gray-500 text-[10px]">Kamu</span>}
       </div>
     </div>
   );

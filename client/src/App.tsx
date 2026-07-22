@@ -1050,8 +1050,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </div>
       )}
 
+      {/* w-fit + auto margins instead of left-1/2/-translate-x-1/2: this
+          element also carries animate-fade-in, whose animated transform
+          overrides the centring translate and pushes it off to the right.
+          Same conflict as the screen-share panel in VideoGrid. */}
       {editorToast && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-emerald-500/90 text-white text-xs font-bold px-4 py-2 rounded-full animate-fade-in pointer-events-none">
+        <div className="absolute top-16 left-0 right-0 mx-auto w-fit z-50 bg-emerald-500/90 text-white text-xs font-bold px-4 py-2 rounded-full animate-fade-in pointer-events-none">
           {editorToast}
         </div>
       )}

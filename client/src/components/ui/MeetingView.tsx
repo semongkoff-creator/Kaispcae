@@ -36,6 +36,10 @@ export function MeetingView({
   const videoTiles = getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams, recordedTargetUserId);
   const screenTiles = videoTiles.filter((t) => t.screenStream);
   const totalTiles = (localStream ? 1 : 0) + (localScreenStream ? 1 : 0) + videoTiles.length + screenTiles.length;
+  // Roughly square: enough columns to keep tiles wide-ish without leaving
+  // rows so short they're useless. Capped at 4 — beyond that faces are too
+  // small to be worth more columns.
+  const gridCols = totalTiles <= 1 ? 1 : totalTiles <= 4 ? 2 : totalTiles <= 9 ? 3 : 4;
 
   return (
     <div className="absolute inset-0 z-40 bg-gray-900/97 backdrop-blur-sm flex flex-col pointer-events-auto">
@@ -63,15 +67,26 @@ export function MeetingView({
             <p className="text-white/40 text-sm">Nobody's on camera right now — walk up to someone to start a video chat.</p>
           </div>
         ) : (
-          // min-h-full (not h-full) — h-full forced this grid's own box to
-          // exactly the scroll container's visible height, which is fine
-          // when tiles fit, but once more rows were needed than fit in that
-          // fixed height, tiles rendering below it visually read as "cut
-          // off" instead of the outer overflow-y-auto container actually
-          // scrolling to reveal them. min-h-full keeps the empty-space case
-          // (few tiles) filling the view while letting the grid grow taller
-          // than the viewport — and scroll — once it needs to.
-          <div className="grid gap-4 min-h-full" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gridAutoRows: 'minmax(160px, 1fr)' }}>
+          // Column count comes from how many people are actually here, not
+          // from auto-fit. auto-fit let a SINGLE tile claim every column, so
+          // being alone produced the widest possible tile — the worst case
+          // instead of the simplest one.
+          //
+          // h-full with 1fr rows (not min-h-full) means the rows always
+          // divide the visible area, so the grid can't grow past the fold and
+          // there is nothing to scroll to. Many participants make each cell
+          // shorter rather than pushing tiles off-screen.
+          //
+          // maxWidth keeps one or two people from being stretched across an
+          // ultrawide monitor; the grid stays centred inside it.
+          <div
+            className="grid gap-4 h-full mx-auto w-full"
+            style={{
+              gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`,
+              gridAutoRows: 'minmax(0, 1fr)',
+              maxWidth: gridCols * 640,
+            }}
+          >
             {localStream && (
               <VideoTile name="You" stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} large />
             )}

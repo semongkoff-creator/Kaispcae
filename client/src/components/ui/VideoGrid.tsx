@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
-import { MicMuteFill, CameraVideoOffFill, PipFill, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill } from 'react-bootstrap-icons';
+import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 
@@ -133,6 +133,7 @@ export function getVideoTiles(
 // letterboxed correctly while the box around it stayed enormously wide.
 function ScreenSharePanel({ name, stream, isLocal }: { name: string; stream: MediaStream; isLocal: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -142,28 +143,69 @@ function ScreenSharePanel({ name, stream, isLocal }: { name: string; stream: Med
     return () => { video.srcObject = null; };
   }, [stream]);
 
-  const togglePip = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (document.pictureInPictureElement === video) document.exitPictureInPicture().catch(() => {});
-    else video.requestPictureInPicture?.().catch(() => {});
-  };
+  // Escape leaves the enlarged view. Anything that takes over most of the
+  // screen needs a way out that doesn't depend on finding a small button.
+  useEffect(() => {
+    if (!maximized) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMaximized(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [maximized]);
 
   return (
     <div
-      // Pinned top-centre. The 9rem cap is not arbitrary: the camera column
-      // is a 6rem-wide rail at right-4, so anything wider would slide under
-      // the participant tiles on a narrow window — the exact "participants
-      // covering the screen" this layout exists to prevent. top-16 clears the
-      // HUD strip along the top edge.
-      className="absolute z-30 top-16 left-1/2 -translate-x-1/2 pointer-events-auto w-[min(640px,calc(100vw-9rem))] rounded-lg overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in"
+      // Pinned top-centre, sized by whichever of three limits bites first.
+      // aspect-video on the video box below turns this one width into the
+      // height too, so the ratio can never distort — the panel just stops
+      // growing.
+      //
+      //   1280px        — an upper bound so it doesn't become absurd on an
+      //                   ultrawide monitor.
+      //   100vw - 14rem — horizontal room. 14rem, not 7rem: the panel is
+      //                   CENTRED, so the leftover space splits evenly across
+      //                   both sides and only half of whatever is reserved
+      //                   actually lands next to the camera rail. The rail
+      //                   itself needs 7rem (a 6rem tile at right-4), so the
+      //                   reservation has to be doubled. The previous value
+      //                   reserved 9rem total — half of that is 4.5rem, less
+      //                   than the rail needs, so on any window under ~864px
+      //                   the panel was already sliding underneath the
+      //                   participant tiles.
+      //   (100vh - 13rem) * 16/9
+      //                 — vertical room, converted to a width through the
+      //                   16:9 ratio. 13rem covers top-16 (4rem), the title
+      //                   bar, and clearance for the HUD toolbar at the
+      //                   bottom. Without this the panel would grow past the
+      //                   bottom edge on short windows.
+      // Centred with left-0 right-0 mx-auto, NOT left-1/2 + -translate-x-1/2.
+      // animate-fade-in animates `transform`, and its `both` fill-mode makes
+      // the final keyframe stick permanently — an animation beats a normal
+      // declaration in the cascade, so translateY(0) silently wiped out the
+      // -50% horizontal shift. The panel kept left:50% with no shift back,
+      // putting its LEFT EDGE at screen centre and hanging off to the right.
+      // Auto margins centre it without touching transform at all, so the two
+      // can't fight.
+      // Enlarged drops the 1280px cap and the room reserved for the camera
+      // rail, growing to whatever the window allows while the same three-way
+      // min() still keeps the 16:9 box inside the viewport. Position, aspect
+      // ratio and object-contain are identical in both states — only the
+      // ceiling moves — so enlarging can never crop or stretch the picture.
+      className={`absolute z-30 top-16 left-0 right-0 mx-auto pointer-events-auto rounded-lg overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in ${
+        maximized
+          ? 'w-[min(calc(100vw-2rem),calc((100vh-9rem)*16/9))]'
+          : 'w-[min(1280px,calc(100vw-14rem),calc((100vh-13rem)*16/9))]'
+      }`}
     >
       {/* A label, not a handle — the panel does not move. */}
       <div className="flex items-center gap-1.5 px-2 py-1 bg-purple-50 dark:bg-gray-700 select-none">
         <DisplayFill size={10} className="text-purple-600 dark:text-purple-300 shrink-0" />
         <span className="text-[11px] text-gray-700 dark:text-gray-200 truncate flex-1">{name}</span>
-        <button onClick={togglePip} title="Picture-in-picture" className="shrink-0 text-gray-500 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer">
-          <PipFill size={10} />
+        <button
+          onClick={() => setMaximized((v) => !v)}
+          title={maximized ? 'Perkecil (Esc)' : 'Perbesar'}
+          className="shrink-0 text-gray-500 hover:text-purple-700 dark:text-gray-300 dark:hover:text-purple-300 cursor-pointer p-0.5 rounded hover:bg-purple-100 dark:hover:bg-gray-600"
+        >
+          {maximized ? <FullscreenExit size={12} /> : <ArrowsFullscreen size={12} />}
         </button>
       </div>
       {/* aspect-video locks the box; object-contain fits any incoming screen
@@ -363,15 +405,6 @@ export function VideoTile({
   // showing someone's walking avatar in place of it would be misleading.
   const showAvatar = !isScreen && (isLocal ? !!cameraOff : remoteVideoOff);
 
-  const handlePip = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (document.pictureInPictureElement === video) {
-      document.exitPictureInPicture().catch(() => {});
-    } else {
-      video.requestPictureInPicture?.().catch(() => {});
-    }
-  };
 
   return (
     <div
@@ -379,7 +412,11 @@ export function VideoTile({
       // purple the rest of the HUD uses for "active". Drawn with ring/border
       // colour rather than an extra element so it can't shift the tile's size
       // and nudge its neighbours every time someone starts talking.
-      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border shadow-lg transition-all duration-300 animate-fade-in group relative ${large ? 'w-full' : 'w-24'} ${
+      // h-full flex flex-col on the large path: the tile fills the grid cell
+      // it was given, and the video area takes whatever is left after the
+      // name/volume rows. That is what lets the cell decide the size instead
+      // of the video deciding it and overflowing.
+      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border shadow-lg transition-all duration-300 animate-fade-in group relative ${large ? 'w-full h-full flex flex-col' : 'w-24'} ${
         speaking ? 'border-purple-500 ring-2 ring-purple-400/60 shadow-purple-400/40' : 'border-purple-200'
       }`}
       style={{ opacity: translucent ? 0.5 : 1 }}
@@ -390,6 +427,11 @@ export function VideoTile({
           and screen shares stay unmirrored. This is purely a browser-side
           style on the <video> element — it can't touch the actual
           MediaStreamTrack sent to WebRTC peers. */}
+      {/* min-h-0 matters: a flex child defaults to min-height:auto, which
+          refuses to shrink below its content and would let the video push the
+          tile taller than its cell — the overflow this whole change exists to
+          remove. */}
+      <div className={large ? 'relative flex-1 min-h-0' : 'relative'}>
       <video
         ref={videoRef}
         autoPlay
@@ -401,30 +443,33 @@ export function VideoTile({
         // presenter's display, usually the toolbars and text people are
         // actually pointing at. Screens get object-contain on black, letting
         // the whole frame through whatever its aspect ratio.
+        // No aspect-video on the large path any more. It fought with h-full
+        // and won, so the height was computed from the WIDTH — in Meeting
+        // View a lone participant's cell spans the entire window, and
+        // width×9/16 then exceeded the viewport, forcing a scroll to see your
+        // own tile. The wider the window, the worse it got. Height now comes
+        // from the cell the tile is placed in; object-cover/contain handles
+        // whatever ratio the source happens to be.
         className={
           isScreen
-            ? `w-full object-contain bg-black ${large ? 'max-h-[58vh]' : 'h-16'}`
-            : `w-full object-cover bg-purple-100 ${large ? 'h-full aspect-video' : 'h-16'}`
+            ? `w-full object-contain bg-black ${large ? 'h-full' : 'h-16'}`
+            : `w-full object-cover bg-purple-100 ${large ? 'h-full' : 'h-16'}`
         }
       />
       {/* Covers the video box (which stays mounted and playing underneath, so
           turning the camera back on is instant) rather than unmounting it —
           a black rectangle tells you nothing, the avatar tells you who. */}
       {showAvatar && (
-        <div className={`absolute top-0 left-0 right-0 ${large ? 'aspect-video' : 'h-16'}`}>
+        <div className="absolute inset-0">
           <InitialsAvatar name={name} large={large} />
         </div>
       )}
-      {/* §6 — PIP, available on every tile (local or remote, camera or
-          screen) via the standard requestPictureInPicture API; shown on
-          hover so it doesn't clutter the small tile by default. */}
-      <button
-        onClick={handlePip}
-        title="Picture-in-picture"
-        className={`absolute top-0.5 right-0.5 rounded bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ${large ? 'w-5 h-5' : 'w-4 h-4'}`}
-      >
-        <PipFill size={large ? 11 : 8} />
-      </button>
+      </div>
+      {/* The per-tile picture-in-picture button was removed on request: it sat
+          under the cursor on every hover and popped a floating OS window that
+          then kept showing a peer's video after they'd walked away, which read
+          as the app being broken. Mini Mode in the sidebar remains as the
+          deliberate, chosen way to detach the view. */}
       {isScreen && (
         <span className="absolute top-0.5 left-0.5 bg-black/50 text-white rounded p-0.5">
           <DisplayFill size={large ? 10 : 8} />

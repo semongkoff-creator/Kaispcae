@@ -36,12 +36,12 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // session, no matter how many times they were clicked.
   const initMedia = useCallback(async () => {
     if (initRef.current) return;
-    // Already fully set up (both tracks present) — nothing to retry. An
-    // audio-only stream (from the camera-busy fallback) does NOT count as
-    // "done" here, so a later camera retry can still try again.
-    const hasAudio = !!streamRef.current?.getAudioTracks().length;
-    const hasVideo = !!streamRef.current?.getVideoTracks().length;
-    if (hasAudio && hasVideo) return;
+    // The mic is all this needs to obtain. It used to also require a video
+    // track before considering itself done, which no longer makes sense: the
+    // camera is now acquired separately by enableCamera() and is absent by
+    // design whenever it's off, so demanding one here would re-request the
+    // microphone on every single camera toggle.
+    if (streamRef.current?.getAudioTracks().length) return;
     initRef.current = true;
     const result = await webrtcService.initLocalMedia();
     streamRef.current = webrtcService.getLocalStream();
@@ -166,33 +166,32 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     return track.enabled;
   }, [initMedia]);
 
+  // Off now means the device is RELEASED, not muted — so this acquires and
+  // stops the camera rather than flipping track.enabled. The mic is never
+  // touched here: audio lives on its own track that is acquired once and kept,
+  // so turning the camera on or off can't disturb it (an earlier version
+  // re-acquired the whole stream and silently re-muted a mic the user had
+  // already turned on).
   const toggleCamera = useCallback(async () => {
     webrtcService.resumeAudio();
-    let track = streamRef.current?.getVideoTracks()[0];
-    if (!track) {
-      // If mic was already unmuted on the previous (audio-only fallback)
-      // stream, remember that — initLocalMedia stops the old tracks and
-      // hands back a brand-new stream, whose audio track otherwise starts
-      // muted again by default, silently re-muting a mic the user had
-      // already turned on.
-      const wasMicUnmuted = !!streamRef.current?.getAudioTracks()[0]?.enabled;
+
+    // No local stream at all yet — the very first click also has to obtain
+    // the mic, since that's what initMedia grants.
+    if (!streamRef.current) {
       await initMedia();
-      track = streamRef.current?.getVideoTracks()[0];
-      if (!track) return false;
-      track.enabled = true;
-      setIsCameraOn(true);
-      if (wasMicUnmuted) {
-        const newAudioTrack = streamRef.current?.getAudioTracks()[0];
-        if (newAudioTrack) {
-          newAudioTrack.enabled = true;
-          setIsMicMuted(false);
-        }
-      }
-      return true;
+      if (!streamRef.current) return false;
     }
-    track.enabled = !track.enabled;
-    setIsCameraOn(track.enabled);
-    return track.enabled;
+
+    if (webrtcService.hasCamera()) {
+      webrtcService.disableCamera();
+      setIsCameraOn(false);
+      return false;
+    }
+
+    const result = await webrtcService.enableCamera();
+    setMediaError(result.error ?? null);
+    setIsCameraOn(result.success);
+    return result.success;
   }, [initMedia]);
 
   const toggleScreenShare = useCallback(async () => {

@@ -45,6 +45,23 @@ const ICE_SERVERS: RTCConfiguration = {
 // "speaking" means.
 const SPEAKING_THRESHOLD = 15;
 
+// Camera capture settings. Previously a hard 320x240 @15fps — QVGA, roughly a
+// twelfth of the pixels below, which is why video looked poor no matter what:
+// the picture was already gone at capture time, and no amount of encoding can
+// restore detail that was never sampled.
+//
+// `ideal` rather than exact on every field: a webcam that can't reach 720p, or
+// a connection that can't carry it, degrades to the closest it can manage
+// instead of failing the whole getUserMedia call with OverconstrainedError.
+// This is a mesh — each person encodes a separate stream per nearby peer — so
+// the cost scales with how many people are standing together, and rises
+// sharply when media is relayed through TURN.
+const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
+  width: { ideal: 1280 },
+  height: { ideal: 720 },
+  frameRate: { ideal: 30 },
+};
+
 // ── DIAGNOSTIC INSTRUMENTATION (temporary) ───────────────────────────────
 // Purely observational: added to locate where two-way audio breaks, after
 // two code-reading fixes failed to resolve it. Remove once the real cause is
@@ -172,35 +189,27 @@ class WebRTCService {
       this.localStream = null;
     }
     try {
-      this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: { width: 320, height: 240, frameRate: 15 },
-      });
+      // MIC ONLY. Joining a room no longer opens the camera at all — the
+      // camera is acquired by enableCamera() the moment it's switched on, and
+      // released again the moment it's switched off. Asking for both here and
+      // then stopping the video track would still flash the indicator light
+      // on every join, which is exactly the behaviour this avoids.
+      //
+      // It also deletes a whole failure mode: the old call asked for camera
+      // and mic together, so a camera already in use by another app failed
+      // the combined request and needed an audio-only retry to rescue the
+      // microphone. Nothing to rescue if the camera was never requested.
+      this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       this.finishLocalMediaSetup();
       this.syncTracksToPeers();
       return { success: true };
     } catch (err: unknown) {
-      // Video-specific failures (camera already open in another app/tab,
-      // no camera present, etc.) shouldn't also take down the microphone —
-      // retry audio-only so at least mic/proximity-audio still works, and
-      // report the camera issue as a non-fatal heads-up rather than
-      // failing the whole join.
-      if (err instanceof DOMException && ['NotReadableError', 'OverconstrainedError', 'NotFoundError'].includes(err.name)) {
-        try {
-          this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          this.finishLocalMediaSetup();
-          this.syncTracksToPeers();
-          return { success: true, error: 'Camera unavailable (already in use elsewhere?) — joined with audio only' };
-        } catch (audioErr: unknown) {
-          console.warn('[webrtc] audio-only fallback also failed:', audioErr);
-        }
-      }
       const message = err instanceof DOMException
-        ? err.name === 'NotAllowedError' ? 'Camera/microphone permission denied'
-          : err.name === 'NotReadableError' ? 'Could not start camera/mic — already in use by another app or browser tab'
-          : err.name === 'NotFoundError' ? 'No camera or microphone found on this device'
+        ? err.name === 'NotAllowedError' ? 'Izin mikrofon ditolak'
+          : err.name === 'NotReadableError' ? 'Mikrofon sedang dipakai aplikasi atau tab lain'
+          : err.name === 'NotFoundError' ? 'Tidak ada mikrofon terdeteksi'
           : err.message
-        : 'Failed to access media devices';
+        : 'Gagal mengakses mikrofon';
       console.warn('[webrtc]', message);
       return { success: false, error: message };
     }
@@ -220,8 +229,16 @@ class WebRTCService {
     // enabled by default, which would otherwise broadcast audio/video the
     // instant someone enters a room, before they've chosen to turn
     // anything on.
+    // Mic: disabled, not stopped. Muting a mic is instant and reversible, and
+    // nobody expects the microphone to be released just because they're muted.
     stream.getAudioTracks().forEach((t) => { t.enabled = false; });
-    stream.getVideoTracks().forEach((t) => { t.enabled = false; });
+    // Camera: genuinely STOPPED and dropped from the stream, not merely
+    // disabled. `enabled = false` only blanks the frames being sent — the
+    // device stays open, the sensor keeps capturing, the indicator light
+    // stays lit and the browser keeps showing its recording dot. Someone
+    // whose camera is "off" is entitled to believe the camera is off.
+    // enableCamera() re-acquires it on demand.
+    stream.getVideoTracks().forEach((t) => { t.stop(); stream.removeTrack(t); });
 
     // Reused across re-acquires, never recreated: every already-connected
     // peer's audioGain node belongs to THIS context, and nodes from two
@@ -282,6 +299,79 @@ class WebRTCService {
 
   getLocalStream(): MediaStream | null {
     return this.localStream;
+  }
+
+  // The camera sender for a peer — the screen-share sender is excluded, since
+  // it is also a video track and overwriting it would replace someone's
+  // presentation with their face.
+  private cameraSender(peer: PeerConnection): RTCRtpSender | undefined {
+    return peer.pc.getSenders().find((s) => s !== peer.screenSender && (s.track?.kind === 'video' || (!s.track && this.videoSenders.has(s))));
+  }
+
+  // Senders that have carried a camera track at least once. Needed because a
+  // sender whose track was replaced with null reports kind 'null' and would
+  // otherwise be indistinguishable from an audio sender, leaving a fresh
+  // camera track with nowhere to go and forcing a pointless renegotiation.
+  private videoSenders = new Set<RTCRtpSender>();
+
+  // Acquires the camera on demand. Requested separately from the mic so the
+  // device is only ever open while the camera is actually on — see
+  // finishLocalMediaSetup for why "off" has to mean released, not muted.
+  async enableCamera(): Promise<{ success: boolean; error?: string }> {
+    if (!this.localStream) return { success: false, error: 'No local stream' };
+    if (this.localStream.getVideoTracks().length) return { success: true };
+
+    let track: MediaStreamTrack;
+    try {
+      const cam = await navigator.mediaDevices.getUserMedia({ video: CAMERA_CONSTRAINTS });
+      track = cam.getVideoTracks()[0];
+      if (!track) return { success: false, error: 'No camera track' };
+    } catch (err: unknown) {
+      const name = err instanceof DOMException ? err.name : '';
+      return {
+        success: false,
+        error: name === 'NotAllowedError' ? 'Izin kamera ditolak'
+          : name === 'NotReadableError' ? 'Kamera sedang dipakai aplikasi lain'
+          : name === 'NotFoundError' ? 'Tidak ada kamera terdeteksi'
+          : 'Gagal menyalakan kamera',
+      };
+    }
+
+    this.localStream.addTrack(track);
+
+    // replaceTrack on an existing sender swaps the outgoing media with no
+    // renegotiation at all — instant, and it can't disturb the audio m-line.
+    // addTrack is only needed the first time, when no camera sender exists yet.
+    for (const peer of this.peers.values()) {
+      const sender = this.cameraSender(peer);
+      if (sender) sender.replaceTrack(track).catch(() => {});
+      else this.videoSenders.add(peer.pc.addTrack(track, this.localStream));
+    }
+    return { success: true };
+  }
+
+  // Releases the camera: stops the device, drops the track from the local
+  // stream, and hands peers a null track so they see video end rather than a
+  // frozen last frame.
+  disableCamera(): void {
+    const stream = this.localStream;
+    if (!stream) return;
+
+    for (const peer of this.peers.values()) {
+      const sender = this.cameraSender(peer);
+      if (sender) {
+        this.videoSenders.add(sender);
+        sender.replaceTrack(null).catch(() => {});
+      }
+    }
+    for (const t of stream.getVideoTracks()) {
+      t.stop();
+      stream.removeTrack(t);
+    }
+  }
+
+  hasCamera(): boolean {
+    return !!this.localStream?.getVideoTracks().length;
   }
 
   getScreenStream(): MediaStream | null {
@@ -669,6 +759,18 @@ class WebRTCService {
     pc.setRemoteDescription(new RTCSessionDescription(sdp))
       .then(() => {
         peer!.remoteDescSet = true;
+        // Second net for a retracted screen share. Stopping a share calls
+        // removeTrack on the sender, which renegotiates — and this offer IS
+        // that renegotiation. The receiving track's `ended` event is supposed
+        // to fire too, but it doesn't do so dependably across browsers, and
+        // when it doesn't the screen stays on screen forever. Checking the
+        // track's readyState at the exact moment the renegotiation lands is
+        // precise and needs no timer or polling.
+        const screenTrack = peer!.remoteScreenStream?.getVideoTracks()[0];
+        if (peer!.remoteScreenStream && (!screenTrack || screenTrack.readyState === 'ended')) {
+          peer!.remoteScreenStream = null;
+          this.onRemoteScreenEnded?.(fromId);
+        }
         for (const c of peer!.iceQueue) {
           pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
         }
@@ -740,6 +842,16 @@ class WebRTCService {
       if (peer.speaking) {
         peer.speaking = false;
         this.onSpeakingChange?.(id, false);
+      }
+      // Same class of problem, and the cause of the "ghost" screen panel:
+      // the ONLY thing that used to retract a shared screen was the remote
+      // track's own `ended` event. Closing a PeerConnection does not reliably
+      // fire that, so a presenter who dropped off — disconnected, or simply
+      // walked out of range — left their screen on everyone's display until
+      // a page reload. Retract it here, where we already know they're gone.
+      if (peer.remoteScreenStream) {
+        peer.remoteScreenStream = null;
+        this.onRemoteScreenEnded?.(id);
       }
       peer.analyser?.disconnect();
       peer.analyser = null;
