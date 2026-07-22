@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
-import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill } from 'react-bootstrap-icons';
+import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 
@@ -131,9 +131,18 @@ export function getVideoTiles(
 // even earlier version set width from the viewport (82vw) but capped height
 // independently, so box and content disagreed on aspect ratio: the video
 // letterboxed correctly while the box around it stayed enormously wide.
-function ScreenSharePanel({ name, stream, isLocal }: { name: string; stream: MediaStream; isLocal: boolean }) {
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 3;
+
+function ScreenSharePanel({ name, stream, isLocal, onClose }: { name: string; stream: MediaStream; isLocal: boolean; onClose: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const [maximized, setMaximized] = useState(false);
+  // Purely local magnification of the shared picture. Nothing is sent
+  // anywhere: the presenter and everyone else keep seeing their own view at
+  // their own zoom.
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     const video = videoRef.current;
@@ -142,6 +151,93 @@ function ScreenSharePanel({ name, stream, isLocal }: { name: string; stream: Med
     video.play().catch(() => {});
     return () => { video.srcObject = null; };
   }, [stream]);
+
+  // A different presenter's screen is a different picture — carrying the
+  // previous one's zoom and pan across would drop the viewer into a random
+  // corner of a screen they've never seen.
+  useEffect(() => {
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
+  }, [stream]);
+
+  // How far the content may be dragged before its edge would come inside the
+  // frame. The video fills the box, so each side overflows by half the excess.
+  const clampOffset = (x: number, y: number, z: number) => {
+    const box = boxRef.current;
+    if (!box || z <= 1) return { x: 0, y: 0 };
+    const maxX = (box.clientWidth * (z - 1)) / 2;
+    const maxY = (box.clientHeight * (z - 1)) / 2;
+    return {
+      x: Math.max(-maxX, Math.min(maxX, x)),
+      y: Math.max(-maxY, Math.min(maxY, y)),
+    };
+  };
+
+  const applyZoom = (nextZ: number, anchorX: number, anchorY: number) => {
+    setZoom((prevZ) => {
+      const z = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, nextZ));
+      // Keeps whatever sits under the anchor point pinned in place, so
+      // zooming aims at what you're pointing at instead of always the middle.
+      setOffset((prev) => {
+        if (z === 1) return { x: 0, y: 0 };
+        const ratio = z / prevZ;
+        return clampOffset(anchorX - (anchorX - prev.x) * ratio, anchorY - (anchorY - prev.y) * ratio, z);
+      });
+      return z;
+    });
+  };
+
+  // Attached natively with passive:false rather than via React's onWheel.
+  // React registers wheel listeners passively, which makes preventDefault a
+  // no-op — the zoom would work but the page would scroll underneath it at
+  // the same time.
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const r = box.getBoundingClientRect();
+      // Anchor measured from the box's centre, because that's the origin the
+      // transform scales around.
+      const ax = e.clientX - r.left - r.width / 2;
+      const ay = e.clientY - r.top - r.height / 2;
+      setZoom((prevZ) => {
+        const z = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prevZ * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+        setOffset((prev) => {
+          if (z === 1) return { x: 0, y: 0 };
+          const ratio = z / prevZ;
+          return clampOffset(ax - (ax - prev.x) * ratio, ay - (ay - prev.y) * ratio, z);
+        });
+        return z;
+      });
+    };
+    box.addEventListener('wheel', onWheel, { passive: false });
+    return () => box.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Panning the CONTENT. Deliberately hung off the video box, never the title
+  // bar — the panel itself must stay pinned, and a drag that sometimes moved
+  // the window and sometimes the picture would be worse than neither.
+  const pan = useRef<{ x: number; y: number } | null>(null);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    // Nothing to pan at 1× — the picture already fits. Starting a drag here
+    // would just look broken.
+    if (zoom <= 1) return;
+    pan.current = { x: e.clientX - offset.x, y: e.clientY - offset.y };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    const p = pan.current;
+    if (!p) return;
+    setOffset(clampOffset(e.clientX - p.x, e.clientY - p.y, zoom));
+  };
+
+  const endPan = (e: React.PointerEvent) => {
+    pan.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+  };
 
   // Escape leaves the enlarged view. Anything that takes over most of the
   // screen needs a way out that doesn't depend on finding a small button.
@@ -190,28 +286,109 @@ function ScreenSharePanel({ name, stream, isLocal }: { name: string; stream: Med
       // min() still keeps the 16:9 box inside the viewport. Position, aspect
       // ratio and object-contain are identical in both states — only the
       // ceiling moves — so enlarging can never crop or stretch the picture.
+      // Two deliberately different sizes:
+      //
+      // Focus (default) — big, but 100vw-14rem is never relaxed. The panel is
+      //   centred, so that reservation leaves 7rem of map showing on each
+      //   side. Keeping the map visible is what separates this from a plain
+      //   meeting app: you should still know you're standing in an office.
+      //   The 1600px ceiling and 11rem vertical allowance are what got raised
+      //   to make it more comfortable — not the margin.
+      //
+      // Full screen — the one state allowed to cover the map, and only ever
+      //   because someone pressed the button for it.
       className={`absolute z-30 top-16 left-0 right-0 mx-auto pointer-events-auto rounded-lg overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in ${
         maximized
           ? 'w-[min(calc(100vw-2rem),calc((100vh-9rem)*16/9))]'
-          : 'w-[min(1280px,calc(100vw-14rem),calc((100vh-13rem)*16/9))]'
+          : 'w-[min(1600px,calc(100vw-14rem),calc((100vh-11rem)*16/9))]'
       }`}
     >
       {/* A label, not a handle — the panel does not move. */}
       <div className="flex items-center gap-1.5 px-2 py-1 bg-purple-50 dark:bg-gray-700 select-none">
         <DisplayFill size={10} className="text-purple-600 dark:text-purple-300 shrink-0" />
         <span className="text-[11px] text-gray-700 dark:text-gray-200 truncate flex-1">{name}</span>
+        {/* Only shown once it's actually zoomed — at 100% there is nothing to
+            explain, and a permanent "100%" badge would just be noise. */}
+        {zoom > 1 && (
+          <span className="shrink-0 text-[10px] font-medium text-purple-700 dark:text-purple-300 tabular-nums">
+            {Math.round(zoom * 100)}%
+          </span>
+        )}
+        <button
+          onClick={() => applyZoom(zoom / 1.25, 0, 0)}
+          disabled={zoom <= MIN_ZOOM}
+          title="Perkecil isi"
+          className="shrink-0 text-gray-500 hover:text-purple-700 dark:text-gray-300 dark:hover:text-purple-300 cursor-pointer p-0.5 rounded hover:bg-purple-100 dark:hover:bg-gray-600 disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent"
+        >
+          <DashLg size={12} />
+        </button>
+        <button
+          onClick={() => applyZoom(zoom * 1.25, 0, 0)}
+          disabled={zoom >= MAX_ZOOM}
+          title="Perbesar isi"
+          className="shrink-0 text-gray-500 hover:text-purple-700 dark:text-gray-300 dark:hover:text-purple-300 cursor-pointer p-0.5 rounded hover:bg-purple-100 dark:hover:bg-gray-600 disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent"
+        >
+          <PlusLg size={12} />
+        </button>
+        {zoom > 1 && (
+          <button
+            onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}
+            title="Kembalikan ke 100%"
+            className="shrink-0 text-gray-500 hover:text-purple-700 dark:text-gray-300 dark:hover:text-purple-300 cursor-pointer p-0.5 rounded hover:bg-purple-100 dark:hover:bg-gray-600"
+          >
+            <ArrowCounterclockwise size={12} />
+          </button>
+        )}
+        {/* Named for what it does. It used to say "Perbesar", which collided
+            with the enlarge button on the thumbnail — two different actions
+            wearing the same word. */}
         <button
           onClick={() => setMaximized((v) => !v)}
-          title={maximized ? 'Perkecil (Esc)' : 'Perbesar'}
+          title={maximized ? 'Keluar layar penuh (Esc)' : 'Layar penuh'}
           className="shrink-0 text-gray-500 hover:text-purple-700 dark:text-gray-300 dark:hover:text-purple-300 cursor-pointer p-0.5 rounded hover:bg-purple-100 dark:hover:bg-gray-600"
         >
           {maximized ? <FullscreenExit size={12} /> : <ArrowsFullscreen size={12} />}
         </button>
+        {/* Back to a thumbnail. Without this there is no way out of the focus
+            panel short of the presenter stopping — a dead end the spec
+            explicitly forbids. */}
+        <button
+          onClick={onClose}
+          title="Kecilkan ke kolom peserta"
+          className="shrink-0 text-gray-500 hover:text-red-500 dark:text-gray-300 cursor-pointer p-0.5 rounded hover:bg-red-50 dark:hover:bg-gray-600"
+        >
+          <XLg size={11} />
+        </button>
       </div>
       {/* aspect-video locks the box; object-contain fits any incoming screen
-          ratio inside it, letterboxed on black rather than cropped. */}
-      <div className="relative w-full aspect-video bg-black">
-        <video ref={videoRef} autoPlay playsInline muted={isLocal} className="absolute inset-0 w-full h-full object-contain" />
+          ratio inside it, letterboxed on black rather than cropped.
+          overflow-hidden turns it into the viewport the zoomed picture is
+          seen through — without it a magnified screen would spill over the
+          panel's edges. */}
+      <div
+        ref={boxRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endPan}
+        onPointerCancel={endPan}
+        // The cursor is the only hint that dragging does anything, so it
+        // appears exactly when panning is possible and not before.
+        className={`relative w-full aspect-video bg-black overflow-hidden ${
+          zoom > 1 ? (pan.current ? 'cursor-grabbing' : 'cursor-grab') : ''
+        }`}
+      >
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={isLocal}
+          // The transform lives on the VIDEO, never on the panel — the panel
+          // itself stays pinned, so magnifying the content can't become a way
+          // to move the window. At zoom 1 this is the identity transform, so
+          // object-contain and the aspect ratio behave exactly as before.
+          style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}
+          className="absolute inset-0 w-full h-full object-contain"
+        />
       </div>
     </div>
   );
@@ -247,10 +424,17 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   }
 
   // Resolved every render rather than stored: when the featured presenter
-  // stops sharing (or walks out of range) their key simply stops matching and
-  // the next share takes over. Holding it in state would strand the layout on
-  // a stream that no longer exists until something else forced an update.
-  const featured = screenEntries.find((s) => s.key === featuredKey) ?? screenEntries[0] ?? null;
+  // stops sharing (or walks out of range) their key simply stops matching, the
+  // panel closes on its own, and nothing needs cleaning up. Holding it in
+  // state would strand the layout on a stream that no longer exists until
+  // something else forced an update.
+  //
+  // No `?? screenEntries[0]` fallback any more. That silently promoted the
+  // first share straight to a full focus panel, so the thumbnail step never
+  // existed for a single presenter — a screen appeared over the map without
+  // anyone asking for it. Now every share starts as a thumbnail in the
+  // column and only becomes the focus panel when its enlarge button is used.
+  const featured = screenEntries.find((s) => s.key === featuredKey) ?? null;
   const otherScreens = screenEntries.filter((s) => s.key !== featured?.key);
 
   const totalTiles = (localStream ? 1 : 0) + (localScreenStream ? 1 : 0) + videoTiles.length
@@ -313,21 +497,24 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   return (
     <>
       {featured && (
-        <ScreenSharePanel key={featured.key} name={featured.name} stream={featured.stream} isLocal={featured.isLocal} />
+        <ScreenSharePanel key={featured.key} name={featured.name} stream={featured.stream} isLocal={featured.isLocal} onClose={() => setFeaturedKey(null)} />
       )}
       <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 pointer-events-none">
         {hideButton}
-        {/* A second simultaneous share stays a thumbnail here; clicking it
-            promotes it into the floating panel. Rare, but silently hiding
-            someone's presentation would be worse. */}
+        {/* Every share that isn't currently the focus lives here as a
+            thumbnail. An explicit button rather than a click-anywhere tile:
+            the whole tile being clickable was invisible, so there was no way
+            to tell a shared screen could be opened at all. */}
         {otherScreens.map((s) => (
-          <div
-            key={s.key}
-            onClick={() => setFeaturedKey(s.key)}
-            title={`Tampilkan ${s.name}`}
-            className="pointer-events-auto cursor-pointer hover:opacity-80 transition-opacity"
-          >
+          <div key={s.key} className="pointer-events-auto relative group/screen">
             <VideoTile name={s.name} stream={s.stream} isLocal={s.isLocal} isScreen />
+            <button
+              onClick={() => setFeaturedKey(s.key)}
+              title={`Perbesar ${s.name}`}
+              className="absolute top-0.5 right-0.5 w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover/screen:opacity-100 transition-opacity cursor-pointer"
+            >
+              <ArrowsFullscreen size={9} />
+            </button>
           </div>
         ))}
         {cameraTiles}

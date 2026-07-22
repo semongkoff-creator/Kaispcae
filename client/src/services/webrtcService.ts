@@ -629,10 +629,33 @@ class WebRTCService {
         return;
       }
 
-      // First incoming video track for this peer = their camera; a SECOND,
-      // distinct one (grouped under a different sender-side MediaStream,
-      // see startScreenShare) = their screen share.
-      if (!peer.videoStream) {
+      // Camera or screen? Decided by which MediaStream the track arrived in,
+      // NOT by arrival order.
+      //
+      // The camera is always added alongside the microphone (both live on
+      // localStream), while a screen share is captured on its own via
+      // getDisplayMedia and carries no audio. So a video track that shares a
+      // stream with an audio track is a camera; one that arrives alone is a
+      // screen.
+      //
+      // Order used to work only by accident: the camera was acquired at join
+      // and merely disabled when "off", so it always arrived first and the
+      // screen was always second. Once the camera started being released
+      // while off, someone sharing their screen with the camera off sent the
+      // SCREEN as their first video track — it was then filed as a camera,
+      // complete with a volume slider, and never appeared as a shared screen
+      // at all.
+      const arrivedWithAudio = (event.streams[0]?.getAudioTracks().length ?? 0) > 0;
+      // Fall back to the old order rule only when the stream carries no
+      // grouping information at all (no audio anywhere yet) — better a guess
+      // than dropping the track.
+      const isCamera = arrivedWithAudio || (!peer.videoStream && !event.streams[0]);
+
+      if (isCamera) {
+        // Overwrites any previous camera stream rather than ignoring the new
+        // one: a peer who turns their camera back on after it was released
+        // sends a genuinely new track, and keeping the old dead one would
+        // leave their tile frozen on the last frame before they switched off.
         const stream = new MediaStream([event.track]);
         peer.videoStream = stream;
         this.onRemoteStream?.(remoteId, stream);
