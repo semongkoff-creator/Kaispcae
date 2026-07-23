@@ -286,19 +286,23 @@ function ScreenSharePanel({ name, stream, isLocal, onClose }: { name: string; st
       // min() still keeps the 16:9 box inside the viewport. Position, aspect
       // ratio and object-contain are identical in both states — only the
       // ceiling moves — so enlarging can never crop or stretch the picture.
-      // Fills the viewport with only a thin inset, so the map shows as a
-      // narrow frame around it — the user chose max size over map visibility.
-      // The 16:9 aspect-lock is deliberately gone: on a 16:9 monitor an
-      // aspect-locked panel can't grow past the height budget without hiding
-      // the map entirely anyway, so the lock capped the size for no gain.
-      // Instead the panel is a flex column filling the inset, the content box
-      // flexes to fill it, and object-contain letterboxes whatever ratio the
-      // shared screen has — a bigger box that still never crops or stretches.
-      // maximized shrinks the inset further to near edge-to-edge.
+      // Fills the viewport, leaving only a thin frame — the user chose max
+      // size over map visibility. The 16:9 aspect-lock is deliberately gone:
+      // on a 16:9 monitor an aspect-locked panel can't grow past the height
+      // budget without hiding the map entirely anyway, so the lock capped the
+      // size for no gain. Instead the panel is a flex column filling its box,
+      // the content flexes to fill it, and object-contain letterboxes whatever
+      // ratio the shared screen has — a bigger box that never crops/stretches.
+      //
+      // left-14, not a symmetric inset: the left nav (Sidebar.tsx) is a
+      // w-12 (48px) z-50 rail that sits ON TOP of this z-30 panel, so a
+      // flush-left panel had its title and left edge hidden under it and the
+      // visible picture pushed off-centre. Clearing 56px on the left puts the
+      // panel in the space actually visible beside the rail.
       className={`absolute z-30 flex flex-col pointer-events-auto overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in ${
         maximized
-          ? 'inset-1 rounded-md'
-          : 'inset-3 rounded-lg'
+          ? 'left-14 right-1 top-1 bottom-1 rounded-md'
+          : 'left-14 right-3 top-3 bottom-3 rounded-lg'
       }`}
     >
       {/* A label, not a handle — the panel does not move. */}
