@@ -302,7 +302,7 @@ function ScreenSharePanel({ name, stream, isLocal, onClose }: { name: string; st
       className={`absolute z-30 flex flex-col pointer-events-auto overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in ${
         maximized
           ? 'left-14 right-1 top-1 bottom-1 rounded-md'
-          : 'left-14 right-3 top-3 bottom-3 rounded-lg'
+          : 'left-14 right-2 top-1 bottom-2 rounded-lg'
       }`}
     >
       {/* A label, not a handle — the panel does not move. */}
