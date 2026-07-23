@@ -286,20 +286,19 @@ function ScreenSharePanel({ name, stream, isLocal, onClose }: { name: string; st
       // min() still keeps the 16:9 box inside the viewport. Position, aspect
       // ratio and object-contain are identical in both states — only the
       // ceiling moves — so enlarging can never crop or stretch the picture.
-      // Sized to nearly fill the window: no pixel ceiling, and only a 2rem
-      // horizontal reservation, so the map survives as a thin border.
-      //
-      // Height is what actually binds on a 16:9 monitor, not width — the box
-      // is aspect-locked, so whichever dimension runs out first decides the
-      // size. That is also why the top offset moves with the state instead of
-      // staying at top-16: the vertical budget has to cover the offset itself
-      // plus the title bar, so a 4rem budget is unreachable while starting
-      // 4rem down the page. Raising the panel is what buys the extra height;
-      // widening alone would have changed nothing at all.
-      className={`absolute z-30 left-0 right-0 mx-auto pointer-events-auto rounded-lg overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in ${
+      // Fills the viewport with only a thin inset, so the map shows as a
+      // narrow frame around it — the user chose max size over map visibility.
+      // The 16:9 aspect-lock is deliberately gone: on a 16:9 monitor an
+      // aspect-locked panel can't grow past the height budget without hiding
+      // the map entirely anyway, so the lock capped the size for no gain.
+      // Instead the panel is a flex column filling the inset, the content box
+      // flexes to fill it, and object-contain letterboxes whatever ratio the
+      // shared screen has — a bigger box that still never crops or stretches.
+      // maximized shrinks the inset further to near edge-to-edge.
+      className={`absolute z-30 flex flex-col pointer-events-auto overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in ${
         maximized
-          ? 'top-2 w-[min(calc(100vw-0.5rem),calc((100vh-3rem)*16/9))]'
-          : 'top-8 w-[min(calc(100vw-2rem),calc((100vh-4rem)*16/9))]'
+          ? 'inset-1 rounded-md'
+          : 'inset-3 rounded-lg'
       }`}
     >
       {/* A label, not a handle — the panel does not move. */}
@@ -359,11 +358,12 @@ function ScreenSharePanel({ name, stream, isLocal, onClose }: { name: string; st
           <XLg size={11} />
         </button>
       </div>
-      {/* aspect-video locks the box; object-contain fits any incoming screen
-          ratio inside it, letterboxed on black rather than cropped.
-          overflow-hidden turns it into the viewport the zoomed picture is
-          seen through — without it a magnified screen would spill over the
-          panel's edges. */}
+      {/* flex-1 lets the box fill whatever height the panel has left after the
+          title bar (the 16:9 aspect-lock is gone — see the panel comment);
+          object-contain fits any incoming screen ratio inside it, letterboxed
+          on black rather than cropped. overflow-hidden turns it into the
+          viewport the zoomed picture is seen through — without it a magnified
+          screen would spill over the panel's edges. */}
       <div
         ref={boxRef}
         onPointerDown={onPointerDown}
@@ -372,7 +372,7 @@ function ScreenSharePanel({ name, stream, isLocal, onClose }: { name: string; st
         onPointerCancel={endPan}
         // The cursor is the only hint that dragging does anything, so it
         // appears exactly when panning is possible and not before.
-        className={`relative w-full aspect-video bg-black overflow-hidden ${
+        className={`relative w-full flex-1 min-h-0 bg-black overflow-hidden ${
           zoom > 1 ? (pan.current ? 'cursor-grabbing' : 'cursor-grab') : ''
         }`}
       >
