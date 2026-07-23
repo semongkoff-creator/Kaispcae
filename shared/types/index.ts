@@ -201,6 +201,10 @@ export enum SocketEvents {
   RTC_OFFER = 'rtc:offer',
   RTC_ANSWER = 'rtc:answer',
   RTC_ICE_CANDIDATE = 'rtc:ice-candidate',
+  // Announces which MediaStream carries a screen share, so receivers can tell
+  // a screen from a camera by fact rather than inference — see
+  // RtcScreenSharePayload.
+  RTC_SCREEN_SHARE = 'rtc:screen-share',
 
   CHAT_BUBBLE = 'chat:bubble',
   EMOTE_PLAY = 'emote:play',
@@ -653,6 +657,27 @@ export interface RtcSignal {
   fromId: string;
   toId: string;
   payload: unknown;
+}
+
+// Tells everyone in the room which MediaStream id is a screen share, so a
+// receiver can classify an incoming video track as fact instead of guessing.
+//
+// The guess it replaces was arrival order — first video track = camera,
+// second = screen. That held only because the camera used to be acquired at
+// join and merely disabled when "off", so it always arrived first. Once the
+// camera started being genuinely released while off, anyone sharing a screen
+// with their camera off sent the SCREEN as their first video track, and it was
+// filed as a camera: shown with a volume slider and never appearing as a
+// shared screen at all, with no error anywhere.
+//
+// Broadcast to the room rather than sent per-peer: someone who walks into
+// range mid-presentation has to learn about it too, and they have no earlier
+// message to have missed.
+export interface RtcScreenSharePayload {
+  // Socket id of the presenter.
+  fromId: string;
+  // MediaStream.id of the screen capture. Null when the share stops.
+  streamId: string | null;
 }
 
 // A furniture piece placed on the map, referencing a visual palette entry

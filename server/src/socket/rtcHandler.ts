@@ -74,6 +74,18 @@ export function registerRtcHandlers(io: Server, socket: Socket) {
     io.to(signal.toId).emit(event, { ...signal, fromId: socket.id });
   }
 
+  // Broadcast, not relayed to one peer: anyone already in the room needs it,
+  // and so does anyone who walks up later (the client re-announces on each new
+  // peer connection). fromId is set server-side from the real socket, never
+  // taken from the payload — same rule as the offer/answer relay below, so a
+  // client can't claim someone else's screen is theirs.
+  socket.on(SocketEvents.RTC_SCREEN_SHARE, (data: { streamId: string | null }) => {
+    const room = getSocketRoom(socket);
+    if (!room) return;
+    const streamId = typeof data?.streamId === 'string' ? data.streamId.slice(0, 200) : null;
+    socket.to(room).emit(SocketEvents.RTC_SCREEN_SHARE, { fromId: socket.id, streamId });
+  });
+
   socket.on(SocketEvents.RTC_OFFER, (signal: RtcSignal) => relay(SocketEvents.RTC_OFFER, signal));
   socket.on(SocketEvents.RTC_ANSWER, (signal: RtcSignal) => relay(SocketEvents.RTC_ANSWER, signal));
   socket.on(SocketEvents.RTC_ICE_CANDIDATE, (signal: RtcSignal) => relay(SocketEvents.RTC_ICE_CANDIDATE, signal));

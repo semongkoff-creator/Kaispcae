@@ -286,21 +286,20 @@ function ScreenSharePanel({ name, stream, isLocal, onClose }: { name: string; st
       // min() still keeps the 16:9 box inside the viewport. Position, aspect
       // ratio and object-contain are identical in both states — only the
       // ceiling moves — so enlarging can never crop or stretch the picture.
-      // Two deliberately different sizes:
+      // Sized to nearly fill the window: no pixel ceiling, and only a 2rem
+      // horizontal reservation, so the map survives as a thin border.
       //
-      // Focus (default) — big, but 100vw-14rem is never relaxed. The panel is
-      //   centred, so that reservation leaves 7rem of map showing on each
-      //   side. Keeping the map visible is what separates this from a plain
-      //   meeting app: you should still know you're standing in an office.
-      //   The 1600px ceiling and 11rem vertical allowance are what got raised
-      //   to make it more comfortable — not the margin.
-      //
-      // Full screen — the one state allowed to cover the map, and only ever
-      //   because someone pressed the button for it.
-      className={`absolute z-30 top-16 left-0 right-0 mx-auto pointer-events-auto rounded-lg overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in ${
+      // Height is what actually binds on a 16:9 monitor, not width — the box
+      // is aspect-locked, so whichever dimension runs out first decides the
+      // size. That is also why the top offset moves with the state instead of
+      // staying at top-16: the vertical budget has to cover the offset itself
+      // plus the title bar, so a 4rem budget is unreachable while starting
+      // 4rem down the page. Raising the panel is what buys the extra height;
+      // widening alone would have changed nothing at all.
+      className={`absolute z-30 left-0 right-0 mx-auto pointer-events-auto rounded-lg overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in ${
         maximized
-          ? 'w-[min(calc(100vw-2rem),calc((100vh-9rem)*16/9))]'
-          : 'w-[min(1600px,calc(100vw-14rem),calc((100vh-11rem)*16/9))]'
+          ? 'top-2 w-[min(calc(100vw-0.5rem),calc((100vh-3rem)*16/9))]'
+          : 'top-8 w-[min(calc(100vw-2rem),calc((100vh-4rem)*16/9))]'
       }`}
     >
       {/* A label, not a handle — the panel does not move. */}

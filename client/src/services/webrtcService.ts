@@ -45,6 +45,19 @@ const ICE_SERVERS: RTCConfiguration = {
 // "speaking" means.
 const SPEAKING_THRESHOLD = 15;
 
+// Fallback classifier, used only until the presenter's RTC_SCREEN_SHARE
+// announcement is known. A camera is published in the same MediaStream as the
+// microphone; a screen comes from getDisplayMedia in a stream of its own with
+// no audio. Kept as a backstop rather than deleted: the announcement can
+// arrive after the track on a slow link, and a peer that briefly showed
+// nothing would be worse than one classified by a good guess.
+function arrivedWithAudioOrUngrouped(event: RTCTrackEvent, peer: { videoStream: MediaStream | null }): boolean {
+  if ((event.streams[0]?.getAudioTracks().length ?? 0) > 0) return true;
+  // No stream grouping at all — nothing to reason from, so fall back to the
+  // old "first video is the camera" rule rather than dropping the track.
+  return !peer.videoStream && !event.streams[0];
+}
+
 // Camera capture settings. Previously a hard 320x240 @15fps — QVGA, roughly a
 // twelfth of the pixels below, which is why video looked poor no matter what:
 // the picture was already gone at capture time, and no amount of encoding can
@@ -103,6 +116,9 @@ interface PeerConnection {
   // Read-only loudness tap for the speaking indicator — see ontrack. Never
   // connected onward, so it can't affect what anyone hears.
   analyser: AnalyserNode | null;
+  // MediaStream.id this peer announced as their screen share, from
+  // RTC_SCREEN_SHARE. Null when they aren't sharing.
+  screenStreamId: string | null;
   // Last emitted speaking state, so the callback only fires on a change
   // rather than ten times a second.
   speaking: boolean;
@@ -533,6 +549,7 @@ class WebRTCService {
       audioGain,
       audioEl: null,
       analyser: null,
+      screenStreamId: this.announcedScreens.get(remoteId) ?? null,
       speaking: false,
       videoStream: null,
       remoteScreenStream: null,
@@ -645,11 +662,17 @@ class WebRTCService {
       // SCREEN as their first video track — it was then filed as a camera,
       // complete with a volume slider, and never appeared as a shared screen
       // at all.
-      const arrivedWithAudio = (event.streams[0]?.getAudioTracks().length ?? 0) > 0;
-      // Fall back to the old order rule only when the stream carries no
-      // grouping information at all (no audio anywhere yet) — better a guess
-      // than dropping the track.
-      const isCamera = arrivedWithAudio || (!peer.videoStream && !event.streams[0]);
+      const inboundId = event.streams[0]?.id;
+      // Preferred answer: the presenter told us which stream is their screen
+      // (RTC_SCREEN_SHARE). No inference involved.
+      const announced = peer.screenStreamId ?? this.announcedScreens.get(remoteId) ?? null;
+      const isCamera = announced && inboundId
+        ? inboundId !== announced
+        // Fallback for the window before that announcement lands (or if it is
+        // lost): a camera travels in the same MediaStream as the microphone,
+        // a screen is captured on its own by getDisplayMedia and carries no
+        // audio. Still order-independent — just less certain than being told.
+        : arrivedWithAudioOrUngrouped(event, peer);
 
       if (isCamera) {
         // Overwrites any previous camera stream rather than ignoring the new
@@ -730,6 +753,14 @@ class WebRTCService {
     console.log('[webrtc] connecting to', remoteId);
     const peer = this.createPeer(remoteId);
     this.peers.set(remoteId, peer);
+
+    // Someone walking up mid-presentation missed the original announcement —
+    // it was broadcast once, before they were connected. Re-announcing on each
+    // new connection means the marker is never something you had to be present
+    // for. Idempotent: receivers just overwrite the same id.
+    if (this.screenStream) {
+      this.socket?.emit(SocketEvents.RTC_SCREEN_SHARE, { streamId: this.screenStream.id });
+    }
 
     // Glare avoidance: lower socket id creates the offer
     const localId = this.socket.id!;
@@ -906,6 +937,10 @@ class WebRTCService {
       this.screenStream = stream;
       const screenTrack = stream.getVideoTracks()[0];
       screenTrack.onended = () => this.stopScreenShare();
+      // Announce BEFORE adding the track, so the id is already known by the
+      // time the renegotiated track shows up at the other end and there is no
+      // window where it has to be guessed at.
+      this.socket?.emit(SocketEvents.RTC_SCREEN_SHARE, { streamId: stream.id });
 
       for (const peer of this.peers.values()) {
         peer.screenSender = peer.pc.addTrack(screenTrack, stream);
@@ -924,6 +959,7 @@ class WebRTCService {
     if (!this.screenStream) return;
     this.screenStream.getTracks().forEach((t) => t.stop());
     this.screenStream = null;
+    this.socket?.emit(SocketEvents.RTC_SCREEN_SHARE, { streamId: null });
 
     for (const peer of this.peers.values()) {
       if (peer.screenSender) {
@@ -936,6 +972,11 @@ class WebRTCService {
 
   destroy() {
     this.disconnectAll();
+    // Cleared here and NOT in disconnectFromPlayer: someone walking out of
+    // proximity range is still presenting, so forgetting their announcement
+    // would force the next reconnection back onto the fallback guess. Leaving
+    // the room is the point at which none of it is true any more.
+    this.announcedScreens.clear();
     if (this.analyserInterval) clearInterval(this.analyserInterval);
     this.localStream?.getTracks().forEach((t) => t.stop());
     this.screenStream?.getTracks().forEach((t) => t.stop());
@@ -944,7 +985,31 @@ class WebRTCService {
     this.socket = null;
   }
 
+  // Screen-share stream ids announced by peers, kept outside the peer record
+  // so an announcement that arrives BEFORE we've connected to that person
+  // isn't lost — createPeer seeds itself from here.
+  private announcedScreens = new Map<string, string>();
+
   private setupSignaling(socket: Socket) {
+    socket.on(SocketEvents.RTC_SCREEN_SHARE, (data: { fromId: string; streamId: string | null }) => {
+      if (!data?.fromId) return;
+      const peer = this.peers.get(data.fromId);
+      if (data.streamId) {
+        this.announcedScreens.set(data.fromId, data.streamId);
+        if (peer) peer.screenStreamId = data.streamId;
+      } else {
+        this.announcedScreens.delete(data.fromId);
+        if (peer) peer.screenStreamId = null;
+        // A stop announcement retracts the panel immediately, without waiting
+        // for the track's own `ended` event — which is precisely the signal
+        // that proved unreliable and left ghost panels behind.
+        if (peer?.remoteScreenStream) {
+          peer.remoteScreenStream = null;
+          this.onRemoteScreenEnded?.(data.fromId);
+        }
+      }
+    });
+
     socket.on(SocketEvents.RTC_OFFER, (signal: { fromId: string; payload: RTCSessionDescriptionInit }) => {
       this.handleOffer(signal.fromId, signal.payload);
     });
