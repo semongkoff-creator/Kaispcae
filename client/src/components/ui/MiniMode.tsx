@@ -173,8 +173,12 @@ export function MiniMode({ pipWindow, nearby, localStream, remoteStreams, remote
     <div className="w-full h-full flex flex-col bg-gray-900 text-white p-2 gap-2 overflow-y-auto">
       <div className="grid grid-cols-2 gap-1.5">
         {localStream && <MiniTile name="You" stream={localStream} muted micMuted={micMuted} cameraOff={cameraOff} />}
-        {videoTiles.map((tile) => (
-          <MiniTile key={tile.id} name={tile.name} stream={tile.stream} />
+        {/* Mini Mode stays camera-only (its empty state literally says
+            "Nobody's on camera") — the streamless proximity tiles that the
+            main column now shows would just be blank boxes in this compact
+            PiP, so they're filtered out here. */}
+        {videoTiles.filter((t) => t.stream).map((tile) => (
+          <MiniTile key={tile.id} name={tile.name} stream={tile.stream!} />
         ))}
       </div>
       {videoTiles.length === 0 && !localStream && (

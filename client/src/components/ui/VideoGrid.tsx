@@ -107,13 +107,19 @@ export function getVideoTiles(
     .map((p) => ({
       id: p.id,
       name: playerRecords[p.id]?.name || 'Unknown',
-      stream: remoteStreams.get(p.id)!,
+      stream: remoteStreams.get(p.id),
       screenStream: remoteScreenStreams.get(p.id),
       translucent: p.visibility === 'translucent',
       isBeingRecorded: !!recordedTargetUserId && playerRecords[p.id]?.userId === recordedTargetUserId,
       handRaised: !!playerRecords[p.id]?.handRaised,
-    }))
-    .filter((t) => t.stream);
+    }));
+    // Deliberately NOT filtered by stream any more. A nearby player must show
+    // the moment they're in range — as live video if it's flowing, or as an
+    // initials tile if their camera is off or their media hasn't connected
+    // yet. The old `.filter((t) => t.stream)` made anyone without a live
+    // camera track invisible in the column even while standing right next to
+    // you, which read as "proximity isn't working". VideoTile renders the
+    // initials avatar whenever stream is absent (see its showAvatar).
 }
 
 // A presented screen as its own panel, pinned in place — deliberately NOT a
@@ -545,7 +551,9 @@ export function VideoTile({
   speaking,
 }: {
   name: string;
-  stream: MediaStream;
+  // Optional: a nearby peer with no camera on (or whose media hasn't arrived
+  // yet) has no stream, and still gets a tile showing their initials.
+  stream?: MediaStream | null;
   isLocal: boolean;
 
   micMuted?: boolean;
@@ -570,8 +578,8 @@ export function VideoTile({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    video.srcObject = stream;
-    video.play().catch(() => {});
+    video.srcObject = stream ?? null;
+    if (stream) video.play().catch(() => {});
     return () => {
       video.srcObject = null;
     };
@@ -579,7 +587,9 @@ export function VideoTile({
 
   useEffect(() => {
     if (isLocal) return;
-    const track = stream.getVideoTracks()[0];
+    // No stream (media not arrived / camera off) counts as video-off, so the
+    // initials avatar shows instead of a blank black tile.
+    const track = stream?.getVideoTracks()[0];
     if (!track) { setRemoteVideoOff(true); return; }
     const sync = () => setRemoteVideoOff(track.muted);
     sync();
@@ -593,7 +603,7 @@ export function VideoTile({
 
   // Screen shares are exempt: a paused screen share is still the screen, and
   // showing someone's walking avatar in place of it would be misleading.
-  const showAvatar = !isScreen && (isLocal ? !!cameraOff : remoteVideoOff);
+  const showAvatar = !isScreen && (isLocal ? !!cameraOff : (!stream || remoteVideoOff));
 
 
   return (
