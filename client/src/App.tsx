@@ -37,6 +37,7 @@ import { Sidebar } from './components/ui/Sidebar';
 import { MicButton } from './components/hud/MicButton';
 import { HandButton } from './components/hud/HandButton';
 import { CameraButton } from './components/hud/CameraButton';
+import { DeviceMenu } from './components/hud/DeviceMenu';
 import { ScreenShareButton } from './components/hud/ScreenShareButton';
 import { NotificationSettings } from './components/ui/NotificationSettings';
 import { Lobby } from './pages/Lobby';
@@ -1189,7 +1190,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {!moduleOpen && (
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-50">
         <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
+        <DeviceMenu kind="audio" />
         <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
+        <DeviceMenu kind="video" />
         <HandButton raised={!!localPlayer.handRaised} onToggle={handleHandToggle} />
         <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
         <NotificationSettings />

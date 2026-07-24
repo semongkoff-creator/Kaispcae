@@ -157,6 +157,16 @@ class WebRTCService {
   // multiple simultaneous connections, so this doesn't affect normal playback.
   private audioDestNodes = new Map<string, MediaStreamAudioDestinationNode>();
   private audioContext: AudioContext | null = null;
+
+  // Chosen input/output devices, remembered across sessions. Applied as
+  // `ideal` (never `exact`) when auto-acquiring on join so a device that has
+  // since been unplugged silently falls back to the system default instead of
+  // throwing OverconstrainedError and leaving the user with no mic/camera.
+  // An explicit user pick (switchMic/switchCamera) does use `exact`, because
+  // there a silent fall-back to a different device would be a lie.
+  private selectedMicId = localStorage.getItem('meetkai.micId');
+  private selectedCameraId = localStorage.getItem('meetkai.cameraId');
+  private selectedSpeakerId = localStorage.getItem('meetkai.speakerId');
   private analyserNode: AnalyserNode | null = null;
   private socket: Socket | null = null;
   private onRemoteStream: ((id: string, stream: MediaStream) => void) | null = null;
@@ -215,7 +225,9 @@ class WebRTCService {
       // and mic together, so a camera already in use by another app failed
       // the combined request and needed an audio-only retry to rescue the
       // microphone. Nothing to rescue if the camera was never requested.
-      this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.localStream = await navigator.mediaDevices.getUserMedia({
+        audio: this.selectedMicId ? { deviceId: { ideal: this.selectedMicId } } : true,
+      });
       this.finishLocalMediaSetup();
       this.syncTracksToPeers();
       return { success: true };
@@ -317,6 +329,97 @@ class WebRTCService {
     return this.localStream;
   }
 
+  // ---- Device selection ----------------------------------------------------
+
+  // Labels are only filled in once permission for that KIND of device has been
+  // granted: the mic is granted on join so mics/speakers are labelled, but
+  // camera labels stay empty until the camera has been switched on at least
+  // once. The UI shows a generic "Camera N" placeholder for the unlabelled.
+  async listDevices(): Promise<{ mics: MediaDeviceInfo[]; cameras: MediaDeviceInfo[]; speakers: MediaDeviceInfo[] }> {
+    let devices: MediaDeviceInfo[] = [];
+    try { devices = await navigator.mediaDevices.enumerateDevices(); } catch { /* ignore */ }
+    return {
+      mics: devices.filter((d) => d.kind === 'audioinput'),
+      cameras: devices.filter((d) => d.kind === 'videoinput'),
+      speakers: devices.filter((d) => d.kind === 'audiooutput'),
+    };
+  }
+
+  getSelectedDevices(): { micId: string | null; cameraId: string | null; speakerId: string | null } {
+    return { micId: this.selectedMicId, cameraId: this.selectedCameraId, speakerId: this.selectedSpeakerId };
+  }
+
+  // Swap the microphone live. replaceTrack (via syncTracksToPeers) needs no
+  // renegotiation, so peers keep hearing this person with no drop.
+  async switchMic(deviceId: string): Promise<void> {
+    this.selectedMicId = deviceId;
+    localStorage.setItem('meetkai.micId', deviceId);
+    if (!this.localStream) return;
+
+    const old = this.localStream.getAudioTracks()[0];
+    // A freshly acquired track is enabled; if the user is currently muted the
+    // new mic must stay muted too, or changing device would silently un-mute.
+    const wasEnabled = old ? old.enabled : false;
+
+    const fresh = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } });
+    const track = fresh.getAudioTracks()[0];
+    if (!track) return;
+    track.enabled = wasEnabled;
+
+    if (old) { old.stop(); this.localStream.removeTrack(old); }
+    this.localStream.addTrack(track);
+
+    // Re-point the speaking-detection analyser at the new track — the old
+    // source fed off the now-stopped one. Same wiring finishLocalMediaSetup
+    // uses, minus its one-time setup.
+    if (this.audioContext) {
+      const source = this.audioContext.createMediaStreamSource(this.localStream);
+      this.analyserNode = this.audioContext.createAnalyser();
+      this.analyserNode.fftSize = 256;
+      source.connect(this.analyserNode);
+    }
+
+    this.syncTracksToPeers();
+  }
+
+  // Swap the camera. Only acts live if the camera is on; otherwise the id is
+  // remembered and enableCamera() picks it up next time it's turned on.
+  async switchCamera(deviceId: string): Promise<void> {
+    this.selectedCameraId = deviceId;
+    localStorage.setItem('meetkai.cameraId', deviceId);
+    const stream = this.localStream;
+    if (!stream) return;
+    const old = stream.getVideoTracks()[0];
+    if (!old) return;
+
+    const fresh = await navigator.mediaDevices.getUserMedia({
+      video: { ...CAMERA_CONSTRAINTS, deviceId: { exact: deviceId } },
+    });
+    const track = fresh.getVideoTracks()[0];
+    if (!track) return;
+
+    old.stop();
+    stream.removeTrack(old);
+    stream.addTrack(track);
+    for (const peer of this.peers.values()) {
+      const sender = this.cameraSender(peer);
+      if (sender) sender.replaceTrack(track).catch(() => {});
+      else this.videoSenders.add(peer.pc.addTrack(track, stream));
+    }
+  }
+
+  // Redirect everyone's voice to the chosen speaker. setSinkId is Chromium-only
+  // — on browsers without it this resolves to a no-op and playback stays on the
+  // default device.
+  async switchSpeaker(deviceId: string): Promise<void> {
+    this.selectedSpeakerId = deviceId;
+    localStorage.setItem('meetkai.speakerId', deviceId);
+    for (const peer of this.peers.values()) {
+      const el = peer.audioEl as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
+      await el?.setSinkId?.(deviceId).catch(() => {});
+    }
+  }
+
   // The camera sender for a peer — the screen-share sender is excluded, since
   // it is also a video track and overwriting it would replace someone's
   // presentation with their face.
@@ -339,7 +442,11 @@ class WebRTCService {
 
     let track: MediaStreamTrack;
     try {
-      const cam = await navigator.mediaDevices.getUserMedia({ video: CAMERA_CONSTRAINTS });
+      const cam = await navigator.mediaDevices.getUserMedia({
+        video: this.selectedCameraId
+          ? { ...CAMERA_CONSTRAINTS, deviceId: { ideal: this.selectedCameraId } }
+          : CAMERA_CONSTRAINTS,
+      });
       track = cam.getVideoTracks()[0];
       if (!track) return { success: false, error: 'No camera track' };
     } catch (err: unknown) {
@@ -610,6 +717,13 @@ class WebRTCService {
         // this machine's own speakers.
         (el as HTMLAudioElement & { playsInline?: boolean }).playsInline = true;
         peer.audioEl = el;
+        // Route to the chosen speaker if one was picked. setSinkId exists only
+        // on Chromium (Firefox largely lacks output selection) — optional
+        // chaining just no-ops where it's unsupported.
+        if (this.selectedSpeakerId) {
+          (el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> })
+            .setSinkId?.(this.selectedSpeakerId).catch(() => {});
+        }
         this.applyGain(peer);
         // Rejects only when no gesture has happened yet; resumeAudio() below
         // retries on the next click, exactly as soundEffects.ts does.
