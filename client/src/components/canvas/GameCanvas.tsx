@@ -160,7 +160,7 @@ interface GameCanvasProps {
   bannerPlaceMode: boolean;
   onBannerPlaceComplete: (x: number, y: number) => void;
   onPortalEnter: (target: string) => void;
-  emitSit: (sitting: boolean, x: number, y: number, direction: Direction) => void;
+  emitSit: (sitting: boolean, x: number, y: number, direction: Direction, seatFurnitureId?: string) => void;
   emitFollowUnfollow: () => void;
   onMediaOpen: (mediaId: string) => void;
 }
@@ -356,9 +356,14 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // without this check, two players could both sit at the same spot and
     // their avatars would render fully overlapping each other.
     const occupied = Object.values(playerRecordsRef.current).some(
-      (p) => p.isSitting && p.x === chairCenterX && p.y === chairCenterY,
+      (p) => p.isSitting && (p.seatFurnitureId === chair.id || (p.x === chairCenterX && p.y === chairCenterY)),
     );
-    if (occupied) return;
+    if (occupied) {
+      // Was a silent no-op before — say why, so a taken seat doesn't read as
+      // "sit is broken". Transient banner, same pattern as other HUD notices.
+      useGameStore.getState().setSitNotice('Kursi ini sedang dipakai.');
+      return;
+    }
 
     const state = useGameStore.getState();
     const player = state.localPlayer;
@@ -371,8 +376,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // Face away from the chair — outward into the room, like someone
     // sitting down rather than facing into the seat back.
     const sitDirection = OPPOSITE[player.direction];
-    state.setLocalPlayer({ x: chairCenterX, y: chairCenterY, direction: sitDirection, isMoving: false, isSitting: true });
-    emitSitRef.current(true, chairCenterX, chairCenterY, sitDirection);
+    state.setLocalPlayer({ x: chairCenterX, y: chairCenterY, direction: sitDirection, isMoving: false, isSitting: true, seatFurnitureId: chair.id });
+    emitSitRef.current(true, chairCenterX, chairCenterY, sitDirection, chair.id);
   }, []);
 
   // Nudge ("senggol", Z key) — finds whoever's closest to the local player
@@ -412,7 +417,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const x = returnPos?.x ?? state.localPlayer.x;
     const y = returnPos?.y ?? state.localPlayer.y;
     const direction = state.localPlayer.direction;
-    state.setLocalPlayer({ x, y, isSitting: false });
+    state.setLocalPlayer({ x, y, isSitting: false, seatFurnitureId: undefined });
     state.setSittingFurnitureId(null);
     state.setSitReturnPos(null);
     emitSitRef.current(false, x, y, direction);

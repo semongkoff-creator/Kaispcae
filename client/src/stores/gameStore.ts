@@ -102,6 +102,12 @@ export interface GameState {
   roomDeletedNotice: string | null;
   setRoomDeletedNotice: (notice: string | null) => void;
 
+  // Transient "couldn't sit" reason (e.g. the chair is already taken). Shown
+  // as a self-dismissing HUD banner in App.tsx, not a navigation like the
+  // notices below it.
+  sitNotice: string | null;
+  setSitNotice: (notice: string | null) => void;
+
   // Set when an admin removes us from the room via Kick (see
   // shared/permissions.ts's 'room:kick') — mirrors roomDeletedNotice's
   // "show a notice, then navigate back to the Lobby" pattern in App.tsx.
@@ -358,6 +364,12 @@ export interface GameState {
   setSelectedTileType: (t: TileType) => void;
   selectedPaletteId?: string;
   setSelectedPaletteId: (id: string | undefined) => void;
+  // Room Editor: the "table" newly-placed chairs get grouped under. Chairs
+  // placed while this is set share a tableId → they form one private
+  // audio/video group when occupied (see Furniture.tableId). Editor-only UI
+  // state, never persisted on its own.
+  activeTableId?: string;
+  setActiveTableId: (id: string | undefined) => void;
   tileHistory: TileType[][][];
   tileHistoryIndex: number;
   pushTileHistory: (tiles: TileType[][]) => void;
@@ -457,6 +469,8 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   roomDeletedNotice: null,
   setRoomDeletedNotice: (notice) => set({ roomDeletedNotice: notice }),
+  sitNotice: null,
+  setSitNotice: (notice) => set({ sitNotice: notice }),
 
   kickedNotice: null,
   setKickedNotice: (notice) => set({ kickedNotice: notice }),
@@ -474,7 +488,10 @@ export const useGameStore = create<GameState>((set, get) => ({
     set((state) => ({
       sittingFurnitureId: furnitureId,
       sitReturnPos: returnPos,
-      localPlayer: { ...state.localPlayer, x, y, direction, isMoving: false, isSitting: true },
+      // seatFurnitureId on the avatar too (not just sittingFurnitureId) so the
+      // "My Seat" teleport path joins table audio groups exactly like a manual
+      // SPACE-sit does.
+      localPlayer: { ...state.localPlayer, x, y, direction, isMoving: false, isSitting: true, seatFurnitureId: furnitureId },
     })),
 
   micMuted: false,
@@ -826,6 +843,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   setSelectedTileType: (t: TileType) => set({ selectedTileType: t, selectedPaletteId: undefined }),
   selectedPaletteId: undefined,
   setSelectedPaletteId: (id) => set({ selectedPaletteId: id }),
+  activeTableId: undefined,
+  setActiveTableId: (id) => set({ activeTableId: id }),
   tileHistory: [],
   tileHistoryIndex: -1,
   pushTileHistory: (tiles) =>

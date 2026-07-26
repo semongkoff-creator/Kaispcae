@@ -59,6 +59,12 @@ export interface Avatar {
   // chair's tile, so remote clients just render this player idle at that
   // exact position rather than needing a separate "sitting" sprite.
   isSitting?: boolean;
+  // Which chair (Furniture.id) this player is currently sitting in, broadcast
+  // alongside isSitting. Two sitting players whose chairs share a Furniture
+  // .tableId form a private audio/video group — the same effect as sharing a
+  // zone (see useProximity). Also how "is this chair already taken" is checked
+  // before letting someone sit. Cleared when they stand.
+  seatFurnitureId?: string;
   // True while the Run key (R) is held during active movement — only
   // meaningful alongside isMoving; purely cosmetic (faster walk-cycle
   // animation) plus the actual higher PLAYER_RUN_SPEED already reflected in
@@ -712,6 +718,13 @@ export interface Furniture {
   // not exposed as a Room Editor toggle, since "which pieces are chairs" is
   // a property of the art (tilePaletteManifest.ts), not an admin choice.
   isInteractable?: boolean;
+  // Groups chairs into a "table": chairs sharing a tableId form one private
+  // audio/video group whenever 2+ of their occupants are seated, exactly like
+  // a private zone (see useProximity's table branch). Set by admins in the
+  // Room Editor. Capacity is simply how many chairs carry this id — there is
+  // no separate maxSeats field to fall out of sync. Only meaningful on
+  // isInteractable chairs.
+  tableId?: string;
   // Permanent seat assignment (ZEP-style "this is my desk"), distinct from
   // Avatar.isSitting which is just transient occupancy. Only set on
   // isInteractable pieces — see FURNITURE_ASSIGN/FURNITURE_UNASSIGN.

@@ -189,10 +189,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       upsertPlayer({ id: data.id, handRaised: data.handRaised || undefined } as Avatar);
     });
 
-    socket.on(SocketEvents.PLAYER_SAT, (data: { id: string; isSitting: boolean; x: number; y: number; direction: Avatar['direction'] }) => {
+    socket.on(SocketEvents.PLAYER_SAT, (data: { id: string; isSitting: boolean; x: number; y: number; direction: Avatar['direction']; seatFurnitureId?: string }) => {
       const state = useGameStore.getState();
       if (data.id === state.localPlayerId) return;
-      upsertPlayer({ id: data.id, isSitting: data.isSitting, x: data.x, y: data.y, direction: data.direction, isMoving: false } as Avatar);
+      // seatFurnitureId carried through so this peer's table membership (and
+      // chair occupancy) is known locally — undefined once they stand.
+      upsertPlayer({ id: data.id, isSitting: data.isSitting, seatFurnitureId: data.seatFurnitureId, x: data.x, y: data.y, direction: data.direction, isMoving: false } as Avatar);
     });
 
     // §4 — Teleport. Broadcast via io.to(room) (not socket.to(room)), so the
@@ -235,7 +237,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
             : { x: seatTileX, y: seatTileY + 1 };
           const returnPos = { x: adjacent.x * TILE_SIZE + TILE_SIZE / 2, y: adjacent.y * TILE_SIZE + TILE_SIZE / 2 };
           state.landOnSeat(data.seatFurnitureId, returnPos, data.x, data.y, data.direction);
-          socket.emit(SocketEvents.PLAYER_SIT, { sitting: true, x: data.x, y: data.y, direction: data.direction });
+          socket.emit(SocketEvents.PLAYER_SIT, { sitting: true, x: data.x, y: data.y, direction: data.direction, seatFurnitureId: data.seatFurnitureId });
           return;
         }
         // Stand up first if sitting — otherwise x/y jumps to the teleport
@@ -605,8 +607,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.PLAYER_HAND, raised);
   }, []);
 
-  const emitSit = useCallback((sitting: boolean, x: number, y: number, direction: Avatar['direction']) => {
-    socketRef.current?.emit(SocketEvents.PLAYER_SIT, { sitting, x, y, direction });
+  const emitSit = useCallback((sitting: boolean, x: number, y: number, direction: Avatar['direction'], seatFurnitureId?: string) => {
+    socketRef.current?.emit(SocketEvents.PLAYER_SIT, { sitting, x, y, direction, seatFurnitureId });
   }, []);
 
   const emitFurnitureAssign = useCallback((furnitureId: string, name: string) => {

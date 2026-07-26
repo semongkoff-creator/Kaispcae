@@ -209,11 +209,15 @@ export async function updatePlayerSitting(
   x: number,
   y: number,
   direction: Avatar['direction'],
+  seatFurnitureId?: string,
 ): Promise<void> {
   const players = await getPlayers(roomId);
   const player = players.find((p) => p.id === playerId);
   if (player) {
     player.isSitting = isSitting || undefined;
+    // Which chair they're in, so a late-joiner's room:state carries table
+    // membership too — cleared when they stand.
+    player.seatFurnitureId = isSitting ? seatFurnitureId : undefined;
     player.x = x;
     player.y = y;
     player.direction = direction;

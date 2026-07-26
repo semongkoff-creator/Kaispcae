@@ -175,6 +175,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const localUserId = useGameStore((s) => s.localUserId);
   const sittingItem = sittingFurnitureId ? furniture.find((f) => f.id === sittingFurnitureId) : undefined;
   const spotlightedUserIds = useGameStore((s) => s.spotlightedUserIds);
+  const sitNotice = useGameStore((s) => s.sitNotice);
+  // A "couldn't sit" notice (chair taken) self-dismisses — one-off action
+  // failure, same treatment as miniModeError.
+  useEffect(() => {
+    if (!sitNotice) return;
+    const t = setTimeout(() => useGameStore.getState().setSitNotice(null), 2500);
+    return () => clearTimeout(t);
+  }, [sitNotice]);
 
   // "My Seat" — one-click jump to whichever furniture is assigned to me in
   // THIS room (assignment is per-room, see Furniture.assignedToUserId).
@@ -188,10 +196,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   }, [emitTeleportRequest]);
 
   const nearby = useProximity(
-    { x: localPlayer.x, y: localPlayer.y, id: localPlayerId },
+    { x: localPlayer.x, y: localPlayer.y, id: localPlayerId, isSitting: localPlayer.isSitting, seatFurnitureId: localPlayer.seatFurnitureId },
     playerRecords,
     zones,
     spotlightedUserIds,
+    furniture,
   );
 
   // Update WebRTC connections based on proximity
@@ -542,6 +551,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     const item: Furniture = {
       id: crypto.randomUUID(), paletteId, x, y, tilesW: entry.tilesW, tilesH: entry.tilesH,
       isInteractable: entry.sittable || undefined,
+      // Group into the active table only for actual chairs — a non-sittable
+      // piece has no occupant, so a tableId on it would be meaningless.
+      tableId: (entry.sittable && state.activeTableId) ? state.activeTableId : undefined,
     };
     state.addFurniture(item);
   }, []);
@@ -1217,6 +1229,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {miniModeError && !moduleOpen && (
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/80 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none max-w-md text-center">
           {miniModeError}
+        </div>
+      )}
+
+      {/* Couldn't-sit notice (e.g. chair taken) — self-dismisses via the effect
+          above, same look as miniModeError. */}
+      {sitNotice && !moduleOpen && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 bg-amber-50 dark:bg-amber-900/80 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none text-center">
+          {sitNotice}
         </div>
       )}
 

@@ -241,11 +241,19 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
   const setPendingZoneRect = useGameStore((s) => s.setPendingZoneRect);
   const furniture = useGameStore((s) => s.furniture);
   const removeFurnitureAt = useGameStore((s) => s.removeFurnitureAt);
+  const activeTableId = useGameStore((s) => s.activeTableId);
+  const setActiveTableId = useGameStore((s) => s.setActiveTableId);
   const bannerPlaceMode = useGameStore((s) => s.bannerPlaceMode);
   const toggleBannerPlaceMode = useGameStore((s) => s.toggleBannerPlaceMode);
   const pendingBannerPos = useGameStore((s) => s.pendingBannerPos);
   const setPendingBannerPos = useGameStore((s) => s.setPendingBannerPos);
   const banners = furniture.filter((f) => f.kind === 'banner');
+  // Distinct tables already placed, with how many chairs each has — its
+  // capacity (no separate maxSeats field; a table just IS its chairs).
+  const tableCounts = furniture.reduce<Record<string, number>>((acc, f) => {
+    if (f.isInteractable && f.tableId) acc[f.tableId] = (acc[f.tableId] ?? 0) + 1;
+    return acc;
+  }, {});
 
   const handleReset = useCallback(() => {
     const state = useGameStore.getState();
@@ -331,6 +339,38 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
       <p className="text-gray-400 dark:text-gray-500 text-[10px] mb-3 leading-relaxed">
         Click to place • Right-click to erase. Objects are stamped in one click at the tile you click (its base), taller pieces extend upward and let you walk behind them. Chairs can be sat in (SPACE) once placed.
       </p>
+
+      {/* Table grouping — chairs placed while a table is active share its id and
+          become one private audio/video group once 2+ people sit (like a zone). */}
+      <div className="mb-3 rounded-lg bg-purple-50/60 dark:bg-gray-800 p-2">
+        <p className="text-gray-500 dark:text-gray-400 text-[10px] uppercase tracking-wider mb-1.5">Meja (grup kursi)</p>
+        <input
+          value={activeTableId ?? ''}
+          onChange={(e) => setActiveTableId(e.target.value.trim() || undefined)}
+          placeholder="mis. meja-1  (kosong = tanpa meja)"
+          maxLength={40}
+          className="w-full bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1 outline-none border border-purple-100 dark:border-gray-600 focus:border-purple-500"
+        />
+        {Object.keys(tableCounts).length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {Object.entries(tableCounts).map(([id, n]) => (
+              <button
+                key={id}
+                onClick={() => setActiveTableId(id)}
+                title={`${n} kursi — klik untuk lanjut menaruh kursi di meja ini`}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-medium cursor-pointer ${
+                  activeTableId === id ? 'bg-purple-600 text-white' : 'bg-purple-100 dark:bg-gray-700 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-gray-600'
+                }`}
+              >
+                {id} · {n}
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-1.5 leading-relaxed">
+          Kursi yang ditaruh saat kolom ini terisi masuk meja yang sama → jadi grup audio/video privat begitu 2+ orang duduk. Kosongkan untuk kursi biasa.
+        </p>
+      </div>
 
       <hr className="border-purple-100 dark:border-gray-700 my-3" />
 

@@ -781,12 +781,16 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     updatePlayerHand(room, socket.id, val);
   });
 
-  socket.on(SocketEvents.PLAYER_SIT, (data: { sitting: boolean; x: number; y: number; direction: Avatar['direction'] }) => {
+  socket.on(SocketEvents.PLAYER_SIT, (data: { sitting: boolean; x: number; y: number; direction: Avatar['direction']; seatFurnitureId?: string }) => {
     const room = currentRoom; if (!room) return;
     if (typeof data?.x !== 'number' || typeof data?.y !== 'number') return;
-    const payload = { id: socket.id, isSitting: !!data.sitting, x: data.x, y: data.y, direction: data.direction };
+    // seatFurnitureId rides along so peers know WHICH chair this is — chairs
+    // sharing a Furniture.tableId form a private audio group (see the client's
+    // useProximity). Cleared (undefined) on stand-up.
+    const seatFurnitureId = data.sitting && typeof data.seatFurnitureId === 'string' ? data.seatFurnitureId : undefined;
+    const payload = { id: socket.id, isSitting: !!data.sitting, x: data.x, y: data.y, direction: data.direction, seatFurnitureId };
     socket.to(room).emit(SocketEvents.PLAYER_SAT, payload);
-    updatePlayerSitting(room, socket.id, payload.isSitting, payload.x, payload.y, payload.direction);
+    updatePlayerSitting(room, socket.id, payload.isSitting, payload.x, payload.y, payload.direction, seatFurnitureId);
   });
 
   socket.on(SocketEvents.ROOM_UPDATE, (payload: RoomUpdatePayload) => {

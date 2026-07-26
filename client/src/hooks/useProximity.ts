@@ -6,6 +6,7 @@ import {
   VisibilityStatus,
   Avatar,
   Zone,
+  Furniture,
   TILE_SIZE,
 } from '@virtualmeet/shared';
 
@@ -36,14 +37,26 @@ export function findZoneAt(pos: { x: number; y: number }, zones: Zone[]): Zone |
 }
 
 export function useProximity(
-  localPlayer: Pick<Avatar, 'x' | 'y' | 'id'>,
+  localPlayer: Pick<Avatar, 'x' | 'y' | 'id' | 'isSitting' | 'seatFurnitureId'>,
   remotePlayers: Record<string, Avatar>,
   zones: Zone[] = [],
   spotlightedUserIds: string[] = [],
+  furniture: Furniture[] = [],
 ): ProximityPlayer[] {
   return useMemo(() => {
     const localZone = findZoneAt(localPlayer, zones);
     const spotlightSet = new Set(spotlightedUserIds);
+
+    // chair Furniture.id → its tableId, so a seated player's table can be
+    // resolved from the seatFurnitureId they broadcast. Only chairs that were
+    // actually grouped carry a tableId.
+    const tableOfChair = new Map<string, string>();
+    for (const f of furniture) {
+      if (f.tableId) tableOfChair.set(f.id, f.tableId);
+    }
+    const seatedTable = (a: Pick<Avatar, 'isSitting' | 'seatFurnitureId'>): string | undefined =>
+      a.isSitting && a.seatFurnitureId ? tableOfChair.get(a.seatFurnitureId) : undefined;
+    const localTable = seatedTable(localPlayer);
 
     return Object.values(remotePlayers).map((p) => {
       const distanceTiles = calcDistanceTiles(localPlayer, p);
@@ -56,6 +69,16 @@ export function useProximity(
       // would render at full opacity but stay silent, since distanceTiles
       // still reflects their real (possibly huge) distance.
       if (p.userId && spotlightSet.has(p.userId)) {
+        return { id: p.id, distanceTiles, visibility: 'full_visible' as VisibilityStatus, viaZone: true };
+      }
+
+      // Table membership: two people seated at chairs sharing a tableId are one
+      // private group — the SAME effect as a shared zone (full connect, full
+      // volume via viaZone), checked FIRST so it holds even if one of them is
+      // also standing inside some zone. A table in the open (no zone) works
+      // identically. Standing clears seatFurnitureId, so this lapses on its own
+      // and they fall back to plain distance below.
+      if (localTable && seatedTable(p) === localTable) {
         return { id: p.id, distanceTiles, visibility: 'full_visible' as VisibilityStatus, viaZone: true };
       }
 
@@ -74,5 +97,5 @@ export function useProximity(
         distanceTiles <= PROXIMITY_THRESHOLD ? 'full_visible' : distanceTiles <= TRANSLUCENT_THRESHOLD ? 'translucent' : 'not_visible';
       return { id: p.id, distanceTiles, visibility };
     });
-  }, [localPlayer.x, localPlayer.y, remotePlayers, zones, spotlightedUserIds]);
+  }, [localPlayer.x, localPlayer.y, localPlayer.isSitting, localPlayer.seatFurnitureId, remotePlayers, zones, spotlightedUserIds, furniture]);
 }
