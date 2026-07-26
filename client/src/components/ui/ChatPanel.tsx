@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
 import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, Paperclip, FileEarmarkFill, Download, TrashFill, PencilFill } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
+import { ChatAvatar, avatarColor } from './ChatAvatar';
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024; // matches server/src/routes/uploads.ts's multer limit
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
@@ -123,7 +124,31 @@ export function ChatPanel({
   const [uploadingFile, setUploadingFile] = useState(false);
   const [attachError, setAttachError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  // Scroll container (not an anchor element): we drive scrollTop directly,
+  // which is steadier under React re-renders than scrollIntoView (that can
+  // yank the whole page and fights the smooth-scroll mid-render).
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Whether the user is parked at (or near) the bottom. A ref, not state, so
+  // reading it inside the new-message effect never runs a render behind.
+  const isNearBottomRef = useRef(true);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+
+  const scrollToBottom = useCallback((smooth = false) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    isNearBottomRef.current = true;
+    setHasNewMessages(false);
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // ~100px slack so "basically at the bottom" still counts as at-bottom.
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    isNearBottomRef.current = nearBottom;
+    if (nearBottom) setHasNewMessages(false);
+  }, []);
 
   // Fall back to the channel/DM view the moment there's no zone chat left.
   useEffect(() => {
@@ -132,9 +157,22 @@ export function ChatPanel({
 
   const visibleMessages = viewingZone ? zoneMessages : messages;
 
+  // A new message arrived (or was sent). If the user is at the bottom, follow
+  // it; if they've scrolled up to read history, DON'T yank them — flag it so
+  // the "new messages" pill appears instead.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [visibleMessages.length]);
+    if (isNearBottomRef.current) scrollToBottom(true);
+    else setHasNewMessages(true);
+  }, [visibleMessages.length, scrollToBottom]);
+
+  // Opening the panel, or switching tab/zone, is a fresh scrollback — jump
+  // straight to the newest message (no smooth animation on first paint).
+  useEffect(() => {
+    if (!open) return;
+    // Next frame, once the new list has rendered at its real height.
+    const id = requestAnimationFrame(() => scrollToBottom(false));
+    return () => cancelAnimationFrame(id);
+  }, [open, viewingZone, activeChatTarget?.type, activeChatTarget?.id, scrollToBottom]);
 
   // Switching targets means a fresh scrollback — reset thread/pagination UI.
   useEffect(() => {
@@ -342,7 +380,12 @@ export function ChatPanel({
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto p-3 space-y-1.5 text-xs">
+          <div className="relative flex-1 min-h-0 flex flex-col">
+          <div
+            ref={scrollRef}
+            onScroll={handleScroll}
+            className="flex-1 overflow-y-auto p-3 space-y-2 text-xs"
+          >
             {!viewingZone && hasMoreOlder && messages.length > 0 && (
               <button
                 onClick={handleLoadOlder}
@@ -355,25 +398,22 @@ export function ChatPanel({
 
             {viewingZone
               ? zoneMessages.map((m) => {
-                  const isMentioned = m.text.includes(`@${localPlayerName}`);
                   const isOwn = m.senderName === localPlayerName;
+                  const isMentioned = m.text.includes(`@${localPlayerName}`);
                   return (
-                    <div
+                    <MessageBubble
                       key={m.id}
-                      onContextMenu={isAdmin && onPinNotice ? (e) => { e.preventDefault(); onPinNotice(m); } : undefined}
-                      title={isAdmin && onPinNotice ? 'Right-click to pin as notice' : undefined}
-                      className={`rounded-lg px-2 py-1 ${isAdmin && onPinNotice ? 'cursor-context-menu' : ''} ${
-                        isMentioned ? 'bg-amber-100 dark:bg-amber-900/40' : isOwn ? 'bg-purple-600' : 'bg-gray-100 dark:bg-gray-700'
-                      }`}
+                      isOwn={isOwn}
+                      name={m.senderName}
+                      color={m.senderColor || avatarColor(m.senderName)}
+                      time={m.timestamp}
+                      mentioned={isMentioned}
+                      pinnable={!!(isAdmin && onPinNotice)}
+                      onPin={() => onPinNotice?.(m)}
                     >
-                      <span className={`font-mono text-[10px] mr-1 ${isOwn ? 'text-purple-200' : 'text-gray-400 dark:text-gray-500'}`}>
-                        {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                      <span className="inline-block w-2 h-2 rounded-full mr-1" style={{ backgroundColor: m.senderColor }} />
-                      <span className={`font-medium ${isOwn ? 'text-purple-100' : 'text-gray-500 dark:text-gray-400'}`}>{m.senderName}</span>
-                      {m.isProximity && <span className={`ml-1 text-[10px] ${isOwn ? 'text-purple-200' : 'text-gray-400 dark:text-gray-500'}`}>(nearby)</span>}
-                      <span className={`ml-1 break-words ${isOwn ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>{m.text}</span>
-                    </div>
+                      {m.isProximity && <span className="opacity-60 mr-1">(nearby)</span>}
+                      <span className="break-words">{m.text}</span>
+                    </MessageBubble>
                   );
                 })
               : messages.map((m) => {
@@ -381,17 +421,44 @@ export function ChatPanel({
                   const isMentioned = m.text.includes(`@${localPlayerName}`);
                   return (
                     <div key={m.id}>
-                      <div
-                        onContextMenu={isAdmin && onPinNotice ? (e) => { e.preventDefault(); onPinNotice(m); } : undefined}
-                        title={isAdmin && onPinNotice ? 'Right-click to pin as notice' : undefined}
-                        className={`rounded-lg px-2 py-1 ${isAdmin && onPinNotice ? 'cursor-context-menu' : ''} ${
-                          isMentioned ? 'bg-amber-100 dark:bg-amber-900/40' : isOwn ? 'bg-purple-600' : 'bg-gray-100 dark:bg-gray-700'
-                        }`}
+                      <MessageBubble
+                        isOwn={isOwn}
+                        name={m.senderName}
+                        color={avatarColor(m.senderId || m.senderName)}
+                        time={m.createdAt}
+                        mentioned={isMentioned}
+                        pinnable={!!(isAdmin && onPinNotice)}
+                        onPin={() => onPinNotice?.(m)}
+                        actions={
+                          <>
+                            <button
+                              onClick={() => toggleThread(m.id)}
+                              className="text-[10px] text-purple-500 hover:text-purple-700 cursor-pointer inline-flex items-center gap-1"
+                            >
+                              <ChatLeftText size={9} />
+                              {m.replyCount ? `${m.replyCount} ${m.replyCount === 1 ? 'reply' : 'replies'}` : 'Reply'}
+                            </button>
+                            {isOwn && onEditMessage && m.text && editingId !== m.id && (
+                              <button
+                                onClick={() => beginEdit(m.id, m.text)}
+                                title="Edit message"
+                                className="text-[10px] text-gray-400 hover:text-purple-600 cursor-pointer inline-flex items-center gap-1"
+                              >
+                                <PencilFill size={9} /> Edit
+                              </button>
+                            )}
+                            {isOwn && onDeleteMessage && (
+                              <button
+                                onClick={() => { if (window.confirm('Delete this message?')) onDeleteMessage(m.id); }}
+                                title="Delete message"
+                                className="text-[10px] text-gray-400 hover:text-red-500 cursor-pointer inline-flex items-center gap-1"
+                              >
+                                <TrashFill size={9} /> Delete
+                              </button>
+                            )}
+                          </>
+                        }
                       >
-                        <span className={`font-mono text-[10px] mr-1 ${isOwn ? 'text-purple-200' : 'text-gray-400 dark:text-gray-500'}`}>
-                          {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                        <span className={`font-medium ${isOwn ? 'text-purple-100' : 'text-gray-500 dark:text-gray-400'}`}>{m.senderName}</span>
                         {editingId === m.id ? (
                           <input
                             autoFocus
@@ -400,45 +467,20 @@ export function ChatPanel({
                             onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); else if (e.key === 'Escape') { setEditingId(null); setEditText(''); } }}
                             onBlur={commitEdit}
                             maxLength={200}
-                            className="ml-1 bg-white/90 text-gray-900 text-xs rounded px-1 py-0.5 outline-none border border-purple-300 w-40"
+                            className="bg-white/90 text-gray-900 text-xs rounded px-1 py-0.5 outline-none border border-purple-300 w-40"
                           />
                         ) : (
                           m.text && (
-                            <span className={`ml-1 break-words ${isOwn ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>
+                            <span className="break-words">
                               {m.text}
-                              {m.edited && <span className={`ml-1 text-[9px] ${isOwn ? 'text-purple-200' : 'text-gray-400 dark:text-gray-500'}`}>(diedit)</span>}
+                              {m.edited && <span className="ml-1 text-[9px] opacity-60">(diedit)</span>}
                             </span>
                           )
                         )}
                         {m.attachmentUrl && (
                           <ChatAttachment url={m.attachmentUrl} fileName={m.attachmentName} isOwn={isOwn} />
                         )}
-                      </div>
-                      <button
-                        onClick={() => toggleThread(m.id)}
-                        className="ml-2 mt-0.5 text-[10px] text-purple-500 hover:text-purple-700 cursor-pointer inline-flex items-center gap-1"
-                      >
-                        <ChatLeftText size={9} />
-                        {m.replyCount ? `${m.replyCount} ${m.replyCount === 1 ? 'reply' : 'replies'}` : 'Reply'}
-                      </button>
-                      {isOwn && onEditMessage && m.text && editingId !== m.id && (
-                        <button
-                          onClick={() => beginEdit(m.id, m.text)}
-                          title="Edit message"
-                          className="ml-2 mt-0.5 text-[10px] text-gray-400 hover:text-purple-600 cursor-pointer inline-flex items-center gap-1"
-                        >
-                          <PencilFill size={9} /> Edit
-                        </button>
-                      )}
-                      {isOwn && onDeleteMessage && (
-                        <button
-                          onClick={() => { if (window.confirm('Delete this message?')) onDeleteMessage(m.id); }}
-                          title="Delete message"
-                          className="ml-2 mt-0.5 text-[10px] text-gray-400 hover:text-red-500 cursor-pointer inline-flex items-center gap-1"
-                        >
-                          <TrashFill size={9} /> Delete
-                        </button>
-                      )}
+                      </MessageBubble>
 
                       {expandedThreadId === m.id && (
                         <div className="ml-3 mt-1 pl-2 border-l-2 border-purple-100 dark:border-gray-700 space-y-1">
@@ -506,7 +548,15 @@ export function ChatPanel({
                 {viewingZone ? `No messages in ${currentZone?.name} yet.` : 'No messages yet.'}
               </p>
             )}
-            <div ref={bottomRef} />
+          </div>
+          {hasNewMessages && (
+            <button
+              onClick={() => scrollToBottom(true)}
+              className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-medium px-2.5 py-1 rounded-full shadow-lg cursor-pointer flex items-center gap-1"
+            >
+              Pesan baru ↓
+            </button>
+          )}
           </div>
 
           {showEmoji && (
@@ -591,6 +641,59 @@ export function ChatPanel({
         </div>
       )}
     </>
+  );
+}
+
+// One chat bubble, WhatsApp-group style: own messages hug the right with no
+// avatar (purple, unchanged); everyone else hugs the left with a round avatar
+// and their name coloured to match it. The sender-specific body (text, edit
+// input, attachment) is passed as children so this wrapper stays identical for
+// zone chat and channel/DM chat; per-message actions (reply/edit/delete) go in
+// `actions`, rendered under the bubble on the same side.
+function MessageBubble({
+  isOwn,
+  name,
+  color,
+  time,
+  mentioned,
+  pinnable,
+  onPin,
+  children,
+  actions,
+}: {
+  isOwn: boolean;
+  name: string;
+  color: string;
+  time: number | string;
+  mentioned?: boolean;
+  pinnable?: boolean;
+  onPin?: () => void;
+  children: ReactNode;
+  actions?: ReactNode;
+}) {
+  // A mentioned message keeps its amber highlight and needs dark text on it,
+  // overriding the white-on-purple own-message default.
+  const bodyText = mentioned || !isOwn ? 'text-gray-900 dark:text-gray-100' : 'text-white';
+  return (
+    <div className={`flex gap-1.5 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+      {!isOwn && <ChatAvatar name={name} color={color} />}
+      <div className={`flex flex-col min-w-0 max-w-[80%] ${isOwn ? 'items-end' : 'items-start'}`}>
+        <div
+          onContextMenu={pinnable ? (e) => { e.preventDefault(); onPin?.(); } : undefined}
+          title={pinnable ? 'Right-click to pin as notice' : undefined}
+          className={`rounded-2xl px-2.5 py-1.5 ${isOwn ? 'rounded-br-sm' : 'rounded-bl-sm'} ${pinnable ? 'cursor-context-menu' : ''} ${bodyText} ${
+            mentioned ? 'bg-amber-100 dark:bg-amber-900/40' : isOwn ? 'bg-purple-600' : 'bg-gray-100 dark:bg-gray-700'
+          }`}
+        >
+          {!isOwn && <div className="font-semibold text-[11px] mb-0.5 leading-tight" style={{ color }}>{name}</div>}
+          {children}
+          <div className={`text-[9px] mt-0.5 ${isOwn ? 'text-purple-200 text-right' : 'text-gray-400 dark:text-gray-500'}`}>
+            {new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
+        </div>
+        {actions && <div className="flex gap-2 mt-0.5 px-1">{actions}</div>}
+      </div>
+    </div>
   );
 }
 
