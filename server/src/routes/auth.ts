@@ -120,7 +120,19 @@ auth.post('/login', authRateLimit, validate(loginSchema), async (req, res: Respo
 auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    // Explicit select (not the whole row): this endpoint runs on every mount +
+    // sliding refresh, and the heavy profilePhoto TEXT column has no business
+    // riding along. Only the fields actually used below are fetched; the client
+    // gets photos (its own included) from the batched /users/profile-photos
+    // route. Keep this list in sync with the response object + active/signToken
+    // usage further down.
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId },
+      select: {
+        id: true, email: true, displayName: true, avatarConfig: true,
+        accountRole: true, workspaceRole: true, timezone: true, active: true,
+      },
+    });
     if (!user) {
       // A JWT can verify fine (correct signature, not expired) and still
       // point at a user id that no longer exists in the database — this is

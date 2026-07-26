@@ -4,6 +4,7 @@ import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteT
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { ChatAvatar, avatarColor } from './ChatAvatar';
+import { useProfilePhotos } from '@/hooks/useProfilePhotos';
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024; // matches server/src/routes/uploads.ts's multer limit
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
@@ -156,6 +157,14 @@ export function ChatPanel({
   }, [currentZone, viewingZone]);
 
   const visibleMessages = viewingZone ? zoneMessages : messages;
+
+  // Profile photos for the channel/DM senders in view — one batched lookup,
+  // cached per user (see useProfilePhotos). Zone chat (ChatMessage) carries no
+  // senderId, so it keeps the initials avatar; only these persisted messages
+  // can resolve a photo.
+  const photoByUser = useProfilePhotos(
+    Array.from(new Set(messages.map((m) => m.senderId).filter(Boolean))),
+  );
 
   // A new message arrived (or was sent). If the user is at the bottom, follow
   // it; if they've scrolled up to read history, DON'T yank them — flag it so
@@ -425,6 +434,7 @@ export function ChatPanel({
                         isOwn={isOwn}
                         name={m.senderName}
                         color={avatarColor(m.senderId || m.senderName)}
+                        photoUrl={photoByUser.get(m.senderId)}
                         time={m.createdAt}
                         mentioned={isMentioned}
                         pinnable={!!(isAdmin && onPinNotice)}
@@ -654,6 +664,7 @@ function MessageBubble({
   isOwn,
   name,
   color,
+  photoUrl,
   time,
   mentioned,
   pinnable,
@@ -664,6 +675,7 @@ function MessageBubble({
   isOwn: boolean;
   name: string;
   color: string;
+  photoUrl?: string;
   time: number | string;
   mentioned?: boolean;
   pinnable?: boolean;
@@ -676,7 +688,7 @@ function MessageBubble({
   const bodyText = mentioned || !isOwn ? 'text-gray-900 dark:text-gray-100' : 'text-white';
   return (
     <div className={`flex gap-1.5 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-      {!isOwn && <ChatAvatar name={name} color={color} />}
+      {!isOwn && <ChatAvatar name={name} color={color} photoUrl={photoUrl} />}
       <div className={`flex flex-col min-w-0 max-w-[80%] ${isOwn ? 'items-end' : 'items-start'}`}>
         <div
           onContextMenu={pinnable ? (e) => { e.preventDefault(); onPin?.(); } : undefined}

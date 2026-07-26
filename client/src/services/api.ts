@@ -154,6 +154,20 @@ export const api = {
   // body, which res.json() would choke on.
   logout: () => fetch(`${API_BASE}/auth/logout`, { method: 'POST' }),
 
+  // ── Profile photo (chat avatar) — stored base64-in-DB, see
+  // server/src/routes/users.ts. The photo is a data-URL the caller has already
+  // resized+compressed (see utils/processProfilePhoto.ts).
+  uploadProfilePhoto: (photo: string) =>
+    request<{ ok: true }>('/users/me/profile-photo', { method: 'PUT', body: JSON.stringify({ photo }) }),
+  deleteProfilePhoto: () =>
+    request<{ ok: true }>('/users/me/profile-photo', { method: 'DELETE' }),
+  // Batch — one call for every sender currently in view, never per-message
+  // (that would be an N+1 on scrollback).
+  getProfilePhotos: (ids: string[]) =>
+    request<{ photos: { id: string; photo: string }[] }>(
+      `/users/profile-photos?ids=${encodeURIComponent(ids.join(','))}`,
+    ),
+
   getRooms: () => request<{ rooms: RoomInfo[] }>('/rooms'),
 
   // ── Room join approval (see server/src/lib/roomMembership.ts) ──────

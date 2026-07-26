@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Tools, LightningFill } from 'react-bootstrap-icons';
+import { Tools, LightningFill, PersonSquare, Trash3 } from 'react-bootstrap-icons';
 import { AvatarConfig, SpriteMode } from '@virtualmeet/shared';
 import { drawAvatar } from '@/components/canvas/AvatarSprite';
 import { PALETTE } from '@/hooks/useAvatarConfig';
+import { api } from '@/services/api';
+import { processProfilePhoto, PhotoError, ACCEPTED_TYPES } from '@/utils/processProfilePhoto';
+import { ChatAvatar, avatarColor } from '@/components/ui/ChatAvatar';
 import {
   GENERATOR_BODIES,
   GENERATOR_EYES,
@@ -49,10 +52,61 @@ interface AvatarSetupProps {
   initialConfig?: AvatarConfig;
   onSave: (config: AvatarConfig) => void;
   onClose?: () => void;
+  // Needed only to preload the caller's OWN existing photo when the editor
+  // opens (via the batch endpoint). The upload/delete calls themselves are
+  // authed server-side, so they don't need it.
+  localUserId?: string;
 }
 
-export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps) {
+export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: AvatarSetupProps) {
   const previewRef = useRef<HTMLCanvasElement>(null);
+
+  // ── Profile photo (chat avatar) — independent of the pixel avatar above;
+  // the two coexist. null = fall back to initials in chat.
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+
+  // Load the current photo once, so the editor shows what's already set.
+  useEffect(() => {
+    if (!localUserId) return;
+    let alive = true;
+    api.getProfilePhotos([localUserId])
+      .then((r) => { if (alive) setPhoto(r.photos[0]?.photo ?? null); })
+      .catch(() => { /* leave as null; not worth an error banner on open */ });
+    return () => { alive = false; };
+  }, [localUserId]);
+
+  const handlePickPhoto = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    setPhotoError('');
+    setPhotoBusy(true);
+    try {
+      const dataUrl = await processProfilePhoto(file); // resize+compress in-browser
+      await api.uploadProfilePhoto(dataUrl);
+      setPhoto(dataUrl);
+    } catch (err) {
+      setPhotoError(err instanceof PhotoError ? err.message : (err as Error)?.message || 'Gagal mengunggah foto.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  }, []);
+
+  const handleRemovePhoto = useCallback(async () => {
+    setPhotoError('');
+    setPhotoBusy(true);
+    try {
+      await api.deleteProfilePhoto();
+      setPhoto(null);
+    } catch (err) {
+      setPhotoError((err as Error)?.message || 'Gagal menghapus foto.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  }, []);
   const [config, setConfig] = useState<AvatarConfig>(() => ({
     ...initialConfig,
     bodyShape: initialConfig?.bodyShape || 'circle',
@@ -247,6 +301,49 @@ export function AvatarSetup({ initialConfig, onSave, onClose }: AvatarSetupProps
             placeholder="e.g. dev, design, AFK"
           />
           <span className="text-gray-400 dark:text-gray-500 text-xs mt-1 block">{config.statusTag.length}/10</span>
+        </Section>
+
+        {/* Foto Profil — dipakai KHUSUS di chat (dan Panel Peserta), terpisah
+            dari avatar pixel di peta. Fallback ke inisial kalau kosong. */}
+        <Section label="Foto Profil (chat)">
+          <div className="flex items-center gap-3">
+            {photo ? (
+              <img src={photo} alt="Foto profil" className="w-14 h-14 rounded-full object-cover shrink-0 border border-purple-100 dark:border-gray-600" />
+            ) : (
+              <ChatAvatar name={config.name || 'You'} color={avatarColor(localUserId || config.name || 'You')} size={56} />
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="flex gap-2">
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept={ACCEPTED_TYPES.join(',')}
+                  onChange={handlePickPhoto}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={photoBusy}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-medium cursor-pointer"
+                >
+                  <PersonSquare size={12} /> {photoBusy ? 'Memproses…' : photo ? 'Ganti Foto' : 'Upload Foto'}
+                </button>
+                {photo && (
+                  <button
+                    onClick={handleRemovePhoto}
+                    disabled={photoBusy}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 text-gray-600 dark:text-gray-300 text-xs font-medium cursor-pointer"
+                  >
+                    <Trash3 size={12} /> Hapus
+                  </button>
+                )}
+              </div>
+              <p className="text-gray-400 dark:text-gray-500 text-[11px] mt-1.5">
+                JPG/PNG/WebP, maks 5MB. Otomatis diperkecil ke 256px.
+              </p>
+              {photoError && <p className="text-red-500 text-[11px] mt-1">{photoError}</p>}
+            </div>
+          </div>
         </Section>
 
         {/* Actions */}

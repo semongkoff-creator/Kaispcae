@@ -13,6 +13,13 @@ model User {
   password                String
   displayName             String
   avatarConfig            Json?
+  // Chat profile photo, stored as a data-URL string (client resizes+compresses
+  // to <=256px WebP, ~<100KB, before it ever reaches here). Deliberately a
+  // heavy TEXT column kept OUT of hot queries via Prisma `omit`/explicit
+  // `select` — see routes/users.ts. This base64-in-DB shortcut is ONLY for the
+  // small profile photo; chat attachments/recordings must still go to object
+  // storage (R2), never here.
+  profilePhoto            String?                   @db.Text
   // Global, account-level role — separate from the per-room Role hierarchy
   // (owner/admin/staff/member, see shared/permissions.ts and RoomMember.role
   // below). 'admin' accounts can create rooms (the only account-wide gate;

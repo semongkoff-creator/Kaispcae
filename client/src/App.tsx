@@ -1142,6 +1142,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           initialConfig={savedConfig}
           onSave={handleAvatarSave}
           onClose={() => setShowEditor(false)}
+          localUserId={localUserId}
         />
       )}
 

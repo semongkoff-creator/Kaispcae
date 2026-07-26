@@ -35,6 +35,7 @@ import attendanceAdminRoutes from './routes/attendanceAdmin';
 import calendarRoutes, { setCalendarIo } from './routes/calendar';
 import meetingRoomRoutes from './routes/meetingRooms';
 import baseShareRoutes from './routes/baseShare';
+import userRoutes from './routes/users';
 import { registerBaseHandlers } from './socket/baseHandler';
 import { startReminderSweep } from './socket/reminderSweep';
 import { startAttendanceSweep } from './socket/attendanceSweep';
@@ -43,7 +44,11 @@ loadConfig();
 const config = getConfig();
 
 const app = express();
-app.use(express.json());
+// 512kb (up from the 100kb default) so profile-photo data-URLs fit — the
+// route itself caps the photo at ~150KB, this is just headroom for the JSON
+// envelope. Large binary uploads still go through multipart (routes/uploads),
+// never JSON, so this ceiling isn't a general large-payload allowance.
+app.use(express.json({ limit: '512kb' }));
 
 // Allow the configured origin(s) PLUS any localhost / private-LAN address on
 // any port, so friends on the same WiFi can join by opening this machine's
@@ -129,6 +134,7 @@ app.use('/api', chatRoutes);
 app.use('/api', baseRoutes);
 app.use('/api', baseCommentRoutes);
 app.use('/api', baseShareRoutes);
+app.use('/api', userRoutes);
 app.use('/api', adminRoutes);
 app.use('/api', attendanceRoutes);
 app.use('/api', attendanceAdminRoutes);
