@@ -4,11 +4,12 @@ import { zoneIdOfSocket } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload } from '@virtualmeet/shared';
 import {
-  addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerSitting,
+  addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerWorkMode, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
 } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';
 import { resolveEntry } from '../lib/roomMembership';
+import { logActivity } from '../lib/larkBase';
 import { socketRateLimit } from '../middleware/rateLimit';
 
 const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec per socket
@@ -779,6 +780,24 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const val = !!raised;
     socket.to(room).emit(SocketEvents.PLAYER_HAND_UPDATED, { id: socket.id, handRaised: val });
     updatePlayerHand(room, socket.id, val);
+  });
+
+  // A3 — Focus/Public work mode. Broadcast + persist like status/hand so other
+  // clients update the badge and room:state carries it for late joiners.
+  socket.on(SocketEvents.WORK_MODE_CHANGE, (data: { mode: 'public' | 'focus'; zoneId?: string }) => {
+    const room = currentRoom; if (!room) return;
+    const mode = data?.mode === 'focus' ? 'focus' : 'public';
+    socket.to(room).emit(SocketEvents.WORK_MODE_CHANGED, { id: socket.id, workMode: mode });
+    updatePlayerWorkMode(room, socket.id, mode);
+    // Log to Lark Base — guarded no-op until the table/scope are set up, so a
+    // logging failure never affects the live mode change above.
+    const uid = (socket.data as { userId?: string }).userId ?? socket.id;
+    void logActivity({
+      eventType: mode === 'focus' ? 'focus_start' : 'focus_end',
+      userId: uid,
+      room,
+      detail: { zoneId: data?.zoneId },
+    });
   });
 
   socket.on(SocketEvents.PLAYER_SIT, (data: { sitting: boolean; x: number; y: number; direction: Avatar['direction']; seatFurnitureId?: string }) => {

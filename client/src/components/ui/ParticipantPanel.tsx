@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, StarFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical } from 'react-bootstrap-icons';
+import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, StarFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones } from 'react-bootstrap-icons';
 import { roleAtLeast, Role } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 
@@ -124,6 +124,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
               color={localPlayer.color}
               status={localPlayer.status}
               handRaised={localPlayer.handRaised}
+              workMode={localPlayer.workMode}
               speaking={localSpeaking}
               role={localRole}
               isLocal
@@ -137,6 +138,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
                 color={p.color}
                 status={p.status}
                 handRaised={p.handRaised}
+                workMode={p.workMode}
                 speaking={speakingPlayers.has(p.id)}
                 role={roleOf(p.userId)}
                 isLocal={false}
@@ -163,6 +165,7 @@ function ParticipantRow({
   color,
   status,
   handRaised,
+  workMode,
   speaking,
   role,
   isLocal,
@@ -184,6 +187,8 @@ function ParticipantRow({
   // a raised hand (see Avatar.handRaised) and whether they're currently
   // speaking (from speakingPlayers / localSpeaking in gameStore).
   handRaised?: boolean;
+  // A3 — 'focus' shows a Do-Not-Disturb headphones badge by the name.
+  workMode?: 'public' | 'focus';
   speaking?: boolean;
   // Live room role (see gameStore roleOf) — renders a 👑 owner / 🛡️ admin
   // badge by the name; 'staff'/'member' show none.
@@ -281,6 +286,7 @@ function ParticipantRow({
         {/* Live presence cues, glanceable per row — same signals shown over
             the avatar (raise-hand ✋, AFK 💤) and video tile (speaking 🔊). */}
         {handRaised && <span title="Hand raised" className="text-[11px] leading-none animate-bounce">✋</span>}
+        {workMode === 'focus' && <Headphones title="Fokus (jangan diganggu)" size={12} className="text-purple-500 shrink-0" />}
         {speaking && <span title="Speaking" className="text-[11px] leading-none animate-pulse">🔊</span>}
         {status?.startsWith('💤') && <span title="Away" className="text-[11px] leading-none opacity-70">💤</span>}
         {inCall && <CameraVideoFill className="text-purple-600" size={11} title="In call" />}

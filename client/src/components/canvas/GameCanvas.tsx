@@ -911,6 +911,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         ctx.fillText('👑', sx, sy - AVATAR_RADIUS - 24);
       }
 
+      // A3 — Focus/DND badge (headphones), just above the head, below any crown.
+      if (avatar.workMode === 'focus') {
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('🎧', sx, sy - AVATAR_RADIUS - 8);
+      }
+
       const sp = speakingPlayersRef.current;
       const isSpeaking = isLocal ? localSpeakingRef.current : sp.has(avatar.id);
       const isMuted = isLocal && micMutedRef.current;

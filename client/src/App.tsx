@@ -101,7 +101,7 @@ const AFK_STATUS = '💤 Away';
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage } = useSocket(authDisplayName, roomSlug, authUserId);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -197,7 +197,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   }, [emitTeleportRequest]);
 
   const nearby = useProximity(
-    { x: localPlayer.x, y: localPlayer.y, id: localPlayerId, isSitting: localPlayer.isSitting, seatFurnitureId: localPlayer.seatFurnitureId },
+    { x: localPlayer.x, y: localPlayer.y, id: localPlayerId, isSitting: localPlayer.isSitting, seatFurnitureId: localPlayer.seatFurnitureId, workMode: localPlayer.workMode },
     playerRecords,
     zones,
     spotlightedUserIds,
@@ -208,6 +208,21 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   useEffect(() => {
     updateProximity(nearby);
   }, [nearby, updateProximity]);
+
+  // A3 — Focus/Public detection. workMode = 'focus' while the local avatar sits
+  // inside a Zone of type 'focus'. On change, update the store (drives the DND
+  // gating in useProximity + the local badge) and tell the server so other
+  // clients see it. findZoneAt over focus-typed zones only.
+  const workMode = useGameStore((s) => s.workMode);
+  const setWorkMode = useGameStore((s) => s.setWorkMode);
+  useEffect(() => {
+    const focusZone = findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'focus'));
+    const mode = focusZone ? 'focus' : 'public';
+    if (mode !== workMode) {
+      setWorkMode(mode);
+      emitWorkMode(mode, focusZone?.id);
+    }
+  }, [localPlayer.x, localPlayer.y, zones, workMode, setWorkMode, emitWorkMode]);
 
   // Mini Mode has to be opened directly inside a real click handler (see
   // openMiniModeWindow's own doc comment for why it can't live in a mount

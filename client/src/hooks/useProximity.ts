@@ -37,7 +37,7 @@ export function findZoneAt(pos: { x: number; y: number }, zones: Zone[]): Zone |
 }
 
 export function useProximity(
-  localPlayer: Pick<Avatar, 'x' | 'y' | 'id' | 'isSitting' | 'seatFurnitureId'>,
+  localPlayer: Pick<Avatar, 'x' | 'y' | 'id' | 'isSitting' | 'seatFurnitureId' | 'workMode'>,
   remotePlayers: Record<string, Avatar>,
   zones: Zone[] = [],
   spotlightedUserIds: string[] = [],
@@ -46,6 +46,9 @@ export function useProximity(
   return useMemo(() => {
     const localZone = findZoneAt(localPlayer, zones);
     const spotlightSet = new Set(spotlightedUserIds);
+    // A3 — Do-Not-Disturb: a focus-mode avatar neither triggers nor receives
+    // auto-connect. If WE are in focus, nobody connects to us at all.
+    const localFocus = localPlayer.workMode === 'focus';
 
     // chair Furniture.id → its tableId, so a seated player's table can be
     // resolved from the seatFurnitureId they broadcast. Only chairs that were
@@ -70,6 +73,14 @@ export function useProximity(
       // still reflects their real (possibly huge) distance.
       if (p.userId && spotlightSet.has(p.userId)) {
         return { id: p.id, distanceTiles, visibility: 'full_visible' as VisibilityStatus, viaZone: true };
+      }
+
+      // A3 Focus/DND — checked before table/zone/distance so it overrides every
+      // auto-connect path (including a shared 'focus' zone: focus is meant to be
+      // solo). If either side is in focus mode, they don't auto-connect. Spotlight
+      // above still wins as a deliberate admin override.
+      if (localFocus || p.workMode === 'focus') {
+        return { id: p.id, distanceTiles, visibility: 'not_visible' as VisibilityStatus };
       }
 
       // Table membership: two people seated at chairs sharing a tableId are one
@@ -97,5 +108,5 @@ export function useProximity(
         distanceTiles <= PROXIMITY_THRESHOLD ? 'full_visible' : distanceTiles <= TRANSLUCENT_THRESHOLD ? 'translucent' : 'not_visible';
       return { id: p.id, distanceTiles, visibility };
     });
-  }, [localPlayer.x, localPlayer.y, localPlayer.isSitting, localPlayer.seatFurnitureId, remotePlayers, zones, spotlightedUserIds, furniture]);
+  }, [localPlayer.x, localPlayer.y, localPlayer.isSitting, localPlayer.seatFurnitureId, localPlayer.workMode, remotePlayers, zones, spotlightedUserIds, furniture]);
 }

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode } from '@virtualmeet/shared';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -151,6 +151,10 @@ export interface GameState {
   setCameraOn: (on: boolean) => void;
   localSpeaking: boolean;
   setLocalSpeaking: (speaking: boolean) => void;
+  // A3 — local work mode (Focus/Public). Kept here for quick access AND mirrored
+  // onto localPlayer.workMode so the local avatar renders its own focus badge.
+  workMode: WorkMode;
+  setWorkMode: (mode: WorkMode) => void;
   speakingPlayers: Set<string>;
   setPlayerSpeaking: (id: string, speaking: boolean) => void;
 
@@ -500,6 +504,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   setCameraOn: (on) => set({ cameraOn: on }),
   localSpeaking: false,
   setLocalSpeaking: (speaking) => set({ localSpeaking: speaking }),
+  workMode: 'public',
+  setWorkMode: (mode) => set((s) => ({
+    workMode: mode,
+    localPlayer: { ...s.localPlayer, workMode: mode === 'focus' ? 'focus' : undefined },
+  })),
   speakingPlayers: new Set<string>(),
   setPlayerSpeaking: (id, speaking) =>
     set((state) => {

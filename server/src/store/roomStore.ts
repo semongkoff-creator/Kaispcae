@@ -189,6 +189,20 @@ export async function updatePlayerStatus(
   }
 }
 
+// A3 — persist Focus/Public so it survives in room:state for late joiners.
+export async function updatePlayerWorkMode(
+  roomId: string,
+  playerId: string,
+  workMode: 'public' | 'focus',
+): Promise<void> {
+  const players = await getPlayers(roomId);
+  const player = players.find((p) => p.id === playerId);
+  if (player) {
+    player.workMode = workMode === 'focus' ? 'focus' : undefined;
+    await setPlayers(roomId, players);
+  }
+}
+
 export async function updatePlayerHand(
   roomId: string,
   playerId: string,

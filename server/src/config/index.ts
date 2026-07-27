@@ -29,6 +29,11 @@ const envSchema = z
     // creator_id IF self-punch (creator = the user themselves) is rejected by
     // Lark. Leave unset to only ever self-punch. See lib/larkAttendance.ts.
     LARK_ATTENDANCE_CREATOR_ID: z.string().optional(),
+    // A3 — Lark Base (Bitable) activity_log target. Optional: when unset, the
+    // activity logging in lib/larkBase.ts is a guarded no-op. Set both once the
+    // table exists and the bitable scope is granted.
+    LARK_BITABLE_APP_TOKEN: z.string().optional(),
+    LARK_BITABLE_ACTIVITY_TABLE_ID: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     // The default JWT secret is a well-known literal — anyone can forge valid

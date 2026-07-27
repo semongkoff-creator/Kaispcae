@@ -76,7 +76,14 @@ export interface Avatar {
   // so it lives on the player record and is included in room:state for late
   // joiners; cleared on the client when the player leaves.
   handRaised?: boolean;
+  // A3 — work mode. 'focus' = inside a Zone of type 'focus' → Do-Not-Disturb:
+  // no proximity auto-connect (see useProximity), a focus badge on the avatar.
+  // Broadcast + kept on the player record like status/handRaised, so it's in
+  // room:state for late joiners. Absent/undefined is treated as 'public'.
+  workMode?: WorkMode;
 }
+
+export type WorkMode = 'public' | 'focus';
 
 // A single tile on the room grid. `type` stays authoritative for collision
 // (BLOCKED_TILES) so old saved rooms keep working unchanged. `floorPaletteId`
@@ -177,6 +184,10 @@ export enum SocketEvents {
   // Raise-hand toggle — same relay+persist shape as status above.
   PLAYER_HAND = 'player:hand',
   PLAYER_HAND_UPDATED = 'player:hand_updated',
+
+  // A3 — Focus/Public work mode. Same relay+persist shape as status/hand.
+  WORK_MODE_CHANGE = 'work_mode:change',
+  WORK_MODE_CHANGED = 'work_mode:changed',
 
   // Zoom-style "Lock Meeting": admin toggles ROOM_LOCK_SET, everyone in the
   // room gets ROOM_LOCK_UPDATED (for the 🔒 indicator + owner control state),
