@@ -63,7 +63,7 @@ async function resolveUserId(tenant: string, openId: string): Promise<string | n
   }
 }
 
-async function importPunch(tenant: string, employeeId: string, creatorId: string): Promise<{ ok: boolean; code?: number; msg?: string }> {
+async function importPunch(tenant: string, employeeId: string, creatorId: string, comment: string): Promise<{ ok: boolean; code?: number; msg?: string }> {
   const res = await fetch(`${LARK_BASE}/attendance/v1/user_flows/batch_create?employee_type=employee_id`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tenant}` },
@@ -74,7 +74,7 @@ async function importPunch(tenant: string, employeeId: string, creatorId: string
           creator_id: creatorId,
           location_name: 'MeetKai',
           check_time: String(Math.floor(Date.now() / 1000)),
-          comment: 'Auto check-in via MeetKai',
+          comment,
         },
       ],
     }),
@@ -83,18 +83,19 @@ async function importPunch(tenant: string, employeeId: string, creatorId: string
   return { ok: json?.code === 0, code: json?.code, msg: json?.msg };
 }
 
-// Record a check-in punch. Tries self-punch (creator_id = the user's own
-// employee_id) first per the agreed plan; if Lark rejects that, retries with an
+// Import a punch (Lark's shift rules decide whether it lands as check-in or
+// check-out — the same endpoint for both, see A12 audit). Tries self-punch
+// (creator = the user themselves) first; if Lark rejects that, retries with an
 // admin creator id from env (LARK_ATTENDANCE_CREATOR_ID) when configured.
-async function punchCheckIn(tenant: string, employeeId: string): Promise<boolean> {
+async function punchWithFallback(tenant: string, employeeId: string, comment: string): Promise<boolean> {
   try {
-    const first = await importPunch(tenant, employeeId, employeeId);
+    const first = await importPunch(tenant, employeeId, employeeId, comment);
     if (first.ok) return true;
     console.error('[attendance] punch (self creator) rejected:', first.code, first.msg);
 
     const adminCreator = getConfig().LARK_ATTENDANCE_CREATOR_ID;
     if (adminCreator && adminCreator !== employeeId) {
-      const second = await importPunch(tenant, employeeId, adminCreator);
+      const second = await importPunch(tenant, employeeId, adminCreator, comment);
       if (second.ok) return true;
       console.error('[attendance] punch (admin creator) rejected:', second.code, second.msg);
     }
@@ -148,7 +149,7 @@ export async function ensureCheckedInToday(userId: string): Promise<void> {
       return;
     }
 
-    const ok = await punchCheckIn(tenant, employeeId);
+    const ok = await punchWithFallback(tenant, employeeId, 'Auto check-in via MeetKai');
     if (ok) {
       // Mark ONLY on real success, so a failed punch retries next request.
       await prisma.user.update({ where: { id: user.id }, data: { lastAttendanceCheckInDate: today } });
@@ -161,4 +162,148 @@ export async function ensureCheckedInToday(userId: string): Promise<void> {
   } finally {
     inFlight.delete(userId);
   }
+}
+
+// ─── A12: checkout + bidirectional status ───────────────────────────────────
+
+export interface AttendanceStatus {
+  isLarkUser: boolean;
+  checkedIn: boolean;
+  checkInTime: number | null; // epoch seconds, from Lark
+  checkedOut: boolean;
+  checkOutTime: number | null;
+  totalHours: number | null; // display-only (Lark computes the official value)
+}
+
+const EMPTY_STATUS: AttendanceStatus = {
+  isLarkUser: false, checkedIn: false, checkInTime: null, checkedOut: false, checkOutTime: null, totalHours: null,
+};
+
+function wibDateCompact(): string {
+  return wibToday().replace(/-/g, ''); // YYYYMMDD
+}
+
+function hoursBetween(inSec: number | null, outSec: number | null): number | null {
+  if (inSec == null || outSec == null || outSec < inSec) return null;
+  return Math.round(((outSec - inSec) / 3600) * 100) / 100;
+}
+
+async function ensureEmployeeId(
+  tenant: string,
+  u: { id: string; larkOpenId: string; larkUserId: string | null },
+): Promise<string | null> {
+  if (u.larkUserId) return u.larkUserId;
+  const resolved = await resolveUserId(tenant, u.larkOpenId);
+  if (resolved) {
+    await getPrisma().user.update({ where: { id: u.id }, data: { larkUserId: resolved } }).catch(() => {});
+  }
+  return resolved;
+}
+
+// Read today's attendance from Lark — the source of truth for the UI. Reflects
+// checkouts done in MeetKai AND directly in the Lark app. Needs scope
+// attendance:task:readonly.
+export async function getTodayAttendanceStatus(userId: string): Promise<AttendanceStatus> {
+  try {
+    const prisma = getPrisma();
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, larkOpenId: true, larkUserId: true },
+    });
+    if (!user?.larkOpenId) return EMPTY_STATUS;
+
+    const cfg = getConfig();
+    if (!cfg.LARK_APP_ID || !cfg.LARK_APP_SECRET) return { ...EMPTY_STATUS, isLarkUser: true };
+    const tenant = await getTenantAccessToken(cfg.LARK_APP_ID, cfg.LARK_APP_SECRET);
+    if (!tenant) return { ...EMPTY_STATUS, isLarkUser: true };
+
+    const employeeId = await ensureEmployeeId(tenant, {
+      id: user.id, larkOpenId: user.larkOpenId, larkUserId: user.larkUserId,
+    });
+    if (!employeeId) return { ...EMPTY_STATUS, isLarkUser: true };
+
+    const day = Number(wibDateCompact());
+    const res = await fetch(`${LARK_BASE}/attendance/v1/user_tasks/query?employee_type=employee_id`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tenant}` },
+      body: JSON.stringify({ user_ids: [employeeId], check_date_from: day, check_date_to: day }),
+    });
+    const json: any = await res.json();
+    if (json?.code !== 0) {
+      console.error('[attendance] user_tasks/query failed:', json?.code, json?.msg);
+      return { ...EMPTY_STATUS, isLarkUser: true };
+    }
+
+    // Defensive parse: the day result carries check_in_record / check_out_record
+    // (each with a `check_time` in seconds). Shapes vary slightly across Lark
+    // versions, so dig for the records tolerantly.
+    const result = json?.data?.user_task_results?.[0];
+    const rec = Array.isArray(result?.records) ? result.records[0] : result?.records ?? result;
+    const inTime = rec?.check_in_record?.check_time;
+    const outTime = rec?.check_out_record?.check_time;
+    // [attendance-diag] TEMPORARY — verify the real response shape against the
+    // defensive parse above during the VPS test, then remove.
+    console.log('[attendance-diag] user_tasks/query result:', JSON.stringify(result ?? json?.data ?? {}).slice(0, 800));
+    const checkInTime = inTime ? Number(inTime) : null;
+    const checkOutTime = outTime ? Number(outTime) : null;
+    return {
+      isLarkUser: true,
+      checkedIn: checkInTime != null,
+      checkInTime,
+      checkedOut: checkOutTime != null,
+      checkOutTime,
+      totalHours: hoursBetween(checkInTime, checkOutTime),
+    };
+  } catch (e) {
+    console.error('[attendance] getTodayAttendanceStatus error:', e);
+    return { ...EMPTY_STATUS, isLarkUser: true };
+  }
+}
+
+export type CheckoutOutcome =
+  | { ok: true; status: AttendanceStatus }
+  | { ok: false; reason: 'not_lark' | 'not_checked_in' | 'already_checked_out' | 'lark_error'; status: AttendanceStatus };
+
+// Record a check-out punch from MeetKai. Idempotent: refuses if not checked in,
+// or if already checked out (per Lark's live status OR the local same-day
+// marker). Never double-punches.
+export async function checkOut(userId: string): Promise<CheckoutOutcome> {
+  const prisma = getPrisma();
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, larkOpenId: true, larkUserId: true, lastAttendanceCheckOutDate: true },
+  });
+  if (!user?.larkOpenId) return { ok: false, reason: 'not_lark', status: EMPTY_STATUS };
+
+  const today = wibToday();
+  const status = await getTodayAttendanceStatus(userId);
+  if (!status.checkedIn) return { ok: false, reason: 'not_checked_in', status };
+  if (status.checkedOut || user.lastAttendanceCheckOutDate === today) {
+    return { ok: false, reason: 'already_checked_out', status };
+  }
+
+  const cfg = getConfig();
+  const tenant = cfg.LARK_APP_ID && cfg.LARK_APP_SECRET
+    ? await getTenantAccessToken(cfg.LARK_APP_ID, cfg.LARK_APP_SECRET)
+    : null;
+  const employeeId = tenant
+    ? await ensureEmployeeId(tenant, { id: user.id, larkOpenId: user.larkOpenId, larkUserId: user.larkUserId })
+    : null;
+  if (!tenant || !employeeId) return { ok: false, reason: 'lark_error', status };
+
+  const ok = await punchWithFallback(tenant, employeeId, 'Checkout via MeetKai');
+  if (!ok) return { ok: false, reason: 'lark_error', status };
+
+  await prisma.user.update({ where: { id: user.id }, data: { lastAttendanceCheckOutDate: today } }).catch(() => {});
+  console.log(`[attendance] checkout recorded for user ${userId} (${today} WIB)`);
+
+  // Re-read so the response shows the new checkout. Lark may lag turning the
+  // punch into a result, so fall back to "now" if it's not visible yet.
+  const after = await getTodayAttendanceStatus(userId);
+  if (after.checkedOut) return { ok: true, status: after };
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    ok: true,
+    status: { ...after, checkedOut: true, checkOutTime: now, totalHours: hoursBetween(after.checkInTime, now) },
+  };
 }

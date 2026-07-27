@@ -7,6 +7,16 @@ const API_BASE = '/api';
 // plain network failure (offline, server down), where fetch() itself throws
 // a status-less TypeError instead. useAuth.ts uses this distinction to only
 // show "session expired" for an actual 401/403/404, not a network blip.
+// A12 — today's Lark attendance status for the current user.
+export interface AttendanceStatus {
+  isLarkUser: boolean;
+  checkedIn: boolean;
+  checkInTime: number | null; // epoch seconds
+  checkedOut: boolean;
+  checkOutTime: number | null;
+  totalHours: number | null;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -173,6 +183,10 @@ export const api = {
     request<{ photos: { id: string; photo: string }[] }>(
       `/users/profile-photos?ids=${encodeURIComponent(ids.join(','))}`,
     ),
+
+  // A12 — Lark attendance status (source of truth = Lark) + checkout.
+  getAttendanceStatus: () => request<AttendanceStatus>('/attendance/status'),
+  checkOutAttendance: () => request<AttendanceStatus>('/attendance/checkout', { method: 'POST' }),
 
   getRooms: () => request<{ rooms: RoomInfo[] }>('/rooms'),
 

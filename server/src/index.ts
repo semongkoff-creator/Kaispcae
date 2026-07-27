@@ -37,6 +37,7 @@ import meetingRoomRoutes from './routes/meetingRooms';
 import baseShareRoutes from './routes/baseShare';
 import userRoutes from './routes/users';
 import larkRoutes from './routes/lark';
+import attendanceLarkRoutes from './routes/attendanceLark';
 import { registerBaseHandlers } from './socket/baseHandler';
 import { startReminderSweep } from './socket/reminderSweep';
 import { startAttendanceSweep } from './socket/attendanceSweep';
@@ -139,6 +140,7 @@ app.use('/api', userRoutes);
 // Mounted at /api → routes resolve to /api/auth/lark/* (see nginx audit: only
 // /api/ is proxied to the backend).
 app.use('/api', larkRoutes);
+app.use('/api', attendanceLarkRoutes);
 app.use('/api', adminRoutes);
 app.use('/api', attendanceRoutes);
 app.use('/api', attendanceAdminRoutes);

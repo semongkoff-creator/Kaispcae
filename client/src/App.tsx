@@ -13,6 +13,7 @@ import { BasesLauncher } from './components/LarkBase/BasesLauncher';
 import { AdminConsole } from './admin/AdminConsole';
 import { CalendarApp } from './components/Calendar/CalendarApp';
 import { AttendanceApp } from './components/Attendance/AttendanceApp';
+import { LarkAttendancePanel } from './components/Attendance/LarkAttendancePanel';
 import { toCurrentUser, type CurrentUser } from './hooks/useCurrentUser';
 import { isTypingTarget, shouldIgnoreRoomHotkey } from './utils/hotkeys';
 import { useZoneLock } from './hooks/useZoneLock';
@@ -466,6 +467,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const [adminViewActive, setAdminViewActive] = useState(false);
   const [calendarViewActive, setCalendarViewActive] = useState(false);
   const [attendanceViewActive, setAttendanceViewActive] = useState(false);
+  const [larkAttendanceActive, setLarkAttendanceActive] = useState(false);
   const [messengerViewActive, setMessengerViewActive] = useState(false);
   // Join-approval queue (admin). pendingJoinCount only drives the menu badge;
   // the panel refetches from the server when opened, so a stale count can
@@ -995,6 +997,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleCalendarView={() => setCalendarViewActive((v) => !v)}
         attendanceViewActive={attendanceViewActive}
         onToggleAttendanceView={() => setAttendanceViewActive((v) => !v)}
+        larkAttendanceActive={larkAttendanceActive}
+        onToggleLarkAttendance={() => setLarkAttendanceActive((v) => !v)}
         messengerViewActive={messengerViewActive}
         onToggleMessengerView={() => setMessengerViewActive((v) => !v)}
         joinQueueActive={joinQueueActive}
@@ -1079,6 +1083,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {baseViewActive && <BasesLauncher currentUser={{ id: authUserId, name: authDisplayName }} onClose={() => setBaseViewActive(false)} />}
       {adminViewActive && <AdminConsole currentUser={currentUser} onClose={() => setAdminViewActive(false)} />}
       {attendanceViewActive && <AttendanceApp onClose={() => setAttendanceViewActive(false)} />}
+      {larkAttendanceActive && <LarkAttendancePanel onClose={() => setLarkAttendanceActive(false)} />}
       {joinQueueActive && isAdmin && (
         <JoinRequestPanel roomSlug={roomSlug} onClose={() => setJoinQueueActive(false)} />
       )}

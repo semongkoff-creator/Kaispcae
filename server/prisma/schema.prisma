@@ -36,6 +36,11 @@ model User {
   // 'YYYY-MM-DD' in WIB of the last day we successfully punched check-in for
   // this user, so repeated /auth/me hits the same day don't re-punch.
   lastAttendanceCheckInDate String?
+  // Same idea for check-out (A12): 'YYYY-MM-DD' WIB of the last successful
+  // checkout punch from MeetKai — a fast idempotency guard against double
+  // checkout. Display/status is read live from Lark (user_tasks/query), which
+  // also reflects checkouts done in the Lark app itself.
+  lastAttendanceCheckOutDate String?
   // Global, account-level role — separate from the per-room Role hierarchy
   // (owner/admin/staff/member, see shared/permissions.ts and RoomMember.role
   // below). 'admin' accounts can create rooms (the only account-wide gate;

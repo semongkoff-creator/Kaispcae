@@ -72,6 +72,10 @@ interface SidebarProps {
   // Attendance module.
   attendanceViewActive: boolean;
   onToggleAttendanceView: () => void;
+  // A12 — the new Lark-backed attendance panel (separate from the retired
+  // MeetKai-native one above).
+  larkAttendanceActive: boolean;
+  onToggleLarkAttendance: () => void;
 
   // Messenger — the full-screen chat surface. The floating ChatPanel stays
   // for chatting while walking around; this is the one you sit down in.
@@ -156,6 +160,8 @@ export function Sidebar({
   onToggleCalendarView,
   attendanceViewActive,
   onToggleAttendanceView,
+  larkAttendanceActive,
+  onToggleLarkAttendance,
   messengerViewActive,
   onToggleMessengerView,
   joinQueueActive,
@@ -261,6 +267,9 @@ export function Sidebar({
             {ATTENDANCE_MENU_ENABLED && (
               <MenuRow icon={<ClockHistory size={15} />} label={attendanceViewActive ? 'Tutup Absensi' : 'Absensi'} active={attendanceViewActive} onClick={closeAnd(onToggleAttendanceView)} />
             )}
+            {/* A12 — new Lark-backed attendance panel (check-in auto on login,
+                checkout here or in the Lark app). */}
+            <MenuRow icon={<ClockHistory size={15} />} label={larkAttendanceActive ? 'Tutup Absensi' : 'Absensi'} active={larkAttendanceActive} onClick={closeAnd(onToggleLarkAttendance)} />
             {isWorkspaceAdmin && (
               <MenuRow icon={<ShieldLock size={15} />} label={adminViewActive ? 'Tutup Konsol Admin' : 'Konsol Admin'} active={adminViewActive} onClick={closeAnd(onToggleAdminView)} />
             )}
