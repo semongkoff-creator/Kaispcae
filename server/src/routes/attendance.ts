@@ -13,6 +13,17 @@ const attendance = Router();
 const clockLimit = rateLimit(60 * 1000, 10);
 const mutationLimit = rateLimit(60 * 1000, 30);
 
+// A2 — MeetKai-native attendance is retired in favour of automatic Lark
+// Attendance (see lib/larkAttendance.ts). WRITE endpoints below are gated with
+// this so no NEW data is recorded here; the GET/history endpoints are left
+// intact so existing records stay viewable, and nothing is dropped. Placed
+// FIRST in each write route's chain, so it short-circuits before auth/handler.
+function attendanceRetired(_req: AuthRequest, res: Response) {
+  res.status(410).json({
+    error: 'Absensi manual MeetKai dinonaktifkan — kini otomatis via Lark Attendance.',
+  });
+}
+
 // THE rule of this module: the time is whatever the SERVER's clock says.
 // A client may send a timestamp; we ignore it. This is not paranoia — a user
 // can set their OS clock to anything, and attendance is exactly the feature
@@ -69,7 +80,7 @@ attendance.get('/attendance/today', authenticateToken, async (req: AuthRequest, 
   } catch (err) { console.error('[attendance] today error:', err); return res.status(500).json({ error: 'Gagal memuat absensi' }); }
 });
 
-attendance.post('/attendance/clock-in', authenticateToken, clockLimit, async (req: AuthRequest, res: Response) => {
+attendance.post('/attendance/clock-in', attendanceRetired, authenticateToken, clockLimit, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
     const now = serverNow(); // NOT req.body.time — see serverNow()'s note.
@@ -122,7 +133,7 @@ attendance.post('/attendance/clock-in', authenticateToken, clockLimit, async (re
   } catch (err) { console.error('[attendance] clock-in error:', err); return res.status(500).json({ error: 'Gagal clock in' }); }
 });
 
-attendance.post('/attendance/clock-out', authenticateToken, clockLimit, async (req: AuthRequest, res: Response) => {
+attendance.post('/attendance/clock-out', attendanceRetired, authenticateToken, clockLimit, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
     const now = serverNow();
@@ -218,7 +229,7 @@ attendance.patch('/attendance/records/:id', authenticateToken, async (_req: Auth
 
 // ─── Corrections ────────────────────────────────────────────────────
 
-attendance.post('/attendance/corrections', authenticateToken, mutationLimit, async (req: AuthRequest, res: Response) => {
+attendance.post('/attendance/corrections', attendanceRetired, authenticateToken, mutationLimit, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
     const record = await prisma.attendanceRecord.findUnique({ where: { id: String(req.body?.recordId ?? '') } });

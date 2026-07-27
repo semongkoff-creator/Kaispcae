@@ -6,6 +6,12 @@ import { RecordingControl } from './RecordingControl';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { Theme } from '@/hooks/useTheme';
 
+// A2 — the MeetKai-native attendance UI is retired in favour of automatic Lark
+// Attendance check-in (see server lib/larkAttendance.ts). Flip to true only to
+// temporarily bring the old manual UI back; the component & historical data
+// were deliberately kept, not deleted.
+const ATTENDANCE_MENU_ENABLED = false;
+
 interface SidebarProps {
   onEditAvatar: () => void;
   status: string;
@@ -248,7 +254,13 @@ export function Sidebar({
               />
             )}
             <MenuRow icon={<CalendarEvent size={15} />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
-            <MenuRow icon={<ClockHistory size={15} />} label={attendanceViewActive ? 'Tutup Absensi' : 'Absensi'} active={attendanceViewActive} onClick={closeAnd(onToggleAttendanceView)} />
+            {/* A2 — Absensi kini otomatis lewat Lark Attendance (check-in dipicu
+                di /auth/me). Menu MeetKai lama disembunyikan (flag false) supaya
+                tak ada pencatatan manual baru; komponen AttendanceApp & data
+                historis sengaja TIDAK dihapus — cukup ubah flag utk kembalikan. */}
+            {ATTENDANCE_MENU_ENABLED && (
+              <MenuRow icon={<ClockHistory size={15} />} label={attendanceViewActive ? 'Tutup Absensi' : 'Absensi'} active={attendanceViewActive} onClick={closeAnd(onToggleAttendanceView)} />
+            )}
             {isWorkspaceAdmin && (
               <MenuRow icon={<ShieldLock size={15} />} label={adminViewActive ? 'Tutup Konsol Admin' : 'Konsol Admin'} active={adminViewActive} onClick={closeAnd(onToggleAdminView)} />
             )}

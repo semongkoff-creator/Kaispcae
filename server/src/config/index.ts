@@ -25,6 +25,10 @@ const envSchema = z
     LARK_APP_ID: z.string().optional(),
     LARK_APP_SECRET: z.string().optional(),
     LARK_REDIRECT_URI: z.string().optional(),
+    // Optional fallback: employee_id of an admin to set as the punch record's
+    // creator_id IF self-punch (creator = the user themselves) is rejected by
+    // Lark. Leave unset to only ever self-punch. See lib/larkAttendance.ts.
+    LARK_ATTENDANCE_CREATOR_ID: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     // The default JWT secret is a well-known literal — anyone can forge valid

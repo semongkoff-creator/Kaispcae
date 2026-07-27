@@ -6,6 +6,7 @@ import { getConfig } from '../config';
 import { authenticateToken, setUploadSessionCookie, clearUploadSessionCookie, AuthRequest } from '../middleware/auth';
 import { validate, registerSchema, loginSchema } from '../middleware/validate';
 import { rateLimit } from '../middleware/rateLimit';
+import { ensureCheckedInToday } from '../lib/larkAttendance';
 
 const auth = Router();
 
@@ -135,6 +136,9 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
       select: {
         id: true, email: true, displayName: true, avatarConfig: true,
         accountRole: true, workspaceRole: true, timezone: true, active: true,
+        // larkOpenId (a short field, unlike profilePhoto) so we can trigger the
+        // Lark attendance check-in below for Lark accounts only.
+        larkOpenId: true,
       },
     });
     if (!user) {
@@ -179,6 +183,13 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
     const currentToken = refreshedToken
       ?? (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
     if (currentToken) setUploadSessionCookie(req, res, currentToken);
+
+    // A2 — trigger Lark Attendance check-in here, NOT at the OAuth callback:
+    // /me is hit on every app load including 30-day auto-login, so this fires
+    // once per work day even when the user never re-does OAuth. Fire-and-forget
+    // + idempotent per WIB day; a failure must never block loading the app.
+    // Lark accounts only (manual users have no larkOpenId).
+    if (user.larkOpenId) void ensureCheckedInToday(user.id);
 
     return res.json({
       user: {

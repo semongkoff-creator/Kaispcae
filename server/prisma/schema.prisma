@@ -27,6 +27,15 @@ model User {
   // unusable value (never a real hash), so it can't be used for manual login
   // unless the user later sets one — out of scope here. See routes/lark.ts.
   larkOpenId              String?                   @unique
+  // Lark `user_id` (a.k.a. employee_id) — needed by the Attendance API, which
+  // does NOT accept open_id. Captured at login when Lark returns it, else
+  // resolved once from open_id via the contact API. Not unique (nullable, and
+  // manual users don't have it). See lib/larkAttendance.ts.
+  larkUserId              String?
+  // Idempotency marker ONLY (not the source of truth — that's Lark Attendance):
+  // 'YYYY-MM-DD' in WIB of the last day we successfully punched check-in for
+  // this user, so repeated /auth/me hits the same day don't re-punch.
+  lastAttendanceCheckInDate String?
   // Global, account-level role — separate from the per-room Role hierarchy
   // (owner/admin/staff/member, see shared/permissions.ts and RoomMember.role
   // below). 'admin' accounts can create rooms (the only account-wide gate;

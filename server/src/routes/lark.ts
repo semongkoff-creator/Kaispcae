@@ -91,6 +91,11 @@ lark.get('/auth/lark/callback', async (req: Request, res: Response) => {
     let name: string | undefined = tokData.name;
     let avatar: string | undefined = tokData.avatar_url;
     let email: string | undefined = tokData.email;
+    // A2 — capture the Lark user_id (employee_id) if the login returns it (the
+    // contact:user.employee_id:readonly scope may surface it here). The
+    // attendance API needs this, not open_id. If absent, larkAttendance
+    // resolves it later from open_id — so a null here is fine.
+    let larkUserId: string | undefined = tokData.user_id;
 
     if (userAccessToken) {
       const infoRes = await fetch(`${LARK_BASE}/authen/v1/user_info`, {
@@ -102,6 +107,7 @@ lark.get('/auth/lark/callback', async (req: Request, res: Response) => {
       name = info.name ?? name;
       avatar = info.avatar_url ?? avatar;
       email = info.email ?? email;
+      larkUserId = info.user_id ?? larkUserId;
     }
 
     if (!openId) throw new Error(`no open_id (token code=${tokJson?.code} msg=${tokJson?.msg})`);
@@ -113,6 +119,7 @@ lark.get('/auth/lark/callback', async (req: Request, res: Response) => {
       user = await prisma.user.create({
         data: {
           larkOpenId: openId,
+          larkUserId: larkUserId || null,
           // Real Lark email if the scope ever returns one; otherwise a
           // deterministic placeholder (email is required + unique).
           email: email || syntheticLarkEmail(openId),
@@ -127,6 +134,10 @@ lark.get('/auth/lark/callback', async (req: Request, res: Response) => {
           profilePhoto: avatar || null,
         },
       });
+    } else if (larkUserId && !user.larkUserId) {
+      // Backfill user_id for an account created before A2 (e.g. the first test
+      // user) the next time they log in via Lark — no re-migration needed.
+      user = await prisma.user.update({ where: { id: user.id }, data: { larkUserId } });
     }
 
     // 4) OUR token, minted the one and only way (identical to manual login) so
