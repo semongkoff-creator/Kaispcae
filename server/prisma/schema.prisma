@@ -20,6 +20,13 @@ model User {
   // small profile photo; chat attachments/recordings must still go to object
   // storage (R2), never here.
   profilePhoto            String?                   @db.Text
+  // Set for accounts created via "Login with Lark" (OAuth) — the Lark user's
+  // open_id. Nullable + unique: existing manual-login users all have null (no
+  // clash), and a given Lark identity maps to exactly one local account
+  // (find-or-create keys on this). A Lark account's `password` is a random
+  // unusable value (never a real hash), so it can't be used for manual login
+  // unless the user later sets one — out of scope here. See routes/lark.ts.
+  larkOpenId              String?                   @unique
   // Global, account-level role — separate from the per-room Role hierarchy
   // (owner/admin/staff/member, see shared/permissions.ts and RoomMember.role
   // below). 'admin' accounts can create rooms (the only account-wide gate;

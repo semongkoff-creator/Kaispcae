@@ -15,19 +15,42 @@ export function useAuth() {
   const [sessionExpiredMessage, setSessionExpiredMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('vm_token');
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-    api.getMe()
-      .then((res) => {
+    (async () => {
+      // Lark OAuth return: the callback bounced back to "/?larkCode=…" (a
+      // single-use code, never the raw JWT). Swap it for the token and store
+      // it under the SAME key manual login uses, then fall through to the
+      // normal getMe() path — so nothing downstream knows or cares that this
+      // session came from Lark.
+      const params = new URLSearchParams(window.location.search);
+      const larkCode = params.get('larkCode');
+      const larkError = params.get('larkError');
+      if (larkCode || larkError) {
+        // Strip the query so a refresh doesn't re-run this with a dead code.
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+      if (larkError) {
+        setError('Login Lark gagal. Silakan coba lagi.');
+      } else if (larkCode) {
+        try {
+          const { token } = await api.exchangeLarkCode(larkCode);
+          localStorage.setItem('vm_token', token);
+        } catch {
+          setError('Login Lark gagal menukar kode. Silakan coba lagi.');
+        }
+      }
+
+      const token = localStorage.getItem('vm_token');
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const res = await api.getMe();
         setUser(res.user);
         // Sliding-expiry refresh: the server only sends a new token back
         // when the current one is close to expiring (see routes/auth.ts).
         if (res.token) localStorage.setItem('vm_token', res.token);
-      })
-      .catch((err) => {
+      } catch (err) {
         localStorage.removeItem('vm_token');
         if (err instanceof ApiError && AUTH_REJECTED_STATUSES.has(err.status)) {
           setSessionExpiredMessage('Your session has expired. Please log in again.');
@@ -35,8 +58,10 @@ export function useAuth() {
         // Any other failure (network offline, server down) fails silently
         // here — there's no session to blame, so there's nothing accurate
         // to tell the user yet. They'll just land on the login screen.
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {

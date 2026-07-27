@@ -149,6 +149,12 @@ export const api = {
   // server/src/routes/auth.ts and useAuth.ts, which persists it.
   getMe: () => request<{ user: UserProfile; token?: string }>('/auth/me'),
 
+  // Lark OAuth: swap the single-use code the callback put in the URL for the
+  // real JWT (kept out of the URL on purpose). The token is then stored and
+  // used exactly like a manual-login token — see useAuth.
+  exchangeLarkCode: (code: string) =>
+    request<{ token: string }>('/auth/lark/exchange', { method: 'POST', body: JSON.stringify({ code }) }),
+
   // Clears the HttpOnly upload-session cookie server-side — JS can't touch it
   // itself. Not routed through request(): the server answers 204 with no
   // body, which res.json() would choke on.

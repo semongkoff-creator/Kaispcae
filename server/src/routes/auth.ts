@@ -10,7 +10,11 @@ import { rateLimit } from '../middleware/rateLimit';
 const auth = Router();
 
 
-function signToken(user: { id: string; email: string }): string {
+// Exported so the Lark OAuth route (routes/lark.ts) issues the EXACT same
+// token shape as manual login — same claims, same secret, same expiry — so the
+// socket handshake middleware (verifyToken) treats a Lark session identically
+// with zero changes. There must be only one way to mint a MeetKai JWT.
+export function signToken(user: { id: string; email: string }): string {
   const config = getConfig();
   return jwt.sign(
     { userId: user.id, email: user.email },

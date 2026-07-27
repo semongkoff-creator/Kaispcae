@@ -19,6 +19,12 @@ const envSchema = z
     CLIENT_URL: z.string().default('http://localhost:5173'),
     RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
     RATE_LIMIT_MAX: z.coerce.number().default(100),
+    // Lark (larksuite.com) OAuth — all optional so the app runs fine without
+    // them; the Lark login route just reports "not configured" when any is
+    // missing (see routes/lark.ts). Never hardcoded — only ever from .env.
+    LARK_APP_ID: z.string().optional(),
+    LARK_APP_SECRET: z.string().optional(),
+    LARK_REDIRECT_URI: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     // The default JWT secret is a well-known literal — anyone can forge valid
