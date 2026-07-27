@@ -149,6 +149,20 @@ export async function ensureCheckedInToday(userId: string): Promise<void> {
       return;
     }
 
+    // CRITICAL guard: Lark treats a SECOND punch of the day as check-OUT. If
+    // the user already checked in today — via MeetKai OR directly in the Lark
+    // app — a second auto-punch here would check them OUT prematurely (this
+    // exact bug happened: an afternoon MeetKai open punched at 15.25 and Lark
+    // read it as checkout). So consult Lark's real status first and only punch
+    // when there is genuinely no check-in yet. Local marker was not enough
+    // because it can't see check-ins made in the Lark app.
+    const live = await getTodayAttendanceStatus(userId);
+    if (live.checkedIn) {
+      await prisma.user.update({ where: { id: user.id }, data: { lastAttendanceCheckInDate: today } }).catch(() => {});
+      console.log(`[attendance] already checked in today (per Lark) for user ${userId} — NOT auto-punching`);
+      return;
+    }
+
     const ok = await punchWithFallback(tenant, employeeId, 'Auto check-in via MeetKai');
     if (ok) {
       // Mark ONLY on real success, so a failed punch retries next request.
