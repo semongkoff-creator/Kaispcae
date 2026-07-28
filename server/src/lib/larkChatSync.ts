@@ -77,12 +77,21 @@ export async function relayChannelMessageToLark(
   senderName: string,
   text: string,
 ): Promise<void> {
-  if (!channel.isDefault) return;
+  // [diag-b4] temporary — remove once outbound sync confirmed working.
+  console.log('[diag-b4 out] relay called', JSON.stringify({ isDefault: channel.isDefault, roomId: channel.roomId }));
+  if (!channel.isDefault) {
+    console.log('[diag-b4 out] skipped: channel is not the default channel');
+    return;
+  }
   const trimmed = (text || '').trim();
   if (!trimmed) return; // attachment-only sends have nothing to relay
   const map = await prisma.roomChatMap.findUnique({ where: { roomId: channel.roomId } });
-  if (!map) return;
+  if (!map) {
+    console.log('[diag-b4 out] skipped: no RoomChatMap for room', channel.roomId);
+    return;
+  }
   const messageId = await sendGroupText(map.chatId, `[${senderName}] ${trimmed}`);
+  console.log('[diag-b4 out] sendGroupText ->', messageId ? `ok ${messageId}` : 'FAILED (see [larkIm] error above)');
   if (messageId) {
     // Best-effort ledger write — a lost row only risks one echoed message, not
     // correctness of the send itself.

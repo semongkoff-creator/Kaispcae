@@ -11,10 +11,18 @@ import { deliverLarkMessageToChannel, getLarkRelayUserId } from './larkChatSync'
 // hands the handler the event body directly, i.e. `{ sender, message }`.
 export async function handleInboundLarkMessage(io: Server, event: any): Promise<void> {
   const msg = event?.message;
+  // [diag-b4] temporary — remove once inbound sync confirmed working.
+  console.log('[diag-b4 in] event received', JSON.stringify({
+    chat_type: msg?.chat_type, message_type: msg?.message_type,
+    chat_id: msg?.chat_id, sender_type: event?.sender?.sender_type,
+  }));
   if (!msg) return;
 
   // Group text only. p2p (DM) and non-text are explicitly out of scope.
-  if (msg.chat_type !== 'group' || msg.message_type !== 'text') return;
+  if (msg.chat_type !== 'group' || msg.message_type !== 'text') {
+    console.log('[diag-b4 in] dropped: not group-text', msg?.chat_type, msg?.message_type);
+    return;
+  }
   const chatId: string | undefined = msg.chat_id;
   const messageId: string | undefined = msg.message_id;
   if (!chatId || !messageId) return;
@@ -22,22 +30,35 @@ export async function handleInboundLarkMessage(io: Server, event: any): Promise<
   // Anti-echo guard #1: only human-sent messages. Our own relayed messages (and
   // any other bot in the group) carry a non-'user' sender_type.
   const senderType: string | undefined = event?.sender?.sender_type;
-  if (senderType && senderType !== 'user') return;
+  if (senderType && senderType !== 'user') {
+    console.log('[diag-b4 in] dropped: sender_type not user =', senderType);
+    return;
+  }
 
   const prisma = getPrisma();
 
   // Anti-echo guard #2: skip a message MeetKai itself just relayed out.
   const echoed = await prisma.larkSentMessage.findUnique({ where: { messageId } });
-  if (echoed) return;
+  if (echoed) {
+    console.log('[diag-b4 in] dropped: echo of our own outbound');
+    return;
+  }
 
   // Resolve the Lark group → room → its default channel.
   const map = await prisma.roomChatMap.findUnique({ where: { chatId } });
-  if (!map) return;
+  if (!map) {
+    console.log('[diag-b4 in] dropped: no RoomChatMap for chat_id', chatId);
+    return;
+  }
   const channel = await prisma.channel.findFirst({
     where: { roomId: map.roomId, isDefault: true },
     select: { id: true, name: true, roomId: true },
   });
-  if (!channel) return;
+  if (!channel) {
+    console.log('[diag-b4 in] dropped: no default channel for room', map.roomId);
+    return;
+  }
+  console.log('[diag-b4 in] delivering to channel', channel.id);
 
   // Message content is a JSON string {"text":"..."}.
   let rawText = '';
