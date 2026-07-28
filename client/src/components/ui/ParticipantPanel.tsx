@@ -146,7 +146,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
                 isFollowingThem={!!p.userId && followInfo?.targetUserId === p.userId}
                 onFollow={p.userId ? () => emitFollowRequest(p.userId!) : undefined}
                 onUnfollow={emitFollowUnfollow}
-                onSummon={canModerate ? () => emitSummonUser(p.name) : undefined}
+                onSummon={() => emitSummonUser(p.name)}
                 isSpotlighted={!!p.userId && spotlightedUserIds.includes(p.userId)}
                 onSpotlight={canModerate && p.userId ? () => emitSpotlightToggle(p.userId!) : undefined}
                 onMessage={p.userId && onStartDm ? () => onStartDm(p.userId!) : undefined}

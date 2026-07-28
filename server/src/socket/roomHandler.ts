@@ -680,12 +680,10 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const nickname = data?.nickname?.trim();
     if (!uid || !nickname) return;
 
-    const rs = getRoomAdmin(room);
-    if (!canAccess(rs, uid, 'summon')) {
-      socket.emit('admin:error', { message: 'Staff role or higher required to summon players' });
-      return;
-    }
-
+    // Summon is open to ALL roles (per product decision) — no staff gate. The
+    // safety rails that remain are enough: the target must ACCEPT (consent),
+    // it's rate-limited (canSummonUser), and it still respects locked zones +
+    // Focus mode below. uid is validated above only to identify the requester.
     const players = await getPlayers(room);
     const actor = players.find((p) => p.id === socket.id);
     if (!actor) return;
