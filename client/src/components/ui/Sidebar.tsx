@@ -57,9 +57,9 @@ interface SidebarProps {
   simplifiedView: boolean;
   onToggleSimplifiedView: () => void;
 
-  // Lark Base (database) module — opens as a full-screen in-room panel.
-  baseViewActive: boolean;
-  onToggleBaseView: () => void;
+  // Daily Task widget (Lark Base-backed) — opens as a full-screen in-room panel.
+  dailyTaskActive: boolean;
+  onToggleDailyTask: () => void;
 
   // Workspace admin console. `isWorkspaceAdmin` is cosmetic only — every
   // /api/admin/* route re-checks the role from the DB (see
@@ -154,8 +154,8 @@ export function Sidebar({
   onToggleZoneLock,
   simplifiedView,
   onToggleSimplifiedView,
-  baseViewActive,
-  onToggleBaseView,
+  dailyTaskActive,
+  onToggleDailyTask,
   calendarViewActive,
   onToggleCalendarView,
   attendanceViewActive,
@@ -249,7 +249,7 @@ export function Sidebar({
               />
             )}
             <MenuRow icon={<EyeFill size={15} />} label="Simplify" onClick={closeAnd(onToggleSimplifiedView)} />
-            <MenuRow icon={<TableIcon size={15} />} label={baseViewActive ? 'Tutup Base' : 'Base (Database)'} active={baseViewActive} onClick={closeAnd(onToggleBaseView)} />
+            <MenuRow icon={<TableIcon size={15} />} label={dailyTaskActive ? 'Tutup Daily Task' : 'Daily Task'} active={dailyTaskActive} onClick={closeAnd(onToggleDailyTask)} />
             <MenuRow icon={<ChatDotsFill size={15} />} label={messengerViewActive ? 'Tutup Chat' : 'Chat'} active={messengerViewActive} onClick={closeAnd(onToggleMessengerView)} />
             {isAdmin && (
               <MenuRow

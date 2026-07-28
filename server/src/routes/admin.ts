@@ -16,13 +16,13 @@ export function setAdminIo(io: Server): void { ioRef = io; }
 // Invites and role changes are abuse-sensitive; same shape as the auth limiter.
 const adminMutationLimit = rateLimit(60 * 1000, 30);
 
-// Notify a user in-app. Reuses the Base module's Notification table — the
-// foundation's "one inbox" rule (a takeover notice must not need its own
-// delivery channel).
-async function notify(prisma: PrismaClient, userId: string, body: string, baseId?: string): Promise<void> {
+// Notify a user in-app via the shared Notification table (a takeover notice
+// must not need its own delivery channel). The Base module that once owned this
+// table was removed (A7); the table and this path remain.
+async function notify(prisma: PrismaClient, userId: string, body: string): Promise<void> {
   try {
     await prisma.notification.create({
-      data: { recipientId: userId, kind: 'workspace', body, baseId: baseId ?? null },
+      data: { recipientId: userId, kind: 'workspace', body },
     });
     ioRef?.to(`user:${userId}`).emit('base:notif', {});
   } catch (err) {
@@ -252,45 +252,8 @@ admin.patch('/admin/policy', authenticateToken, requireWorkspace('base:managePol
 // It is loud by construction: audit row + notification to the previous owner.
 // There is no read-without-takeover endpoint, and there must never be one.
 
-admin.post('/admin/bases/:baseId/takeover', authenticateToken, requireWorkspace('base:takeover'), adminMutationLimit, async (req: AuthRequest, res: Response) => {
-  try {
-    const prisma = getPrisma();
-    const base = await prisma.base.findUnique({ where: { id: req.params.baseId }, select: { id: true, name: true, ownerId: true } });
-    if (!base) return res.status(404).json({ error: 'Base tidak ditemukan' });
-    if (base.ownerId === req.userId) return res.status(400).json({ error: 'Kamu sudah pemilik base ini' });
-    const reason = String(req.body?.reason ?? '').trim();
-    if (!reason) return res.status(400).json({ error: 'Alasan wajib diisi untuk pengambilalihan' });
-
-    const prevOwnerId = base.ownerId;
-    await prisma.$transaction([
-      // Previous owner is demoted to editor rather than evicted — taking a
-      // base over must not also destroy the person's access to their work.
-      prisma.baseMember.upsert({
-        where: { baseId_userId: { baseId: base.id, userId: prevOwnerId } },
-        update: { role: 'editor' },
-        create: { baseId: base.id, userId: prevOwnerId, role: 'editor' },
-      }),
-      prisma.baseMember.deleteMany({ where: { baseId: base.id, userId: req.userId! } }),
-      prisma.base.update({ where: { id: base.id }, data: { ownerId: req.userId! } }),
-    ]);
-
-    await writeAudit(prisma, {
-      actorId: req.userId!, action: 'base:takeover', targetType: 'base', targetId: base.id,
-      targetUserId: prevOwnerId, reason,
-      meta: { baseName: base.name, before: { ownerId: prevOwnerId }, after: { ownerId: req.userId } },
-      ip: clientIp(req),
-    });
-    const actor = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
-    await notify(prisma, prevOwnerId, `Admin ${actor?.displayName ?? ''} mengambil alih kepemilikan base "${base.name}". Alasan: ${reason}`, base.id);
-    return res.json({ success: true, baseId: base.id, newOwnerId: req.userId });
-  } catch (err) {
-    console.error('[admin] takeover error:', err);
-    return res.status(500).json({ error: 'Gagal mengambil alih base' });
-  }
-});
-
-// Doc takeover — the Docs counterpart of the base takeover above, and the
-// ONLY way an admin ever reaches a private document's contents (D6).
+// Doc takeover — the ONLY way an admin ever reaches a private document's
+// contents (D6).
 admin.post('/admin/docs/:docId/takeover', authenticateToken, requireWorkspace('docs:takeover'), adminMutationLimit, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();

@@ -27,21 +27,18 @@ import teleportRoutes from './routes/teleport';
 import uploadRoutes from './routes/uploads';
 import recordingRoutes from './routes/recordings';
 import chatRoutes, { setIo as setChatIo } from './routes/chat';
-import baseRoutes, { setBaseIo } from './routes/bases';
-import baseCommentRoutes, { setCommentsIo } from './routes/baseComments';
 import adminRoutes, { setAdminIo } from './routes/admin';
 import attendanceRoutes from './routes/attendance';
 import attendanceAdminRoutes from './routes/attendanceAdmin';
 import calendarRoutes, { setCalendarIo } from './routes/calendar';
 import meetingRoomRoutes from './routes/meetingRooms';
-import baseShareRoutes from './routes/baseShare';
 import userRoutes from './routes/users';
 import larkRoutes from './routes/lark';
 import attendanceLarkRoutes from './routes/attendanceLark';
 import meetingRoutes, { setMeetingIo, startRecordingPoller } from './routes/meeting';
 import larkChatMapRoutes from './routes/larkChatMap';
+import taskRoutes from './routes/tasks';
 import { startLarkEventStream } from './lib/larkWs';
-import { registerBaseHandlers } from './socket/baseHandler';
 import { startReminderSweep } from './socket/reminderSweep';
 import { startAttendanceSweep } from './socket/attendanceSweep';
 
@@ -107,8 +104,6 @@ io.use((socket, next) => {
 setIo(io);
 setMembersIo(io);
 setChatIo(io);
-setBaseIo(io);
-setCommentsIo(io);
 setAdminIo(io);
 setCalendarIo(io);
 setMeetingIo(io);
@@ -138,15 +133,13 @@ app.use('/api', teleportRoutes);
 app.use('/api', uploadRoutes);
 app.use('/api', recordingRoutes);
 app.use('/api', chatRoutes);
-app.use('/api', baseRoutes);
-app.use('/api', baseCommentRoutes);
-app.use('/api', baseShareRoutes);
 app.use('/api', userRoutes);
 // Mounted at /api → routes resolve to /api/auth/lark/* (see nginx audit: only
 // /api/ is proxied to the backend).
 app.use('/api', larkRoutes);
 app.use('/api', attendanceLarkRoutes);
 app.use('/api', larkChatMapRoutes);
+app.use('/api', taskRoutes);
 app.use('/api', meetingRoutes);
 app.use('/api', adminRoutes);
 app.use('/api', attendanceRoutes);
@@ -175,7 +168,6 @@ async function start() {
     registerFollowHandlers(io, socket);
     registerMediaHandlers(io, socket);
     registerRecordingHandlers(io, socket);
-    registerBaseHandlers(io, socket);
   });
 
   startMediaExpirySweep(io);

@@ -10,7 +10,7 @@ import { AvatarSetup } from './components/avatar/AvatarSetup';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
 import { MeetingControl } from './components/ui/MeetingControl';
-import { BasesLauncher } from './components/LarkBase/BasesLauncher';
+import { DailyTaskPanel } from './components/ui/DailyTaskPanel';
 import { AdminConsole } from './admin/AdminConsole';
 import { CalendarApp } from './components/Calendar/CalendarApp';
 import { AttendanceApp } from './components/Attendance/AttendanceApp';
@@ -19,7 +19,6 @@ import { toCurrentUser, type CurrentUser } from './hooks/useCurrentUser';
 import { isTypingTarget, shouldIgnoreRoomHotkey } from './utils/hotkeys';
 import { useZoneLock } from './hooks/useZoneLock';
 import { ZoneLockBar } from './components/ui/ZoneLockBar';
-import { SharePage } from './components/LarkBase/SharePage';
 import { MiniMode, isMiniModeSupported, openMiniModeWindow } from './components/ui/MiniMode';
 import { ChatPanel } from './components/ui/ChatPanel';
 import { JoinGate, JoinRequestPanel } from './components/ui/JoinApproval';
@@ -488,7 +487,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
   const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
-  const [baseViewActive, setBaseViewActive] = useState(false);
+  const [dailyTaskActive, setDailyTaskActive] = useState(false);
   const [adminViewActive, setAdminViewActive] = useState(false);
   const [calendarViewActive, setCalendarViewActive] = useState(false);
   const [attendanceViewActive, setAttendanceViewActive] = useState(false);
@@ -521,7 +520,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // True while any full-screen suite module covers the room. Room affordances
   // (hotkeys, the floating Chat button) must stand down while it's open —
   // they belong to the office, not to a spreadsheet or a document.
-  const moduleOpen = baseViewActive || calendarViewActive || adminViewActive || attendanceViewActive || messengerViewActive;
+  const moduleOpen = dailyTaskActive || calendarViewActive || adminViewActive || attendanceViewActive || messengerViewActive;
 
   // E key for editor, Tab for admin panel
   useEffect(() => {
@@ -1023,7 +1022,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           if (!currentZone) return;
           zoneLock.setLock(currentZone.id, !zoneLock.lockOf(currentZone.id), currentZone.name);
         }}
-        baseViewActive={baseViewActive}
+        dailyTaskActive={dailyTaskActive}
         calendarViewActive={calendarViewActive}
         onToggleCalendarView={() => setCalendarViewActive((v) => !v)}
         attendanceViewActive={attendanceViewActive}
@@ -1038,7 +1037,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         isWorkspaceAdmin={currentUser.workspaceRole === 'admin'}
         adminViewActive={adminViewActive}
         onToggleAdminView={() => setAdminViewActive((v) => !v)}
-        onToggleBaseView={() => setBaseViewActive((v) => !v)}
+        onToggleDailyTask={() => setDailyTaskActive((v) => !v)}
         miniModeSupported={isMiniModeSupported()}
         miniModeActive={!!miniModeWindow}
         onToggleMiniMode={handleToggleMiniMode}
@@ -1111,7 +1110,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {/* Lark Base (database) module — full-screen in-room panel, same z-40
           layer as Meeting View; the room's Sidebar rail (z-50) stays reachable
           and the launcher offsets itself by pl-14 to clear it. */}
-      {baseViewActive && <BasesLauncher currentUser={{ id: authUserId, name: authDisplayName }} onClose={() => setBaseViewActive(false)} />}
+      {dailyTaskActive && <DailyTaskPanel onClose={() => setDailyTaskActive(false)} />}
       {adminViewActive && <AdminConsole currentUser={currentUser} onClose={() => setAdminViewActive(false)} />}
       {attendanceViewActive && <AttendanceApp onClose={() => setAttendanceViewActive(false)} />}
       {larkAttendanceActive && <LarkAttendancePanel onClose={() => setLarkAttendanceActive(false)} />}
@@ -1624,11 +1623,6 @@ export default function App() {
     return () => { cancelled = true; };
   }, [roomSlug, user]);
 
-  // Public share link (?share=<token>) — a read-only Base view openable
-  // WITHOUT logging in. Checked before the auth gate below.
-  const params = new URLSearchParams(window.location.search);
-  const shareToken = params.get('share');
-  if (shareToken) return <SharePage token={shareToken} />;
   // Loading
   if (loading) {
     return (

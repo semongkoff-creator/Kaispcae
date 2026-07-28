@@ -23,6 +23,35 @@ export interface LarkChatSummary {
   name: string;
 }
 
+// A7 — Daily Task (backed by a Lark Base table).
+export interface DailyTask {
+  recordId: string;
+  task: string;
+  workstream: string | null;
+  priority: string | null;
+  status: string | null;
+  notes: string | null;
+  dueDate: number | null;
+  project: { recordId: string; name: string } | null;
+}
+
+export interface TaskOptions {
+  workstream: string[];
+  priority: string[];
+  status: string[];
+  projects: { recordId: string; name: string }[];
+}
+
+export interface CreateTaskBody {
+  task: string;
+  workstream?: string;
+  priority?: string;
+  status?: string;
+  notes?: string;
+  dueDate?: number;
+  projectRecordId?: string;
+}
+
 export interface MomRecord {
   id: string;
   roomId: string;
@@ -225,6 +254,13 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ chatId, chatName }),
     }),
+
+  // A7 — Daily Task (reads/writes the Lark Base table directly).
+  getTodayTasks: () => request<{ tasks: DailyTask[] }>('/tasks/today'),
+  getTaskOptions: () => request<TaskOptions>('/tasks/options'),
+  createTask: (body: CreateTaskBody) => request<{ task: DailyTask }>('/tasks', { method: 'POST', body: JSON.stringify(body) }),
+  updateTaskStatus: (recordId: string, status: string) =>
+    request<{ ok: boolean }>(`/tasks/${encodeURIComponent(recordId)}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
 
   getRooms: () => request<{ rooms: RoomInfo[] }>('/rooms'),
 

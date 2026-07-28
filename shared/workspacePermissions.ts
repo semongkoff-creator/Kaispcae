@@ -45,9 +45,9 @@ export type WorkspaceAction =
   | 'docs:manageTemplates'
   | 'docs:managePolicy'            // public share links allowed? max expiry? password required?
   | 'docs:takeover'                // overt ownership takeover — audited + notifies old owner
-  // ── base config ──
-  | 'base:managePolicy'            // public share links allowed? export limits?
-  | 'base:takeover';               // overt ownership takeover — audited + notifies old owner
+  // ── base config (WorkspacePolicy share-link limits; Base module removed in
+  //    A7 but the shared policy row + its Docs fields remain) ──
+  | 'base:managePolicy';           // public share links allowed? export limits?
 
 // Every action above is admin-only today. This is kept as an explicit map
 // rather than a bare `role === 'admin'` so that (a) the full surface of
@@ -71,7 +71,6 @@ const ACTION_ROLE: Record<WorkspaceAction, WorkspaceRole> = {
   'docs:managePolicy': 'admin',
   'docs:takeover': 'admin',
   'base:managePolicy': 'admin',
-  'base:takeover': 'admin',
 };
 
 export interface WorkspaceCtx {

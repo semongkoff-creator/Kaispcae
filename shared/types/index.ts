@@ -920,8 +920,6 @@ export type { RoomTemplateId } from '../defaultRoomLayout';
 export { BLOCKED_TILES, isTileBlocked, findZoneEntryTile, findAdjacentFreeTile } from '../tileCollision';
 export type { Role, FeatureKey } from '../permissions';
 export { roleAtLeast, hasFeatureAccess, FEATURE_MIN_ROLE } from '../permissions';
-export type { BaseRole, BaseAction, PermissionCtx, FieldAccess, RecordEditRule } from '../basePermissions';
-export { baseRoleAtLeast, can, canViewField, canEditField, canEditRecord, BASE_ROLE_LABELS } from '../basePermissions';
 export type { ShiftDef, AttendanceStatus, WorkTotals, Geofence, Coords, GeofenceResult } from '../attendanceRules';
 export {
   STATUS_LABELS, shiftBounds, isWorkday, lateMinutes, clockInStatus, earlyLeaveMinutes,
@@ -936,5 +934,3 @@ export type { DocRole, DocAction, DocCtx } from '../docPermissions';
 export { docRoleAtLeast, canDoc, DOC_ROLE_LABELS } from '../docPermissions';
 export type { WorkspaceRole, WorkspaceAction, WorkspaceCtx } from '../workspacePermissions';
 export { canWorkspace, WORKSPACE_ACTIONS, WORKSPACE_ROLE_LABELS } from '../workspacePermissions';
-export type { BaseCellValue, BaseOp, BaseOpType, MutationRequest, WsOpsMessage, WsPresenceMessage, PresenceUser } from '../baseOps';
-export { OP_ACTION } from '../baseOps';

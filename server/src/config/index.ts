@@ -39,6 +39,14 @@ const envSchema = z
     // LARK_APP_ID/LARK_APP_SECRET. No webhook URL, encrypt key, or verification
     // token needed — hence no extra env vars here.
     //
+    // A7 — Daily Task widget reads/writes a specific Lark Base (Bitable) table
+    // as its single source of truth. These are non-secret identifiers from the
+    // Base URL; defaulted so no VPS env change is needed, overridable per deploy.
+    LARK_TASK_APP_TOKEN: z.string().default('UXozb1N5TapUC4s7fu2lpmDigwc'),
+    LARK_TASK_TABLE_ID: z.string().default('tbl4HKtwKhDS99pJ'),
+    // The linked "Project" table (Related Project field points here) — its
+    // records populate the live Project dropdown.
+    LARK_TASK_PROJECT_TABLE_ID: z.string().default('tbl6MlZSjIddOZSl'),
     // Bagian 4 upgrade — key to encrypt each user's stored Lark OAuth tokens at
     // rest (AES-256-GCM, see lib/tokenCrypto.ts). Any string; it's hashed to a
     // 32-byte key. Unset → user tokens are NOT stored and chat always relays via

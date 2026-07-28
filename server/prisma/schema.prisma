@@ -112,12 +112,10 @@ model User {
   // Messenger migration step 2 — replaces the As-A/As-B pair above with one
   // membership list that isn't scoped to a room (see Conversation).
   conversationMemberships ConversationParticipant[]
-  // Lark Base (collaborative database) — reverse relations
-  ownedBases              Base[]                    @relation("BaseOwner")
-  baseMemberships         BaseMember[]
-  baseComments            RecordComment[]
+  // Workspace notifications (attendance/calendar/reminder). Kept after the Base
+  // feature was removed (A7) — the Base module was deleted but Notification is
+  // shared by many features, so only its Base coupling was dropped.
   baseNotifications       Notification[]            @relation("NotifRecipient")
-  baseHistoryActs         RecordHistory[]           @relation("HistoryActor")
 }
 
 // ─── Workspace foundation (shared by Base / Calendar / Attendance / Docs) ───
@@ -590,123 +588,14 @@ model DocVersion {
   @@index([docId, createdAt])
 }
 
-// ─── Lark Base (collaborative database module) ──────────────────────
-// A Base is a standalone, user-owned database (its own member list, share
-// links, comments, history) — independent of Rooms. Field/view definitions
-// live as JSON on BaseTable (flexible, mirrors Room.tilemapData); records are
-// individual rows so pagination + per-cell last-write-wins merging work.
-
-model Base {
-  id            String         @id @default(cuid())
-  name          String
-  ownerId       String
-  owner         User           @relation("BaseOwner", fields: [ownerId], references: [id])
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  tables        BaseTable[]
-  members       BaseMember[]
-  shareLinks    ShareLink[]
-  notifications Notification[]
-}
-
-model BaseMember {
-  id        String   @id @default(cuid())
-  baseId    String
-  base      Base     @relation(fields: [baseId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      String // owner | editor | commenter | viewer (see shared/basePermissions.ts)
-  createdAt DateTime @default(now())
-
-  @@unique([baseId, userId])
-  @@index([userId])
-}
-
-model BaseTable {
-  id         String       @id @default(cuid())
-  baseId     String
-  base       Base         @relation(fields: [baseId], references: [id], onDelete: Cascade)
-  name       String
-  icon       String?
-  orderIndex Int          @default(0)
-  fields     Json // Field[]
-  views      Json // View[]
-  // Optional per-record edit rule (7d): { personFieldId } — editors may only
-  // modify records whose person field equals themselves. Owner bypasses.
-  // Enforced in lib/baseOps.ts against the DB's cells, never the client's.
-  recordRule Json?
-  createdAt  DateTime     @default(now())
-  records    BaseRecord[]
-
-  @@index([baseId])
-}
-
-model BaseRecord {
-  id          String          @id @default(cuid())
-  tableId     String
-  table       BaseTable       @relation(fields: [tableId], references: [id], onDelete: Cascade)
-  cells       Json // { [fieldId]: value }
-  orderIndex  Float           @default(0)
-  createdById String?
-  updatedById String?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  comments    RecordComment[]
-  history     RecordHistory[]
-
-  @@index([tableId, orderIndex])
-}
-
-model ShareLink {
-  token        String    @id // random ≥32 chars
-  baseId       String
-  base         Base      @relation(fields: [baseId], references: [id], onDelete: Cascade)
-  viewId       String // points at ONE view
-  role         String // viewer | commenter | editor
-  passwordHash String?
-  expiresAt    DateTime?
-  allowCopy    Boolean   @default(true)
-  createdById  String
-  createdAt    DateTime  @default(now())
-  lastOpenedAt DateTime?
-
-  @@index([baseId])
-}
-
-model RecordComment {
-  id        String     @id @default(cuid())
-  recordId  String
-  record    BaseRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
-  authorId  String
-  author    User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  body      String
-  mentions  Json? // userId[]
-  parentId  String? // reply threading
-  resolved  Boolean    @default(false)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-
-  @@index([recordId, createdAt])
-}
-
-model RecordHistory {
-  id        String     @id @default(cuid())
-  recordId  String
-  record    BaseRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
-  actorId   String
-  actor     User       @relation("HistoryActor", fields: [actorId], references: [id], onDelete: Cascade)
-  fieldId   String
-  oldValue  Json?
-  newValue  Json?
-  createdAt DateTime   @default(now())
-
-  @@index([recordId, createdAt])
-}
-
+// ─── Workspace notifications ─────────────────────────────────────────
+// Shared by attendance / calendar / reminders / admin (each calls
+// notification.create). Originally created alongside the Lark Base module and
+// coupled to it via baseId; the Base feature was removed in A7, so that column
+// and its FK were dropped, but the table itself stays — many features depend on
+// it. `recordId` is a free-form pointer kept for legacy rows.
 model Notification {
   id          String   @id @default(cuid())
-  baseId      String?
-  base        Base?    @relation(fields: [baseId], references: [id], onDelete: Cascade)
   recipientId String
   recipient   User     @relation("NotifRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
   kind        String // mention | assigned | invited
