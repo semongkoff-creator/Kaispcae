@@ -162,6 +162,8 @@ interface GameCanvasProps {
   onPortalEnter: (target: string) => void;
   emitSit: (sitting: boolean, x: number, y: number, direction: Direction, seatFurnitureId?: string) => void;
   emitFollowUnfollow: () => void;
+  // A4 — free double-click teleport.
+  emitTeleportTo: (x: number, y: number, direction: Direction) => void;
   onMediaOpen: (mediaId: string) => void;
 }
 
@@ -220,7 +222,7 @@ function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: numb
   return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, onMediaOpen }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, onMediaOpen }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -334,6 +336,40 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   useEffect(() => {
     setPosition(localPlayer.x, localPlayer.y);
   }, [localPlayer.x, localPlayer.y, setPosition]);
+
+  // A4 — double-click a non-blocked tile to teleport there instantly. Refs so
+  // the once-attached listener always reads current values without re-binding.
+  const emitTeleportToRef = useRef(emitTeleportTo); emitTeleportToRef.current = emitTeleportTo;
+  // Transient fade rings at teleport source + destination (performance.now()
+  // timestamps), drawn + expired in the render loop.
+  const teleportFlashRef = useRef<{ x: number; y: number; start: number }[]>([]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onDblClick = (e: MouseEvent) => {
+      if (editorModeRef.current) return; // never teleport while editing the room
+      const store = useGameStore.getState();
+      if (store.localPlayer.isSitting) return; // stand up first (movement is frozen)
+      const rect = canvas.getBoundingClientRect();
+      const worldX = (e.clientX - rect.left) + cameraXRef.current;
+      const worldY = (e.clientY - rect.top) + cameraYRef.current;
+      const tileX = Math.floor(worldX / TILE_SIZE);
+      const tileY = Math.floor(worldY / TILE_SIZE);
+      if (tileX < 0 || tileY < 0) return;
+      if (isBlocked(tileX, tileY)) return; // can't land inside a wall/desk
+      const cx = tileX * TILE_SIZE + TILE_SIZE / 2;
+      const cy = tileY * TILE_SIZE + TILE_SIZE / 2;
+      const from = store.localPlayer;
+      const now = performance.now();
+      teleportFlashRef.current.push({ x: from.x, y: from.y, start: now }, { x: cx, y: cy, start: now });
+      setPosition(cx, cy); // move the movement source-of-truth immediately — no snap-back
+      store.setLocalPlayer({ x: cx, y: cy, isMoving: false });
+      emitTeleportToRef.current(cx, cy, from.direction); // others snap via PLAYER_TELEPORTED
+    };
+    canvas.addEventListener('dblclick', onDblClick);
+    return () => canvas.removeEventListener('dblclick', onDblClick);
+  }, [isBlocked, setPosition]);
 
   // ── Sit-in-chair ─────────────────────────────────────────────────────
   // Updated every frame in draw() below (cheap — furniture lists are small)
@@ -937,6 +973,26 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         ctx.arc(sx, sy, AVATAR_RADIUS + 3, 0, Math.PI * 2);
         ctx.strokeStyle = `rgba(74, 222, 128, ${pulse * 0.6})`;
         ctx.lineWidth = 2; ctx.stroke();
+      }
+    }
+
+    // A4 — teleport fade rings at the source + destination tiles, so a teleport
+    // reads as a deliberate blink rather than a glitch. Expired entries pruned.
+    {
+      const flashes = teleportFlashRef.current;
+      const FLASH_MS = 450;
+      for (let i = flashes.length - 1; i >= 0; i--) {
+        const age = timestamp - flashes[i].start;
+        if (age >= FLASH_MS || age < 0) { flashes.splice(i, 1); continue; }
+        const t = age / FLASH_MS;
+        ctx.save();
+        ctx.globalAlpha = (1 - t) * 0.7;
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(flashes[i].x - cameraX, flashes[i].y - cameraY, AVATAR_RADIUS + 4 + t * 18, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
       }
     }
 

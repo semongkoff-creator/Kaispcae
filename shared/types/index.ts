@@ -280,6 +280,10 @@ export enum SocketEvents {
   // slide across the map like a normal walk would.
   TELEPORT_REQUEST = 'teleport:request',
   PLAYER_TELEPORTED = 'player:teleported',
+  // A4 — free double-click-to-teleport to an arbitrary (non-blocked) tile.
+  // Client sends target pixel coords; server validates + re-broadcasts as
+  // PLAYER_TELEPORTED so every client SNAPS (no lerp), same as other teleports.
+  PLAYER_TELEPORT_TO = 'player:teleport_to',
 
   ROOM_DELETE = 'room:delete',
   ROOM_DELETED = 'room:deleted',

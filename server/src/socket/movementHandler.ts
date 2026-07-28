@@ -57,6 +57,27 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     }
   });
 
+  // A4 — free double-click teleport. Same bounds + server-authoritative
+  // collision guard as PLAYER_MOVE, but re-broadcast as PLAYER_TELEPORTED so
+  // every client SNAPS instead of interpolating a slide across the map.
+  socket.on(SocketEvents.PLAYER_TELEPORT_TO, (data: { x: number; y: number; direction?: string }) => {
+    if (typeof data?.x !== 'number' || typeof data?.y !== 'number') return;
+    const clampedX = Math.max(TILE_SIZE / 2, Math.min(MAP_WIDTH * TILE_SIZE - TILE_SIZE / 2, data.x));
+    const clampedY = Math.max(TILE_SIZE / 2, Math.min(MAP_HEIGHT * TILE_SIZE - TILE_SIZE / 2, data.y));
+    const rooms = Array.from(socket.rooms);
+    const gameRoom = rooms.find((r) => r !== socket.id);
+    if (!gameRoom) return;
+    const tiles = getCachedTiles(gameRoom);
+    if (tiles) {
+      const tileX = Math.floor(clampedX / TILE_SIZE);
+      const tileY = Math.floor(clampedY / TILE_SIZE);
+      if (isTileBlocked(tiles, tileX, tileY)) return; // refuse teleport into a wall/desk
+    }
+    const direction = (data.direction as MoveData['direction']) || 'down';
+    socket.to(gameRoom).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: clampedX, y: clampedY, direction });
+    updatePlayerPosition(gameRoom, socket.id, clampedX, clampedY, direction, false);
+  });
+
   socket.on(SocketEvents.PLAYER_STOP, (data: { direction: string }) => {
     const rooms = Array.from(socket.rooms);
     const gameRoom = rooms.find((r) => r !== socket.id);

@@ -63,9 +63,15 @@ export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions)
     }
 
     const isMoving = dx !== 0 || dy !== 0;
-    // Run (hold R) only means anything while actually moving — holding it
-    // alone with no direction key does nothing, same as every other game.
-    const isRunning = isMoving && (keys.has('r') || keys.has('R') || keys.has('KeyR'));
+    // Run/sprint only means anything while actually moving — holding it alone
+    // with no direction key does nothing, same as every other game. A4 adds
+    // Shift as an alias for R (same PLAYER_RUN_SPEED — one sprint system, not
+    // two). This ONLY feeds the speed pick in tryMove; it does not touch the
+    // ref/state architecture, so the movement-responsiveness fix is untouched.
+    const isRunning = isMoving && (
+      keys.has('r') || keys.has('R') || keys.has('KeyR') ||
+      keys.has('Shift') || keys.has('ShiftLeft') || keys.has('ShiftRight')
+    );
     return { direction, isMoving, dx, dy, isRunning };
   }, []);
 

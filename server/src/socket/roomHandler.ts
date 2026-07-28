@@ -706,6 +706,11 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       socket.emit('admin:error', { message: `${target.name} sedang di zona terkunci — tidak bisa dipanggil.` });
       return;
     }
+    // A4 — respect A3's Focus/DND: someone in focus mode can't be summoned.
+    if (target.workMode === 'focus') {
+      socket.emit('admin:error', { message: `${target.name} sedang dalam mode Focus — tidak bisa dipanggil sekarang.` });
+      return;
+    }
 
     clearPendingSummon(target.id);
     const requestId = randomUUID();
