@@ -278,7 +278,7 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
       // duplicates (already relayed by the original send) and attachment-only
       // messages (empty text; the helper no-ops on those too).
       if (!duplicate && text) {
-        void relayChannelMessageToLark(prisma, channel, message.sender.displayName, text).catch((e) =>
+        void relayChannelMessageToLark(prisma, channel, userId, message.sender.displayName, text).catch((e) =>
           console.error('[channelChat] Lark relay failed:', e),
         );
       }

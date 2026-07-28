@@ -1,5 +1,8 @@
 generator client {
   provider = "prisma-client-js"
+  // omitApi: lets lib/prisma.ts globally `omit` the Lark token columns so they
+  // never appear in a query result unless explicitly re-selected (Bagian 4).
+  previewFeatures = ["omitApi"]
 }
 
 datasource db {
@@ -41,6 +44,21 @@ model User {
   // checkout. Display/status is read live from Lark (user_tasks/query), which
   // also reflects checkouts done in the Lark app itself.
   lastAttendanceCheckOutDate String?
+  // Bagian 4 upgrade — the user's own Lark OAuth tokens, so chat messages can
+  // be sent to Lark AS the real user (im:message.send_as_user) instead of the
+  // bot. SENSITIVE: these are impersonation credentials — stored AES-256-GCM
+  // encrypted (see lib/tokenCrypto.ts), and excluded from every query by a
+  // global Prisma `omit` (see lib/prisma.ts) so they can never leak to the
+  // frontend; only the send path re-selects them explicitly. Captured/rotated
+  // at Lark login (routes/lark.ts) and on refresh (lib/larkUserToken.ts).
+  // Null for manual-login users → the bot+prefix fallback handles them.
+  larkUserAccessToken   String?   @db.Text
+  larkRefreshToken      String?   @db.Text
+  // When the access token / refresh token expire (absolute instants). Not
+  // secret, so not omitted — used to decide "still valid?" vs "refresh" vs
+  // "give up and use the bot".
+  larkTokenExpiresAt    DateTime?
+  larkRefreshExpiresAt  DateTime?
   // Global, account-level role — separate from the per-room Role hierarchy
   // (owner/admin/staff/member, see shared/permissions.ts and RoomMember.role
   // below). 'admin' accounts can create rooms (the only account-wide gate;

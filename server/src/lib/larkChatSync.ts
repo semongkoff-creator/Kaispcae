@@ -3,7 +3,8 @@ import { Server } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
 import { SocketEvents, ChannelMessage } from '@virtualmeet/shared';
 import { ensureGroupConversation } from './conversations';
-import { sendGroupText } from './larkIm';
+import { sendGroupText, sendAsUser } from './larkIm';
+import { getValidUserToken } from './larkUserToken';
 
 // Bagian 4 — the two directions of the Lark ↔ MeetKai channel sync live here so
 // the socket handler (outbound) and the webhook route (inbound) share one
@@ -65,24 +66,51 @@ export async function deliverLarkMessageToChannel(
   io.to(`channel:${channel.id}`).emit(SocketEvents.CHANNEL_MESSAGE_NEW, dto);
 }
 
-// OUTBOUND: relay a message just sent in MeetKai to the mapped Lark group, as
-// `[Sender] text`. Fire-and-forget by contract — the caller must NOT await this
-// in a way that can fail the user's own send (a Lark outage must not break
-// MeetKai chat). Only the default channel of a mapped room relays; everything
-// else is a no-op. The returned Lark message_id is recorded so the inbound
-// webhook recognises and drops the echo.
+// In-memory ledger of message_ids MeetKai just relayed OUT to Lark, so the
+// inbound WS handler can drop the echo instantly. This matters most for
+// user-identity sends: their echo arrives with sender_type="user", so the
+// sender_type filter does NOT catch it — this set (checked first) plus the
+// durable LarkSentMessage row are the only anti-echo guards for that path.
+// TTL-pruned; an echo only ever comes back within seconds.
+const recentSentIds = new Map<string, number>();
+const RECENT_TTL_MS = 2 * 60 * 1000;
+
+export function wasRecentlySentByUs(messageId: string): boolean {
+  const exp = recentSentIds.get(messageId);
+  if (exp === undefined) return false;
+  if (exp < Date.now()) {
+    recentSentIds.delete(messageId);
+    return false;
+  }
+  return true;
+}
+
+function markSent(messageId: string): void {
+  recentSentIds.set(messageId, Date.now() + RECENT_TTL_MS);
+  if (recentSentIds.size > 500) {
+    const now = Date.now();
+    for (const [k, v] of recentSentIds) if (v < now) recentSentIds.delete(k);
+  }
+}
+
+// OUTBOUND: relay a message just sent in MeetKai to the mapped Lark group.
+// Fire-and-forget by contract — the caller must NOT let this fail the user's own
+// send (a Lark outage must not break MeetKai chat). Only the default channel of
+// a mapped room relays.
+//
+// Bagian 4 upgrade: try to send AS the real user (their user_access_token) so it
+// appears under their own name in Lark; fall back to the bot with a `[Name]`
+// prefix when the user has no valid token (manual-login user, expired+dead
+// refresh, or a Lark error). Either way the returned message_id is recorded for
+// anti-echo.
 export async function relayChannelMessageToLark(
   prisma: PrismaClient,
   channel: { roomId: string; isDefault: boolean },
+  senderId: string,
   senderName: string,
   text: string,
 ): Promise<void> {
-  // [diag-b4] temporary — remove once outbound sync confirmed working.
-  console.log('[diag-b4 out] relay called', JSON.stringify({ isDefault: channel.isDefault, roomId: channel.roomId }));
-  if (!channel.isDefault) {
-    console.log('[diag-b4 out] skipped: channel is not the default channel');
-    return;
-  }
+  if (!channel.isDefault) return;
   const trimmed = (text || '').trim();
   if (!trimmed) return; // attachment-only sends have nothing to relay
   const map = await prisma.roomChatMap.findUnique({ where: { roomId: channel.roomId } });
@@ -90,11 +118,24 @@ export async function relayChannelMessageToLark(
     console.log('[diag-b4 out] skipped: no RoomChatMap for room', channel.roomId);
     return;
   }
-  const messageId = await sendGroupText(map.chatId, `[${senderName}] ${trimmed}`);
-  console.log('[diag-b4 out] sendGroupText ->', messageId ? `ok ${messageId}` : 'FAILED (see [larkIm] error above)');
+
+  // 1) Prefer the user's own identity.
+  let messageId: string | null = null;
+  const userToken = await getValidUserToken(senderId);
+  if (userToken) {
+    messageId = await sendAsUser(map.chatId, trimmed, userToken);
+    console.log('[diag-b4 out] sendAsUser ->', messageId ? `ok ${messageId}` : 'failed → bot fallback');
+  }
+  // 2) Fallback: bot + [Name] prefix (the original mechanism, never removed).
+  if (!messageId) {
+    messageId = await sendGroupText(map.chatId, `[${senderName}] ${trimmed}`);
+    console.log('[diag-b4 out] sendGroupText(bot) ->', messageId ? `ok ${messageId}` : 'FAILED (see [larkIm] error above)');
+  }
+
   if (messageId) {
-    // Best-effort ledger write — a lost row only risks one echoed message, not
-    // correctness of the send itself.
+    // Fast in-memory guard first (beats the echo's round-trip), then the durable
+    // row (survives a restart). A lost row only risks one echoed message.
+    markSent(messageId);
     await prisma.larkSentMessage.create({ data: { messageId } }).catch(() => {});
   }
 }

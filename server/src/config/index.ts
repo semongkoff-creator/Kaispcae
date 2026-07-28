@@ -38,6 +38,12 @@ const envSchema = z
     // connection (WSClient, see lib/larkWs.ts), authenticated with the existing
     // LARK_APP_ID/LARK_APP_SECRET. No webhook URL, encrypt key, or verification
     // token needed — hence no extra env vars here.
+    //
+    // Bagian 4 upgrade — key to encrypt each user's stored Lark OAuth tokens at
+    // rest (AES-256-GCM, see lib/tokenCrypto.ts). Any string; it's hashed to a
+    // 32-byte key. Unset → user tokens are NOT stored and chat always relays via
+    // the bot+prefix fallback. Never printed or committed.
+    LARK_TOKEN_ENC_KEY: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     // The default JWT secret is a well-known literal — anyone can forge valid

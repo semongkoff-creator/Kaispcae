@@ -4,6 +4,7 @@ import { getPrisma } from '../lib/prisma';
 import { getConfig } from '../config';
 import { signToken } from './auth';
 import { syntheticLarkEmail } from '../lib/larkEmail';
+import { buildStoredTokenFields } from '../lib/larkUserToken';
 
 const lark = Router();
 
@@ -84,6 +85,15 @@ lark.get('/auth/lark/callback', async (req: Request, res: Response) => {
     const tokJson: any = await tokRes.json();
     const tokData = tokJson?.data ?? {};
     const userAccessToken: string | undefined = tokData.access_token;
+    // Bagian 4 upgrade — capture the refresh token + lifetimes (previously
+    // discarded) so chat can be relayed as this user later. Encrypted before
+    // storage; buildStoredTokenFields returns {} if encryption is off.
+    const larkTokenFields = buildStoredTokenFields(
+      tokData.access_token,
+      tokData.refresh_token,
+      tokData.expires_in,
+      tokData.refresh_expires_in,
+    );
 
     // The access_token response already carries the profile; user_info is the
     // task's named source, so prefer it and fall back to the token payload.
@@ -132,12 +142,17 @@ lark.get('/auth/lark/callback', async (req: Request, res: Response) => {
           // upload feature stores). ChatAvatar renders any <img src>, so it
           // still shows — just note it's not the base64-in-DB path.
           profilePhoto: avatar || null,
+          ...larkTokenFields,
         },
       });
-    } else if (larkUserId && !user.larkUserId) {
-      // Backfill user_id for an account created before A2 (e.g. the first test
-      // user) the next time they log in via Lark — no re-migration needed.
-      user = await prisma.user.update({ where: { id: user.id }, data: { larkUserId } });
+    } else {
+      // Existing account — always refresh the stored tokens on each Lark login
+      // (they rotate), and backfill user_id for accounts created before A2.
+      const updateData: Record<string, unknown> = { ...larkTokenFields };
+      if (larkUserId && !user.larkUserId) updateData.larkUserId = larkUserId;
+      if (Object.keys(updateData).length > 0) {
+        user = await prisma.user.update({ where: { id: user.id }, data: updateData });
+      }
     }
 
     // 4) OUR token, minted the one and only way (identical to manual login) so

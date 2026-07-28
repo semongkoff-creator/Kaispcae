@@ -40,6 +40,35 @@ export async function sendGroupText(chatId: string, text: string): Promise<strin
   }
 }
 
+// Bagian 4 upgrade — send a text message to a group AS THE USER, using their
+// user_access_token instead of the bot's tenant token. Same endpoint; the
+// message appears in Lark under the real user's name/avatar. Requires the
+// im:message.send_as_user scope. Returns the Lark message_id or null on any
+// failure (caller falls back to the bot). Text is sent verbatim — no [Name]
+// prefix, since it's genuinely from that user.
+export async function sendAsUser(chatId: string, text: string, userAccessToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${LARK_OPENAPI_BASE}/im/v1/messages?receive_id_type=chat_id`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${userAccessToken}`, 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({
+        receive_id: chatId,
+        msg_type: 'text',
+        content: JSON.stringify({ text }),
+      }),
+    });
+    const j: any = await res.json();
+    if (j?.code !== 0) {
+      console.error('[larkIm] sendAsUser failed:', j?.code, j?.msg);
+      return null;
+    }
+    return j?.data?.message_id ?? null;
+  } catch (e) {
+    console.error('[larkIm] sendAsUser error:', e);
+    return null;
+  }
+}
+
 // List the group chats the bot belongs to — used to populate the admin mapping
 // dropdown so an admin picks from real chats instead of pasting a chat_id.
 // Requires scope im:chat:readonly. Paginates through all pages (chat counts are
