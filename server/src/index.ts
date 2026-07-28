@@ -39,8 +39,8 @@ import userRoutes from './routes/users';
 import larkRoutes from './routes/lark';
 import attendanceLarkRoutes from './routes/attendanceLark';
 import meetingRoutes, { setMeetingIo, startRecordingPoller } from './routes/meeting';
-import larkEventsRoutes, { setLarkEventsIo } from './routes/larkEvents';
 import larkChatMapRoutes from './routes/larkChatMap';
+import { startLarkEventStream } from './lib/larkWs';
 import { registerBaseHandlers } from './socket/baseHandler';
 import { startReminderSweep } from './socket/reminderSweep';
 import { startAttendanceSweep } from './socket/attendanceSweep';
@@ -49,15 +49,6 @@ loadConfig();
 const config = getConfig();
 
 const app = express();
-
-// Bagian 4 — the Lark event webhook is mounted FIRST, before cors, the rate
-// limiter, and express.json, on purpose:
-//  • it parses its body with express.raw (signature is over the exact bytes),
-//    so the global express.json below must never touch it;
-//  • it's server-to-server from Lark (no Origin, and it must not be rate-limited
-//    away during a busy chat), so it skips cors + the global limiter too.
-// Its own signature check is the access control here, not any of those.
-app.use('/api', larkEventsRoutes);
 
 // 512kb (up from the 100kb default) so profile-photo data-URLs fit — the
 // route itself caps the photo at ~150KB, this is just headroom for the JSON
@@ -121,7 +112,6 @@ setCommentsIo(io);
 setAdminIo(io);
 setCalendarIo(io);
 setMeetingIo(io);
-setLarkEventsIo(io);
 
 // ── REST routes ──────────────────────────────────────────────────
 app.get('/api/health', async (_req, res) => {
@@ -196,6 +186,8 @@ async function start() {
     console.log(`[server] VirtualMeet running on http://localhost:${config.PORT}`);
     // A5 — background poll for finished Lark VC recordings.
     startRecordingPoller();
+    // Bagian 4 — open the Lark persistent connection for inbound chat events.
+    startLarkEventStream(io);
   });
 }
 

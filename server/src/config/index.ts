@@ -34,14 +34,10 @@ const envSchema = z
     // table exists and the bitable scope is granted.
     LARK_BITABLE_APP_TOKEN: z.string().optional(),
     LARK_BITABLE_ACTIVITY_TABLE_ID: z.string().optional(),
-    // Bagian 4 — Lark Event Subscription (inbound webhook /api/lark/events).
-    // Both optional so the app runs without the chat-sync feature; the webhook
-    // rejects EVERY request (500-safe: returns 404-like ignore) until both are
-    // set. LARK_ENCRYPT_KEY decrypts the AES-256-CBC event payload;
-    // LARK_VERIFICATION_TOKEN is checked against the event's token field. Get
-    // both from Lark Console → Event Subscription. Never hardcoded.
-    LARK_ENCRYPT_KEY: z.string().optional(),
-    LARK_VERIFICATION_TOKEN: z.string().optional(),
+    // Bagian 4 — inbound Lark chat events arrive over the SDK's persistent
+    // connection (WSClient, see lib/larkWs.ts), authenticated with the existing
+    // LARK_APP_ID/LARK_APP_SECRET. No webhook URL, encrypt key, or verification
+    // token needed — hence no extra env vars here.
   })
   .superRefine((val, ctx) => {
     // The default JWT secret is a well-known literal — anyone can forge valid
