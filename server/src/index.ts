@@ -38,6 +38,7 @@ import baseShareRoutes from './routes/baseShare';
 import userRoutes from './routes/users';
 import larkRoutes from './routes/lark';
 import attendanceLarkRoutes from './routes/attendanceLark';
+import meetingRoutes, { setMeetingIo, startRecordingPoller } from './routes/meeting';
 import { registerBaseHandlers } from './socket/baseHandler';
 import { startReminderSweep } from './socket/reminderSweep';
 import { startAttendanceSweep } from './socket/attendanceSweep';
@@ -107,6 +108,7 @@ setBaseIo(io);
 setCommentsIo(io);
 setAdminIo(io);
 setCalendarIo(io);
+setMeetingIo(io);
 
 // ── REST routes ──────────────────────────────────────────────────
 app.get('/api/health', async (_req, res) => {
@@ -141,6 +143,7 @@ app.use('/api', userRoutes);
 // /api/ is proxied to the backend).
 app.use('/api', larkRoutes);
 app.use('/api', attendanceLarkRoutes);
+app.use('/api', meetingRoutes);
 app.use('/api', adminRoutes);
 app.use('/api', attendanceRoutes);
 app.use('/api', attendanceAdminRoutes);
@@ -177,6 +180,8 @@ async function start() {
 
   httpServer.listen(config.PORT, () => {
     console.log(`[server] VirtualMeet running on http://localhost:${config.PORT}`);
+    // A5 — background poll for finished Lark VC recordings.
+    startRecordingPoller();
   });
 }
 

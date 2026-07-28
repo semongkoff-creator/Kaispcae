@@ -356,6 +356,32 @@ model MeetingRoom {
   events CalendarEvent[]
 }
 
+// A5 — a recorded "official meeting" started from inside a meeting-type Zone,
+// backed by a Lark VC reservation (auto_record). Distinct from MeetingRoom
+// (calendar room booking). Foundation for A6 (AI summary). Standalone (no FK
+// relations) — roomId is the room slug, startedBy/zoneId are plain ids.
+model MomRecord {
+  id              String    @id @default(cuid())
+  roomId          String
+  zoneId          String
+  startedBy       String
+  startTime       DateTime  @default(now())
+  endTime         DateTime?
+  larkReserveId   String?
+  larkMeetingNo   String?
+  larkMeetingId   String?
+  // 'live' → meeting reserved/ongoing; 'ended' → ended, no recording yet;
+  // 'recording_pending' → waiting on Lark to finish processing; 'recorded' →
+  // recordingUrl filled; 'unavailable' → plan/permission has no recording.
+  recordingStatus String    @default("live")
+  recordingUrl    String?
+  summary         String?   @db.Text
+  actionItems     Json?
+  createdAt       DateTime  @default(now())
+
+  @@index([roomId])
+}
+
 model CalendarEvent {
   id          String       @id @default(cuid())
   calendarId  String

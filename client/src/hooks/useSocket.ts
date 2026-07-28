@@ -197,6 +197,14 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       upsertPlayer({ id: data.id, workMode: data.workMode === 'focus' ? 'focus' : undefined } as Avatar);
     });
 
+    // A5 — an official meeting started/ended in a zone; drives the join banner.
+    socket.on(SocketEvents.MEETING_STARTED, (d: { momRecordId: string; zoneId: string; url: string; startedBy: string }) => {
+      useGameStore.getState().setMeetingStarted(d.zoneId, { momRecordId: d.momRecordId, url: d.url, startedBy: d.startedBy });
+    });
+    socket.on(SocketEvents.MEETING_ENDED, (d: { zoneId: string }) => {
+      useGameStore.getState().setMeetingEnded(d.zoneId);
+    });
+
     socket.on(SocketEvents.PLAYER_SAT, (data: { id: string; isSitting: boolean; x: number; y: number; direction: Avatar['direction']; seatFurnitureId?: string }) => {
       const state = useGameStore.getState();
       if (data.id === state.localPlayerId) return;

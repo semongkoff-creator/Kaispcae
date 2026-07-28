@@ -17,6 +17,20 @@ export interface AttendanceStatus {
   totalHours: number | null;
 }
 
+// A5 — a recorded meeting (Lark VC) for the Meeting History panel.
+export interface MomRecord {
+  id: string;
+  roomId: string;
+  zoneId: string;
+  startedBy: string;
+  startTime: string;
+  endTime: string | null;
+  larkMeetingNo: string | null;
+  recordingStatus: string;
+  recordingUrl: string | null;
+  summary: string | null;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -187,6 +201,14 @@ export const api = {
   // A12 — Lark attendance status (source of truth = Lark) + checkout.
   getAttendanceStatus: () => request<AttendanceStatus>('/attendance/status'),
   checkOutAttendance: () => request<AttendanceStatus>('/attendance/checkout', { method: 'POST' }),
+
+  // A5 — recorded meetings (Lark VC).
+  startMeeting: (roomId: string, zoneId: string) =>
+    request<{ momRecordId: string; url: string; meetingNo: string }>('/meeting/start', { method: 'POST', body: JSON.stringify({ roomId, zoneId }) }),
+  endMeeting: (momRecordId: string) =>
+    request<{ ok: boolean; recordingStatus?: string }>('/meeting/end', { method: 'POST', body: JSON.stringify({ momRecordId }) }),
+  getMeetingHistory: (roomId: string) =>
+    request<{ meetings: MomRecord[] }>(`/meeting/history?roomId=${encodeURIComponent(roomId)}`),
 
   getRooms: () => request<{ rooms: RoomInfo[] }>('/rooms'),
 

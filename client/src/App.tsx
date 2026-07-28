@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { GearFill, Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill } from 'react-bootstrap-icons';
 import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
@@ -9,6 +9,7 @@ import { NameModal } from './components/ui/NameModal';
 import { AvatarSetup } from './components/avatar/AvatarSetup';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
+import { MeetingControl } from './components/ui/MeetingControl';
 import { BasesLauncher } from './components/LarkBase/BasesLauncher';
 import { AdminConsole } from './admin/AdminConsole';
 import { CalendarApp } from './components/Calendar/CalendarApp';
@@ -223,6 +224,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       emitWorkMode(mode, focusZone?.id);
     }
   }, [localPlayer.x, localPlayer.y, zones, workMode, setWorkMode, emitWorkMode]);
+
+  // A5 — Meeting zone detection. The MeetingControl (Start/Join/End + history)
+  // renders only while the local avatar is inside a Zone of type 'meeting'.
+  // Purely derived — no server round-trip needed; the meeting itself is
+  // started explicitly via the button.
+  const meetingZone = useMemo(
+    () => findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'meeting')),
+    [localPlayer.x, localPlayer.y, zones],
+  );
 
   // Mini Mode has to be opened directly inside a real click handler (see
   // openMiniModeWindow's own doc comment for why it can't live in a mount
@@ -838,6 +848,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         emitTeleportTo={emitTeleportTo}
         onMediaOpen={setViewingMediaId}
       />
+
+      {/* A5 — meeting controls, only while standing inside a meeting-type zone */}
+      {meetingZone && !editorMode && (
+        <MeetingControl roomId={roomSlug} zoneId={meetingZone.id} />
+      )}
 
       {miniModeWindow && (
         <MiniMode

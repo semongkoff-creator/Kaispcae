@@ -189,6 +189,11 @@ export enum SocketEvents {
   WORK_MODE_CHANGE = 'work_mode:change',
   WORK_MODE_CHANGED = 'work_mode:changed',
 
+  // A5 — official meeting (Lark VC) started/ended in a meeting zone. Server
+  // broadcasts to the room so everyone sees the "join via Lark" banner.
+  MEETING_STARTED = 'meeting:started',
+  MEETING_ENDED = 'meeting:ended',
+
   // Zoom-style "Lock Meeting": admin toggles ROOM_LOCK_SET, everyone in the
   // room gets ROOM_LOCK_UPDATED (for the 🔒 indicator + owner control state),
   // and a NON-admin who tries to join a locked room gets ROOM_LOCKED_DENIED
