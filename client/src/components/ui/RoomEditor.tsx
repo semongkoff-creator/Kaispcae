@@ -1,10 +1,11 @@
-import { useCallback, useState } from 'react';
-import { LockFill, X, SaveFill, ArrowClockwise, MegaphoneFill } from 'react-bootstrap-icons';
+import { useCallback, useState, useEffect } from 'react';
+import { LockFill, X, SaveFill, ArrowClockwise, MegaphoneFill, ChatDotsFill } from 'react-bootstrap-icons';
 import { TileType, Zone, ZoneType, Furniture } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { createDefaultRoom } from '@/utils/createDefaultRoom';
 import { PaletteEntry } from '@/data/tilePaletteManifest';
 import { PALETTE_BY_THEME } from '@/data/themeAssets';
+import { api, LarkChatSummary, ApiError } from '@/services/api';
 
 const ZONE_COLORS = ['#7c3aed', '#4d96ff', '#10b981', '#f59e0b', '#ef4444', '#64748b'];
 const BANNER_COLORS = ['#7c3aed', '#4d96ff', '#10b981', '#f59e0b', '#ef4444', '#1f2937'];
@@ -220,11 +221,96 @@ function PaletteThumb({ entry }: { entry: PaletteEntry }) {
   );
 }
 
-interface RoomEditorProps {
-  onSave: () => void;
+// Bagian 4 — admin control to map this room's default ("general") channel to a
+// Lark group so messages sync both ways. Self-contained: loads the current
+// mapping + the bot's available groups on open, saves via PUT. Only ever
+// rendered inside the admin-gated Room Editor.
+function LarkSyncSection({ roomSlug }: { roomSlug: string }) {
+  const [loading, setLoading] = useState(true);
+  const [chats, setChats] = useState<LarkChatSummary[]>([]);
+  const [mappedChatId, setMappedChatId] = useState<string>('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .getLarkChatMap(roomSlug)
+      .then((r) => {
+        if (!alive) return;
+        setChats(r.chats);
+        setMappedChatId(r.map?.chatId ?? '');
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setError(e instanceof ApiError ? e.message : 'Gagal memuat data Lark.');
+      })
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [roomSlug]);
+
+  const save = async (chatId: string) => {
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    try {
+      const chat = chats.find((c) => c.chatId === chatId);
+      await api.setLarkChatMap(roomSlug, chatId || null, chat?.name ?? null);
+      setMappedChatId(chatId);
+      setSaved(true);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Gagal menyimpan.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <p className="text-gray-500 dark:text-gray-400 text-[10px] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <ChatDotsFill size={11} /> Sinkron Grup Lark
+      </p>
+      {loading ? (
+        <p className="text-gray-400 text-[11px] py-1">Memuat…</p>
+      ) : chats.length === 0 && !mappedChatId ? (
+        <p className="text-gray-400 dark:text-gray-500 text-[10px] leading-relaxed">
+          Tidak ada grup Lark yang bisa dipilih. Undang bot ke grup Lark yang dituju dulu, lalu buka lagi.
+        </p>
+      ) : (
+        <>
+          <select
+            value={mappedChatId}
+            disabled={saving}
+            onChange={(e) => save(e.target.value)}
+            className="w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-xs rounded px-2 py-1.5 mb-1 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 cursor-pointer disabled:opacity-50"
+          >
+            <option value="">— Tidak disinkron —</option>
+            {chats.map((c) => (
+              <option key={c.chatId} value={c.chatId}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-gray-400 dark:text-gray-500 text-[10px] leading-relaxed">
+            Channel <span className="font-medium">#general</span> room ini akan tersambung dua arah dengan grup Lark yang dipilih.
+          </p>
+        </>
+      )}
+      {saved && <p className="text-green-600 dark:text-green-400 text-[10px] mt-1">Tersimpan.</p>}
+      {error && <p className="text-red-500 text-[10px] mt-1">{error}</p>}
+    </div>
+  );
 }
 
-export function RoomEditor({ onSave }: RoomEditorProps) {
+interface RoomEditorProps {
+  onSave: () => void;
+  roomSlug: string;
+}
+
+export function RoomEditor({ onSave, roomSlug }: RoomEditorProps) {
   const selected = useGameStore((s) => s.selectedTileType);
   const setSelected = useGameStore((s) => s.setSelectedTileType);
   const selectedPaletteId = useGameStore((s) => s.selectedPaletteId);
@@ -421,6 +507,11 @@ export function RoomEditor({ onSave }: RoomEditorProps) {
       <p className="text-gray-400 dark:text-gray-500 text-[10px] mb-3 leading-relaxed">
         Players inside a zone only hear/see each other, regardless of distance — great for meeting rooms.
       </p>
+
+      <hr className="border-purple-100 dark:border-gray-700 my-3" />
+
+      {/* Bagian 4 — bind this room's #general channel to a Lark group */}
+      <LarkSyncSection roomSlug={roomSlug} />
 
       <hr className="border-purple-100 dark:border-gray-700 my-3" />
 

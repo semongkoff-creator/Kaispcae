@@ -1089,7 +1089,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       )}
 
       {isAdmin && editorMode && (
-        <RoomEditor onSave={handleRoomSave} />
+        <RoomEditor onSave={handleRoomSave} roomSlug={roomSlug} />
       )}
 
       {editorMode && (

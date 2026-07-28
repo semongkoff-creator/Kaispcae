@@ -6,6 +6,7 @@ import { socketRateLimit } from '../middleware/rateLimit';
 import { sanitizeChat } from '../middleware/validate';
 import { ensureGroupConversation, ensureDmConversation } from '../lib/conversations';
 import { canAccessRoomChat } from '../lib/chatAccess';
+import { relayChannelMessageToLark } from '../lib/larkChatSync';
 
 
 // Keyed by userId, not socket.id — a per-connection key means disconnecting
@@ -271,6 +272,16 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
       // re-broadcasting would paint it twice on their screens.
       const target = duplicate ? socket : io.to(`channel:${payload.channelId}`);
       target.emit(SocketEvents.CHANNEL_MESSAGE_NEW, toMessageDto(message));
+
+      // Bagian 4 — relay to the mapped Lark group (default channel only).
+      // Fire-and-forget: a Lark outage must never fail the MeetKai send. Skip
+      // duplicates (already relayed by the original send) and attachment-only
+      // messages (empty text; the helper no-ops on those too).
+      if (!duplicate && text) {
+        void relayChannelMessageToLark(prisma, channel, message.sender.displayName, text).catch((e) =>
+          console.error('[channelChat] Lark relay failed:', e),
+        );
+      }
     } catch (e) {
       console.error('[channelChat] failed to persist channel message:', e);
     }

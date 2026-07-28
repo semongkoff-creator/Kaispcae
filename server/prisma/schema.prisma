@@ -744,6 +744,8 @@ model Room {
   // Provenance back-relation only — these survive the room's deletion
   // (onDelete: SetNull), unlike everything else on this list.
   conversationsV2   Conversation[]
+  // Bagian 4 — optional Lark group this room's "general" channel syncs with.
+  larkChatMap       RoomChatMap?
 }
 
 model RoomMember {
@@ -974,6 +976,39 @@ model ChatMessage {
   // routes/uploads.ts). Without this, that check is a full scan of every
   // message ever sent, on every single image load.
   @@index([attachmentUrl])
+}
+
+// Bagian 4 — Two-way Lark ↔ MeetKai chat sync (channel/room ONLY, never DM
+// or zone-private chat). One Lark group chat maps to one MeetKai room; the
+// sync target is that room's default ("general") Channel. Both ids are unique:
+// roomId so a room has at most one mapping, chatId so an inbound webhook can
+// resolve the room from the Lark chat_id with a single indexed lookup.
+model RoomChatMap {
+  id        String   @id @default(cuid())
+  roomId    String   @unique
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  // Lark group chat_id (e.g. "oc_xxx") this room mirrors.
+  chatId    String   @unique
+  // Cached Lark group name for display in the admin mapping UI — advisory only,
+  // never used for routing (chatId is authoritative).
+  chatName  String?
+  // Cached room name, mirrors the spec's RoomChatMap shape; display-only.
+  roomName  String
+  createdAt DateTime @default(now())
+}
+
+// Bagian 4 — anti-echo ledger. Every message MeetKai sends OUT to Lark has its
+// returned Lark message_id recorded here; the inbound webhook skips any event
+// whose message_id is present, so a message we just relayed to Lark can't come
+// back through the webhook and double-post in MeetKai. Rows are disposable —
+// only recent ids matter (a message only ever echoes back within seconds), so
+// createdAt is indexed for a cheap periodic prune.
+model LarkSentMessage {
+  id        String   @id @default(cuid())
+  messageId String   @unique
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 // ── Messenger migration, step 2: workspace-level conversations ────────

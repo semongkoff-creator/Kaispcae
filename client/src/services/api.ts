@@ -18,6 +18,11 @@ export interface AttendanceStatus {
 }
 
 // A5 — a recorded meeting (Lark VC) for the Meeting History panel.
+export interface LarkChatSummary {
+  chatId: string;
+  name: string;
+}
+
 export interface MomRecord {
   id: string;
   roomId: string;
@@ -209,6 +214,17 @@ export const api = {
     request<{ ok: boolean; recordingStatus?: string }>('/meeting/end', { method: 'POST', body: JSON.stringify({ momRecordId }) }),
   getMeetingHistory: (roomId: string) =>
     request<{ meetings: MomRecord[] }>(`/meeting/history?roomId=${encodeURIComponent(roomId)}`),
+
+  // Bagian 4 — Lark ↔ MeetKai chat sync mapping (room admins only).
+  getLarkChatMap: (slug: string) =>
+    request<{ map: { chatId: string; chatName: string | null } | null; chats: LarkChatSummary[] }>(
+      `/rooms/${slug}/lark-map`,
+    ),
+  setLarkChatMap: (slug: string, chatId: string | null, chatName?: string | null) =>
+    request<{ map: { chatId: string; chatName: string | null } | null }>(`/rooms/${slug}/lark-map`, {
+      method: 'PUT',
+      body: JSON.stringify({ chatId, chatName }),
+    }),
 
   getRooms: () => request<{ rooms: RoomInfo[] }>('/rooms'),
 
