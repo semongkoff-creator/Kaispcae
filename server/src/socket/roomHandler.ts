@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerWorkMode, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -839,27 +839,43 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     updatePlayerStatus(room, socket.id, trimmed);
   });
 
-  socket.on(SocketEvents.PLAYER_HAND, (raised: boolean) => {
+  socket.on(SocketEvents.PLAYER_HAND, async (raised: boolean) => {
     const room = currentRoom; if (!room) return;
     const val = !!raised;
     // Visual ✋ badge: whole room, both raise and lower (unchanged).
     socket.to(room).emit(SocketEvents.PLAYER_HAND_UPDATED, { id: socket.id, handRaised: val });
     updatePlayerHand(room, socket.id, val);
 
-    // Bug 14 — sound cue only on RAISE, only to others in the SAME zone as the
-    // raiser (never the whole map), throttled per sender. If the raiser isn't
-    // in any zone there's no defined audience, so no chime is sent (the badge
-    // still shows). Focus/DND is respected on the receiving client, so a
-    // focused user still gets the badge but not the sound.
+    // Bug 14 — sound cue only on RAISE, throttled per sender, never blasted to
+    // the whole map. Focus/DND is respected on the receiving client (a focused
+    // user still gets the badge, not the sound). Audience:
+    //  • if the raiser is inside a zone → everyone else in that same zone;
+    //  • otherwise (open floor) → other open-floor players within earshot
+    //    (TRANSLUCENT_THRESHOLD tiles), so it still works outside a meeting zone
+    //    without reaching people across the map or those busy in a zone.
     if (!val) return;
-    const zoneId = zoneIdOfSocket(socket.id);
-    if (!zoneId) return;
     const now = Date.now();
     if (now - (handSoundCooldown.get(socket.id) ?? 0) < HAND_SOUND_COOLDOWN_MS) return;
     handSoundCooldown.set(socket.id, now);
     const fromName = getPlayerName(socket.id);
-    for (const sid of getSocketIdsInZone(room, zoneId)) {
-      if (sid === socket.id) continue;
+    const zoneId = zoneIdOfSocket(socket.id);
+    let recipients: string[];
+    if (zoneId) {
+      recipients = getSocketIdsInZone(room, zoneId).filter((sid) => sid !== socket.id);
+    } else {
+      const players = await getPlayers(room);
+      const me = players.find((p) => p.id === socket.id);
+      recipients = me
+        ? players
+            .filter((p) =>
+              p.id !== socket.id &&
+              zoneIdOfSocket(p.id) == null && // don't ring people busy inside a zone
+              Math.max(Math.abs(p.x - me.x), Math.abs(p.y - me.y)) / TILE_SIZE <= TRANSLUCENT_THRESHOLD,
+            )
+            .map((p) => p.id)
+        : [];
+    }
+    for (const sid of recipients) {
       io.to(sid).emit(SocketEvents.HAND_RAISED_ALERT, { fromId: socket.id, fromName });
     }
   });
