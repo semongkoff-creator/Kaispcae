@@ -30,6 +30,7 @@ import { Minimap } from './components/hud/Minimap';
 import { RoomEditor } from './components/ui/RoomEditor';
 import { AdminPanel } from './components/ui/AdminPanel';
 import { TeleportPanel } from './components/ui/TeleportPanel';
+import { RoomEditorPage } from './pages/RoomEditorPage';
 import { AddMediaPanel } from './components/ui/AddMediaPanel';
 import { MediaViewerModal } from './components/ui/MediaViewerModal';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
@@ -1019,6 +1020,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         isAdmin={isAdmin}
         editorMode={editorMode}
         onToggleEditorMode={toggleEditorMode}
+        onOpenRoomEditor={() => window.open(`/?roomEditor=${encodeURIComponent(roomSlug)}`, '_blank', 'noopener')}
         canTeleport={roleAtLeast(localRole, 'member')}
         showTeleportPanel={showTeleportPanel}
         onToggleTeleport={() => openPanel('teleport')}
@@ -1511,7 +1513,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   );
 }
 
-export default function App() {
+function MainApp() {
   const { user, loading, error, sessionExpiredMessage, login, register, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [roomSlug, setRoomSlug] = useState<string | null>(null);
@@ -1716,4 +1718,15 @@ export default function App() {
   // a remount on room change gives every room a clean slate, matching what
   // already happens when leaving to the Lobby and rejoining.
   return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} />;
+}
+
+// ZEP Room Editor opens in its own tab as /?roomEditor=<slug> (a query param on
+// the root path so the SPA index.html always loads — same scheme as ?join, no
+// nginx SPA-fallback dependency). The tab shares localStorage, so it's the SAME
+// session as the main tab (no new login, no single-device supersede). A tiny
+// wrapper picks the page WITHOUT conditional hooks in either component.
+export default function App() {
+  const editorSlug = new URLSearchParams(window.location.search).get('roomEditor');
+  if (editorSlug) return <RoomEditorPage slug={editorSlug} />;
+  return <MainApp />;
 }

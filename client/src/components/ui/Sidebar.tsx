@@ -21,6 +21,10 @@ interface SidebarProps {
   isAdmin: boolean;
   editorMode: boolean;
   onToggleEditorMode: () => void;
+  // ZEP Room Editor (Potong 0) — opens the new full-page editor in a new tab.
+  // The old overlay editor stays available as "Editor Lama" until the new one
+  // is complete.
+  onOpenRoomEditor: () => void;
 
   canTeleport: boolean;
   showTeleportPanel: boolean;
@@ -142,6 +146,7 @@ export function Sidebar({
   isAdmin,
   editorMode,
   onToggleEditorMode,
+  onOpenRoomEditor,
   canTeleport,
   showTeleportPanel,
   onToggleTeleport,
@@ -306,7 +311,10 @@ export function Sidebar({
                 meant by "lock the room". The server-side room lock still
                 exists and still guards JOIN_ROOM — it just has no UI. */}
             {isAdmin && (
-              <MenuRow icon={<Tools size={15} />} label={editorMode ? 'Editing...' : 'Edit Room'} active={editorMode} onClick={closeAnd(onToggleEditorMode)} />
+              <MenuRow icon={<Tools size={15} />} label="Edit Room" onClick={closeAnd(onOpenRoomEditor)} />
+            )}
+            {isAdmin && (
+              <MenuRow icon={<Tools size={15} />} label={editorMode ? 'Editor Lama (aktif)' : 'Editor Lama'} active={editorMode} onClick={closeAnd(onToggleEditorMode)} />
             )}
             {canTeleport && (
               <MenuRow icon={<GeoAltFill size={15} />} label="Teleport" active={showTeleportPanel} onClick={closeAnd(onToggleTeleport)} />

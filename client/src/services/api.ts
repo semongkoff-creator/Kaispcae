@@ -344,6 +344,21 @@ export const api = {
 
   getRoom: (slug: string) => request<RoomInfo>(`/rooms/${slug}`),
 
+  // ZEP Room Editor (opened in its own tab) — admin-gated on the server. Returns
+  // the room's stored map as-is (read-only). tilemapData is the raw 2D tile grid
+  // (rows of tile objects); the editor normalizes it to RoomTile[][] on the
+  // client, same shape the game view uses. 403 → caller isn't a room admin.
+  getRoomEditorData: (slug: string) =>
+    request<{
+      id: string;
+      name: string;
+      slug: string;
+      theme: string;
+      tilemapData: unknown[][] | null;
+      furniture: unknown[];
+      zones: unknown[];
+    }>(`/rooms/${slug}/editor-data`),
+
   createRoom: (name: string, maxPlayers?: number, isPublic?: boolean, theme?: 'modern-interiors' | 'scifi-office', template?: RoomTemplateId) =>
     request<RoomInfo>('/rooms', {
       method: 'POST',

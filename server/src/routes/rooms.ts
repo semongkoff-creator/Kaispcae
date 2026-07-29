@@ -1,8 +1,9 @@
 import { Router, Response } from 'express';
 import { Server } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile } from '@virtualmeet/shared';
+import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { resolveRoomRole } from '../lib/roles';
 import { isRoomLocked } from '../socket/roomHandler';
 import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
 import { ensureGroupConversation } from '../lib/conversations';
@@ -100,6 +101,36 @@ rooms.get('/rooms/:slug', async (req, res: Response) => {
   } catch (err) {
     console.error('[rooms] get error:', err);
     return res.status(500).json({ error: 'Failed to get room' });
+  }
+});
+
+// GET /api/rooms/:slug/editor-data — full map payload for the ZEP-style Room
+// Editor (which opens in its own browser tab). Admin-gated at the SERVER, not
+// just behind a hidden button: resolve the caller's per-room role and require
+// room:update (admin+), so a non-admin hitting this URL directly is refused
+// with 403. Read-only — returns the room's stored map exactly as saved; this
+// endpoint never writes (Potong 0 is view-only).
+rooms.get('/rooms/:slug/editor-data', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    if (!hasFeatureAccess(role, 'room:update')) {
+      return res.status(403).json({ error: 'Admin role required to edit this room' });
+    }
+    return res.json({
+      id: room.id,
+      name: room.name,
+      slug: room.slug,
+      theme: room.theme ?? 'default',
+      tilemapData: room.tilemapData ?? null,
+      furniture: room.furniture ?? [],
+      zones: room.zones ?? [],
+    });
+  } catch (err) {
+    console.error('[rooms] editor-data error:', err);
+    return res.status(500).json({ error: 'Failed to load editor data' });
   }
 });
 
