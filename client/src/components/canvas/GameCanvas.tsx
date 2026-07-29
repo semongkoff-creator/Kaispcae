@@ -175,6 +175,14 @@ const MEDIA_ICON: Record<string, string> = { image: '🖼️', youtube: '▶️'
 const NUDGE_FX_DURATION_MS = 600;
 const NUDGE_SPARK_COUNT = 8;
 
+// Bug 3 — how forgiving the "walk up to interact" hitbox is, in tiles
+// (Chebyshev). The old chair logic demanded the player stand on the exact
+// adjacent tile AND face the seat dead-on; media used a radius of 1. A radius
+// of 2 lets the player be ~1 tile of slack away in any direction (incl.
+// diagonals) and still get the prompt, while nearest-wins selection keeps two
+// nearby pieces from being confused for one another.
+const INTERACT_TILE_RADIUS = 2;
+
 // Hand gesture shown on the NUDGER's own body (not the target) — a fist
 // bump reads as the closest match to "senggol" itself, and deliberately
 // isn't a single-finger pointing hand (👉).
@@ -597,35 +605,55 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const playerX = effectiveMoveResult.x;
     const playerY = effectiveMoveResult.y;
 
-    // Sit-in-chair: is there a sittable chair on the tile the player is
-    // currently facing? Uses the STORED direction, not moveResult.direction
-    // — the latter resets to a hardcoded 'down' the instant no movement key
-    // is held (fine for movement, wrong for "which way am I facing").
+    // Sit-in-chair: is there a sittable chair NEAR the player? (Bug 3 — was:
+    // only the single tile the player faced dead-on.) Now we take the nearest
+    // interactable seat within INTERACT_TILE_RADIUS, using the STORED facing
+    // direction only as a tiebreaker so two seats side-by-side still resolve to
+    // the one the player is turned toward. Uses the stored direction, not
+    // moveResult.direction — the latter resets to a hardcoded 'down' the
+    // instant no movement key is held (fine for movement, wrong for facing).
     {
       const facingDir = localPlayerRef.current.direction;
       const baseTileX = Math.floor(playerX / TILE_SIZE);
       const baseTileY = Math.floor(playerY / TILE_SIZE);
       const facingTileX = baseTileX + (facingDir === 'left' ? -1 : facingDir === 'right' ? 1 : 0);
       const facingTileY = baseTileY + (facingDir === 'up' ? -1 : facingDir === 'down' ? 1 : 0);
-      // Match anywhere across the piece's base-row width, not just its
-      // anchor tile — a 2-wide sofa is still one seat, so facing its right
-      // half must trigger the sit prompt exactly like facing its left half.
       if (localPlayerRef.current.isSitting) {
         nearbyChairRef.current = null;
       } else {
-        const chair = furnitureRef.current.find((f) =>
-          f.isInteractable && f.y === facingTileY && facingTileX >= f.x && facingTileX < f.x + f.tilesW,
-        );
-        nearbyChairRef.current = chair ? { furniture: chair, tileX: facingTileX, tileY: facingTileY } : null;
+        // Seats span the piece's base row (y = f.y, x in [f.x, f.x+tilesW)).
+        // For each interactable piece find its seat tile nearest the player;
+        // keep the closest overall. Score = Chebyshev distance, minus a small
+        // bias toward a seat that sits exactly on the tile the player faces —
+        // so facing disambiguates ties without being required. Snapping later
+        // uses this nearest seat tile, which is always on the piece, so the
+        // avatar still lands ON the chair (never on an empty gap tile).
+        let best: { furniture: Furniture; tileX: number; tileY: number } | null = null;
+        let bestScore = Infinity;
+        for (const f of furnitureRef.current) {
+          if (!f.isInteractable) continue;
+          let nearFx = f.x;
+          let nearDist = Infinity;
+          for (let fx = f.x; fx < f.x + f.tilesW; fx++) {
+            const d = Math.max(Math.abs(fx - baseTileX), Math.abs(f.y - baseTileY));
+            if (d < nearDist) { nearDist = d; nearFx = fx; }
+          }
+          if (nearDist > INTERACT_TILE_RADIUS) continue;
+          const faced = f.y === facingTileY && nearFx === facingTileX ? 0 : 0.5;
+          const score = nearDist + faced;
+          if (score < bestScore) { bestScore = score; best = { furniture: f, tileX: nearFx, tileY: f.y }; }
+        }
+        nearbyChairRef.current = best;
       }
 
-      // Nearest interactable media within 1 tile (Chebyshev) of where the
-      // player is standing — drives the "press X to open" prompt below.
+      // Nearest interactable media within INTERACT_TILE_RADIUS (Chebyshev) of
+      // where the player is standing — drives the "press X to open" prompt
+      // below. (Bug 3 — widened from 1 tile to match the chair hitbox.)
       let best: { id: string; tileX: number; tileY: number } | null = null;
       let bestDist = Infinity;
       for (const m of mediaObjectsRef.current) {
         const d = Math.max(Math.abs(m.x - baseTileX), Math.abs(m.y - baseTileY));
-        if (d <= 1 && d < bestDist) { bestDist = d; best = { id: m.id, tileX: m.x, tileY: m.y }; }
+        if (d <= INTERACT_TILE_RADIUS && d < bestDist) { bestDist = d; best = { id: m.id, tileX: m.x, tileY: m.y }; }
       }
       nearbyMediaRef.current = best;
     }
