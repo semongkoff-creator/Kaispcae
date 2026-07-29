@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { isUserInLockedZone } from './zoneLock';
-import { zoneIdOfSocket } from './zoneHandler';
+import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode } from '@virtualmeet/shared';
 import {
@@ -25,6 +25,12 @@ const canSlap = socketRateLimit(3); // A10 — burst guard; the real limit is th
 // pruned lazily on read.
 const slapCooldown = new Map<string, number>();
 const SLAP_COOLDOWN_MS = 30_000;
+
+// Bug 14 — per-sender cooldown for the raise-hand chime, keyed by the raiser's
+// socket id. Spamming the ✋ button only re-rings the zone once per window
+// (the visual badge still toggles freely — this only throttles the sound).
+const handSoundCooldown = new Map<string, number>();
+const HAND_SOUND_COOLDOWN_MS = 5_000;
 
 // §5.1 — Summon now requires the target's consent, so the actual move only
 // happens once they accept. Keyed by TARGET socket id — a new request from
@@ -836,8 +842,26 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   socket.on(SocketEvents.PLAYER_HAND, (raised: boolean) => {
     const room = currentRoom; if (!room) return;
     const val = !!raised;
+    // Visual ✋ badge: whole room, both raise and lower (unchanged).
     socket.to(room).emit(SocketEvents.PLAYER_HAND_UPDATED, { id: socket.id, handRaised: val });
     updatePlayerHand(room, socket.id, val);
+
+    // Bug 14 — sound cue only on RAISE, only to others in the SAME zone as the
+    // raiser (never the whole map), throttled per sender. If the raiser isn't
+    // in any zone there's no defined audience, so no chime is sent (the badge
+    // still shows). Focus/DND is respected on the receiving client, so a
+    // focused user still gets the badge but not the sound.
+    if (!val) return;
+    const zoneId = zoneIdOfSocket(socket.id);
+    if (!zoneId) return;
+    const now = Date.now();
+    if (now - (handSoundCooldown.get(socket.id) ?? 0) < HAND_SOUND_COOLDOWN_MS) return;
+    handSoundCooldown.set(socket.id, now);
+    const fromName = getPlayerName(socket.id);
+    for (const sid of getSocketIdsInZone(room, zoneId)) {
+      if (sid === socket.id) continue;
+      io.to(sid).emit(SocketEvents.HAND_RAISED_ALERT, { fromId: socket.id, fromName });
+    }
   });
 
   // A3 — Focus/Public work mode. Broadcast + persist like status/hand so other

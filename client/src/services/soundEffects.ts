@@ -53,3 +53,11 @@ export function playNudgeSound(emphasized = false): void {
     playClip(NUDGE_SRC, 0.5);
   }
 }
+
+// Bug 14 — raise-hand chime for others in the same zone. Reuses the soft nudge
+// clip (no separate audio system) at a gentle volume so it reads as a polite
+// "someone wants to speak" cue, not an alarming knock. Same sound-setting gate
+// as everything else via playClip.
+export function playHandRaiseSound(): void {
+  playClip(NUDGE_SRC, 0.35);
+}

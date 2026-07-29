@@ -190,6 +190,12 @@ export enum SocketEvents {
   // Raise-hand toggle — same relay+persist shape as status above.
   PLAYER_HAND = 'player:hand',
   PLAYER_HAND_UPDATED = 'player:hand_updated',
+  // Bug 14 — a short, polite chime for people in the SAME zone as whoever just
+  // raised their hand (server-scoped to the zone + per-sender cooldown), so a
+  // presenter hears "someone wants to speak" without watching the screen. The
+  // visual ✋ badge still goes to the whole room via PLAYER_HAND_UPDATED above;
+  // this is only the sound cue.
+  HAND_RAISED_ALERT = 'player:hand_alert',
 
   // A3 — Focus/Public work mode. Same relay+persist shape as status/hand.
   WORK_MODE_CHANGE = 'work_mode:change',

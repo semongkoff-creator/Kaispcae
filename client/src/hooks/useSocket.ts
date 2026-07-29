@@ -4,7 +4,7 @@ import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent,
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
-import { playNudgeSound } from '@/services/soundEffects';
+import { playNudgeSound, playHandRaiseSound } from '@/services/soundEffects';
 import { SERVER_URL } from '@/services/serverUrl';
 
 // Bump a chat target's unread count unless the user is actively looking at
@@ -502,6 +502,14 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       playNudgeSound(true);
       if (state.localPlayerId) state.triggerNudge(state.localPlayerId, Date.now(), data.fromId);
       state.setSlappedBy(data.fromName || 'Seseorang');
+    });
+
+    // Bug 14 — someone in my zone raised their hand. Server already scoped this
+    // to the zone + applied a per-sender cooldown, so just play the polite
+    // chime. A3 — Focus/DND mutes the SOUND only; the ✋ badge still updates via
+    // PLAYER_HAND_UPDATED above, so a focused user can still see it.
+    socket.on(SocketEvents.HAND_RAISED_ALERT, () => {
+      if (useGameStore.getState().workMode !== 'focus') playHandRaiseSound();
     });
 
     socket.on(SocketEvents.ROOM_UPDATED, (data: RoomUpdatePayload) => {
