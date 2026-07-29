@@ -4,6 +4,7 @@ import { zoneIdOfSocket } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, FollowInfo, CONSENT_REQUEST_TIMEOUT_MS, FollowRespondPayload } from '@virtualmeet/shared';
 import { getPlayerName } from './roomHandler';
+import { getPlayers } from '../store/roomStore';
 
 // Follow (spec §3) — auto-move a follower's avatar to trail a target
 // player. The actual per-frame trailing movement is entirely client-side
@@ -116,7 +117,7 @@ export function registerFollowHandlers(io: Server, socket: Socket): void {
   // Starts a pending request rather than following immediately — the
   // target has to accept via FOLLOW_RESPOND below before the relationship
   // actually exists.
-  socket.on(SocketEvents.FOLLOW_REQUEST, (data: { targetUserId: string }) => {
+  socket.on(SocketEvents.FOLLOW_REQUEST, async (data: { targetUserId: string }) => {
     const room = socketToRoom.get(socket.id); if (!room) return;
     const followerUid = socketToUid.get(socket.id); if (!followerUid) return;
     const targetUid = data?.targetUserId;
@@ -145,6 +146,14 @@ export function registerFollowHandlers(io: Server, socket: Socket): void {
     const targetSocketId = uidToSocket.get(targetUid);
     if (!targetSocketId) {
       socket.emit('admin:error', { message: 'User not found or offline' });
+      return;
+    }
+
+    // A3 — respect Focus/DND (mirrors Summon): don't ping someone who's in
+    // Focus mode; reject the request with a clear reason to the follower.
+    const players = await getPlayers(room);
+    if (players.find((p) => p.id === targetSocketId)?.workMode === 'focus') {
+      socket.emit('admin:error', { message: `${getPlayerName(targetSocketId)} sedang dalam mode Focus — tidak bisa diikuti sekarang.` });
       return;
     }
 

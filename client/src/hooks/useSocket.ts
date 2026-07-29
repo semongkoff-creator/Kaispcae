@@ -360,7 +360,9 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       // §10 — only for messages from someone else, and notifyNewMessage
       // itself no-ops unless the tab is actually in the background (spec's
       // own rule) and the user has actually turned notifications on.
-      if (msg.senderId !== useGameStore.getState().localPlayerId) {
+      // A3 — while in Focus/DND, suppress the disruptive popup; the message is
+      // still stored/rendered below, just no real-time notification.
+      if (msg.senderId !== useGameStore.getState().localPlayerId && useGameStore.getState().workMode !== 'focus') {
         notifyNewMessage(msg.senderName, msg.text);
       }
       if (msg.zoneId) addZoneChatMessage(msg.zoneId, msg);
@@ -390,7 +392,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
         state.appendTargetMessage(`channel:${msg.channelId}`, msg);
       }
       if (msg.senderId !== state.localUserId) {
-        notifyNewMessage(msg.senderName, msg.text);
+        // A3 — Focus/DND mutes the popup but STILL marks unread (message kept).
+        if (state.workMode !== 'focus') notifyNewMessage(msg.senderName, msg.text);
         markUnreadIfHidden(`channel:${msg.channelId}`);
       }
     });
@@ -405,7 +408,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
         state.appendTargetMessage(`dm:${msg.conversationId}`, msg);
       }
       if (msg.senderId !== state.localUserId) {
-        notifyNewMessage(msg.senderName, msg.text);
+        // A3 — Focus/DND mutes the popup but STILL marks unread (message kept).
+        if (state.workMode !== 'focus') notifyNewMessage(msg.senderName, msg.text);
         markUnreadIfHidden(`dm:${msg.conversationId}`);
       }
     });
@@ -480,15 +484,19 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       // audible); the actual target hears a stronger, doubled version so it
       // clearly reads as "someone poked YOU", not just ambient noise. Both
       // respect the user's sound setting (see playNudgeSound).
-      playNudgeSound(isMe);
-      if (isMe) {
-        const nudgerName = state.playerRecords[event.fromId]?.name ?? 'Seseorang';
-        // In-app toast — shows even while the tab is focused, which the
-        // OS-level notification below deliberately does not (it only fires
-        // when the tab is in the background, to avoid double-pinging someone
-        // already looking at the screen).
-        state.setNudgedBy(nudgerName);
-        notifyNudge(nudgerName);
+      // A3 — Focus/DND: a nudge is pure real-time disruption (nothing to read
+      // later), so mute its sound + toast + OS notification entirely.
+      if (state.workMode !== 'focus') {
+        playNudgeSound(isMe);
+        if (isMe) {
+          const nudgerName = state.playerRecords[event.fromId]?.name ?? 'Seseorang';
+          // In-app toast — shows even while the tab is focused, which the
+          // OS-level notification below deliberately does not (it only fires
+          // when the tab is in the background, to avoid double-pinging someone
+          // already looking at the screen).
+          state.setNudgedBy(nudgerName);
+          notifyNudge(nudgerName);
+        }
       }
     });
 
