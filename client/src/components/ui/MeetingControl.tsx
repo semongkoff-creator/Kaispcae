@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { CameraVideoFill, BoxArrowUpRight, StopFill, ClockHistory, XLg } from 'react-bootstrap-icons';
 import { api, MomRecord } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -81,7 +82,12 @@ function MeetingHistoryPanel({ roomId, onClose }: { roomId: string; onClose: () 
     api.getMeetingHistory(roomId).then((r) => setList(r.meetings)).catch(() => setList([]));
   }, [roomId]);
 
-  return (
+  // Bug 2 — portal to <body>. MeetingControl's wrapper uses -translate-x-1/2,
+  // and a CSS transform makes a new containing block, so a `fixed` modal inside
+  // it was clamped to the narrow pill instead of the viewport (that's why it
+  // rendered as a thin strip and max-w-2xl did nothing). Rendering on body
+  // escapes the transformed ancestor so the overlay truly fills the screen.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onMouseDown={onClose}>
       {/* Bug 2 — roomier panel: wider (max-w-2xl), taller, header pinned while
           the list scrolls inside its own region so the page never elongates. */}
@@ -121,6 +127,7 @@ function MeetingHistoryPanel({ roomId, onClose }: { roomId: string; onClose: () 
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
