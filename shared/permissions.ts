@@ -51,7 +51,13 @@ export const FEATURE_MIN_ROLE = {
   // staff"). Bookmarks (§4.2) aren't listed here since they're gated by an
   // exact ownerId match, not a role tier — 'owner' would be redundant with
   // that check rather than an independent gate.
+  //
+  // MANAGING team locations (create/delete/reorder) stays staff+ ('teleport:admin').
+  // USING them (listing + jumping to an existing one) is split out to its own
+  // gate open to every real user — Bug 4 separated "may use" from "may manage"
+  // so members can teleport to saved spots without being able to edit the list.
   'teleport:admin': 'staff',
+  'teleport:use': 'member',
   // §5 — matches the spec's own literal example ("summon: minRole staff").
   // Both the single-user and whole-room forms share this one gate — the
   // spec checks role identically for both (§5.1 and §5.2/5.3's pseudocode).

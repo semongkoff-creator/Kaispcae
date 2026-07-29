@@ -22,8 +22,11 @@ teleport.get('/rooms/:slug/teleport-locations', authenticateToken, async (req: A
     const room = await loadRoomBySlug(prisma, req.params.slug);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId);
-    if (!hasFeatureAccess(role, 'teleport:admin')) {
-      return res.status(403).json({ error: 'Staff role or higher required' });
+    // Listing is a USE action (needed to pick a destination), so it's open to
+    // every member — not gated behind 'teleport:admin' like create/delete/
+    // reorder below. (Bug 4: members may use saved locations, not manage them.)
+    if (!hasFeatureAccess(role, 'teleport:use')) {
+      return res.status(403).json({ error: 'Room access required' });
     }
     const locations = await prisma.teleportLocation.findMany({ where: { roomId: room.id }, orderBy: { orderIndex: 'asc' } });
     return res.json({ locations });

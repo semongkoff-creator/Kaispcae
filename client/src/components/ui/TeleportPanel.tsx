@@ -7,6 +7,10 @@ import { useGameStore } from '@/stores/gameStore';
 interface TeleportPanelProps {
   roomSlug: string;
   isOwner: boolean;
+  // Bug 4 — may the viewer MANAGE team locations (add/delete/reorder)? Using
+  // them (jumping) is open to everyone who can see the panel; only staff+ get
+  // the edit controls. The server enforces the same split independently.
+  canManage: boolean;
   onTeleport: (kind: 'admin' | 'bookmark', locationId: string) => void;
   onClose: () => void;
 }
@@ -20,7 +24,7 @@ const MAX_TELEPORT_LOCATIONS = 20;
 // up/down buttons rather than drag-and-drop — same end result (send the
 // server a full new order, see api.ts's reorder* calls) without pulling in
 // a DnD library for what's a short, infrequently-reordered list.
-export function TeleportPanel({ roomSlug, isOwner, onTeleport, onClose }: TeleportPanelProps) {
+export function TeleportPanel({ roomSlug, isOwner, canManage, onTeleport, onClose }: TeleportPanelProps) {
   const [tab, setTab] = useState<'team' | 'bookmarks'>('team');
   const [locations, setLocations] = useState<TeleportLocation[]>([]);
   const [bookmarks, setBookmarks] = useState<OwnerBookmark[]>([]);
@@ -131,24 +135,32 @@ export function TeleportPanel({ roomSlug, isOwner, onTeleport, onClose }: Telepo
                 >
                   <GeoAltFill size={11} className="text-purple-500 shrink-0" /> {loc.name}
                 </button>
-                <button onClick={() => moveLocation(i, -1)} disabled={i === 0} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-30 cursor-pointer"><ArrowUp size={10} /></button>
-                <button onClick={() => moveLocation(i, 1)} disabled={i === locations.length - 1} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-30 cursor-pointer"><ArrowDown size={10} /></button>
-                <button
-                  onClick={() => api.deleteTeleportLocation(roomSlug, loc.id).then(loadLocations)}
-                  className="text-red-400 hover:text-red-600 cursor-pointer"
-                >
-                  <Trash size={10} />
-                </button>
+                {/* Bug 4 — reorder/delete are manage-only (staff+). Members
+                    still get the jump button above. */}
+                {canManage && (
+                  <>
+                    <button onClick={() => moveLocation(i, -1)} disabled={i === 0} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-30 cursor-pointer"><ArrowUp size={10} /></button>
+                    <button onClick={() => moveLocation(i, 1)} disabled={i === locations.length - 1} className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-30 cursor-pointer"><ArrowDown size={10} /></button>
+                    <button
+                      onClick={() => api.deleteTeleportLocation(roomSlug, loc.id).then(loadLocations)}
+                      className="text-red-400 hover:text-red-600 cursor-pointer"
+                    >
+                      <Trash size={10} />
+                    </button>
+                  </>
+                )}
               </div>
             ))}
             {locations.length === 0 && <p className="text-gray-400 dark:text-gray-500 text-[10px] text-center py-2">Belum ada lokasi.</p>}
           </div>
-          <button
-            onClick={handleAddLocation}
-            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-600 text-xs font-medium cursor-pointer"
-          >
-            <PlusCircle size={12} /> Add current location ({locations.length}/{MAX_TELEPORT_LOCATIONS})
-          </button>
+          {canManage && (
+            <button
+              onClick={handleAddLocation}
+              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-600 text-xs font-medium cursor-pointer"
+            >
+              <PlusCircle size={12} /> Add current location ({locations.length}/{MAX_TELEPORT_LOCATIONS})
+            </button>
+          )}
         </>
       ) : (
         <>

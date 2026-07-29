@@ -1023,7 +1023,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         isAdmin={isAdmin}
         editorMode={editorMode}
         onToggleEditorMode={toggleEditorMode}
-        canTeleport={roleAtLeast(localRole, 'staff')}
+        canTeleport={roleAtLeast(localRole, 'member')}
         showTeleportPanel={showTeleportPanel}
         onToggleTeleport={() => setShowTeleportPanel((v) => !v)}
         hasMySeat={hasMySeat}
@@ -1184,6 +1184,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         <TeleportPanel
           roomSlug={roomSlug}
           isOwner={localRole === 'owner'}
+          // Bug 4 — everyone may open the panel and jump to saved locations,
+          // but only staff+ see the add/delete/reorder controls (mirrors the
+          // server's 'teleport:admin' gate on those REST endpoints).
+          canManage={roleAtLeast(localRole, 'staff')}
           onTeleport={(kind, locationId) => emitTeleportRequest({ kind, locationId })}
           onClose={() => setShowTeleportPanel(false)}
         />

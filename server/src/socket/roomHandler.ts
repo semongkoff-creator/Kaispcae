@@ -629,8 +629,12 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         seatFurnitureId = seat.id;
       } else if (data.kind === 'admin') {
         const rs = getRoomAdmin(room);
-        if (!canAccess(rs, uid, 'teleport:admin')) {
-          socket.emit('admin:error', { message: 'Staff role or higher required to use team locations' });
+        // Bug 4 — USING a team location is open to every member; only
+        // creating/deleting/reordering them (REST, see routes/teleport.ts)
+        // stays 'teleport:admin'. The DB lookup is still scoped to this room,
+        // so a member can only jump to a location that actually exists here.
+        if (!canAccess(rs, uid, 'teleport:use')) {
+          socket.emit('admin:error', { message: 'Room access required to use team locations' });
           return;
         }
         const loc = await prisma.teleportLocation.findFirst({ where: { id: data.locationId, roomId: dbRoom.id } });
