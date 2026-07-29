@@ -82,38 +82,44 @@ function MeetingHistoryPanel({ roomId, onClose }: { roomId: string; onClose: () 
   }, [roomId]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onMouseDown={onClose}>
+      {/* Bug 2 — roomier panel: wider (max-w-2xl), taller, header pinned while
+          the list scrolls inside its own region so the page never elongates. */}
       <div
-        className="bg-white dark:bg-gray-800 rounded-2xl p-5 w-full max-w-md max-h-[70vh] overflow-y-auto shadow-xl border border-purple-100 dark:border-gray-700"
+        className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-xl border border-purple-100 dark:border-gray-700"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-3">
-          <span className="flex items-center gap-2 text-gray-900 dark:text-gray-100 font-semibold text-sm"><ClockHistory size={15} /> Riwayat Meeting</span>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"><XLg size={15} /></button>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-purple-100 dark:border-gray-700 shrink-0">
+          <span className="flex items-center gap-2.5 text-gray-900 dark:text-gray-100 font-semibold text-lg"><ClockHistory size={20} /> Riwayat Meeting</span>
+          <button onClick={onClose} title="Tutup" className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer p-1"><XLg size={20} /></button>
         </div>
-        {list === null ? (
-          <p className="text-gray-400 text-sm text-center py-6">Memuat…</p>
-        ) : list.length === 0 ? (
-          <p className="text-gray-500 dark:text-gray-400 text-sm py-4">Belum ada meeting di room ini.</p>
-        ) : (
-          <div className="space-y-2">
-            {list.map((m) => (
-              <div key={m.id} className="rounded-lg border border-purple-100 dark:border-gray-700 p-2.5 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-700 dark:text-gray-200 font-medium">{fmt(m.startTime)} → {fmt(m.endTime)}</span>
-                  <span className="text-[10px] text-gray-500 dark:text-gray-400">{STATUS_LABEL[m.recordingStatus] ?? m.recordingStatus}</span>
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {list === null ? (
+            <p className="text-gray-400 text-base text-center py-12">Memuat…</p>
+          ) : list.length === 0 ? (
+            <p className="text-gray-500 dark:text-gray-400 text-base text-center py-12">Belum ada meeting di room ini.</p>
+          ) : (
+            <div className="space-y-3">
+              {list.map((m) => (
+                <div key={m.id} className="rounded-xl border border-purple-100 dark:border-gray-700 p-4">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <span className="text-gray-800 dark:text-gray-100 font-medium text-base">{fmt(m.startTime)} → {fmt(m.endTime)}</span>
+                    <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-200">
+                      {STATUS_LABEL[m.recordingStatus] ?? m.recordingStatus}
+                    </span>
+                  </div>
+                  {m.recordingUrl ? (
+                    <a href={m.recordingUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-purple-600 dark:text-purple-300 hover:underline mt-2.5 text-sm font-medium">
+                      <BoxArrowUpRight size={13} /> Buka rekaman
+                    </a>
+                  ) : m.larkMeetingNo ? (
+                    <span className="text-gray-500 dark:text-gray-400 mt-2 block text-sm">No. meeting: {m.larkMeetingNo}</span>
+                  ) : null}
                 </div>
-                {m.recordingUrl ? (
-                  <a href={m.recordingUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-purple-600 dark:text-purple-300 hover:underline mt-1">
-                    <BoxArrowUpRight size={10} /> Buka rekaman
-                  </a>
-                ) : m.larkMeetingNo ? (
-                  <span className="text-gray-400 dark:text-gray-500 mt-1 block">No. meeting: {m.larkMeetingNo}</span>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
