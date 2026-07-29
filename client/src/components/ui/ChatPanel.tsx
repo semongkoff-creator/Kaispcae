@@ -4,7 +4,7 @@ import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteT
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { ChatAvatar, avatarColor } from './ChatAvatar';
-import { useProfilePhotos } from '@/hooks/useProfilePhotos';
+import { useProfiles } from '@/hooks/useProfiles';
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024; // matches server/src/routes/uploads.ts's multer limit
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
@@ -158,12 +158,17 @@ export function ChatPanel({
 
   const visibleMessages = viewingZone ? zoneMessages : messages;
 
-  // Profile photos for the channel/DM senders in view — one batched lookup,
-  // cached per user (see useProfilePhotos). Zone chat (ChatMessage) carries no
-  // senderId, so it keeps the initials avatar; only these persisted messages
-  // can resolve a photo.
-  const photoByUser = useProfilePhotos(
-    Array.from(new Set(messages.map((m) => m.senderId).filter(Boolean))),
+  // Current identity (name + photo) for the channel/DM senders in view —
+  // including any expanded thread replies — resolved by senderId in one batched
+  // lookup, cached per user (see useProfiles). This is what makes old messages
+  // show the sender's LATEST name/photo rather than the snapshot stored on the
+  // message (Bug 8). Zone chat (ChatMessage) carries no senderId, so it keeps
+  // the snapshot name + initials avatar.
+  const profileByUser = useProfiles(
+    Array.from(new Set([
+      ...messages.map((m) => m.senderId),
+      ...threadReplies.map((r) => r.senderId),
+    ].filter(Boolean))),
   );
 
   // A new message arrived (or was sent). If the user is at the bottom, follow
@@ -432,9 +437,9 @@ export function ChatPanel({
                     <div key={m.id}>
                       <MessageBubble
                         isOwn={isOwn}
-                        name={m.senderName}
+                        name={profileByUser.get(m.senderId)?.name || m.senderName}
                         color={avatarColor(m.senderId || m.senderName)}
-                        photoUrl={photoByUser.get(m.senderId)}
+                        photoUrl={profileByUser.get(m.senderId)?.photo ?? undefined}
                         time={m.createdAt}
                         mentioned={isMentioned}
                         pinnable={!!(isAdmin && onPinNotice)}
@@ -497,7 +502,7 @@ export function ChatPanel({
                           {threadReplies.map((r) => (
                             <div key={r.id} className="rounded bg-purple-50/50 dark:bg-gray-700/50 px-2 py-1 group/reply flex items-start justify-between gap-1">
                               <span className="min-w-0">
-                                <span className="font-medium text-gray-500 dark:text-gray-400 mr-1">{r.senderName}</span>
+                                <span className="font-medium text-gray-500 dark:text-gray-400 mr-1">{profileByUser.get(r.senderId)?.name || r.senderName}</span>
                                 {editingId === r.id ? (
                                   <input
                                     autoFocus

@@ -72,8 +72,8 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: Ava
   useEffect(() => {
     if (!localUserId) return;
     let alive = true;
-    api.getProfilePhotos([localUserId])
-      .then((r) => { if (alive) setPhoto(r.photos[0]?.photo ?? null); })
+    api.getProfiles([localUserId])
+      .then((r) => { if (alive) setPhoto(r.profiles[0]?.photo ?? null); })
       .catch(() => { /* leave as null; not worth an error banner on open */ });
     return () => { alive = false; };
   }, [localUserId]);

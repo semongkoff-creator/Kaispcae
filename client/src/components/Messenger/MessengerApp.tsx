@@ -4,6 +4,7 @@ import { ChannelMessage, Channel, DirectConversationSummary } from '@virtualmeet
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { GroupMembers } from './GroupMembers';
+import { useProfiles } from '@/hooks/useProfiles';
 
 // §Messenger — the full-screen chat surface, in the same "module panel over
 // the room" shape Docs/Base/Calendar/Attendance already use (see App.tsx).
@@ -63,7 +64,17 @@ function dayLabel(ts: number): string {
   return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-function Avatar({ name, seed, size = 40, square = false }: { name: string; seed: string; size?: number; square?: boolean }) {
+function Avatar({ name, seed, size = 40, square = false, photoUrl }: { name: string; seed: string; size?: number; square?: boolean; photoUrl?: string }) {
+  if (photoUrl) {
+    return (
+      <img
+        src={photoUrl}
+        alt={name}
+        className={`${square ? 'rounded-lg' : 'rounded-full'} object-cover shrink-0`}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
   return (
     <div
       className={`${tintFor(seed)} ${square ? 'rounded-lg' : 'rounded-full'} flex items-center justify-center text-white font-semibold shrink-0 select-none`}
@@ -132,6 +143,13 @@ export function MessengerApp({
   const unreadByTarget = useGameStore((s) => s.unreadByTarget);
   const typingByTarget = useGameStore((s) => s.typingByTarget);
   const playerRecords = useGameStore((s) => s.playerRecords);
+
+  // Bug 8 — resolve each sender's CURRENT name/photo by senderId (one batched,
+  // per-session-cached lookup) so old messages show the sender's latest
+  // identity, not the senderName snapshot stored on the message.
+  const profileByUser = useProfiles(
+    Array.from(new Set(messages.map((m) => m.senderId).filter(Boolean))),
+  );
 
   const [text, setText] = useState('');
   const [query, setQuery] = useState('');
@@ -434,6 +452,9 @@ export function MessengerApp({
                 // a messenger does it — a wall of repeated names is noise.
                 const newDay = !prev || new Date(prev.createdAt).toDateString() !== new Date(m.createdAt).toDateString();
                 const grouped = !newDay && prev?.senderId === m.senderId && m.createdAt - prev.createdAt < 5 * 60 * 1000;
+                // Bug 8 — current name/photo by id, snapshot senderName only as fallback.
+                const senderProfile = profileByUser.get(m.senderId);
+                const senderName = senderProfile?.name || m.senderName;
                 return (
                   <div key={m.id}>
                     {newDay && (
@@ -445,12 +466,12 @@ export function MessengerApp({
                     )}
                     <div className={`flex gap-2.5 ${own ? 'flex-row-reverse' : ''} ${grouped ? 'mt-0.5' : 'mt-3'}`}>
                       <div className="w-8 shrink-0">
-                        {!grouped && <Avatar name={m.senderName} seed={m.senderId} size={32} />}
+                        {!grouped && <Avatar name={senderName} seed={m.senderId} size={32} photoUrl={senderProfile?.photo ?? undefined} />}
                       </div>
                       <div className={`max-w-[min(560px,70%)] min-w-0 ${own ? 'items-end' : 'items-start'} flex flex-col`}>
                         {!grouped && (
                           <span className={`text-[11px] text-gray-400 mb-1 px-1 ${own ? 'text-right' : ''}`}>
-                            {own ? 'Kamu' : m.senderName} · {new Date(m.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                            {own ? 'Kamu' : senderName} · {new Date(m.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         )}
                         <div className="group relative">

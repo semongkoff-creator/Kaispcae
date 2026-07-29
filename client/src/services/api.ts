@@ -261,10 +261,12 @@ export const api = {
     request<{ ok: true }>('/users/me/profile-photo', { method: 'PUT', body: JSON.stringify({ photo }) }),
   deleteProfilePhoto: () =>
     request<{ ok: true }>('/users/me/profile-photo', { method: 'DELETE' }),
-  // Batch — one call for every sender currently in view, never per-message
-  // (that would be an N+1 on scrollback).
-  getProfilePhotos: (ids: string[]) =>
-    request<{ photos: { id: string; photo: string }[] }>(
+  // Batch identity lookup — one call for every sender currently in view, never
+  // per-message (that would be an N+1 on scrollback). Returns each user's
+  // CURRENT displayName + photo so chat renders live identity (Bug 8). `photo`
+  // is null when unset (chat falls back to initials).
+  getProfiles: (ids: string[]) =>
+    request<{ profiles: { id: string; name: string; photo: string | null }[] }>(
       `/users/profile-photos?ids=${encodeURIComponent(ids.join(','))}`,
     ),
 

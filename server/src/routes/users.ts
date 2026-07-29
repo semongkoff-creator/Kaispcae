@@ -41,25 +41,29 @@ users.delete('/users/me/profile-photo', authenticateToken, async (req: AuthReque
   }
 });
 
-// GET /api/users/profile-photos?ids=a,b,c — batch lookup for chat. One call for
-// all senders in view keeps this off the N+1 path, and this is the ONLY place
-// the heavy profilePhoto column is selected (everywhere else omits it). Returns
-// just the users that actually have a photo.
+// GET /api/users/profile-photos?ids=a,b,c — batch identity lookup for chat.
+// Returns the CURRENT displayName + photo for each requested sender, so chat
+// always renders live identity (Bug 8: old messages must show the sender's
+// latest name/photo, not a snapshot from send time). One call for all senders
+// in view keeps this off the N+1 path, and this is the ONLY place the heavy
+// profilePhoto column is selected (everywhere else omits it). `photo` is null
+// for users who haven't set one (chat falls back to initials); a row is still
+// returned for them so the name resolves.
 users.get('/users/profile-photos', authenticateToken, async (req: AuthRequest, res: Response) => {
   const raw = String(req.query.ids ?? '').trim();
-  if (!raw) return res.json({ photos: [] });
+  if (!raw) return res.json({ profiles: [] });
   // Cap the batch so a crafted id list can't pull a pile of TEXT columns.
   const ids = Array.from(new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))).slice(0, 100);
-  if (ids.length === 0) return res.json({ photos: [] });
+  if (ids.length === 0) return res.json({ profiles: [] });
   try {
     const rows = await getPrisma().user.findMany({
-      where: { id: { in: ids }, profilePhoto: { not: null } },
-      select: { id: true, profilePhoto: true },
+      where: { id: { in: ids } },
+      select: { id: true, displayName: true, profilePhoto: true },
     });
-    return res.json({ photos: rows.map((r) => ({ id: r.id, photo: r.profilePhoto })) });
+    return res.json({ profiles: rows.map((r) => ({ id: r.id, name: r.displayName, photo: r.profilePhoto })) });
   } catch (e) {
-    console.error('[users] batch profile photos failed:', e);
-    return res.status(500).json({ error: 'Gagal memuat foto.' });
+    console.error('[users] batch profiles failed:', e);
+    return res.status(500).json({ error: 'Gagal memuat profil.' });
   }
 });
 
