@@ -653,6 +653,12 @@ model Room {
   conversationsV2   Conversation[]
   // Bagian 4 — optional Lark group this room's "general" channel syncs with.
   larkChatMap       RoomChatMap?
+  // A8 — Lark Drive folder (under LARK_DRIVE_ROOT_FOLDER_TOKEN) holding this
+  // room's chat attachments + recordings. Created best-effort at room creation;
+  // null until then (or if Drive isn't configured) — lazily created on first
+  // upload (see lib/larkDrive.ensureRoomFolder), which also covers retry after
+  // a failed create and rooms that predate this feature.
+  larkFolderToken   String?
 }
 
 model RoomMember {

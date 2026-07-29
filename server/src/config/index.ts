@@ -47,6 +47,12 @@ const envSchema = z
     // The linked "Project" table (Related Project field points here) — its
     // records populate the live Project dropdown.
     LARK_TASK_PROJECT_TABLE_ID: z.string().default('tbl6MlZSjIddOZSl'),
+    // A8 — root Lark Drive folder that per-room subfolders (chat attachments +
+    // recordings) are created under. The app has no personal Drive space, so an
+    // admin creates ONE folder, shares it with the app, and puts its
+    // folder_token here. Unset → Drive storage is disabled and uploads fall back
+    // to local disk (current behaviour). Requires the drive:drive scope.
+    LARK_DRIVE_ROOT_FOLDER_TOKEN: z.string().optional(),
     // Bagian 4 upgrade — key to encrypt each user's stored Lark OAuth tokens at
     // rest (AES-256-GCM, see lib/tokenCrypto.ts). Any string; it's hashed to a
     // 32-byte key. Unset → user tokens are NOT stored and chat always relays via

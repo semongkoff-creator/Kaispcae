@@ -62,7 +62,13 @@ function toMessageDto(m: {
 // as-is, or it could plant an arbitrary external URL (phishing/tracking
 // pixel) dressed up as a chat attachment.
 function isValidAttachmentUrl(url: unknown): url is string {
-  return typeof url === 'string' && /^\/api\/uploads\/[a-zA-Z0-9-]+\.[a-zA-Z0-9]{1,10}$/.test(url);
+  // Legacy disk uploads (/api/uploads/<uuid>.<ext>) OR A8 Lark Drive-backed
+  // attachments (/api/files/<file_token>). Either way it's a same-origin path
+  // this server produced — never an arbitrary/external URL from the client.
+  return (
+    typeof url === 'string' &&
+    (/^\/api\/uploads\/[a-zA-Z0-9-]+\.[a-zA-Z0-9]{1,10}$/.test(url) || /^\/api\/files\/[a-zA-Z0-9_-]+$/.test(url))
+  );
 }
 
 // A client-generated send id (see ChatMessage.clientId). Bounded because it

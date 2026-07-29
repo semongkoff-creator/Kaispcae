@@ -6,6 +6,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { isRoomLocked } from '../socket/roomHandler';
 import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
 import { ensureGroupConversation } from '../lib/conversations';
+import { driveEnabled, ensureRoomFolder } from '../lib/larkDrive';
 
 const rooms = Router();
 
@@ -151,6 +152,14 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
         role: 'admin',
       },
     });
+
+    // A8 — best-effort: create this room's Lark Drive folder for attachments +
+    // recordings. Must NEVER fail room creation — a Drive/network hiccup just
+    // leaves larkFolderToken null, and ensureRoomFolder recreates it lazily on
+    // the first upload. Fire-and-forget (ensureRoomFolder persists the token).
+    if (driveEnabled()) {
+      void ensureRoomFolder(room.id).catch((e) => console.error('[rooms] Lark folder create failed:', e));
+    }
 
     // Every room gets a non-deletable "general" channel for persisted chat
     // (see routes/chat.ts) — rooms created before this existed get one

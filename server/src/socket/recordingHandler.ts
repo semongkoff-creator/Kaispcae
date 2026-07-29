@@ -18,10 +18,11 @@ import { resolveRoomRole as resolveRole } from '../lib/roles';
 const socketToUid = new Map<string, string>();
 const socketToRoom = new Map<string, string>();
 
-// Mirrors channelChatHandler.ts's isValidAttachmentUrl, narrowed to the .webm
-// that POST /uploads/recording is the only producer of.
+// The two shapes POST /uploads/recording can produce: a legacy disk .webm
+// (/api/uploads/<uuid>.webm) or an A8 Lark Drive locator (drive:<file_token>).
+// Both are server-generated; a client can't forge an arbitrary path/URL here.
 function isValidRecordingUrl(url: unknown): url is string {
-  return typeof url === 'string' && /^\/api\/uploads\/[a-zA-Z0-9-]+\.webm$/.test(url);
+  return typeof url === 'string' && (/^\/api\/uploads\/[a-zA-Z0-9-]+\.webm$/.test(url) || /^drive:[a-zA-Z0-9_-]+$/.test(url));
 }
 
 // Finds the live socket (if any) for a given account userId within a room —

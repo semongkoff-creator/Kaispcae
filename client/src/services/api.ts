@@ -101,6 +101,10 @@ async function uploadFile(path: string, file: File): Promise<{ url: string; file
   const token = localStorage.getItem('vm_token');
   const form = new FormData();
   form.append('file', file);
+  // A8 — tell the server which room this upload belongs to, so it lands in that
+  // room's Lark Drive folder. The current room is whatever we last entered.
+  const roomSlug = localStorage.getItem('vm_last_room_slug');
+  if (roomSlug) form.append('roomSlug', roomSlug);
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -120,6 +124,9 @@ async function uploadRecordingBlob(blob: Blob): Promise<{ url: string }> {
   const token = localStorage.getItem('vm_token');
   const form = new FormData();
   form.append('file', blob, 'recording.webm');
+  // A8 — route the recording into the room's Lark Drive folder.
+  const roomSlug = localStorage.getItem('vm_last_room_slug');
+  if (roomSlug) form.append('roomSlug', roomSlug);
   const res = await fetch(`${API_BASE}/uploads/recording`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
