@@ -17,6 +17,14 @@ const canTeleport = socketRateLimit(2); // max 2 teleport requests/sec per socke
 const canUpdateRoom = socketRateLimit(2); // max 2 room:update (DB write) calls/sec per socket
 const canSummonUser = socketRateLimit(3); // max 3 single-target summon requests/sec per socket
 const canKnock = socketRateLimit(1); // max 1 knock/sec per socket — no spamming the host
+const canSlap = socketRateLimit(3); // A10 — burst guard; the real limit is the 30s/target cooldown below
+
+// A10 — Slap ("colek") cooldown: 30s per (sender socket → target socket) pair,
+// so you can't spam-poke the same person. Ephemeral (socket-id keyed); a
+// reconnect resets it, which is fine for a cosmetic nudge. Entries are tiny and
+// pruned lazily on read.
+const slapCooldown = new Map<string, number>();
+const SLAP_COOLDOWN_MS = 30_000;
 
 // §5.1 — Summon now requires the target's consent, so the actual move only
 // happens once they accept. Keyed by TARGET socket id — a new request from
@@ -763,6 +771,49 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     updatePlayerPosition(room, socket.id, landX, landY, stillRequester.direction);
     io.to(room).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: landX, y: landY, direction: stillRequester.direction });
     io.to(pending.fromSocketId).emit(SocketEvents.SUMMON_RESULT, { targetName, accepted: true });
+  });
+
+  // A10 — Slap/Tap ("colek"): a one-way, ephemeral attention nudge. Reuses
+  // Summon's target resolution (by nickname, most-recent match) and Focus/DND
+  // respect, but with NO consent dance — just relay to the target after a
+  // 30s-per-target cooldown. Nothing persisted (optional activity_log only).
+  socket.on(SocketEvents.SLAP, async (data: { nickname: string }) => {
+    if (!canSlap(socket.id)) return;
+    const room = currentRoom; if (!room) return;
+    const nickname = data?.nickname?.trim();
+    if (!nickname) return;
+
+    const players = await getPlayers(room);
+    const matches = players.filter((p) => p.id !== socket.id && p.name === nickname);
+    if (matches.length === 0) {
+      socket.emit('admin:error', { message: 'Orang itu tidak ada di room ini.' });
+      return;
+    }
+    const target = matches[matches.length - 1];
+
+    // Respect A3 Focus/DND — same rule as Summon.
+    if (target.workMode === 'focus') {
+      socket.emit('admin:error', { message: `${target.name} sedang fokus — tidak bisa dicolek sekarang.` });
+      return;
+    }
+
+    // 30s-per-target cooldown (the 2nd rapid colek to the same person is dropped).
+    const key = `${socket.id}:${target.id}`;
+    const now = Date.now();
+    const last = slapCooldown.get(key) ?? 0;
+    if (now - last < SLAP_COOLDOWN_MS) {
+      const wait = Math.ceil((SLAP_COOLDOWN_MS - (now - last)) / 1000);
+      socket.emit('admin:error', { message: `Sabar ya, tunggu ${wait} detik sebelum colek ${target.name} lagi.` });
+      return;
+    }
+    slapCooldown.set(key, now);
+
+    io.to(target.id).emit(SocketEvents.SLAPPED, { fromName: getPlayerName(socket.id), fromId: socket.id });
+
+    // Optional, non-fatal: usage stats. logActivity is a guarded no-op unless
+    // the Lark Base activity table is configured (see lib/larkBase).
+    const uid = findUserIdBySocket(socket.id);
+    if (uid) void logActivity({ eventType: 'slap', userId: uid, room, detail: { targetId: findUserIdBySocket(target.id) ?? target.id } });
   });
 
   socket.on(SocketEvents.AVATAR_UPDATE, (avatarConfig: AvatarConfig) => {

@@ -327,6 +327,14 @@ export enum SocketEvents {
   SUMMON_RESPOND = 'summon:respond',
   SUMMON_RESULT = 'summon:result',
 
+  // A10 — Slap/Tap ("colek"): a lightweight, ephemeral attention-nudge to one
+  // person (vibrate + soft sound + shake + toast). SLAP is the sender's request
+  // (by nickname, like SUMMON_USER); the server relays SLAPPED only to the
+  // target socket after a Focus + 30s-per-target cooldown check. Nothing is
+  // persisted (optional activity_log only).
+  SLAP = 'slap',
+  SLAPPED = 'slapped',
+
   // §6 — Add Media. Portal (spec's ~10s ephemeral variant) is deliberately
   // NOT included — this app already has a permanent portal tile placed via
   // the Room Editor (see createDefaultRoom.ts's 'portal' TileType), and

@@ -500,6 +500,17 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       }
     });
 
+    // A10 — Slap ("colek") received. The server already enforced Focus/DND +
+    // cooldown, so just play the effect: vibrate, soft sound, shake own avatar
+    // (reusing the nudge machinery), and a dedicated toast.
+    socket.on(SocketEvents.SLAPPED, (data: { fromName: string; fromId?: string }) => {
+      const state = useGameStore.getState();
+      navigator.vibrate?.(200);
+      playNudgeSound(true);
+      if (state.localPlayerId) state.triggerNudge(state.localPlayerId, Date.now(), data.fromId);
+      state.setSlappedBy(data.fromName || 'Seseorang');
+    });
+
     socket.on(SocketEvents.ROOM_UPDATED, (data: RoomUpdatePayload) => {
       const tiles = data.tiles.map((row, y) =>
         row.map((t, x) => ({ ...t, x, y, type: t.type as any }))
@@ -784,6 +795,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.SUMMON_USER, { nickname });
   }, []);
 
+  // A10 — "colek" a participant (by nickname, like summon).
+  const emitSlap = useCallback((nickname: string) => {
+    socketRef.current?.emit(SocketEvents.SLAP, { nickname });
+  }, []);
+
   const emitSummonRespond = useCallback((requestId: string, accept: boolean) => {
     socketRef.current?.emit(SocketEvents.SUMMON_RESPOND, { requestId, accept });
   }, []);
@@ -828,5 +844,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage };
 }

@@ -310,6 +310,10 @@ export interface GameState {
   // summonResult above.
   nudgedBy: string | null;
   setNudgedBy: (name: string | null) => void;
+  // A10 — name of whoever last "colek"-ed (slapped) the local user; drives a
+  // brief toast, separate from nudgedBy so the copy can differ.
+  slappedBy: string | null;
+  setSlappedBy: (name: string | null) => void;
 
   // Recent Activity Feed — a lightweight, client-only log of room events
   // (join/leave, media added, notice pinned, recording start/end) built
@@ -756,6 +760,8 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   nudgedBy: null,
   setNudgedBy: (name) => set({ nudgedBy: name }),
+  slappedBy: null,
+  setSlappedBy: (name) => set({ slappedBy: name }),
 
   activityEvents: [],
   addActivity: (message) =>

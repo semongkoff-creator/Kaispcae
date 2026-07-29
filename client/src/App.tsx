@@ -101,7 +101,7 @@ const AFK_STATUS = '💤 Away';
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage } = useSocket(authDisplayName, roomSlug, authUserId);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -440,6 +440,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     const timer = setTimeout(() => useGameStore.getState().setNudgedBy(null), 3000);
     return () => clearTimeout(timer);
   }, [nudgedBy]);
+
+  // A10 — "colek"/slap toast, same auto-clear pattern as the nudge toast above.
+  const slappedBy = useGameStore((s) => s.slappedBy);
+  useEffect(() => {
+    if (!slappedBy) return;
+    const timer = setTimeout(() => useGameStore.getState().setSlappedBy(null), 3000);
+    return () => clearTimeout(timer);
+  }, [slappedBy]);
 
   const incomingFollowRequest = useGameStore((s) => s.incomingFollowRequest);
   useEffect(() => {
@@ -879,7 +887,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             </p>
           </div>
           <div className="absolute top-14 left-16 flex items-start gap-2 pointer-events-none">
-            <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSpotlightToggle={emitSpotlightToggle} onStartDm={channelChat.startDm} emitKick={emitKick} />
+            <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} emitSpotlightToggle={emitSpotlightToggle} onStartDm={channelChat.startDm} emitKick={emitKick} />
             <ActivityFeed />
           </div>
         </>
@@ -980,6 +988,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           <div className="bg-amber-500/95 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-2 animate-fade-in">
             <HandIndexThumbFill size={14} />
             <span className="font-bold">{nudgedBy}</span> menyenggolmu!
+          </div>
+        )}
+        {slappedBy && (
+          <div className="bg-purple-600/95 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-2 animate-fade-in">
+            👋 <span className="font-bold">{slappedBy}</span> nyoel kamu — sadar dong!
           </div>
         )}
       </div>

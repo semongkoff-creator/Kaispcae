@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, StarFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones } from 'react-bootstrap-icons';
+import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, StarFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill } from 'react-bootstrap-icons';
 import { roleAtLeast, Role } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 
@@ -28,6 +28,8 @@ interface ParticipantPanelProps {
   emitFollowRequest: (targetUserId: string) => void;
   emitFollowUnfollow: () => void;
   emitSummonUser: (nickname: string) => void;
+  // A10 — "colek"/slap a participant by name (lightweight attention nudge).
+  emitSlap: (nickname: string) => void;
   emitSpotlightToggle: (targetUserId: string) => void;
   // Opens (or creates) a persisted 1:1 DM with this account — see
   // useChannelChat.ts's startDm. Undefined for rows with no account id
@@ -40,7 +42,7 @@ interface ParticipantPanelProps {
 
 const MAX_VIDEO_THUMBS = 3;
 
-export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSpotlightToggle, onStartDm, emitKick }: ParticipantPanelProps) {
+export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, emitSpotlightToggle, onStartDm, emitKick }: ParticipantPanelProps) {
   const [open, setOpen] = useState(false);
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
@@ -147,6 +149,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
                 onFollow={p.userId ? () => emitFollowRequest(p.userId!) : undefined}
                 onUnfollow={emitFollowUnfollow}
                 onSummon={() => emitSummonUser(p.name)}
+                onSlap={() => emitSlap(p.name)}
                 isSpotlighted={!!p.userId && spotlightedUserIds.includes(p.userId)}
                 onSpotlight={canModerate && p.userId ? () => emitSpotlightToggle(p.userId!) : undefined}
                 onMessage={p.userId && onStartDm ? () => onStartDm(p.userId!) : undefined}
@@ -175,6 +178,7 @@ function ParticipantRow({
   onFollow,
   onUnfollow,
   onSummon,
+  onSlap,
   isSpotlighted,
   onSpotlight,
   onMessage,
@@ -205,6 +209,9 @@ function ParticipantRow({
   // §5.1 — undefined (not just a no-op) when I'm below staff, so the button
   // doesn't render at all rather than rendering disabled.
   onSummon?: () => void;
+  // A10 — "colek"/slap: a lightweight attention nudge (open to everyone, like
+  // summon). Undefined for the local row.
+  onSlap?: () => void;
   // §6 — spotlight bypasses this player's distance-visibility limit for
   // everyone in the room; undefined when I'm below staff or they have no
   // account id (guest fallback — unreachable today, login is mandatory).
@@ -267,7 +274,7 @@ function ParticipantRow({
   // leaving it open over a row whose state just changed reads as if the
   // click didn't register.
   const pick = (fn?: () => void) => () => { closeMenu(); fn?.(); };
-  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onMessage || onSpotlight || onKick);
+  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onMessage || onSpotlight || onKick);
 
   return (
     <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50 dark:bg-gray-700/50">
@@ -339,6 +346,9 @@ function ParticipantRow({
                 )}
                 {onSummon && (
                   <MenuItem icon={<MagnetFill size={12} />} label="Panggil ke sini" onClick={pick(onSummon)} />
+                )}
+                {onSlap && (
+                  <MenuItem icon={<HandIndexThumbFill size={12} />} label="Colek (sadarkan)" onClick={pick(onSlap)} />
                 )}
                 {onMessage && (
                   <MenuItem icon={<ChatDotsFill size={11} />} label="Kirim pesan" onClick={pick(onMessage)} />
