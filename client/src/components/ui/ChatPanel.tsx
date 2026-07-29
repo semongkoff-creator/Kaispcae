@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
-import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, Paperclip, FileEarmarkFill, Download, TrashFill, PencilFill } from 'react-bootstrap-icons';
+import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, Paperclip, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { ChatAvatar, avatarColor } from './ChatAvatar';
+import { AttachmentLightbox, type LightboxTarget } from './AttachmentLightbox';
 import { useProfiles } from '@/hooks/useProfiles';
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024; // matches server/src/routes/uploads.ts's multer limit
@@ -83,6 +84,8 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  // Bug 10 — attachment preview opens in this in-app lightbox, not a new tab.
+  const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
   const beginEdit = (id: string, current: string) => { setEditingId(id); setEditText(current); };
   const commitEdit = () => {
     const t = editText.trim();
@@ -493,7 +496,7 @@ export function ChatPanel({
                           )
                         )}
                         {m.attachmentUrl && (
-                          <ChatAttachment url={m.attachmentUrl} fileName={m.attachmentName} isOwn={isOwn} />
+                          <ChatAttachment url={m.attachmentUrl} fileName={m.attachmentName} isOwn={isOwn} onOpen={setLightbox} />
                         )}
                       </MessageBubble>
 
@@ -655,6 +658,7 @@ export function ChatPanel({
           </div>
         </div>
       )}
+      {lightbox && <AttachmentLightbox target={lightbox} onClose={() => setLightbox(null)} />}
     </>
   );
 }
@@ -724,35 +728,46 @@ function MessageBubble({
 // unlike Add Media's MediaViewerModal, since this is a much smaller/simpler
 // surface); anything else renders as a compact download row instead of
 // trying to guess how to preview an arbitrary file type.
-function ChatAttachment({ url, fileName, isOwn }: { url: string; fileName?: string; isOwn: boolean }) {
+// Bug 10 — clicking an attachment opens the in-app lightbox (onOpen) rather
+// than navigating to a new tab. The in-bubble element is a preview/affordance
+// only; playback/preview happens in the lightbox.
+function ChatAttachment({ url, fileName, isOwn, onOpen }: { url: string; fileName?: string; isOwn: boolean; onOpen: (t: LightboxTarget) => void }) {
+  const open = () => onOpen({ url, fileName });
   if (isImageAttachment(url)) {
     return (
-      <a href={url} target="_blank" rel="noopener noreferrer" className="block mt-1">
+      <button type="button" onClick={open} className="block mt-1 cursor-pointer">
         {/* Fixed box + object-cover (not max-w/max-h, which only caps large
             images and leaves a naturally-small one — a tiny icon/sticker —
             rendering at its native size, easy to miss entirely) so every
             thumbnail reads as a deliberate preview regardless of the
             original image's actual resolution. */}
         <img src={url} alt={fileName || 'Attachment'} className="w-32 h-24 rounded object-cover bg-purple-100" />
-      </a>
+      </button>
     );
   }
   if (isVideoAttachment(url)) {
-    return <video src={url} controls className="mt-1 w-48 rounded bg-black" />;
+    // Muted, controls-less first frame as a thumbnail with a play badge; the
+    // actual player (with controls + autoplay) lives in the lightbox.
+    return (
+      <button type="button" onClick={open} className="relative block mt-1 cursor-pointer w-48">
+        <video src={url} muted preload="metadata" className="w-48 rounded bg-black pointer-events-none" />
+        <span className="absolute inset-0 flex items-center justify-center">
+          <PlayCircleFill size={34} className="text-white/90 drop-shadow" />
+        </span>
+      </button>
+    );
   }
   return (
-    <a
-      href={url}
-      download={fileName}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`mt-1 flex items-center gap-1.5 rounded px-2 py-1 text-[11px] ${
+    <button
+      type="button"
+      onClick={open}
+      className={`mt-1 flex items-center gap-1.5 rounded px-2 py-1 text-[11px] w-full text-left cursor-pointer ${
         isOwn ? 'bg-purple-700/60 text-white hover:bg-purple-700' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'
       }`}
     >
       <FileEarmarkFill size={12} className="shrink-0" />
-      <span className="truncate flex-1">{fileName || 'Download file'}</span>
+      <span className="truncate flex-1">{fileName || 'Open file'}</span>
       <Download size={11} className="shrink-0" />
-    </a>
+    </button>
   );
 }

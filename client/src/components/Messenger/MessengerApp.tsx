@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { XLg, PlusLg, Paperclip, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill } from 'react-bootstrap-icons';
+import { XLg, PlusLg, Paperclip, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill } from 'react-bootstrap-icons';
 import { ChannelMessage, Channel, DirectConversationSummary } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { GroupMembers } from './GroupMembers';
 import { useProfiles } from '@/hooks/useProfiles';
+import { AttachmentLightbox, type LightboxTarget } from '@/components/ui/AttachmentLightbox';
 
 // §Messenger — the full-screen chat surface, in the same "module panel over
 // the room" shape Docs/Base/Calendar/Attendance already use (see App.tsx).
@@ -158,6 +159,8 @@ export function MessengerApp({
   const [newChannelName, setNewChannelName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  // Bug 10 — attachment preview opens in this in-app lightbox, not a new tab.
+  const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
   const [uploading, setUploading] = useState(false);
   const [attachError, setAttachError] = useState('');
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -503,7 +506,7 @@ export function MessengerApp({
                                   : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-bl-md'
                               }`}
                             >
-                              {m.attachmentUrl && <MessageAttachment url={m.attachmentUrl} name={m.attachmentName} own={own} />}
+                              {m.attachmentUrl && <MessageAttachment url={m.attachmentUrl} name={m.attachmentName} own={own} onOpen={setLightbox} />}
                               {m.text}
                             </div>
                           )}
@@ -615,35 +618,44 @@ export function MessengerApp({
           />
         )}
       </section>
+      {lightbox && <AttachmentLightbox target={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );
 }
 
-// Images and videos render inline; anything else gets a download row. Mirrors
-// ChatPanel's ChatAttachment — same allowlist, same reasoning about what a
-// browser can safely display inline (see server/src/routes/uploads.ts).
-function MessageAttachment({ url, name, own }: { url: string; name?: string; own: boolean }) {
+// Bug 10 — clicking an attachment opens the shared in-app lightbox (onOpen)
+// instead of a new tab. Mirrors ChatPanel's ChatAttachment — same allowlist,
+// same reasoning about what a browser can display inline (see uploads.ts).
+function MessageAttachment({ url, name, own, onOpen }: { url: string; name?: string; own: boolean; onOpen: (t: LightboxTarget) => void }) {
+  const open = () => onOpen({ url, fileName: name });
   if (IMAGE_EXT_RE.test(url)) {
     return (
-      <a href={url} target="_blank" rel="noreferrer" className="block mb-1.5">
+      <button type="button" onClick={open} className="block mb-1.5 cursor-pointer">
         <img src={url} alt={name ?? 'lampiran'} className="max-w-full max-h-72 rounded-lg" />
-      </a>
+      </button>
     );
   }
   if (VIDEO_EXT_RE.test(url)) {
-    return <video src={url} controls className="max-w-full max-h-72 rounded-lg mb-1.5" />;
+    return (
+      <button type="button" onClick={open} className="relative block mb-1.5 cursor-pointer">
+        <video src={url} muted preload="metadata" className="max-w-full max-h-72 rounded-lg bg-black pointer-events-none" />
+        <span className="absolute inset-0 flex items-center justify-center">
+          <PlayCircleFill size={40} className="text-white/90 drop-shadow" />
+        </span>
+      </button>
+    );
   }
   return (
-    <a
-      href={url}
-      download={name}
-      className={`flex items-center gap-2 mb-1.5 px-2.5 py-2 rounded-lg ${
+    <button
+      type="button"
+      onClick={open}
+      className={`flex items-center gap-2 mb-1.5 px-2.5 py-2 rounded-lg w-full text-left cursor-pointer ${
         own ? 'bg-indigo-400/40' : 'bg-gray-100 dark:bg-gray-700'
       }`}
     >
       <FileEarmarkFill size={18} className="shrink-0" />
       <span className="text-xs truncate flex-1">{name ?? 'Lampiran'}</span>
       <Download size={13} className="shrink-0" />
-    </a>
+    </button>
   );
 }
