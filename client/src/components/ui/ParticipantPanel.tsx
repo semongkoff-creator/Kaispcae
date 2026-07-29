@@ -38,12 +38,17 @@ interface ParticipantPanelProps {
   // Temporary removal from the room, admin+ only (see shared/permissions.ts's
   // 'room:kick') — not a ban, the target can rejoin any time.
   emitKick?: (targetUserId: string) => void;
+  // Bug 12 — open state is now controlled by the parent's single-active-panel
+  // coordinator (was local), so opening this closes any other panel and vice
+  // versa. onToggle flips it (header click); onClose forces it shut.
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
 }
 
 const MAX_VIDEO_THUMBS = 3;
 
-export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, emitKick }: ParticipantPanelProps) {
-  const [open, setOpen] = useState(false);
+export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, emitKick, open, onToggle, onClose }: ParticipantPanelProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
@@ -78,7 +83,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
   return (
     <div className="relative z-40 pointer-events-auto">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={onToggle}
         title="Participants"
         className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer inline-flex items-center gap-1.5"
       >
@@ -96,7 +101,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
             <div className="flex items-center gap-2">
               <span className="text-gray-400 dark:text-gray-500 text-xs">{totalOnline} online</span>
               <button
-                onClick={() => setOpen(false)}
+                onClick={onClose}
                 title="Close"
                 className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
               >

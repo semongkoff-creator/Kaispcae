@@ -18,6 +18,28 @@ export interface ActivityEvent {
   timestamp: number;
 }
 
+// Bug 12 — the set of mutually-exclusive main panels. Deliberately excludes
+// small HUD popovers (Presence, Notifications, Activity feed, Device menu,
+// Status, attachment menu), the avatar editor modal, the minimap/emote-wheel,
+// the mini-mode popout window, the file lightbox, toasts and confirm modals —
+// those are separate layers, not panels. Room-editor mode is tracked by
+// `editorMode`, coordinated to be exclusive with these without being one of them.
+export type PanelId =
+  | 'chat'
+  | 'participants'
+  | 'dailyTask'
+  | 'leave'
+  | 'teleport'
+  | 'addMedia'
+  | 'adminPanel'
+  | 'meeting'
+  | 'calendar'
+  | 'adminConsole'
+  | 'attendance'
+  | 'larkAttendance'
+  | 'messenger'
+  | 'joinQueue';
+
 // Keeps the feed skimmable and bounds its memory — old entries just fall
 // off the end rather than needing a separate pruning pass (see
 // activityEvents's own doc comment above).
@@ -194,6 +216,16 @@ export interface GameState {
   setActiveChatTarget: (target: { type: 'channel' | 'dm'; id: string } | null) => void;
   chatPanelOpen: boolean;
   setChatPanelOpen: (open: boolean) => void;
+  // Bug 12 — "one panel at a time": the single main panel currently open, or
+  // null. Opening any panel replaces (closes) the previous one. Small HUD
+  // popovers, the file lightbox, toasts and confirm modals are NOT panels and
+  // live on their own layers — see PanelId for the exhaustive list. chatPanelOpen
+  // stays in sync (it's exactly `activePanel === 'chat'`) so chat's existing
+  // unread wiring keeps working. Room-editor mode (editorMode) is mutually
+  // exclusive with panels too, coordinated in openPanel/toggleEditorMode.
+  activePanel: PanelId | null;
+  openPanel: (id: PanelId) => void;
+  closePanel: () => void;
   // Unread message counts per chat target ("channel:<id>"/"dm:<id>") — bumped
   // when a message arrives for a target the user isn't currently viewing, and
   // cleared when they open/switch to it. Drives the badges on the Chat button
@@ -559,7 +591,23 @@ export const useGameStore = create<GameState>((set, get) => ({
   activeChatTarget: null,
   setActiveChatTarget: (activeChatTarget) => set({ activeChatTarget }),
   chatPanelOpen: false,
-  setChatPanelOpen: (chatPanelOpen) => set({ chatPanelOpen }),
+  // Kept in lockstep with activePanel: opening chat makes it the sole panel;
+  // closing it clears activePanel only if chat was the one showing.
+  setChatPanelOpen: (open) =>
+    set((s) => (open
+      ? { chatPanelOpen: true, activePanel: 'chat', editorMode: false }
+      : { chatPanelOpen: false, activePanel: s.activePanel === 'chat' ? null : s.activePanel })),
+
+  activePanel: null,
+  // Toggle semantics: opening the panel that's already open closes it. Opening
+  // any other panel replaces it, and turns off both chat and room-editor mode
+  // so exactly one main surface is visible at a time.
+  openPanel: (id) =>
+    set((s) => {
+      const next = s.activePanel === id ? null : id;
+      return { activePanel: next, chatPanelOpen: next === 'chat', editorMode: false };
+    }),
+  closePanel: () => set({ activePanel: null, chatPanelOpen: false }),
   unreadByTarget: {},
   bumpUnread: (key) =>
     set((state) => ({ unreadByTarget: { ...state.unreadByTarget, [key]: (state.unreadByTarget[key] ?? 0) + 1 } })),
@@ -868,7 +916,13 @@ export const useGameStore = create<GameState>((set, get) => ({
   localUserId: '',
   setLocalUserId: (id) => set({ localUserId: id }),
   editorMode: false,
-  toggleEditorMode: () => set((s) => ({ editorMode: !s.editorMode })),
+  // Entering room-editor mode is exclusive with the main panels (Bug 12):
+  // turning it on closes whatever panel was open.
+  toggleEditorMode: () =>
+    set((s) => {
+      const editorMode = !s.editorMode;
+      return editorMode ? { editorMode, activePanel: null, chatPanelOpen: false } : { editorMode };
+    }),
   selectedTileType: 'wall',
   setSelectedTileType: (t: TileType) => set({ selectedTileType: t, selectedPaletteId: undefined }),
   selectedPaletteId: undefined,

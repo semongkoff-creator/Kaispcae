@@ -476,9 +476,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const setTiles = useGameStore((s) => s.setTiles);
   const tiles = useGameStore((s) => s.tiles);
   const [editorToast, setEditorToast] = useState('');
-  const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const [showTeleportPanel, setShowTeleportPanel] = useState(false);
-  const [showAddMediaPanel, setShowAddMediaPanel] = useState(false);
+  // Bug 12 — "one panel at a time": every main panel derives its open state
+  // from a single store field. Opening one closes the rest (and chat / room
+  // editor); see gameStore openPanel/closePanel. Names are kept identical to
+  // the old local booleans so the rest of the component is unchanged.
+  const activePanel = useGameStore((s) => s.activePanel);
+  const openPanel = useGameStore((s) => s.openPanel);
+  const closePanel = useGameStore((s) => s.closePanel);
+  const showAdminPanel = activePanel === 'adminPanel';
+  const showTeleportPanel = activePanel === 'teleport';
+  const showAddMediaPanel = activePanel === 'addMedia';
   const [viewingMediaId, setViewingMediaId] = useState<string | null>(null);
   const localRole = useGameStore((s) => s.localRole);
   const mediaObjects = useGameStore((s) => s.mediaObjects);
@@ -486,17 +493,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
   const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
-  const [dailyTaskActive, setDailyTaskActive] = useState(false);
-  const [leaveActive, setLeaveActive] = useState(false);
-  const [adminViewActive, setAdminViewActive] = useState(false);
-  const [calendarViewActive, setCalendarViewActive] = useState(false);
-  const [attendanceViewActive, setAttendanceViewActive] = useState(false);
-  const [larkAttendanceActive, setLarkAttendanceActive] = useState(false);
-  const [messengerViewActive, setMessengerViewActive] = useState(false);
+  const dailyTaskActive = activePanel === 'dailyTask';
+  const leaveActive = activePanel === 'leave';
+  const adminViewActive = activePanel === 'adminConsole';
+  const calendarViewActive = activePanel === 'calendar';
+  const attendanceViewActive = activePanel === 'attendance';
+  const larkAttendanceActive = activePanel === 'larkAttendance';
+  const messengerViewActive = activePanel === 'messenger';
   // Join-approval queue (admin). pendingJoinCount only drives the menu badge;
   // the panel refetches from the server when opened, so a stale count can
   // never turn into a stale decision.
-  const [joinQueueActive, setJoinQueueActive] = useState(false);
+  const joinQueueActive = activePanel === 'joinQueue';
   const [pendingJoinCount, setPendingJoinCount] = useState(0);
 
   // Keep the badge fresh for admins. Polled rather than driven by the
@@ -533,7 +540,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       }
       if (e.key === 'Tab') {
         e.preventDefault();
-        setShowAdminPanel((v) => !v);
+        openPanel('adminPanel');
       }
     };
     window.addEventListener('keydown', handler);
@@ -685,7 +692,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const followerUserIds = useGameStore((s) => s.followerUserIds);
   const [showEmoteWheel, setShowEmoteWheel] = useState(false);
   const [showMinimap, setShowMinimap] = useState(true);
-  const [meetingViewActive, setMeetingViewActive] = useState(false);
+  const meetingViewActive = activePanel === 'meeting';
   const [miniModeWindow, setMiniModeWindow] = useState<Window | null>(null);
   const [miniModeError, setMiniModeError] = useState<string | null>(null);
   const miniModeErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -882,7 +889,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             </p>
           </div>
           <div className="absolute top-14 left-16 flex items-start gap-2 pointer-events-none">
-            <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} emitKick={emitKick} />
+            <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} emitKick={emitKick} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
             <ActivityFeed />
           </div>
         </>
@@ -1012,11 +1019,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleEditorMode={toggleEditorMode}
         canTeleport={roleAtLeast(localRole, 'member')}
         showTeleportPanel={showTeleportPanel}
-        onToggleTeleport={() => setShowTeleportPanel((v) => !v)}
+        onToggleTeleport={() => openPanel('teleport')}
         hasMySeat={hasMySeat}
         onMySeat={handleMySeat}
         meetingViewActive={meetingViewActive}
-        onToggleMeetingView={() => setMeetingViewActive((v) => !v)}
+        onToggleMeetingView={() => openPanel('meeting')}
         roomLocked={roomLocked}
         canLock={isAdmin}
         onToggleLock={() => emitRoomLock(!roomLocked)}
@@ -1032,27 +1039,27 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         }}
         dailyTaskActive={dailyTaskActive}
         leaveActive={leaveActive}
-        onToggleLeave={() => setLeaveActive((v) => !v)}
+        onToggleLeave={() => openPanel('leave')}
         calendarViewActive={calendarViewActive}
-        onToggleCalendarView={() => setCalendarViewActive((v) => !v)}
+        onToggleCalendarView={() => openPanel('calendar')}
         attendanceViewActive={attendanceViewActive}
-        onToggleAttendanceView={() => setAttendanceViewActive((v) => !v)}
+        onToggleAttendanceView={() => openPanel('attendance')}
         larkAttendanceActive={larkAttendanceActive}
-        onToggleLarkAttendance={() => setLarkAttendanceActive((v) => !v)}
+        onToggleLarkAttendance={() => openPanel('larkAttendance')}
         messengerViewActive={messengerViewActive}
-        onToggleMessengerView={() => setMessengerViewActive((v) => !v)}
+        onToggleMessengerView={() => openPanel('messenger')}
         joinQueueActive={joinQueueActive}
-        onToggleJoinQueue={() => setJoinQueueActive((v) => !v)}
+        onToggleJoinQueue={() => openPanel('joinQueue')}
         pendingJoinCount={pendingJoinCount}
         isWorkspaceAdmin={currentUser.workspaceRole === 'admin'}
         adminViewActive={adminViewActive}
-        onToggleAdminView={() => setAdminViewActive((v) => !v)}
-        onToggleDailyTask={() => setDailyTaskActive((v) => !v)}
+        onToggleAdminView={() => openPanel('adminConsole')}
+        onToggleDailyTask={() => openPanel('dailyTask')}
         miniModeSupported={isMiniModeSupported()}
         miniModeActive={!!miniModeWindow}
         onToggleMiniMode={handleToggleMiniMode}
         showAddMediaPanel={showAddMediaPanel}
-        onToggleAddMedia={() => setShowAddMediaPanel((v) => !v)}
+        onToggleAddMedia={() => openPanel('addMedia')}
         canRecord={isAdmin}
         recordingTargets={recordingTargets}
         activeRecording={activeRecording}
@@ -1120,13 +1127,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {/* Lark Base (database) module — full-screen in-room panel, same z-40
           layer as Meeting View; the room's Sidebar rail (z-50) stays reachable
           and the launcher offsets itself by pl-14 to clear it. */}
-      {dailyTaskActive && <DailyTaskPanel onClose={() => setDailyTaskActive(false)} />}
-      {leaveActive && <LeavePanel onClose={() => setLeaveActive(false)} />}
-      {adminViewActive && <AdminConsole currentUser={currentUser} onClose={() => setAdminViewActive(false)} />}
-      {attendanceViewActive && <AttendanceApp onClose={() => setAttendanceViewActive(false)} />}
-      {larkAttendanceActive && <LarkAttendancePanel onClose={() => setLarkAttendanceActive(false)} />}
+      {dailyTaskActive && <DailyTaskPanel onClose={closePanel} />}
+      {leaveActive && <LeavePanel onClose={closePanel} />}
+      {adminViewActive && <AdminConsole currentUser={currentUser} onClose={closePanel} />}
+      {attendanceViewActive && <AttendanceApp onClose={closePanel} />}
+      {larkAttendanceActive && <LarkAttendancePanel onClose={closePanel} />}
       {joinQueueActive && isAdmin && (
-        <JoinRequestPanel roomSlug={roomSlug} onClose={() => setJoinQueueActive(false)} />
+        <JoinRequestPanel roomSlug={roomSlug} onClose={closePanel} />
       )}
       {/* Messenger — the full-screen chat surface. Shares every bit of state
           with the floating ChatPanel below (same useChannelChat instance), so
@@ -1136,7 +1143,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           localUserId={authUserId}
           isAdmin={isAdmin}
           roomSlug={roomSlug}
-          onClose={() => setMessengerViewActive(false)}
+          onClose={closePanel}
           channels={channelChat.channels}
           dmConversations={channelChat.dmConversations}
           activeChatTarget={channelChat.activeChatTarget}
@@ -1153,8 +1160,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {calendarViewActive && (
         <CalendarApp
           currentUser={{ id: authUserId, name: authDisplayName, timezone: currentUser.timezone }}
-          onClose={() => setCalendarViewActive(false)}
-          onStartMeeting={(slug) => { setCalendarViewActive(false); onPortalTravel(slug); }}
+          onClose={closePanel}
+          onStartMeeting={(slug) => { closePanel(); onPortalTravel(slug); }}
         />
       )}
 
@@ -1176,7 +1183,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           // server's 'teleport:admin' gate on those REST endpoints).
           canManage={roleAtLeast(localRole, 'staff')}
           onTeleport={(kind, locationId) => emitTeleportRequest({ kind, locationId })}
-          onClose={() => setShowTeleportPanel(false)}
+          onClose={closePanel}
         />
       )}
 
@@ -1184,7 +1191,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         <AddMediaPanel
           onAdd={handleMediaAdd}
           onScreenshot={handleScreenshot}
-          onClose={() => setShowAddMediaPanel(false)}
+          onClose={closePanel}
         />
       )}
 
@@ -1220,7 +1227,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onManualVolumeChange={setManualVolume}
           recordedTargetUserId={activeRecording?.targetUserId}
           isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
-          onClose={() => setMeetingViewActive(false)}
+          onClose={closePanel}
           onEmote={handleEmoteSelect}
         />
       ) : (
