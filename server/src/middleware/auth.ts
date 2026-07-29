@@ -1,6 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { getConfig } from '../config';
+import { getPrisma } from '../lib/prisma';
+
+// Bug 1 — single active session. The exact error code + message the client
+// keys off to show "logged in elsewhere" and redirect to login.
+export const SESSION_SUPERSEDED = 'SESSION_SUPERSEDED';
+export const SESSION_SUPERSEDED_MESSAGE = 'Akun ini baru saja login di perangkat lain. Sesi ini telah berakhir.';
 
 // A browser loading <img src="/api/uploads/<uuid>.png"> cannot attach an
 // Authorization header, and passing the token as a query param would leak it
@@ -94,9 +100,27 @@ export interface AuthRequest extends Request {
   // GET /auth/me to decide whether this session is close enough to expiry
   // to hand back a freshly-signed replacement token (see auth.ts).
   tokenExp?: number;
+  // Bug 1 — the token's sessionId claim; /auth/me preserves it on refresh so
+  // the same device keeps one session across sliding-refresh.
+  sessionId?: string;
 }
 
-export function authenticateToken(req: AuthRequest, res: Response, next: NextFunction) {
+// Bug 1 — a token is superseded when the user has an active session id and this
+// token doesn't carry it. `currentSessionId === null` (legacy / no login since
+// launch) is grace-accepted so a deploy never logs everyone out.
+export async function isSessionSuperseded(userId: string, sessionId?: string): Promise<boolean> {
+  try {
+    const user = await getPrisma().user.findUnique({ where: { id: userId }, select: { currentSessionId: true } });
+    return !!user?.currentSessionId && sessionId !== user.currentSessionId;
+  } catch (e) {
+    // Fail OPEN on a transient DB error: a DB blip must not log everyone out,
+    // and the socket handshake + /auth/me enforce the same rule anyway.
+    console.error('[auth] session check error:', e);
+    return false;
+  }
+}
+
+export async function authenticateToken(req: AuthRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
@@ -108,8 +132,12 @@ export function authenticateToken(req: AuthRequest, res: Response, next: NextFun
   if (!decoded) {
     return res.status(403).json({ error: 'Invalid or expired token' });
   }
+  if (await isSessionSuperseded(decoded.userId, decoded.sessionId)) {
+    return res.status(401).json({ error: SESSION_SUPERSEDED, message: SESSION_SUPERSEDED_MESSAGE });
+  }
   req.userId = decoded.userId;
   req.tokenExp = decoded.exp;
+  req.sessionId = decoded.sessionId;
   next();
 }
 
@@ -119,11 +147,12 @@ export function verifyToken(token: string): string | null {
   return verifyTokenClaims(token)?.userId ?? null;
 }
 
-function verifyTokenClaims(token: string): { userId: string; exp: number } | null {
+// Full claims — used by the socket handshake (needs sessionId, not just userId).
+export function verifyTokenClaims(token: string): { userId: string; exp: number; sessionId?: string } | null {
   try {
     const config = getConfig();
-    const decoded = jwt.verify(token, config.JWT_SECRET) as { userId: string; email: string; exp: number };
-    return { userId: decoded.userId, exp: decoded.exp };
+    const decoded = jwt.verify(token, config.JWT_SECRET) as { userId: string; email: string; exp: number; sessionId?: string };
+    return { userId: decoded.userId, exp: decoded.exp, sessionId: decoded.sessionId };
   } catch {
     return null;
   }

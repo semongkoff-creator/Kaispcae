@@ -5,6 +5,7 @@ import { getConfig } from '../config';
 import { signToken } from './auth';
 import { syntheticLarkEmail } from '../lib/larkEmail';
 import { buildStoredTokenFields } from '../lib/larkUserToken';
+import { disconnectUserSockets } from '../lib/sessionKick';
 
 const lark = Router();
 
@@ -155,9 +156,13 @@ lark.get('/auth/lark/callback', async (req: Request, res: Response) => {
       }
     }
 
-    // 4) OUR token, minted the one and only way (identical to manual login) so
-    // the socket handshake accepts it unchanged.
-    const token = signToken(user);
+    // 4) OUR token, minted the one and only way (identical to manual login).
+    // Bug 1 — start a fresh single-session (persist id + kick other devices),
+    // same as manual login, so the "one active device" rule applies to Lark too.
+    const sessionId = crypto.randomUUID();
+    await prisma.user.update({ where: { id: user.id }, data: { currentSessionId: sessionId } });
+    disconnectUserSockets(user.id);
+    const token = signToken(user, sessionId);
 
     // 5) Hand it back via a single-use code, not the raw JWT in the URL.
     sweep(oneTimeCodes, (v) => v.exp);

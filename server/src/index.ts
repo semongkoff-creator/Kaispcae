@@ -19,7 +19,8 @@ import { registerRecordingHandlers } from './socket/recordingHandler';
 import { getRedis } from './store/roomStore';
 import { loadConfig, getConfig } from './config';
 import { rateLimit } from './middleware/rateLimit';
-import { verifyToken } from './middleware/auth';
+import { verifyTokenClaims, isSessionSuperseded, SESSION_SUPERSEDED } from './middleware/auth';
+import { setSessionKickIo } from './lib/sessionKick';
 import authRoutes from './routes/auth';
 import roomRoutes, { setIo } from './routes/rooms';
 import roomMemberRoutes, { setMembersIo } from './routes/roomMembers';
@@ -92,16 +93,26 @@ const io = new Server(httpServer, {
 // account (including a room's owner) and take over admin/master-admin
 // privileges. Unauthenticated connections are still allowed through (guest
 // fallback), they just don't get a verified identity.
-io.use((socket, next) => {
+io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token;
   if (typeof token === 'string' && token) {
-    const userId = verifyToken(token);
-    if (userId) socket.data.userId = userId;
+    const claims = verifyTokenClaims(token);
+    if (claims) {
+      // Bug 1 — single active session: reject a socket whose session has been
+      // superseded by a newer login, so the old device is disconnected with a
+      // clear reason instead of silently receiving live room state.
+      if (await isSessionSuperseded(claims.userId, claims.sessionId)) {
+        return next(new Error(SESSION_SUPERSEDED));
+      }
+      socket.data.userId = claims.userId;
+      socket.data.sessionId = claims.sessionId;
+    }
   }
   next();
 });
 
 setIo(io);
+setSessionKickIo(io);
 setMembersIo(io);
 setChatIo(io);
 setAdminIo(io);

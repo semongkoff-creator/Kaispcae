@@ -1,27 +1,40 @@
 import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 import { getPrisma } from '../lib/prisma';
 import { getConfig } from '../config';
 import { authenticateToken, setUploadSessionCookie, clearUploadSessionCookie, AuthRequest } from '../middleware/auth';
 import { validate, registerSchema, loginSchema } from '../middleware/validate';
 import { rateLimit } from '../middleware/rateLimit';
 import { ensureCheckedInToday } from '../lib/larkAttendance';
+import { disconnectUserSockets } from '../lib/sessionKick';
 
 const auth = Router();
 
 
 // Exported so the Lark OAuth route (routes/lark.ts) issues the EXACT same
 // token shape as manual login — same claims, same secret, same expiry — so the
-// socket handshake middleware (verifyToken) treats a Lark session identically
-// with zero changes. There must be only one way to mint a MeetKai JWT.
-export function signToken(user: { id: string; email: string }): string {
+// socket handshake middleware treats a Lark session identically. There must be
+// only one way to mint a MeetKai JWT. Bug 1: the sessionId claim is what auth
+// (REST + socket) checks against User.currentSessionId for single-session.
+export function signToken(user: { id: string; email: string }, sessionId: string): string {
   const config = getConfig();
   return jwt.sign(
-    { userId: user.id, email: user.email },
+    { userId: user.id, email: user.email, sessionId },
     config.JWT_SECRET,
     { expiresIn: config.JWT_EXPIRES_IN as any },
   );
+}
+
+// Bug 1 — establish a brand-new active session for this user (on a successful
+// manual/Lark login): mint a fresh id, persist it as THE session, kick any
+// other live sockets, and return the id to embed in the JWT.
+async function startNewSession(userId: string): Promise<string> {
+  const sessionId = randomUUID();
+  await getPrisma().user.update({ where: { id: userId }, data: { currentSessionId: sessionId } });
+  disconnectUserSockets(userId); // supersede every previously-connected device
+  return sessionId;
 }
 
 // How close to expiry (in seconds) a token has to be before GET /auth/me
@@ -66,7 +79,8 @@ auth.post('/register', authRateLimit, validate(registerSchema), async (req, res:
       },
     });
 
-    const token = signToken(user);
+    const sessionId = await startNewSession(user.id);
+    const token = signToken(user, sessionId);
     setUploadSessionCookie(req, res, token);
 
     return res.status(201).json({
@@ -100,7 +114,8 @@ auth.post('/login', authRateLimit, validate(loginSchema), async (req, res: Respo
       return res.status(403).json({ error: 'Akun ini dinonaktifkan. Hubungi admin.' });
     }
 
-    const token = signToken(user);
+    const sessionId = await startNewSession(user.id);
+    const token = signToken(user, sessionId);
     setUploadSessionCookie(req, res, token);
 
     return res.json({
@@ -139,6 +154,8 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
         // larkOpenId (a short field, unlike profilePhoto) so we can trigger the
         // Lark attendance check-in below for Lark accounts only.
         larkOpenId: true,
+        // Bug 1 — needed to preserve / adopt the single-session id below.
+        currentSessionId: true,
       },
     });
     if (!user) {
@@ -161,16 +178,33 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'Akun ini dinonaktifkan. Hubungi admin.' });
     }
 
+    // Bug 1 — single-session handling. authenticateToken already rejected a
+    // token whose sessionId is superseded, so reaching here means either (a)
+    // this token IS the active session, or (b) legacy: the user has no
+    // currentSessionId yet (grace-accepted). For (b), ADOPT this device as the
+    // active session now (migrate) so single-session takes effect without ever
+    // logging existing 30-day auto-logins out. Either way we keep the SAME
+    // sessionId across the sliding refresh below, so the same device stays one
+    // continuous session.
+    let sessionId = req.sessionId;
+    if (!user.currentSessionId) {
+      sessionId = sessionId ?? randomUUID();
+      await prisma.user.update({ where: { id: user.id }, data: { currentSessionId: sessionId } });
+    }
+
     // Sliding-expiry refresh: an actively-returning user with a token still
     // valid but within REFRESH_THRESHOLD_SECONDS of expiring gets a new
     // full-length one here, so someone who opens the app regularly is never
     // logged out — only a user who stays away longer than the full
-    // JWT_EXPIRES_IN window ever hits a real expiry.
+    // JWT_EXPIRES_IN window ever hits a real expiry. Bug 1: a legacy token just
+    // adopted above is re-minted unconditionally so it starts carrying the
+    // sessionId claim.
     let refreshedToken: string | undefined;
-    if (typeof req.tokenExp === 'number') {
-      const secondsRemaining = req.tokenExp - Math.floor(Date.now() / 1000);
-      if (secondsRemaining < REFRESH_THRESHOLD_SECONDS) {
-        refreshedToken = signToken(user);
+    const adopted = !req.sessionId && !!sessionId; // legacy token migrated this hit
+    if (sessionId && (adopted || typeof req.tokenExp === 'number')) {
+      const secondsRemaining = typeof req.tokenExp === 'number' ? req.tokenExp - Math.floor(Date.now() / 1000) : 0;
+      if (adopted || secondsRemaining < REFRESH_THRESHOLD_SECONDS) {
+        refreshedToken = signToken(user, sessionId);
       }
     }
 

@@ -88,6 +88,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    // Bug 1 — single active session: this token was superseded by a newer
+    // login elsewhere. Drop it and broadcast so useAuth can redirect to login
+    // with a clear message, from wherever the failing request originated.
+    if ((body as any).error === 'SESSION_SUPERSEDED') {
+      localStorage.removeItem('vm_token');
+      window.dispatchEvent(new CustomEvent('vm-session-superseded', { detail: (body as any).message }));
+    }
     throw new ApiError((body as any).error || `Request failed: ${res.status}`, res.status);
   }
 

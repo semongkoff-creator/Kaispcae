@@ -64,6 +64,21 @@ export function useAuth() {
     })();
   }, []);
 
+  // Bug 1 — a login on another device superseded this session. api.ts (REST)
+  // and useSocket (socket) both dispatch 'vm-session-superseded'; here we end
+  // the session and surface the reason on the login screen (reusing the
+  // existing sessionExpiredMessage banner) instead of a stuck/confusing UI.
+  useEffect(() => {
+    const onSuperseded = (e: Event) => {
+      localStorage.removeItem('vm_token');
+      setUser(null);
+      const msg = (e as CustomEvent).detail as string | undefined;
+      setSessionExpiredMessage(msg || 'Akun ini baru saja login di perangkat lain. Sesi ini telah berakhir.');
+    };
+    window.addEventListener('vm-session-superseded', onSuperseded);
+    return () => window.removeEventListener('vm-session-superseded', onSuperseded);
+  }, []);
+
   const login = useCallback(async (email: string, password: string) => {
     setError(null);
     setSessionExpiredMessage(null);

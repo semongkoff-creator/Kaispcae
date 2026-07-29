@@ -63,6 +63,13 @@ model User {
   // "give up and use the bot".
   larkTokenExpiresAt    DateTime?
   larkRefreshExpiresAt  DateTime?
+  // Bug 1 — single active session. Random id minted at each successful login
+  // (manual OR Lark) and embedded in the JWT as a `sessionId` claim. Auth
+  // (REST + socket) rejects a token whose sessionId != this, so logging in on a
+  // new device supersedes the old one. Null = legacy/no login since the feature
+  // launched (grace-accepted, then adopted on the next /auth/me). Sliding
+  // refresh keeps the SAME id so the same device stays logged in.
+  currentSessionId      String?
   // Global, account-level role — separate from the per-room Role hierarchy
   // (owner/admin/staff/member, see shared/permissions.ts and RoomMember.role
   // below). 'admin' accounts can create rooms (the only account-wide gate;

@@ -592,6 +592,17 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socket.on('connect_error', (err) => {
       console.error('[socket] connect_error:', err.message, '| full error:', err);
       setConnected(false);
+      // Bug 1 — the handshake was rejected because a newer login superseded
+      // this session. Route it through the same global handler as the REST path.
+      if (err?.message === 'SESSION_SUPERSEDED') {
+        window.dispatchEvent(new CustomEvent('vm-session-superseded', { detail: 'Akun ini baru saja login di perangkat lain. Sesi ini telah berakhir.' }));
+      }
+    });
+
+    // Bug 1 — server-initiated kick when a NEW login supersedes this live
+    // socket (emitted just before the forced disconnect, see lib/sessionKick).
+    socket.on('SESSION_SUPERSEDED', (d: { message?: string }) => {
+      window.dispatchEvent(new CustomEvent('vm-session-superseded', { detail: d?.message }));
     });
 
     // All listeners attached — safe to connect now
