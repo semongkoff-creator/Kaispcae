@@ -39,6 +39,7 @@ import { PendingRequestToast } from './components/ui/PendingRequestToast';
 import { Sidebar } from './components/ui/Sidebar';
 import { MicButton } from './components/hud/MicButton';
 import { HandButton } from './components/hud/HandButton';
+import { playHandRaiseSound } from './services/soundEffects';
 import { CameraButton } from './components/hud/CameraButton';
 import { DeviceMenu } from './components/hud/DeviceMenu';
 import { ScreenShareButton } from './components/hud/ScreenShareButton';
@@ -361,6 +362,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     const next = !useGameStore.getState().localPlayer.handRaised;
     useGameStore.getState().setLocalPlayer({ handRaised: next || undefined });
     emitPlayerHand(next);
+    // Bug 14 — soft local confirmation for the raiser (the server chime goes
+    // only to OTHERS in the same zone/nearby, so without this the person who
+    // pressed it would hear nothing and think it did nothing). Raise only.
+    if (next) playHandRaiseSound();
   }, [emitPlayerHand]);
 
   // Cleanup
