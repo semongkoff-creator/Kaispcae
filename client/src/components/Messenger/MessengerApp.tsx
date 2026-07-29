@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { XLg, PlusLg, Paperclip, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill } from 'react-bootstrap-icons';
+import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill } from 'react-bootstrap-icons';
 import { ChannelMessage, Channel, DirectConversationSummary } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { GroupMembers } from './GroupMembers';
 import { useProfiles } from '@/hooks/useProfiles';
 import { AttachmentLightbox, type LightboxTarget } from '@/components/ui/AttachmentLightbox';
+import { AttachmentMenuButton } from '@/components/ui/AttachmentMenuButton';
 
 // §Messenger — the full-screen chat surface, in the same "module panel over
 // the room" shape Docs/Base/Calendar/Attendance already use (see App.tsx).
@@ -166,7 +167,6 @@ export function MessengerApp({
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [showMembers, setShowMembers] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // 1s tick so typing indicators lapse on their own — there's no explicit
@@ -563,23 +563,12 @@ export function MessengerApp({
                 >
                   <EmojiSmile size={15} />
                 </button>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
+                <AttachmentMenuButton
+                  onFile={(f) => void handleFile(f)}
                   disabled={uploading}
                   title="Lampirkan file"
-                  className="w-7 h-7 rounded hover:bg-gray-100 dark:hover:bg-gray-700 inline-flex items-center justify-center text-gray-400 shrink-0 disabled:opacity-50"
-                >
-                  <Paperclip size={15} />
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  hidden
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) void handleFile(f);
-                    e.target.value = '';
-                  }}
+                  iconSize={15}
+                  buttonClassName="w-7 h-7 rounded hover:bg-gray-100 dark:hover:bg-gray-700 inline-flex items-center justify-center text-gray-400 shrink-0 disabled:opacity-50"
                 />
                 <textarea
                   rows={1}

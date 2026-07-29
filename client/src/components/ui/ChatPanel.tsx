@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
-import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, Paperclip, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill } from 'react-bootstrap-icons';
+import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { ChatAvatar, avatarColor } from './ChatAvatar';
 import { AttachmentLightbox, type LightboxTarget } from './AttachmentLightbox';
+import { AttachmentMenuButton } from './AttachmentMenuButton';
 import { useProfiles } from '@/hooks/useProfiles';
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024; // matches server/src/routes/uploads.ts's multer limit
@@ -127,7 +128,6 @@ export function ChatPanel({
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [attachError, setAttachError] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
   // Scroll container (not an anchor element): we drive scrollTop directly,
   // which is steadier under React re-renders than scrollIntoView (that can
   // yank the whole page and fights the smooth-scroll mid-render).
@@ -220,11 +220,8 @@ export function ChatPanel({
   // just sent as its own chat message (empty text + attachment) instead of
   // a map object. Only available for persisted Channel/DM tabs: zone/bubble
   // chat (ChatMessage) has no attachment field at all.
-  const handleFileSelect = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      e.target.value = ''; // let picking the same file twice in a row re-fire onChange
-      if (!file) return;
+  const handleAttachFile = useCallback(
+    async (file: File) => {
       setAttachError('');
       if (file.size > MAX_ATTACHMENT_BYTES) {
         setAttachError('File is too large — max 10MB.');
@@ -617,22 +614,12 @@ export function ChatPanel({
                 messages — zone/bubble chat (ChatMessage) has no attachment
                 field, so the button is hidden rather than silently failing. */}
             {!viewingZone && !proximityMode && (
-              <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploadingFile}
-                  title="Attach a file"
-                  className="text-purple-600 dark:text-purple-400 disabled:opacity-40 cursor-pointer"
-                >
-                  <Paperclip size={16} />
-                </button>
-              </>
+              <AttachmentMenuButton
+                onFile={handleAttachFile}
+                disabled={uploadingFile}
+                title="Lampirkan"
+                buttonClassName="text-purple-600 dark:text-purple-400 disabled:opacity-40 cursor-pointer"
+              />
             )}
             <input
               value={text}
