@@ -10,7 +10,6 @@ import { AvatarSetup } from './components/avatar/AvatarSetup';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
 import { MeetingControl } from './components/ui/MeetingControl';
-import { PresenceControl } from './components/ui/PresenceControl';
 import { DailyTaskPanel } from './components/ui/DailyTaskPanel';
 import { LeavePanel } from './components/ui/LeavePanel';
 import { AdminConsole } from './admin/AdminConsole';
@@ -865,8 +864,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         <MeetingControl roomId={roomSlug} zoneId={meetingZone.id} />
       )}
 
-      {/* A11 — presence status control (near the local user) */}
-      {!editorMode && <PresenceControl />}
 
       {miniModeWindow && (
         <MiniMode

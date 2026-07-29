@@ -2,6 +2,7 @@ import { ReactNode, useState } from 'react';
 import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { StatusButton } from '../avatar/StatusButton';
+import { PresenceControl } from './PresenceControl';
 import { RecordingControl } from './RecordingControl';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { Theme } from '@/hooks/useTheme';
@@ -348,6 +349,9 @@ export function Sidebar({
 
       <AvatarEditorButton onClick={onEditAvatar} variant="sidebar" />
       <StatusButton status={status} onSave={onSaveStatus} variant="sidebar" />
+      {/* Bug 15 — presence (Available/Lunch/Away) picker lives here now; the
+          effective status still shows on the avatar badge. */}
+      <PresenceControl />
 
       <SidebarIcon
         title="Back to room list"
