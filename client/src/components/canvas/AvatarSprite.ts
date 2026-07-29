@@ -89,9 +89,19 @@ export function drawAvatar(
     nextBadgeY -= 14;
   }
 
-  // ─── Custom status (e.g. "WFH", "In a meeting") above everything else ──
-  if (avatar.status) {
-    drawCustomStatus(ctx, cx, nextBadgeY, avatar.status);
+  // ─── Single unified status pill ─────────────────────────────────────
+  // One indicator, not two: show the user's custom free-text status if they
+  // set one; otherwise fall back to the effective work-mode/presence status
+  // (In Meeting/Focus/Lunch/Away). This replaces the old separate bare emoji
+  // badge that GameCanvas used to draw below — everything's in this one pill now.
+  const presenceLabel =
+    avatar.workMode === 'in_meeting' ? '🎥 In Meeting' :
+    avatar.workMode === 'focus' ? '🎧 Focus' :
+    avatar.workMode === 'lunch' ? '🍽️ Lunch' :
+    avatar.workMode === 'away' ? '🌙 Away' : '';
+  const statusText = avatar.status || presenceLabel;
+  if (statusText) {
+    drawCustomStatus(ctx, cx, nextBadgeY, statusText);
     nextBadgeY -= 15;
   }
 

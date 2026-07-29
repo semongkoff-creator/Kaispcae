@@ -903,20 +903,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         ctx.fillText('👑', sx, sy - AVATAR_RADIUS - 24);
       }
 
-      // A11 — presence badge above the head (below any crown). Only non-default
-      // statuses show one; 'available' is left undefined upstream = no badge.
-      if (avatar.workMode) {
-        const emoji =
-          avatar.workMode === 'in_meeting' ? '🎥' :
-          avatar.workMode === 'focus' ? '🎧' :
-          avatar.workMode === 'lunch' ? '🍽️' :
-          avatar.workMode === 'away' ? '🌙' : '';
-        if (emoji) {
-          ctx.font = '13px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(emoji, sx, sy - AVATAR_RADIUS - 8);
-        }
-      }
+      // (Presence status now shows as ONE unified pill above the avatar — the
+      // custom-status pill in AvatarSprite.ts, which falls back to the work-mode
+      // label when no custom text is set. The separate bare emoji badge that
+      // used to sit here was removed to avoid two overlapping status cues.)
 
       const sp = speakingPlayersRef.current;
       const isSpeaking = isLocal ? localSpeakingRef.current : sp.has(avatar.id);
