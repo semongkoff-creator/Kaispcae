@@ -670,6 +670,15 @@ model Room {
   // upload (see lib/larkDrive.ensureRoomFolder), which also covers retry after
   // a failed create and rooms that predate this feature.
   larkFolderToken   String?
+  // ZEP Room Editor (Potong 1) — new layered map format, stored BESIDE the
+  // legacy tilemapData/furniture/zones columns (which stay as archive/fallback).
+  // Nullable: a room without layerData still renders via the legacy path,
+  // unchanged. Populated lazily (once, idempotently) the first time the room is
+  // opened in the new editor — see lib/convertLegacyRoom.ts. Once set, it is the
+  // room's source of truth and the game reads it via the layerDataToLegacy
+  // adaptor. mapFormatVersion tracks the schema of layerData.
+  layerData         Json?
+  mapFormatVersion  Int?
 }
 
 model RoomMember {

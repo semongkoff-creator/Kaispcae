@@ -1,4 +1,4 @@
-import { TeleportLocation, OwnerBookmark, Recording, RoomTemplateId, Channel, ChannelMessage, DirectConversationSummary, WorkspaceRole } from '@virtualmeet/shared';
+import { TeleportLocation, OwnerBookmark, Recording, RoomTemplateId, Channel, ChannelMessage, DirectConversationSummary, WorkspaceRole, LayerData } from '@virtualmeet/shared';
 
 const API_BASE = '/api';
 
@@ -354,6 +354,10 @@ export const api = {
       name: string;
       slug: string;
       theme: string;
+      // Potong 1 — the new layered format (source of truth once converted).
+      // Null only if the room couldn't be proven-lossless converted, in which
+      // case the editor falls back to the legacy fields below.
+      layerData: LayerData | null;
       tilemapData: unknown[][] | null;
       furniture: unknown[];
       zones: unknown[];

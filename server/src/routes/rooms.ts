@@ -4,6 +4,7 @@ import { getPrisma } from '../lib/prisma';
 import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
+import { convertLegacyRoom } from '../lib/convertLegacyRoom';
 import { isRoomLocked } from '../socket/roomHandler';
 import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
 import { ensureGroupConversation } from '../lib/conversations';
@@ -119,11 +120,18 @@ rooms.get('/rooms/:slug/editor-data', authenticateToken, async (req: AuthRequest
     if (!hasFeatureAccess(role, 'room:update')) {
       return res.status(403).json({ error: 'Admin role required to edit this room' });
     }
+    // Potong 1 — lazy migration: convert this room to the layered format on
+    // first open (idempotent; a round-trip-verified no-op if already converted
+    // or if conversion can't be proven lossless). layerData may be null if the
+    // guard refused, in which case the editor falls back to the legacy fields.
+    const conv = await convertLegacyRoom(room.id);
+    const layerData = conv.layerData ?? (room.layerData as unknown) ?? null;
     return res.json({
       id: room.id,
       name: room.name,
       slug: room.slug,
       theme: room.theme ?? 'default',
+      layerData,
       tilemapData: room.tilemapData ?? null,
       furniture: room.furniture ?? [],
       zones: room.zones ?? [],

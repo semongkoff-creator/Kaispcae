@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerWorkMode, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -360,7 +360,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
     // Fetch the saved room once — reused for spawn point lookup below and
     // for the tiles/furniture/zones sent in room:state once player data is ready.
-    let dbRoom: { tilemapData: unknown; furniture: unknown; zones: unknown; theme?: string | null; template?: string | null } | null = null;
+    let dbRoom: { tilemapData: unknown; furniture: unknown; zones: unknown; theme?: string | null; template?: string | null; layerData?: unknown } | null = null;
     try {
       dbRoom = await getPrisma().room.findUnique({ where: { slug: room } });
     } catch (e) { console.warn('[room] failed to load room from db:', e); }
@@ -426,16 +426,28 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       let savedTiles: RoomTile[][] | undefined;
       let savedFurniture: any[] | undefined;
       let savedZones: any[] | undefined;
-      if (dbRoom?.tilemapData && Array.isArray(dbRoom.tilemapData) && (dbRoom.tilemapData as any[]).length > 0) {
-        savedTiles = (dbRoom.tilemapData as any[]).map((row: any[], y: number) =>
-          row.map((t: any, x: number) => ({ ...t, x, y, type: t.type || 'floor' }))
-        );
-      }
-      if (dbRoom?.furniture && Array.isArray(dbRoom.furniture)) {
-        savedFurniture = dbRoom.furniture as any[];
-      }
-      if (dbRoom?.zones && Array.isArray(dbRoom.zones)) {
-        savedZones = dbRoom.zones as any[];
+      // ZEP Room Editor (Potong 1) — once a room is converted, layerData is its
+      // source of truth. The adaptor reconstructs the EXACT same runtime shape
+      // (tiles/furniture/zones), so everything downstream — render, collision,
+      // zones, sit, teleport — is untouched. Rooms without layerData take the
+      // unchanged legacy path below.
+      if (dbRoom?.layerData) {
+        const derived = layerDataToLegacy(dbRoom.layerData as unknown as LayerData);
+        savedTiles = derived.tiles;
+        savedFurniture = derived.furniture;
+        savedZones = derived.zones;
+      } else {
+        if (dbRoom?.tilemapData && Array.isArray(dbRoom.tilemapData) && (dbRoom.tilemapData as any[]).length > 0) {
+          savedTiles = (dbRoom.tilemapData as any[]).map((row: any[], y: number) =>
+            row.map((t: any, x: number) => ({ ...t, x, y, type: t.type || 'floor' }))
+          );
+        }
+        if (dbRoom?.furniture && Array.isArray(dbRoom.furniture)) {
+          savedFurniture = dbRoom.furniture as any[];
+        }
+        if (dbRoom?.zones && Array.isArray(dbRoom.zones)) {
+          savedZones = dbRoom.zones as any[];
+        }
       }
 
       const playersWithMeta = state.players.map((p) => {
