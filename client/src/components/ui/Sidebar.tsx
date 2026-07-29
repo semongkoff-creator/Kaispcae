@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck } from 'react-bootstrap-icons';
+import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { StatusButton } from '../avatar/StatusButton';
 import { RecordingControl } from './RecordingControl';
@@ -60,6 +60,10 @@ interface SidebarProps {
   // Daily Task widget (Lark Base-backed) — opens as a full-screen in-room panel.
   dailyTaskActive: boolean;
   onToggleDailyTask: () => void;
+
+  // A9 — Cuti (leave request via Lark Approval) full-screen in-room panel.
+  leaveActive: boolean;
+  onToggleLeave: () => void;
 
   // Workspace admin console. `isWorkspaceAdmin` is cosmetic only — every
   // /api/admin/* route re-checks the role from the DB (see
@@ -156,6 +160,8 @@ export function Sidebar({
   onToggleSimplifiedView,
   dailyTaskActive,
   onToggleDailyTask,
+  leaveActive,
+  onToggleLeave,
   calendarViewActive,
   onToggleCalendarView,
   attendanceViewActive,
@@ -260,6 +266,7 @@ export function Sidebar({
               />
             )}
             <MenuRow icon={<CalendarEvent size={15} />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
+            <MenuRow icon={<Airplane size={15} />} label={leaveActive ? 'Tutup Cuti' : 'Cuti'} active={leaveActive} onClick={closeAnd(onToggleLeave)} />
             {/* A2 — Absensi kini otomatis lewat Lark Attendance (check-in dipicu
                 di /auth/me). Menu MeetKai lama disembunyikan (flag false) supaya
                 tak ada pencatatan manual baru; komponen AttendanceApp & data

@@ -52,6 +52,28 @@ export interface CreateTaskBody {
   projectRecordId?: string;
 }
 
+// A9 — leave (Cuti) request via Lark Approval.
+export interface LeaveRecord {
+  instanceCode: string;
+  status: string; // PENDING | APPROVED | REJECTED | CANCELED | ...
+  name: string | null;
+  start: string | null;
+  end: string | null;
+  unit: string | null;
+  reason: string | null;
+  submittedAt: number | null;
+}
+
+export interface CreateLeaveBody {
+  name: string;
+  start: string; // ISO UTC
+  end: string; // ISO UTC
+  unit: string; // DAY | HALF_DAY | HOUR
+  interval: number;
+  reason: string;
+  timezoneOffset: number;
+}
+
 export interface MomRecord {
   id: string;
   roomId: string;
@@ -268,6 +290,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ chatId, chatName }),
     }),
+
+  // A9 — Cuti (leave) via Lark Approval.
+  getLeaveOptions: () => request<{ leaveTypes: string[] }>('/leave/options'),
+  getMyLeaves: () => request<{ leaves: LeaveRecord[] }>('/leave/mine'),
+  createLeave: (body: CreateLeaveBody) => request<{ instanceCode: string }>('/leave', { method: 'POST', body: JSON.stringify(body) }),
 
   // A7 — Daily Task (reads/writes the Lark Base table directly).
   getTodayTasks: () => request<{ tasks: DailyTask[] }>('/tasks/today'),

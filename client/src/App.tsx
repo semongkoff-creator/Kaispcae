@@ -12,6 +12,7 @@ import { MeetingView } from './components/ui/MeetingView';
 import { MeetingControl } from './components/ui/MeetingControl';
 import { PresenceControl } from './components/ui/PresenceControl';
 import { DailyTaskPanel } from './components/ui/DailyTaskPanel';
+import { LeavePanel } from './components/ui/LeavePanel';
 import { AdminConsole } from './admin/AdminConsole';
 import { CalendarApp } from './components/Calendar/CalendarApp';
 import { AttendanceApp } from './components/Attendance/AttendanceApp';
@@ -499,6 +500,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
   const [dailyTaskActive, setDailyTaskActive] = useState(false);
+  const [leaveActive, setLeaveActive] = useState(false);
   const [adminViewActive, setAdminViewActive] = useState(false);
   const [calendarViewActive, setCalendarViewActive] = useState(false);
   const [attendanceViewActive, setAttendanceViewActive] = useState(false);
@@ -531,7 +533,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // True while any full-screen suite module covers the room. Room affordances
   // (hotkeys, the floating Chat button) must stand down while it's open —
   // they belong to the office, not to a spreadsheet or a document.
-  const moduleOpen = dailyTaskActive || calendarViewActive || adminViewActive || attendanceViewActive || messengerViewActive;
+  const moduleOpen = dailyTaskActive || leaveActive || calendarViewActive || adminViewActive || attendanceViewActive || messengerViewActive;
 
   // E key for editor, Tab for admin panel
   useEffect(() => {
@@ -1042,6 +1044,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           zoneLock.setLock(currentZone.id, !zoneLock.lockOf(currentZone.id), currentZone.name);
         }}
         dailyTaskActive={dailyTaskActive}
+        leaveActive={leaveActive}
+        onToggleLeave={() => setLeaveActive((v) => !v)}
         calendarViewActive={calendarViewActive}
         onToggleCalendarView={() => setCalendarViewActive((v) => !v)}
         attendanceViewActive={attendanceViewActive}
@@ -1130,6 +1134,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           layer as Meeting View; the room's Sidebar rail (z-50) stays reachable
           and the launcher offsets itself by pl-14 to clear it. */}
       {dailyTaskActive && <DailyTaskPanel onClose={() => setDailyTaskActive(false)} />}
+      {leaveActive && <LeavePanel onClose={() => setLeaveActive(false)} />}
       {adminViewActive && <AdminConsole currentUser={currentUser} onClose={() => setAdminViewActive(false)} />}
       {attendanceViewActive && <AttendanceApp onClose={() => setAttendanceViewActive(false)} />}
       {larkAttendanceActive && <LarkAttendancePanel onClose={() => setLarkAttendanceActive(false)} />}

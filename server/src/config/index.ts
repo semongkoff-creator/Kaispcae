@@ -53,6 +53,11 @@ const envSchema = z
     // folder_token here. Unset → Drive storage is disabled and uploads fall back
     // to local disk (current behaviour). Requires the drive:drive scope.
     LARK_DRIVE_ROOT_FOLDER_TOKEN: z.string().optional(),
+    // A9 — Lark Approval "Cuti" (leave) approval_code. Non-secret (an approval
+    // definition id); defaulted so the feature works out-of-box, overridable
+    // per deploy. Empty → the leave feature is disabled (guarded, never sends an
+    // empty code to Lark). The approval uses Lark's native leaveGroupV2 widget.
+    LARK_APPROVAL_CODE_CUTI: z.string().default('F6C868F2-7427-450E-8DB4-A9D28A4AC181'),
     // Bagian 4 upgrade — key to encrypt each user's stored Lark OAuth tokens at
     // rest (AES-256-GCM, see lib/tokenCrypto.ts). Any string; it's hashed to a
     // 32-byte key. Unset → user tokens are NOT stored and chat always relays via
