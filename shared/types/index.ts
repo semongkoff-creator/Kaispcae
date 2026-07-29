@@ -76,14 +76,20 @@ export interface Avatar {
   // so it lives on the player record and is included in room:state for late
   // joiners; cleared on the client when the player leaves.
   handRaised?: boolean;
-  // A3 — work mode. 'focus' = inside a Zone of type 'focus' → Do-Not-Disturb:
-  // no proximity auto-connect (see useProximity), a focus badge on the avatar.
-  // Broadcast + kept on the player record like status/handRaised, so it's in
-  // room:state for late joiners. Absent/undefined is treated as 'public'.
+  // A3/A11 — presence status. Kept the name `workMode` (the field predates A11)
+  // but widened to the full presence set. 'focus' still means Do-Not-Disturb:
+  // no proximity auto-connect (useProximity), and Summon/Slap/Follow are
+  // rejected against it. Broadcast + kept on the player record like
+  // status/handRaised, so it's in room:state for late joiners.
+  // Absent/undefined is treated as 'available' (no badge).
   workMode?: WorkMode;
 }
 
-export type WorkMode = 'public' | 'focus';
+// A11 — presence status. 'in_meeting' + 'focus' are AUTO from the zone the
+// avatar is in (meeting/focus zone); 'available' | 'lunch' | 'away' are the
+// manual choices. Only 'focus' triggers DND behaviour (see useProximity /
+// Summon / Slap / Follow) — the rest are display-only labels.
+export type WorkMode = 'available' | 'in_meeting' | 'focus' | 'lunch' | 'away';
 
 // A single tile on the room grid. `type` stays authoritative for collision
 // (BLOCKED_TILES) so old saved rooms keep working unchanged. `floorPaletteId`

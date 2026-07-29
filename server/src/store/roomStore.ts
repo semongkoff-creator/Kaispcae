@@ -1,4 +1,4 @@
-import { Avatar, RoomState, AvatarConfig, RoomTile } from '@virtualmeet/shared';
+import { Avatar, RoomState, AvatarConfig, RoomTile, WorkMode } from '@virtualmeet/shared';
 import { Redis } from 'ioredis';
 
 // In-memory fallback storage — always works, zero dependencies
@@ -193,12 +193,13 @@ export async function updatePlayerStatus(
 export async function updatePlayerWorkMode(
   roomId: string,
   playerId: string,
-  workMode: 'public' | 'focus',
+  workMode: WorkMode,
 ): Promise<void> {
   const players = await getPlayers(roomId);
   const player = players.find((p) => p.id === playerId);
   if (player) {
-    player.workMode = workMode === 'focus' ? 'focus' : undefined;
+    // 'available' is the default → store undefined (no badge); keep any other.
+    player.workMode = workMode === 'available' ? undefined : workMode;
     await setPlayers(roomId, players);
   }
 }

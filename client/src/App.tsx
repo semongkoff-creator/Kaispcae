@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { GearFill, Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill } from 'react-bootstrap-icons';
-import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS } from '@virtualmeet/shared';
+import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import { GameCanvas } from './components/canvas/GameCanvas';
 import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
@@ -10,6 +10,7 @@ import { AvatarSetup } from './components/avatar/AvatarSetup';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
 import { MeetingControl } from './components/ui/MeetingControl';
+import { PresenceControl } from './components/ui/PresenceControl';
 import { DailyTaskPanel } from './components/ui/DailyTaskPanel';
 import { AdminConsole } from './admin/AdminConsole';
 import { CalendarApp } from './components/Calendar/CalendarApp';
@@ -209,29 +210,31 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     updateProximity(nearby);
   }, [nearby, updateProximity]);
 
-  // A3 — Focus/Public detection. workMode = 'focus' while the local avatar sits
-  // inside a Zone of type 'focus'. On change, update the store (drives the DND
-  // gating in useProximity + the local badge) and tell the server so other
-  // clients see it. findZoneAt over focus-typed zones only.
-  const workMode = useGameStore((s) => s.workMode);
-  const setWorkMode = useGameStore((s) => s.setWorkMode);
-  useEffect(() => {
-    const focusZone = findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'focus'));
-    const mode = focusZone ? 'focus' : 'public';
-    if (mode !== workMode) {
-      setWorkMode(mode);
-      emitWorkMode(mode, focusZone?.id);
-    }
-  }, [localPlayer.x, localPlayer.y, zones, workMode, setWorkMode, emitWorkMode]);
-
   // A5 — Meeting zone detection. The MeetingControl (Start/Join/End + history)
   // renders only while the local avatar is inside a Zone of type 'meeting'.
-  // Purely derived — no server round-trip needed; the meeting itself is
-  // started explicitly via the button.
+  // Purely derived; also feeds the A11 presence status below.
   const meetingZone = useMemo(
     () => findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'meeting')),
     [localPlayer.x, localPlayer.y, zones],
   );
+
+  // A11 — Presence status (consolidates A3 Focus + A5 meeting detection). Zone
+  // wins over the manual choice: inside a meeting zone → 'in_meeting'; inside a
+  // focus zone → 'focus'; otherwise the user's last manual pick
+  // (available/lunch/away). On change, update the store (drives DND gating +
+  // badge) and broadcast so other clients see it. Leaving a zone re-applies the
+  // remembered manual status automatically.
+  const workMode = useGameStore((s) => s.workMode);
+  const setWorkMode = useGameStore((s) => s.setWorkMode);
+  const manualStatus = useGameStore((s) => s.manualStatus);
+  useEffect(() => {
+    const focusZone = findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'focus'));
+    const effective: WorkMode = meetingZone ? 'in_meeting' : focusZone ? 'focus' : manualStatus;
+    if (effective !== workMode) {
+      setWorkMode(effective);
+      emitWorkMode(effective, meetingZone?.id ?? focusZone?.id);
+    }
+  }, [localPlayer.x, localPlayer.y, zones, meetingZone, manualStatus, workMode, setWorkMode, emitWorkMode]);
 
   // Mini Mode has to be opened directly inside a real click handler (see
   // openMiniModeWindow's own doc comment for why it can't live in a mount
@@ -860,6 +863,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {meetingZone && !editorMode && (
         <MeetingControl roomId={roomSlug} zoneId={meetingZone.id} />
       )}
+
+      {/* A11 — presence status control (near the local user) */}
+      {!editorMode && <PresenceControl />}
 
       {miniModeWindow && (
         <MiniMode

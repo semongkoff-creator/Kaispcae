@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, StarFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill } from 'react-bootstrap-icons';
-import { roleAtLeast, Role } from '@virtualmeet/shared';
+import { roleAtLeast, Role, WorkMode } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
+import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
 
 // One labelled row inside a participant's action menu. Icon plus wording,
 // because five bare icons crowded into a row said nothing until you hovered
@@ -191,8 +192,9 @@ function ParticipantRow({
   // a raised hand (see Avatar.handRaised) and whether they're currently
   // speaking (from speakingPlayers / localSpeaking in gameStore).
   handRaised?: boolean;
-  // A3 — 'focus' shows a Do-Not-Disturb headphones badge by the name.
-  workMode?: 'public' | 'focus';
+  // A11 — presence status badge by the name (focus=🎧 DND, in_meeting=🎥,
+  // lunch=🍽️, away=🌙). Undefined/available shows none.
+  workMode?: WorkMode;
   speaking?: boolean;
   // Live room role (see gameStore roleOf) — renders a 👑 owner / 🛡️ admin
   // badge by the name; 'staff'/'member' show none.
@@ -294,6 +296,11 @@ function ParticipantRow({
             the avatar (raise-hand ✋, AFK 💤) and video tile (speaking 🔊). */}
         {handRaised && <span title="Hand raised" className="text-[11px] leading-none animate-bounce">✋</span>}
         {workMode === 'focus' && <Headphones title="Fokus (jangan diganggu)" size={12} className="text-purple-500 shrink-0" />}
+        {workMode && workMode !== 'focus' && (
+          <span title={PRESENCE_LABEL[workMode]} className="text-[11px] leading-none shrink-0">
+            {workMode === 'available' ? '' : PRESENCE_EMOJI[workMode]}
+          </span>
+        )}
         {speaking && <span title="Speaking" className="text-[11px] leading-none animate-pulse">🔊</span>}
         {status?.startsWith('💤') && <span title="Away" className="text-[11px] leading-none opacity-70">💤</span>}
         {inCall && <CameraVideoFill className="text-purple-600" size={11} title="In call" />}

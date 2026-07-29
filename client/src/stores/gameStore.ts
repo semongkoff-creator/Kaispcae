@@ -151,10 +151,17 @@ export interface GameState {
   setCameraOn: (on: boolean) => void;
   localSpeaking: boolean;
   setLocalSpeaking: (speaking: boolean) => void;
-  // A3 — local work mode (Focus/Public). Kept here for quick access AND mirrored
-  // onto localPlayer.workMode so the local avatar renders its own focus badge.
+  // A3/A11 — local presence status (effective). Kept here for quick access AND
+  // mirrored onto localPlayer.workMode so the local avatar renders its own
+  // status badge.
   workMode: WorkMode;
   setWorkMode: (mode: WorkMode) => void;
+  // A11 — the user's last MANUAL choice (Available/Lunch/Away). Distinct from
+  // the effective `workMode`: while inside a meeting/focus zone the effective
+  // status is auto ('in_meeting'/'focus'), but this manual value is remembered
+  // and re-applies the moment they leave the zone.
+  manualStatus: 'available' | 'lunch' | 'away';
+  setManualStatus: (status: 'available' | 'lunch' | 'away') => void;
   // A5 — active recorded meetings, keyed by zoneId. Set/cleared by the
   // MEETING_STARTED/ENDED socket broadcasts so everyone in the room sees the
   // "join via Lark" banner.
@@ -514,11 +521,14 @@ export const useGameStore = create<GameState>((set, get) => ({
   setCameraOn: (on) => set({ cameraOn: on }),
   localSpeaking: false,
   setLocalSpeaking: (speaking) => set({ localSpeaking: speaking }),
-  workMode: 'public',
+  workMode: 'available',
   setWorkMode: (mode) => set((s) => ({
     workMode: mode,
-    localPlayer: { ...s.localPlayer, workMode: mode === 'focus' ? 'focus' : undefined },
+    // 'available' shows no badge (plain online); everything else does.
+    localPlayer: { ...s.localPlayer, workMode: mode === 'available' ? undefined : mode },
   })),
+  manualStatus: 'available',
+  setManualStatus: (status) => set({ manualStatus: status }),
   activeMeetings: {},
   setMeetingStarted: (zoneId, info) => set((s) => ({ activeMeetings: { ...s.activeMeetings, [zoneId]: info } })),
   setMeetingEnded: (zoneId) => set((s) => {

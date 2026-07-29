@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
@@ -191,10 +191,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
     // A3 — another player's Focus/Public change; update their record so their
     // badge + proximity DND (useProximity) reflect it here.
-    socket.on(SocketEvents.WORK_MODE_CHANGED, (data: { id: string; workMode: 'public' | 'focus' }) => {
+    socket.on(SocketEvents.WORK_MODE_CHANGED, (data: { id: string; workMode: WorkMode }) => {
       const state = useGameStore.getState();
       if (data.id === state.localPlayerId) return;
-      upsertPlayer({ id: data.id, workMode: data.workMode === 'focus' ? 'focus' : undefined } as Avatar);
+      // 'available' → no badge (undefined); any other status keeps its value.
+      upsertPlayer({ id: data.id, workMode: data.workMode === 'available' ? undefined : data.workMode } as Avatar);
     });
 
     // A5 — an official meeting started/ended in a zone; drives the join banner.
@@ -638,7 +639,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.PLAYER_STATUS_UPDATE, status);
   }, []);
 
-  const emitWorkMode = useCallback((mode: 'public' | 'focus', zoneId?: string) => {
+  const emitWorkMode = useCallback((mode: WorkMode, zoneId?: string) => {
     socketRef.current?.emit(SocketEvents.WORK_MODE_CHANGE, { mode, zoneId });
   }, []);
 
