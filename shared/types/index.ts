@@ -360,14 +360,6 @@ export enum SocketEvents {
   WHITEBOARD_CLEAR = 'whiteboard:clear',
   WHITEBOARD_CLEARED = 'whiteboard:cleared',
 
-  // §6 (RTC upgrade) — spotlighting a player makes them FULL_VISIBLE to
-  // everyone in the room regardless of distance (spec's own
-  // computeVisibility bypass rule). Kept as its own tiny event pair rather
-  // than folded into ADMIN_CHANGED — it's a room-wide broadcast state, not
-  // a per-user role change, so it doesn't fit that payload's shape.
-  SPOTLIGHT_TOGGLE = 'rtc:spotlight_toggle',
-  SPOTLIGHT_CHANGED = 'rtc:spotlight_changed',
-
   // §7 — Screen Recording, adapted to client-side capture (see the
   // Recording Prisma model's doc comment for why). RECORDING_STARTED/ENDED
   // are sent per-socket, not broadcast, since who gets to see a REC

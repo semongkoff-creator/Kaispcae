@@ -4,13 +4,13 @@ import { Recording } from '@virtualmeet/shared';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { api, ApiError } from '@/services/api';
 
-interface SpotlightedPlayer {
+interface RecordingTarget {
   userId: string;
   name: string;
 }
 
 interface RecordingControlProps {
-  recordingTargets: SpotlightedPlayer[];
+  recordingTargets: RecordingTarget[];
   activeRecording: ActiveRecordingInfo | null;
   isRecordingMine: boolean;
   uploading: boolean;
@@ -22,11 +22,11 @@ interface RecordingControlProps {
   variant?: 'standalone' | 'sidebar';
 }
 
-// §7 — Screen Recording controls: start (with a target picker when more
-// than one person is spotlighted), the active-recording badge, a stop
-// button visible only to whoever started it (spec's own explicit rule —
-// not even another admin can stop someone else's recording), and a small
-// list of past recordings available to download.
+// §7 — Screen Recording controls: start (with a target picker if more than
+// one target is ever offered; today it's just "Myself"), the active-recording
+// badge, a stop button visible only to whoever started it (spec's own explicit
+// rule — not even another admin can stop someone else's recording), and a
+// small list of past recordings available to download.
 export function RecordingControl({ recordingTargets, activeRecording, isRecordingMine, uploading, roomSlug, onStart, onStop, variant = 'standalone' }: RecordingControlProps) {
   const [showPicker, setShowPicker] = useState(false);
   const [showList, setShowList] = useState(false);

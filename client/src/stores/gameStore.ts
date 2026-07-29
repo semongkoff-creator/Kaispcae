@@ -277,11 +277,6 @@ export interface GameState {
   appendWhiteboardStroke: (mediaId: string, stroke: WhiteboardStroke) => void;
   clearWhiteboardStrokes: (mediaId: string) => void;
 
-  // §6 (RTC upgrade) — account userIds (not socket ids) currently
-  // spotlighted in this room; see rtcHandler.ts's doc comment on why userId.
-  spotlightedUserIds: string[];
-  setSpotlightedUserIds: (ids: string[]) => void;
-
   // §7 — Screen Recording. null means either nothing is being recorded, or
   // it is but I'm not allowed to know (plain member, not the target).
   activeRecording: ActiveRecordingInfo | null;
@@ -731,9 +726,6 @@ export const useGameStore = create<GameState>((set, get) => ({
     set((state) => ({
       mediaObjects: state.mediaObjects.map((m) => (m.id === mediaId ? { ...m, payload: { ...m.payload, strokes: [] } } : m)),
     })),
-
-  spotlightedUserIds: [],
-  setSpotlightedUserIds: (ids) => set({ spotlightedUserIds: ids }),
 
   activeRecording: null,
   setActiveRecording: (info) => set({ activeRecording: info }),

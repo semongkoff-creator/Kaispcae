@@ -62,10 +62,6 @@ export const FEATURE_MIN_ROLE = {
   // Both the single-user and whole-room forms share this one gate — the
   // spec checks role identically for both (§5.1 and §5.2/5.3's pseudocode).
   'summon': 'staff',
-  // §6 (spec's §8/RTC upgrade) — spotlighting bypasses everyone's distance
-  // visibility limit for that one target, effectively a broadcast-to-room
-  // action, so it's gated the same as the other staff+ room-wide controls.
-  'rtc:spotlight': 'staff',
   // §7 — the spec labels this "Enterprise-only", and recording someone's
   // video is more sensitive than the other staff+ room controls above, so
   // this is gated one tier higher at admin+ rather than reusing 'staff'.
@@ -77,9 +73,9 @@ export const FEATURE_MIN_ROLE = {
   'channel:create': 'admin',
   'channel:delete': 'admin',
   // Temporary removal from the room (not a ban — they can rejoin any time).
-  // Gated at admin+ specifically, one tier above the staff+ Summon/Spotlight
-  // controls, since forcibly ending someone's session is more disruptive
-  // than moving or spotlighting them.
+  // Gated at admin+ specifically, one tier above the staff+ Summon control,
+  // since forcibly ending someone's session is more disruptive than moving
+  // them.
   'room:kick': 'admin',
   // Zoom-style "Lock Meeting" — an admin/owner toggles the room closed so
   // no new non-admin can enter (people already inside stay). In-memory only

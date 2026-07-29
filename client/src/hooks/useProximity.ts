@@ -40,12 +40,10 @@ export function useProximity(
   localPlayer: Pick<Avatar, 'x' | 'y' | 'id' | 'isSitting' | 'seatFurnitureId' | 'workMode'>,
   remotePlayers: Record<string, Avatar>,
   zones: Zone[] = [],
-  spotlightedUserIds: string[] = [],
   furniture: Furniture[] = [],
 ): ProximityPlayer[] {
   return useMemo(() => {
     const localZone = findZoneAt(localPlayer, zones);
-    const spotlightSet = new Set(spotlightedUserIds);
     // A3 — Do-Not-Disturb: a focus-mode avatar neither triggers nor receives
     // auto-connect. If WE are in focus, nobody connects to us at all.
     const localFocus = localPlayer.workMode === 'focus';
@@ -64,21 +62,9 @@ export function useProximity(
     return Object.values(remotePlayers).map((p) => {
       const distanceTiles = calcDistanceTiles(localPlayer, p);
 
-      // §6 — spotlight bypasses distance/zone entirely (spec's own
-      // computeVisibility rule: "if target.isSpotlighted: return FULL_VISIBLE").
-      // viaZone: true here too — it's what useWebRTC.ts reads to decide
-      // "skip the distance falloff, use full volume" (viaZone ? 1 :
-      // calcGain(distanceTiles)); without it a spotlighted-but-far player
-      // would render at full opacity but stay silent, since distanceTiles
-      // still reflects their real (possibly huge) distance.
-      if (p.userId && spotlightSet.has(p.userId)) {
-        return { id: p.id, distanceTiles, visibility: 'full_visible' as VisibilityStatus, viaZone: true };
-      }
-
       // A3 Focus/DND — checked before table/zone/distance so it overrides every
       // auto-connect path (including a shared 'focus' zone: focus is meant to be
-      // solo). If either side is in focus mode, they don't auto-connect. Spotlight
-      // above still wins as a deliberate admin override.
+      // solo). If either side is in focus mode, they don't auto-connect.
       if (localFocus || p.workMode === 'focus') {
         return { id: p.id, distanceTiles, visibility: 'not_visible' as VisibilityStatus };
       }
@@ -108,5 +94,5 @@ export function useProximity(
         distanceTiles <= PROXIMITY_THRESHOLD ? 'full_visible' : distanceTiles <= TRANSLUCENT_THRESHOLD ? 'translucent' : 'not_visible';
       return { id: p.id, distanceTiles, visibility };
     });
-  }, [localPlayer.x, localPlayer.y, localPlayer.isSitting, localPlayer.seatFurnitureId, localPlayer.workMode, remotePlayers, zones, spotlightedUserIds, furniture]);
+  }, [localPlayer.x, localPlayer.y, localPlayer.isSitting, localPlayer.seatFurnitureId, localPlayer.workMode, remotePlayers, zones, furniture]);
 }

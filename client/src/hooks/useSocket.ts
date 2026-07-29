@@ -321,14 +321,6 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       clearWhiteboardStrokes(data.mediaId);
     });
 
-    // §6 (RTC upgrade) — full replacement list each time (small set, simpler
-    // than diffing add/remove), including the one sent right after JOIN_ROOM
-    // for spotlights that were already active before I connected.
-    socket.on(SocketEvents.SPOTLIGHT_CHANGED, (data: { spotlightedUserIds: string[] }) => {
-      console.log('[socket] spotlight changed —', data.spotlightedUserIds.length, 'spotlighted');
-      useGameStore.getState().setSpotlightedUserIds(data.spotlightedUserIds);
-    });
-
     // §7 — only ever arrives for clients allowed to see it at all (see
     // recordingHandler.ts's per-socket emit) — App.tsx's own effect watches
     // this same state to decide whether IT was the request that started
@@ -840,10 +832,6 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.WHITEBOARD_CLEAR, { mediaId });
   }, []);
 
-  const emitSpotlightToggle = useCallback((targetUserId: string) => {
-    socketRef.current?.emit(SocketEvents.SPOTLIGHT_TOGGLE, { targetUserId });
-  }, []);
-
   const emitRecordingStart = useCallback((targetUserId: string, title: string) => {
     socketRef.current?.emit(SocketEvents.RECORDING_START, { targetUserId, title });
   }, []);
@@ -856,5 +844,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage };
 }

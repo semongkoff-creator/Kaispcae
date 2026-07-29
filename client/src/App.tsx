@@ -103,7 +103,7 @@ const AFK_STATUS = '💤 Away';
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitSpotlightToggle, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage } = useSocket(authDisplayName, roomSlug, authUserId);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -177,7 +177,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const roomLocked = useGameStore((s) => s.roomLocked);
   const localUserId = useGameStore((s) => s.localUserId);
   const sittingItem = sittingFurnitureId ? furniture.find((f) => f.id === sittingFurnitureId) : undefined;
-  const spotlightedUserIds = useGameStore((s) => s.spotlightedUserIds);
   const sitNotice = useGameStore((s) => s.sitNotice);
   // A "couldn't sit" notice (chair taken) self-dismisses — one-off action
   // failure, same treatment as miniModeError.
@@ -202,7 +201,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     { x: localPlayer.x, y: localPlayer.y, id: localPlayerId, isSitting: localPlayer.isSitting, seatFurnitureId: localPlayer.seatFurnitureId, workMode: localPlayer.workMode },
     playerRecords,
     zones,
-    spotlightedUserIds,
     furniture,
   );
 
@@ -284,23 +282,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     emitRecordingStop,
     emitRecordingFinalize,
   });
-  // §7 — "Myself" is always an available recording target, spotlight or
-  // not: recording myself captures my whole screen/tab via getDisplayMedia
-  // (see useScreenRecording.ts), not a peer connection, so there's no
-  // reachability requirement the way there is for recording someone else.
-  // This also means solo/testing use (no one around to spotlight) still
-  // has something to record instead of the button just staying disabled.
-  // Spotlighted others are listed after, excluding myself if I happen to
-  // be spotlighted too (to avoid a duplicate "Myself" entry).
+  // §7 — recording captures my own screen/tab via getDisplayMedia (see
+  // useScreenRecording.ts), so "Myself" is the only target. (Recording other
+  // people was only ever reachable by first spotlighting them; that feature
+  // was removed in Bug 7, so the picker is now just this single entry.)
   const recordingTargets = [
     { userId: localUserId, name: `${localPlayer.name} (You)` },
-    ...spotlightedUserIds
-      .filter((uid) => uid !== localUserId)
-      .map((uid) => {
-        const p = Object.values(playerRecords).find((rec) => rec.userId === uid);
-        return p ? { userId: uid, name: p.name } : null;
-      })
-      .filter((p): p is { userId: string; name: string } => !!p),
   ];
 
   // Track which zone (if any) the local player is standing in — drives the
@@ -895,7 +882,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             </p>
           </div>
           <div className="absolute top-14 left-16 flex items-start gap-2 pointer-events-none">
-            <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} emitSpotlightToggle={emitSpotlightToggle} onStartDm={channelChat.startDm} emitKick={emitKick} />
+            <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} emitKick={emitKick} />
             <ActivityFeed />
           </div>
         </>

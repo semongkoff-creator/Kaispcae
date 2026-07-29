@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, StarFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill } from 'react-bootstrap-icons';
+import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill } from 'react-bootstrap-icons';
 import { roleAtLeast, Role, WorkMode } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
@@ -31,7 +31,6 @@ interface ParticipantPanelProps {
   emitSummonUser: (nickname: string) => void;
   // A10 — "colek"/slap a participant by name (lightweight attention nudge).
   emitSlap: (nickname: string) => void;
-  emitSpotlightToggle: (targetUserId: string) => void;
   // Opens (or creates) a persisted 1:1 DM with this account — see
   // useChannelChat.ts's startDm. Undefined for rows with no account id
   // (unreachable today — login is mandatory before joining a room).
@@ -43,14 +42,13 @@ interface ParticipantPanelProps {
 
 const MAX_VIDEO_THUMBS = 3;
 
-export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, emitSpotlightToggle, onStartDm, emitKick }: ParticipantPanelProps) {
+export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, emitKick }: ParticipantPanelProps) {
   const [open, setOpen] = useState(false);
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const followInfo = useGameStore((s) => s.followInfo);
   const followerUserIds = useGameStore((s) => s.followerUserIds);
-  const spotlightedUserIds = useGameStore((s) => s.spotlightedUserIds);
   const localSpeaking = useGameStore((s) => s.localSpeaking);
   const speakingPlayers = useGameStore((s) => s.speakingPlayers);
   const localRole = useGameStore((s) => s.localRole);
@@ -68,7 +66,6 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
     if (staffPlayerIds.has(userId)) return 'staff';
     return 'member';
   };
-  const canModerate = roleAtLeast(localRole, 'staff');
   const canKick = roleAtLeast(localRole, 'admin');
 
   const remotePlayers = Object.values(playerRecords);
@@ -151,8 +148,6 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
                 onUnfollow={emitFollowUnfollow}
                 onSummon={() => emitSummonUser(p.name)}
                 onSlap={() => emitSlap(p.name)}
-                isSpotlighted={!!p.userId && spotlightedUserIds.includes(p.userId)}
-                onSpotlight={canModerate && p.userId ? () => emitSpotlightToggle(p.userId!) : undefined}
                 onMessage={p.userId && onStartDm ? () => onStartDm(p.userId!) : undefined}
                 onKick={canKick && p.userId && emitKick ? () => emitKick(p.userId!) : undefined}
               />
@@ -180,8 +175,6 @@ function ParticipantRow({
   onUnfollow,
   onSummon,
   onSlap,
-  isSpotlighted,
-  onSpotlight,
   onMessage,
   onKick,
 }: {
@@ -214,11 +207,6 @@ function ParticipantRow({
   // A10 — "colek"/slap: a lightweight attention nudge (open to everyone, like
   // summon). Undefined for the local row.
   onSlap?: () => void;
-  // §6 — spotlight bypasses this player's distance-visibility limit for
-  // everyone in the room; undefined when I'm below staff or they have no
-  // account id (guest fallback — unreachable today, login is mandatory).
-  isSpotlighted?: boolean;
-  onSpotlight?: () => void;
   // Opens a persisted 1:1 DM with this participant (see useChannelChat.ts).
   onMessage?: () => void;
   // Temporary removal from the room — undefined (not just a no-op) when I'm
@@ -276,7 +264,7 @@ function ParticipantRow({
   // leaving it open over a row whose state just changed reads as if the
   // click didn't register.
   const pick = (fn?: () => void) => () => { closeMenu(); fn?.(); };
-  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onMessage || onSpotlight || onKick);
+  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onMessage || onKick);
 
   return (
     <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50 dark:bg-gray-700/50">
@@ -359,13 +347,6 @@ function ParticipantRow({
                 )}
                 {onMessage && (
                   <MenuItem icon={<ChatDotsFill size={11} />} label="Kirim pesan" onClick={pick(onMessage)} />
-                )}
-                {onSpotlight && (
-                  <MenuItem
-                    icon={<StarFill size={12} className={isSpotlighted ? 'text-amber-500' : ''} />}
-                    label={isSpotlighted ? 'Hapus sorotan' : 'Sorot'}
-                    onClick={pick(onSpotlight)}
-                  />
                 )}
                 {onKick && (
                   <>
