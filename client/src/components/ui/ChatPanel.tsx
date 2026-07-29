@@ -710,6 +710,11 @@ function MessageBubble({
         </div>
         {actions && <div className="flex gap-2 mt-0.5 px-1">{actions}</div>}
       </div>
+      {/* Bug 9 — own messages now also carry their avatar, mirrored to the RIGHT
+          of the (right-aligned) bubble. Same ChatAvatar as everyone else, so it
+          shows the current profile photo (or initials). No name label inside an
+          own bubble, and its purple/right layout is unchanged. */}
+      {isOwn && <ChatAvatar name={name} color={color} photoUrl={photoUrl} />}
     </div>
   );
 }
