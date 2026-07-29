@@ -3,6 +3,10 @@ generator client {
   // omitApi: lets lib/prisma.ts globally `omit` the Lark token columns so they
   // never appear in a query result unless explicitly re-selected (Bagian 4).
   previewFeatures = ["omitApi"]
+  // "native" covers local dev; "linux-musl-openssl-3.0.x" is the engine the
+  // production Docker image (node:20-alpine) needs. Committed here so the VPS
+  // no longer needs a local uncommitted edit that blocked every `git pull`.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
