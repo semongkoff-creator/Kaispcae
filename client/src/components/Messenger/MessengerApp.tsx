@@ -617,14 +617,17 @@ export function MessengerApp({
 // same reasoning about what a browser can display inline (see uploads.ts).
 function MessageAttachment({ url, name, own, onOpen }: { url: string; name?: string; own: boolean; onOpen: (t: LightboxTarget) => void }) {
   const open = () => onOpen({ url, fileName: name });
-  if (IMAGE_EXT_RE.test(url)) {
+  // Bug 17 — detect by the original FILENAME first; Drive attachments have an
+  // extension-less proxy URL (/api/files/<token>).
+  const probe = name || url;
+  if (IMAGE_EXT_RE.test(probe)) {
     return (
       <button type="button" onClick={open} className="block mb-1.5 cursor-pointer">
         <img src={url} alt={name ?? 'lampiran'} className="max-w-full max-h-72 rounded-lg" />
       </button>
     );
   }
-  if (VIDEO_EXT_RE.test(url)) {
+  if (VIDEO_EXT_RE.test(probe)) {
     return (
       <button type="button" onClick={open} className="relative block mb-1.5 cursor-pointer">
         <video src={url} muted preload="metadata" className="max-w-full max-h-72 rounded-lg bg-black pointer-events-none" />

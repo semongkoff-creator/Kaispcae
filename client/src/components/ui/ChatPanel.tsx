@@ -720,7 +720,11 @@ function MessageBubble({
 // only; playback/preview happens in the lightbox.
 function ChatAttachment({ url, fileName, isOwn, onOpen }: { url: string; fileName?: string; isOwn: boolean; onOpen: (t: LightboxTarget) => void }) {
   const open = () => onOpen({ url, fileName });
-  if (isImageAttachment(url)) {
+  // Bug 17 — detect by the original FILENAME first. Drive-backed attachments are
+  // served from an extension-less proxy URL (/api/files/<token>), so testing the
+  // URL alone mis-detected every Drive image/video as a plain file.
+  const probe = fileName || url;
+  if (isImageAttachment(probe)) {
     return (
       <button type="button" onClick={open} className="block mt-1 cursor-pointer">
         {/* Fixed box + object-cover (not max-w/max-h, which only caps large
@@ -732,7 +736,7 @@ function ChatAttachment({ url, fileName, isOwn, onOpen }: { url: string; fileNam
       </button>
     );
   }
-  if (isVideoAttachment(url)) {
+  if (isVideoAttachment(probe)) {
     // Muted, controls-less first frame as a thumbnail with a play badge; the
     // actual player (with controls + autoplay) lives in the lightbox.
     return (
