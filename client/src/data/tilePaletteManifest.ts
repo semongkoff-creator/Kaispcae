@@ -15,6 +15,8 @@
 // that render on the "overhead" layer (after avatars) so players can walk
 // visually behind tall pieces.
 
+import { LIMEZU_OFFICE_ENTRIES } from './limezu-office-manifest';
+
 export type PaletteCategory = 'floor' | 'furniture' | 'decor' | 'electronics';
 
 export interface PaletteEntry {
@@ -47,6 +49,7 @@ function single(file: number): string {
 }
 
 export const TILE_PALETTE: PaletteEntry[] = [
+  ...LIMEZU_OFFICE_ENTRIES,
   // ── Floor textures (1x1) ──────────────────────────────────────────
   // Only entries whose bounding box was verified (by rendering the crop
   // against a magenta background) to fill the FULL 32x32 cell with no
