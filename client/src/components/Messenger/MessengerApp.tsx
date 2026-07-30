@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill } from 'react-bootstrap-icons';
+import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill, ExclamationTriangleFill } from 'react-bootstrap-icons';
 import { ChannelMessage, Channel, DirectConversationSummary } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -615,17 +615,69 @@ export function MessengerApp({
 // Bug 10 — clicking an attachment opens the shared in-app lightbox (onOpen)
 // instead of a new tab. Mirrors ChatPanel's ChatAttachment — same allowlist,
 // same reasoning about what a browser can display inline (see uploads.ts).
+
+// Bug 3 — mirrors ChatPanel.tsx's ImageThumb: a bare <img> showed nothing
+// while loading and fell through to the browser's own broken-image icon on
+// failure, reading as "you have to open/download this to see what it is".
+// Sized a bit larger than ChatPanel's version (this surface has more room)
+// but otherwise identical — fixed box + object-cover so the loading/failed
+// states have somewhere stable to center in, same tradeoff ChatPanel's
+// version documents. Corner download button is a sibling of the
+// open-lightbox button, never nested — nesting <a>/<button> inside a
+// <button> is invalid HTML with inconsistent cross-browser behavior.
+function ImageThumb({ url, name, onOpen }: { url: string; name?: string; onOpen: () => void }) {
+  const [state, setState] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  return (
+    <div className="relative mb-1.5 w-48 h-36 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700">
+      {state !== 'failed' && (
+        <button type="button" onClick={onOpen} title={name} className="block w-full h-full cursor-pointer">
+          <img
+            src={url}
+            alt={name ?? 'lampiran'}
+            onLoad={() => setState('loaded')}
+            onError={() => setState('failed')}
+            className={`w-full h-full object-cover transition-opacity ${state === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
+          />
+        </button>
+      )}
+      {state === 'loading' && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <span className="w-6 h-6 rounded-full border-2 border-gray-300 dark:border-gray-500 border-t-transparent animate-spin" />
+        </div>
+      )}
+      {state === 'failed' && (
+        <button
+          type="button"
+          onClick={onOpen}
+          title="Gagal dimuat — klik untuk detail/unduh"
+          className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-2 text-center cursor-pointer"
+        >
+          <ExclamationTriangleFill size={20} className="text-amber-500" />
+          <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">Gagal dimuat</span>
+        </button>
+      )}
+      {state === 'loaded' && (
+        <a
+          href={url}
+          download={name}
+          onClick={(e) => e.stopPropagation()}
+          title="Unduh"
+          className="absolute bottom-1.5 right-1.5 w-6 h-6 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center cursor-pointer"
+        >
+          <Download size={12} />
+        </a>
+      )}
+    </div>
+  );
+}
+
 function MessageAttachment({ url, name, own, onOpen }: { url: string; name?: string; own: boolean; onOpen: (t: LightboxTarget) => void }) {
   const open = () => onOpen({ url, fileName: name });
   // Bug 17 — detect by the original FILENAME first; Drive attachments have an
   // extension-less proxy URL (/api/files/<token>).
   const probe = name || url;
   if (IMAGE_EXT_RE.test(probe)) {
-    return (
-      <button type="button" onClick={open} className="block mb-1.5 cursor-pointer">
-        <img src={url} alt={name ?? 'lampiran'} className="max-w-full max-h-72 rounded-lg" />
-      </button>
-    );
+    return <ImageThumb url={url} name={name} onOpen={open} />;
   }
   if (VIDEO_EXT_RE.test(probe)) {
     return (

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
-import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill } from 'react-bootstrap-icons';
+import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -710,6 +710,61 @@ function MessageBubble({
   );
 }
 
+// Bug 3 — the thumbnail used to be a bare <img>: nothing shown while it
+// loaded (just the bg-purple-100 box) and a failed load fell through to the
+// browser's own broken-image icon — reading as "you have to open/download
+// this to find out what it is" even though the whole point of an inline
+// thumbnail is not needing to. Tracks its own load state so a spinner shows
+// while pending and a clear "gagal dimuat" replaces a silently-broken image.
+// The corner download button is a SIBLING of the open-lightbox button, not a
+// nested one — a <button>/<a> inside a <button> is invalid HTML and behaves
+// inconsistently across browsers.
+function ImageThumb({ url, fileName, onOpen }: { url: string; fileName?: string; onOpen: () => void }) {
+  const [state, setState] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  return (
+    <div className="relative mt-1 w-32 h-24 rounded overflow-hidden bg-purple-100 dark:bg-gray-700">
+      {state !== 'failed' && (
+        <button type="button" onClick={onOpen} title={fileName} className="block w-full h-full cursor-pointer">
+          <img
+            src={url}
+            alt={fileName || 'Attachment'}
+            onLoad={() => setState('loaded')}
+            onError={() => setState('failed')}
+            className={`w-full h-full object-cover transition-opacity ${state === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
+          />
+        </button>
+      )}
+      {state === 'loading' && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <span className="w-5 h-5 rounded-full border-2 border-purple-300 border-t-transparent animate-spin" />
+        </div>
+      )}
+      {state === 'failed' && (
+        <button
+          type="button"
+          onClick={onOpen}
+          title="Gagal dimuat — klik untuk detail/unduh"
+          className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-1 text-center cursor-pointer"
+        >
+          <ExclamationTriangleFill size={16} className="text-amber-500" />
+          <span className="text-[9px] text-gray-500 dark:text-gray-400 leading-tight">Gagal dimuat</span>
+        </button>
+      )}
+      {state === 'loaded' && (
+        <a
+          href={url}
+          download={fileName}
+          onClick={(e) => e.stopPropagation()}
+          title="Unduh"
+          className="absolute bottom-1 right-1 w-5 h-5 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center cursor-pointer"
+        >
+          <Download size={10} />
+        </a>
+      )}
+    </div>
+  );
+}
+
 // Image attachments render as a clickable inline preview (opens the
 // full-size image in a new tab — no in-app viewer for chat attachments,
 // unlike Add Media's MediaViewerModal, since this is a much smaller/simpler
@@ -725,16 +780,7 @@ function ChatAttachment({ url, fileName, isOwn, onOpen }: { url: string; fileNam
   // URL alone mis-detected every Drive image/video as a plain file.
   const probe = fileName || url;
   if (isImageAttachment(probe)) {
-    return (
-      <button type="button" onClick={open} className="block mt-1 cursor-pointer">
-        {/* Fixed box + object-cover (not max-w/max-h, which only caps large
-            images and leaves a naturally-small one — a tiny icon/sticker —
-            rendering at its native size, easy to miss entirely) so every
-            thumbnail reads as a deliberate preview regardless of the
-            original image's actual resolution. */}
-        <img src={url} alt={fileName || 'Attachment'} className="w-32 h-24 rounded object-cover bg-purple-100" />
-      </button>
-    );
+    return <ImageThumb url={url} fileName={fileName} onOpen={open} />;
   }
   if (isVideoAttachment(probe)) {
     // Muted, controls-less first frame as a thumbnail with a play badge; the
