@@ -383,6 +383,24 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
         state.bumpReplyCount(`channel:${msg.channelId}`, msg.parentId);
       } else {
         state.appendTargetMessage(`channel:${msg.channelId}`, msg);
+        // Bug 13 — regression from the chat-system migration: the speech
+        // bubble over the sender's avatar was a side effect of the OLD
+        // room-wide CHAT_BROADCAST handler, and when everyday chat moved to
+        // persisted channels this handler never picked it up — so bubbles
+        // kept working for zone chat / "Say nearby" but vanished for the
+        // chat people actually use. ChannelMessage.senderId is a USER id
+        // while bubbles key on the in-room socket id, so map it through
+        // playerRecords (localPlayerId for our own echo). Top-level messages
+        // with text only: thread replies live in their thread, and an
+        // attachment-only send has nothing to say in a bubble. DMs
+        // deliberately get NO bubble — floating private-message text over
+        // someone's head would broadcast it to the whole room.
+        if (msg.text) {
+          const pid = msg.senderId === state.localUserId
+            ? state.localPlayerId
+            : Object.values(state.playerRecords).find((p) => p.userId === msg.senderId)?.id;
+          if (pid) state.setSpeechBubble(pid, { playerId: pid, text: msg.text, expireAt: Date.now() + 4000 });
+        }
       }
       if (msg.senderId !== state.localUserId) {
         // A3 — Focus/DND mutes the popup but STILL marks unread (message kept).
