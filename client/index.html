@@ -2,7 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Bug 12 — maximum-scale/user-scalable pin the visual viewport to the
+         layout viewport. The whole UI is a game canvas + HUD anchored to a
+         w-screen/h-screen overflow-hidden root: pinch-zoom / double-tap zoom
+         (and iOS's auto-zoom-on-input-focus) magnify the VISUAL viewport and
+         let it pan away from the layout viewport, sliding the HUD (mic/
+         camera, sidebar) out of view entirely — the "HUD disappears when
+         zooming" report. An app-like canvas surface is the accepted case for
+         disabling pinch zoom; in-page content has its own sizing controls. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>VirtualMeet</title>
   </head>
   <body class="m-0 p-0 overflow-hidden bg-gray-900">
