@@ -113,6 +113,13 @@ const NUDGE_SPARK_COUNT = 8;
 // diagonals) and still get the prompt, while nearest-wins selection keeps two
 // nearby pieces from being confused for one another.
 const INTERACT_TILE_RADIUS = 2;
+// Chairs are the exception: SPACE means BOTH "sit" and "jump", and sit wins
+// whenever a seat is in range — at radius 2 an office map full of desks left
+// almost nowhere Space still jumped ("kalo diem gabisa loncat"). Radius 1
+// (own tile + the 8 around it, facing still only a tiebreaker) keeps Bug 3's
+// no-exact-facing forgiveness without the sit swallowing the jump key from
+// two tiles away. Media keeps the wider radius — X isn't overloaded.
+const SIT_TILE_RADIUS = 1;
 
 // Hand gesture shown on the NUDGER's own body (not the target) — a fist
 // bump reads as the closest match to "senggol" itself, and deliberately
@@ -601,7 +608,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
             const d = Math.max(Math.abs(fx - baseTileX), Math.abs(f.y - baseTileY));
             if (d < nearDist) { nearDist = d; nearFx = fx; }
           }
-          if (nearDist > INTERACT_TILE_RADIUS) continue;
+          if (nearDist > SIT_TILE_RADIUS) continue;
           const faced = f.y === facingTileY && nearFx === facingTileX ? 0 : 0.5;
           const score = nearDist + faced;
           if (score < bestScore) { bestScore = score; best = { furniture: f, tileX: nearFx, tileY: f.y }; }
