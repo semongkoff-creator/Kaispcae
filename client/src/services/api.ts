@@ -126,13 +126,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 // §6 — Add Media (Image/File upload). Separate from request() because it
 // must NOT set Content-Type: application/json — the browser needs to set
 // its own multipart/form-data boundary for a FormData body.
-async function uploadFile(path: string, file: File): Promise<{ url: string; fileName: string }> {
+async function uploadFile(path: string, file: File, roomSlugOverride?: string): Promise<{ url: string; fileName: string }> {
   const token = localStorage.getItem('vm_token');
   const form = new FormData();
   form.append('file', file);
   // A8 — tell the server which room this upload belongs to, so it lands in that
-  // room's Lark Drive folder. The current room is whatever we last entered.
-  const roomSlug = localStorage.getItem('vm_last_room_slug');
+  // room's Lark Drive folder. Prefer an explicit slug (the Room Editor edits a
+  // room that may differ from the last one entered); else the last room.
+  const roomSlug = roomSlugOverride || localStorage.getItem('vm_last_room_slug');
   if (roomSlug) form.append('roomSlug', roomSlug);
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
@@ -446,7 +447,15 @@ export const api = {
   // §6 — Add Media (Image/File). Returns the url to hand to emitMediaAdd's
   // payload — the actual MapMediaObject row is created over the socket
   // (see mediaHandler.ts), not here; this endpoint only handles the binary.
-  uploadMedia: (file: File) => uploadFile('/uploads', file),
+  uploadMedia: (file: File, roomSlug?: string) => uploadFile('/uploads', file, roomSlug),
+
+  // Potong 6 — media effects authored from the Room Editor (admin-gated REST,
+  // reuses the MapMediaObject system + broadcast).
+  getRoomMedia: (slug: string) => request<{ mediaObjects: unknown[] }>(`/rooms/${slug}/editor/media`),
+  addRoomMedia: (slug: string, body: { type: string; x: number; y: number; payload: unknown }) =>
+    request<unknown>(`/rooms/${slug}/editor/media`, { method: 'POST', body: JSON.stringify(body) }),
+  deleteRoomMedia: (slug: string, id: string) =>
+    request<{ ok: true }>(`/rooms/${slug}/editor/media/${id}`, { method: 'DELETE' }),
 
   // §7 — Screen Recording.
   uploadRecording: (blob: Blob) => uploadRecordingBlob(blob),

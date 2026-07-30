@@ -28,6 +28,15 @@ const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateAr
   { id: 'portal', label: 'Portal', color: 'rgba(124,58,237,0.95)', hint: 'Stamp klik tile portal → pilih tujuan room lain, atau klik titik tujuan di room ini. Pemain tekan F untuk pindah.' },
 ];
 
+interface MediaObj { id: string; type: string; x: number; y: number; payload: { url?: string; videoId?: string; websiteUrl?: string; audioUrl?: string; areaW?: number; areaH?: number; name?: string } }
+function parseYouTubeId(raw: string): string | null {
+  const m = raw.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([\w-]{11})/) || raw.match(/^([\w-]{11})$/);
+  return m ? m[1] : null;
+}
+function pickFile(accept: string): Promise<File | null> {
+  return new Promise((res) => { const i = document.createElement('input'); i.type = 'file'; i.accept = accept; i.onchange = () => res(i.files?.[0] ?? null); i.click(); });
+}
+
 type SavePayload = ReturnType<ReturnType<typeof useEditorStore.getState>['takePending']>;
 function hasChanges(p: SavePayload): boolean {
   return !!(p.floorChanges?.length || p.wallChanges?.length || p.objects || p.topObjects || p.tileEffects || p.areas || p.width != null);
@@ -116,6 +125,14 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const [resizeH, setResizeH] = useState(0);
   const [portalHint, setPortalHint] = useState(false); // awaiting internal-portal destination click
   const portalOriginRef = useRef<{ x: number; y: number } | null>(null);
+  // Potong 6 — media effects (reuse MapMediaObject via REST). Not part of
+  // layerData; fetched separately and drawn as editor markers.
+  const [mediaMode, setMediaMode] = useState<'image' | 'youtube' | 'website' | 'bgm' | null>(null);
+  const mediaModeRef = useRef(mediaMode); useEffect(() => { mediaModeRef.current = mediaMode; }, [mediaMode]);
+  const [media, setMedia] = useState<MediaObj[]>([]);
+  const mediaRef = useRef<MediaObj[]>([]);
+  useEffect(() => { mediaRef.current = media; }, [media]);
+  const refetchMedia = useCallback(() => { api.getRoomMedia(slug).then((r) => setMedia(r.mediaObjects as MediaObj[])).catch(() => {}); }, [slug]);
 
   const activeLayer = useEditorStore((s) => s.activeLayer);
   const setActiveLayer = useEditorStore((s) => s.setActiveLayer);
@@ -155,6 +172,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         const layer = r.layerData ?? legacyToLayerData(normalizeTiles(r.tilemapData), (r.furniture as Furniture[]) ?? [], (r.zones as Zone[]) ?? []);
         setMeta({ name: r.name, theme });
         setDoc(layer);
+        refetchMedia();
       })
       .catch((e) => {
         if (!alive) return;
@@ -224,6 +242,20 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               const f = arr.find((o) => o.id === st.selectedObjectId);
               if (f) { const bx = f.x * TILE_SIZE, by = (f.y - (f.tilesH - 1)) * TILE_SIZE; ctx.strokeStyle = 'rgba(250,204,21,0.95)'; ctx.lineWidth = 2 / z; ctx.strokeRect(bx, by, f.tilesW * TILE_SIZE, f.tilesH * TILE_SIZE); }
             }
+            // Media markers (Potong 6, editor-only).
+            for (const mm of mediaRef.current) {
+              const mx = mm.x * TILE_SIZE, my = mm.y * TILE_SIZE;
+              if (mm.type === 'bgm') {
+                const w = (mm.payload.areaW ?? 1) * TILE_SIZE, h = (mm.payload.areaH ?? 1) * TILE_SIZE;
+                ctx.fillStyle = 'rgba(34,197,94,0.14)'; ctx.fillRect(mx, my, w, h);
+                ctx.strokeStyle = 'rgba(34,197,94,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(mx, my, w, h); ctx.setLineDash([]);
+                ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '11px sans-serif'; ctx.fillText(`🎵 ${mm.payload.name ?? ''}`, mx + 4, my + 14);
+              } else {
+                const icon = mm.type === 'image' ? '🖼️' : mm.type === 'youtube' ? '▶️' : mm.type === 'website' ? '🔗' : '📌';
+                ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(mx + 3, my + 3, TILE_SIZE - 6, TILE_SIZE - 6);
+                ctx.font = '14px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText(icon, mx + TILE_SIZE / 2, my + TILE_SIZE / 2 + 5); ctx.textAlign = 'left';
+              }
+            }
           }
         }
       }
@@ -289,6 +321,12 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       } else if (s.activeTool === 'eraser') { const o = s.objectAt(t.x, t.y, ol); if (o) s.removeObject(o.id, ol); }
       else if (s.activeTool === 'select') { s.selectObjectAt(t.x, t.y, ol); if (useEditorStore.getState().selectedObjectId) { s.beginStroke(); dragRef.current = { mode: 'objMove' }; } }
     } else if (layer === 'effects') {
+      // Media effects (MapMediaObject) take precedence when a media mode is armed.
+      if (mediaModeRef.current) {
+        if (s.activeTool === 'stamp') void placeMedia(mediaModeRef.current, t.x, t.y);
+        else if (s.activeTool === 'eraser') { const m = mediaAt(t.x, t.y); if (m) api.deleteRoomMedia(slug, m.id).then(refetchMedia).catch(() => {}); }
+        return;
+      }
       const eff = s.selectedEffect; if (!eff) return;
       if (eff === 'startingPoint' || eff === 'impassable') {
         if (s.activeTool === 'stamp') { s.beginStroke(); s.stampEffectAt(t.x, t.y); dragRef.current = { mode: 'effPaint' }; }
@@ -381,6 +419,42 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     if (shrinking && losses > 0 && !window.confirm(`Mengecilkan map akan MENGHAPUS konten di luar batas baru:\n\n• ${outObj} objek\n• ${outWall} tile wall\n• ${outEff} tile efek\n• ${outAreas} area\n\nLanjutkan?`)) return;
     useEditorStore.getState().resizeMap(w, h);
     setResizeOpen(false);
+  };
+
+  const mediaAt = (x: number, y: number): MediaObj | null => {
+    for (let i = mediaRef.current.length - 1; i >= 0; i--) {
+      const m = mediaRef.current[i];
+      const w = m.type === 'bgm' ? (m.payload.areaW ?? 1) : 1, h = m.type === 'bgm' ? (m.payload.areaH ?? 1) : 1;
+      if (x >= m.x && x < m.x + w && y >= m.y && y < m.y + h) return m;
+    }
+    return null;
+  };
+  const placeMedia = async (kind: 'image' | 'youtube' | 'website' | 'bgm', x: number, y: number) => {
+    try {
+      if (kind === 'image') {
+        const f = await pickFile('image/*'); if (!f) return;
+        if (f.size > 10 * 1024 * 1024) { window.alert('Gambar maksimal 10MB.'); return; }
+        const { url } = await api.uploadMedia(f, slug);
+        await api.addRoomMedia(slug, { type: 'image', x, y, payload: { url } });
+      } else if (kind === 'youtube') {
+        const raw = (window.prompt('URL YouTube:', '') ?? '').trim(); if (!raw) return;
+        const id = parseYouTubeId(raw); if (!id) { window.alert('URL YouTube tidak valid.'); return; }
+        await api.addRoomMedia(slug, { type: 'youtube', x, y, payload: { videoId: id } });
+      } else if (kind === 'website') {
+        const u = (window.prompt('URL website (harus https://):', 'https://') ?? '').trim();
+        if (!/^https:\/\/\S+/i.test(u)) { window.alert('Hanya URL https:// yang diperbolehkan.'); return; }
+        await api.addRoomMedia(slug, { type: 'website', x, y, payload: { websiteUrl: u } });
+      } else {
+        const f = await pickFile('audio/mpeg,audio/ogg,audio/*'); if (!f) return;
+        if (f.size > 10 * 1024 * 1024) { window.alert('Audio maksimal 10MB.'); return; }
+        const name = (window.prompt('Nama area musik:', 'Musik') ?? 'Musik').trim();
+        const w = Math.max(1, parseInt(window.prompt('Lebar area (tile):', '4') || '4', 10) || 4);
+        const h = Math.max(1, parseInt(window.prompt('Tinggi area (tile):', '4') || '4', 10) || 4);
+        const { url } = await api.uploadMedia(f, slug);
+        await api.addRoomMedia(slug, { type: 'bgm', x, y, payload: { audioUrl: url, areaW: w, areaH: h, name, volume: 0.3 } });
+      }
+      refetchMedia();
+    } catch { window.alert('Gagal menambah media.'); }
   };
 
   const floorEntries = meta ? PALETTE_BY_THEME[meta.theme].filter((p) => p.category === 'floor') : [];
@@ -483,13 +557,27 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               <p className="text-xs uppercase tracking-wider text-white/40 mb-2">Tile Effects</p>
               <div className="space-y-1.5">
                 {EFFECTS.map((e) => (
-                  <button key={e.id} onClick={() => setSelectedEffect(e.id)}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm cursor-pointer ${selectedEffect === e.id ? 'bg-purple-600/30 border border-purple-400 text-white' : 'border border-white/10 text-white/70 hover:bg-white/5'}`}>
+                  <button key={e.id} onClick={() => { setSelectedEffect(e.id); setMediaMode(null); }}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm cursor-pointer ${!mediaMode && selectedEffect === e.id ? 'bg-purple-600/30 border border-purple-400 text-white' : 'border border-white/10 text-white/70 hover:bg-white/5'}`}>
                     <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: e.color }} /> {e.label}
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] text-white/50 mt-3 leading-relaxed">{EFFECTS.find((e) => e.id === selectedEffect)?.hint ?? 'Pilih efek lalu gambar di kanvas. Overlay warna ini hanya tampil di editor, tidak di game.'}</p>
+
+              <p className="text-xs uppercase tracking-wider text-white/40 mt-4 mb-2">Media</p>
+              <div className="space-y-1.5">
+                {([['image', '🖼️ Insert image'], ['youtube', '▶️ YouTube'], ['website', '🔗 Open website'], ['bgm', '🎵 Background music']] as const).map(([id, label]) => (
+                  <button key={id} onClick={() => { setMediaMode(id); setSelectedEffect(null); }}
+                    className={`w-full px-2 py-1.5 rounded text-left text-sm cursor-pointer ${mediaMode === id ? 'bg-purple-600/30 border border-purple-400 text-white' : 'border border-white/10 text-white/70 hover:bg-white/5'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-white/50 mt-3 leading-relaxed">
+                {mediaMode
+                  ? 'Stamp: klik tile untuk menaruh (image/BGM → upload; YouTube/Website → tempel URL). Eraser: klik untuk hapus. File → Lark Drive room ini.'
+                  : (EFFECTS.find((e) => e.id === selectedEffect)?.hint ?? 'Pilih efek/media lalu gambar di kanvas. Overlay ini hanya tampil di editor.')}
+              </p>
             </>
           )}
         </div>

@@ -14,7 +14,9 @@ import { deleteUploadedFile } from '../routes/uploads';
 // in-memory admin cache — mirrors how teleport.ts's REST routes independently
 // resolve role, since this module has no socket-layer admin state to reuse.
 
-const MEDIA_TYPES: MediaType[] = ['image', 'youtube', 'whiteboard', 'file'];
+const MEDIA_TYPES: MediaType[] = ['image', 'youtube', 'whiteboard', 'file', 'website', 'bgm'];
+// Uploaded-file locators: legacy disk (/api/uploads/) or Lark Drive (/api/files/, A8).
+const isUploadUrl = (u: unknown): u is string => typeof u === 'string' && (u.startsWith('/api/uploads/') || u.startsWith('/api/files/'));
 const IMAGE_FILE_TTL_MS = 24 * 60 * 60 * 1000; // 24h — spec §6's table, Image row (and File, see doc comment on the model)
 
 const canAddMedia = socketRateLimit(2);
@@ -52,20 +54,26 @@ async function canDeleteMedia(prisma: PrismaClient, userId: string, roomId: stri
   return member?.role === 'admin' || user?.accountRole === 'admin';
 }
 
-function isValidPayload(type: MediaType, payload: MediaPayload | undefined): boolean {
+export function isValidMediaPayload(type: MediaType, payload: MediaPayload | undefined): boolean {
   if (!payload) return type === 'whiteboard'; // whiteboard starts with no payload — strokes are added after
   switch (type) {
     case 'image':
     case 'file':
-      return typeof payload.url === 'string' && payload.url.startsWith('/api/uploads/');
+      return isUploadUrl(payload.url);
     case 'youtube':
       return typeof payload.videoId === 'string' && /^[\w-]{11}$/.test(payload.videoId);
+    case 'website':
+      // https only — reject javascript:/data:/http: etc.
+      return typeof payload.websiteUrl === 'string' && /^https:\/\/\S+$/i.test(payload.websiteUrl);
+    case 'bgm':
+      return isUploadUrl(payload.audioUrl) && typeof payload.areaW === 'number' && typeof payload.areaH === 'number';
     case 'whiteboard':
       return true;
     default:
       return false;
   }
 }
+const isValidPayload = isValidMediaPayload;
 
 export function registerMediaHandlers(io: Server, socket: Socket): void {
   socket.on(SocketEvents.JOIN_ROOM, async (roomId: string, _playerName?: string, _avatarConfig?: unknown, userId?: string) => {
@@ -139,9 +147,8 @@ export function registerMediaHandlers(io: Server, socket: Socket): void {
 
       await prisma.mapMediaObject.delete({ where: { id: row.id } });
       const payload = row.payload as MediaPayload;
-      if ((row.type === 'image' || row.type === 'file') && payload?.url) {
-        deleteUploadedFile(payload.url);
-      }
+      if ((row.type === 'image' || row.type === 'file') && payload?.url) deleteUploadedFile(payload.url);
+      if (row.type === 'bgm' && payload?.audioUrl) deleteUploadedFile(payload.audioUrl);
       io.to(room).emit(SocketEvents.MEDIA_REMOVED, { id: row.id });
     } catch (e) {
       console.error('[media] remove error:', e);

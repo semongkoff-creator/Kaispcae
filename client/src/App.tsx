@@ -31,6 +31,7 @@ import { RoomEditor } from './components/ui/RoomEditor';
 import { AdminPanel } from './components/ui/AdminPanel';
 import { TeleportPanel } from './components/ui/TeleportPanel';
 import { RoomEditorPage } from './pages/RoomEditorPage';
+import { useBgm } from './hooks/useBgm';
 import { AddMediaPanel } from './components/ui/AddMediaPanel';
 import { MediaViewerModal } from './components/ui/MediaViewerModal';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
@@ -204,6 +205,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     zones,
     furniture,
   );
+
+  // Potong 6 — area background music. Conversation (any full-connected peer)
+  // always takes priority: the hook pauses the music while one is active.
+  const bgm = useBgm(nearby.some((p) => p.visibility === 'full_visible'));
 
   // Update WebRTC connections based on proximity
   useEffect(() => {
@@ -1261,6 +1266,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           Meeting View" behaviour above is untouched — but a full-screen
           module is a different thing: the bar lands squarely on the
           messenger's composer, covering the input you're trying to type in. */}
+      {/* Potong 6 — area background-music control (only while inside a BGM area). */}
+      {!moduleOpen && bgm.inAreaName && (
+        <div className="absolute bottom-20 right-4 z-50 flex items-center gap-2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 rounded-full px-3 py-1.5 shadow-sm pointer-events-auto text-xs text-gray-700 dark:text-gray-200">
+          <span>🎵 {bgm.inAreaName}</span>
+          {bgm.needsUnlock ? (
+            <button onClick={bgm.playNow} className="text-purple-600 dark:text-purple-300 font-medium cursor-pointer">🔊 Putar musik</button>
+          ) : (
+            <button onClick={() => bgm.setMuted(!bgm.muted)} className="cursor-pointer" title={bgm.muted ? 'Bunyikan' : 'Bisukan'}>{bgm.muted ? '🔇' : '🔉'}</button>
+          )}
+        </div>
+      )}
       {!moduleOpen && (
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-50">
         <MicButton muted={isMicMuted} onToggle={handleMicToggle} />

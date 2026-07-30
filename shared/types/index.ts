@@ -566,13 +566,20 @@ export interface FollowResultPayload {
 // §6 — Add Media. One table/type union with `type` as discriminator, per
 // the spec's own "MapMediaObject" model — 'portal' and 'screenshot' are
 // deliberately absent, see the SocketEvents doc comment above for why.
-export type MediaType = 'image' | 'youtube' | 'whiteboard' | 'file';
+// Potong 6 — 'website' (open a URL) and 'bgm' (area background music) added.
+export type MediaType = 'image' | 'youtube' | 'whiteboard' | 'file' | 'website' | 'bgm';
 
 export interface MediaPayload {
-  url?: string; // image / file — served from this app's own /uploads static route
+  url?: string; // image / file — /api/uploads/<name> or /api/files/<token> (Lark Drive, A8)
   fileName?: string; // file only — original name, for the download link's label
   videoId?: string; // youtube only — parsed from whatever URL shape the user pasted
   strokes?: WhiteboardStroke[]; // whiteboard only — full history, appended to on each stroke
+  // Potong 6
+  websiteUrl?: string; // 'website' — always https:// (validated on placement)
+  audioUrl?: string; // 'bgm' — uploaded audio, same Lark Drive path as attachments
+  areaW?: number; // 'bgm' — area size in tiles (music plays while inside x..x+areaW)
+  areaH?: number;
+  volume?: number; // 'bgm' — default playback volume 0..1
 }
 
 export interface MapMediaObject {

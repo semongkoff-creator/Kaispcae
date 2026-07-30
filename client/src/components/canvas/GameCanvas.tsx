@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import {
   TILE_SIZE,
   MAP_WIDTH,
@@ -95,7 +95,10 @@ interface GameCanvasProps {
   onMediaOpen: (mediaId: string) => void;
 }
 
-const MEDIA_ICON: Record<string, string> = { image: '🖼️', youtube: '▶️', whiteboard: '📝', file: '📎' };
+const MEDIA_ICON: Record<string, string> = { image: '🖼️', youtube: '▶️', whiteboard: '📝', file: '📎', website: '🔗', bgm: '🎵' };
+// Potong 6 — how close (tiles, Chebyshev) a player must be for a YouTube tile to
+// auto-embed its player.
+const YT_EMBED_RADIUS = 2;
 
 // How long the nudge-impact spark burst stays on screen — longer than
 // NUDGE_DURATION_MS (the shake) since the burst reads better lingering a
@@ -209,6 +212,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const bannerRefs = useRef(new Map<string, HTMLDivElement>());
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const mediaObjectsRef = useRef(mediaObjects);
+  // Potong 6 — which YouTube tile is close enough to auto-embed (proximity).
+  const [ytEmbedId, setYtEmbedId] = useState<string | null>(null);
+  const ytEmbedRef = useRef<string | null>(null);
   // §6 — Add Media markers: same DOM-overlay-positioned-via-transform
   // pattern as zone/banner above, one small clickable pin per object.
   const mediaMarkerRefs = useRef(new Map<string, HTMLDivElement>());
@@ -609,10 +615,24 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       let best: { id: string; tileX: number; tileY: number } | null = null;
       let bestDist = Infinity;
       for (const m of mediaObjectsRef.current) {
+        // website = clicked pin (opens a tab); bgm = ambient area — neither uses
+        // the "Press X to open" modal, so don't offer it for them.
+        if (m.type === 'website' || m.type === 'bgm') continue;
         const d = Math.max(Math.abs(m.x - baseTileX), Math.abs(m.y - baseTileY));
         if (d <= INTERACT_TILE_RADIUS && d < bestDist) { bestDist = d; best = { id: m.id, tileX: m.x, tileY: m.y }; }
       }
       nearbyMediaRef.current = best;
+
+      // Potong 6 — nearest YouTube tile within YT_EMBED_RADIUS auto-embeds its
+      // player (muted). Toggled via React state only when it changes, so the
+      // overlay swaps thumbnail↔iframe without re-rendering every frame.
+      let ytId: string | null = null; let ytDist = Infinity;
+      for (const m of mediaObjectsRef.current) {
+        if (m.type !== 'youtube') continue;
+        const d = Math.max(Math.abs(m.x - baseTileX), Math.abs(m.y - baseTileY));
+        if (d <= YT_EMBED_RADIUS && d < ytDist) { ytDist = d; ytId = m.id; }
+      }
+      if (ytId !== ytEmbedRef.current) { ytEmbedRef.current = ytId; setYtEmbedId(ytId); }
     }
     // Rounded to whole CSS pixels — every tile/avatar screen position is
     // `n * TILE_SIZE - camera`, so a fractional camera offset put every draw
@@ -1338,24 +1358,41 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
               }}
               className="absolute top-0 left-0 will-change-transform pointer-events-auto"
             >
-              <button
-                onClick={() => onMediaOpen(media.id)}
-                title={media.type}
-                className={isThumbnail && thumbnailSrc
-                  ? 'w-16 h-16 -mt-16 -ml-4 rounded-lg overflow-hidden shadow-md border border-purple-200 cursor-pointer hover:scale-105 transition-transform bg-white/90 relative'
-                  : 'w-8 h-8 -mt-8 flex items-center justify-center text-lg bg-white/90 backdrop-blur-sm rounded-full shadow-md border border-purple-200 cursor-pointer hover:scale-110 transition-transform'}
-              >
-                {isThumbnail && thumbnailSrc ? (
-                  <>
-                    <img src={thumbnailSrc} alt="" className="w-full h-full object-cover" />
-                    {media.type === 'youtube' && (
-                      <span className="absolute inset-0 flex items-center justify-center text-white text-xl drop-shadow">▶️</span>
-                    )}
-                  </>
-                ) : (
-                  MEDIA_ICON[media.type] ?? '📌'
-                )}
-              </button>
+              {/* Potong 6 — YouTube auto-embeds (muted) when the player is near;
+                  website opens a new tab; bgm shows a non-interactive marker. */}
+              {media.type === 'youtube' && ytEmbedId === media.id && media.payload.videoId ? (
+                <iframe
+                  title="yt"
+                  src={`https://www.youtube.com/embed/${media.payload.videoId}?mute=1&rel=0`}
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  className="w-56 h-32 -mt-32 -ml-4 rounded-lg shadow-lg border border-purple-300 bg-black"
+                />
+              ) : (
+                <button
+                  onClick={
+                    media.type === 'website'
+                      ? () => { const u = media.payload.websiteUrl; if (u) window.open(u, '_blank', 'noopener'); }
+                      : media.type === 'bgm'
+                        ? undefined
+                        : () => onMediaOpen(media.id)
+                  }
+                  title={media.type === 'website' ? (media.payload.websiteUrl ?? 'website') : media.type}
+                  className={isThumbnail && thumbnailSrc
+                    ? 'w-16 h-16 -mt-16 -ml-4 rounded-lg overflow-hidden shadow-md border border-purple-200 cursor-pointer hover:scale-105 transition-transform bg-white/90 relative'
+                    : `w-8 h-8 -mt-8 flex items-center justify-center text-lg bg-white/90 backdrop-blur-sm rounded-full shadow-md border border-purple-200 ${media.type === 'bgm' ? '' : 'cursor-pointer hover:scale-110'} transition-transform`}
+                >
+                  {isThumbnail && thumbnailSrc ? (
+                    <>
+                      <img src={thumbnailSrc} alt="" className="w-full h-full object-cover" />
+                      {media.type === 'youtube' && (
+                        <span className="absolute inset-0 flex items-center justify-center text-white text-xl drop-shadow">▶️</span>
+                      )}
+                    </>
+                  ) : (
+                    MEDIA_ICON[media.type] ?? '📌'
+                  )}
+                </button>
+              )}
             </div>
           );
         })}

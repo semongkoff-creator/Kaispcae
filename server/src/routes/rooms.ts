@@ -1,12 +1,19 @@
 import { Router, Response } from 'express';
 import { Server } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess, LayerData, layerDataToLegacy, findSpawnPixel, TILE_SIZE } from '@virtualmeet/shared';
+import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess, LayerData, layerDataToLegacy, findSpawnPixel, TILE_SIZE, MediaType, MediaPayload } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
 import { convertLegacyRoom } from '../lib/convertLegacyRoom';
 import { isRoomLocked } from '../socket/roomHandler';
+import { isValidMediaPayload } from '../socket/mediaHandler';
+import { deleteUploadedFile } from './uploads';
 import { setCachedTiles, getPlayers, updatePlayerPosition } from '../store/roomStore';
+
+// Client shape for a MapMediaObject row (mirrors mediaHandler.toClientShape).
+function mediaShape(r: { id: string; roomId: string; type: string; x: number; y: number; createdBy: string; createdByName: string; createdAt: Date; expiresAt: Date | null; payload: unknown }) {
+  return { id: r.id, roomId: r.roomId, type: r.type, x: r.x, y: r.y, createdBy: r.createdBy, createdByName: r.createdByName, createdAt: r.createdAt.toISOString(), expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null, payload: (r.payload as MediaPayload) ?? {} };
+}
 import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
 import { ensureGroupConversation } from '../lib/conversations';
 import { driveEnabled, ensureRoomFolder } from '../lib/larkDrive';
@@ -244,6 +251,61 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
     console.error('[rooms] editor layers save error:', err);
     return res.status(500).json({ error: 'Failed to save layers' });
   }
+});
+
+// Potong 6 — media effects authored from the new editor (which has no socket),
+// via the EXISTING MapMediaObject system. Admin-gated; broadcasts the same
+// MEDIA_ADDED/MEDIA_REMOVED the game already handles, so placements appear live.
+// Editor-placed media is permanent (no 24h TTL — it's intentional room decor).
+const EDITOR_MEDIA_TYPES: MediaType[] = ['image', 'youtube', 'website', 'bgm'];
+
+rooms.get('/rooms/:slug/editor/media', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    if (!hasFeatureAccess(role, 'room:update')) return res.status(403).json({ error: 'Admin required' });
+    const rows = await prisma.mapMediaObject.findMany({ where: { roomId: room.id } });
+    return res.json({ mediaObjects: rows.map(mediaShape) });
+  } catch (err) { console.error('[rooms] editor media list error:', err); return res.status(500).json({ error: 'Failed' }); }
+});
+
+rooms.post('/rooms/:slug/editor/media', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    if (!hasFeatureAccess(role, 'room:update')) return res.status(403).json({ error: 'Admin required' });
+    const { type, x, y, payload } = req.body ?? {};
+    if (!EDITOR_MEDIA_TYPES.includes(type) || !Number.isInteger(x) || !Number.isInteger(y)) return res.status(400).json({ error: 'Bad media data' });
+    if (!isValidMediaPayload(type, payload)) return res.status(400).json({ error: 'Invalid or unsafe media payload' });
+    const actor = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
+    const row = await prisma.mapMediaObject.create({
+      data: { roomId: room.id, type, x: Math.round(x), y: Math.round(y), createdBy: req.userId!, createdByName: actor?.displayName ?? 'Admin', expiresAt: null, payload: (payload ?? {}) as object },
+    });
+    ioRef?.to(room.slug).emit(SocketEvents.MEDIA_ADDED, mediaShape(row));
+    return res.status(201).json(mediaShape(row));
+  } catch (err) { console.error('[rooms] editor media add error:', err); return res.status(500).json({ error: 'Failed' }); }
+});
+
+rooms.delete('/rooms/:slug/editor/media/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    if (!hasFeatureAccess(role, 'room:update')) return res.status(403).json({ error: 'Admin required' });
+    const row = await prisma.mapMediaObject.findFirst({ where: { id: req.params.id, roomId: room.id } });
+    if (!row) return res.json({ ok: true });
+    await prisma.mapMediaObject.delete({ where: { id: row.id } });
+    const p = row.payload as MediaPayload;
+    if ((row.type === 'image' || row.type === 'file') && p?.url) deleteUploadedFile(p.url);
+    if (row.type === 'bgm' && p?.audioUrl) deleteUploadedFile(p.audioUrl);
+    ioRef?.to(room.slug).emit(SocketEvents.MEDIA_REMOVED, { id: row.id });
+    return res.json({ ok: true });
+  } catch (err) { console.error('[rooms] editor media delete error:', err); return res.status(500).json({ error: 'Failed' }); }
 });
 
 // POST /api/rooms — create room
