@@ -365,6 +365,46 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       dbRoom = await getPrisma().room.findUnique({ where: { slug: room } });
     } catch (e) { console.warn('[room] failed to load room from db:', e); }
 
+    // Resolve the room's actual tile grid NOW (it used to happen later, only
+    // for the room:state payload) — the spawn rescue below needs it. Hoisted,
+    // not duplicated: the room:state emit further down reuses these.
+    const theme: RoomTheme = dbRoom?.theme === 'scifi-office' ? 'scifi-office' : 'modern-interiors';
+    const template = (dbRoom?.template as RoomTemplateId | null) ?? undefined;
+    let savedTiles: RoomTile[][] | undefined;
+    let savedFurniture: any[] | undefined;
+    let savedZones: any[] | undefined;
+    // ZEP Room Editor (Potong 1) — once a room is converted, layerData is its
+    // source of truth. The adaptor reconstructs the EXACT same runtime shape
+    // (tiles/furniture/zones), so everything downstream — render, collision,
+    // zones, sit, teleport — is untouched. Rooms without layerData take the
+    // unchanged legacy path below.
+    if (dbRoom?.layerData) {
+      const derived = layerDataToLegacy(dbRoom.layerData as unknown as LayerData);
+      savedTiles = derived.tiles;
+      savedFurniture = derived.furniture;
+      savedZones = derived.zones;
+    } else {
+      if (dbRoom?.tilemapData && Array.isArray(dbRoom.tilemapData) && (dbRoom.tilemapData as any[]).length > 0) {
+        savedTiles = (dbRoom.tilemapData as any[]).map((row: any[], y: number) =>
+          row.map((t: any, x: number) => ({ ...t, x, y, type: t.type || 'floor' }))
+        );
+      }
+      if (dbRoom?.furniture && Array.isArray(dbRoom.furniture)) {
+        savedFurniture = dbRoom.furniture as any[];
+      }
+      if (dbRoom?.zones && Array.isArray(dbRoom.zones)) {
+        savedZones = dbRoom.zones as any[];
+      }
+    }
+    // Rooms created before the default-office-layout seed (or the legacy
+    // DEFAULT_ROOM slug, which has no DB row at all) still have empty or
+    // missing map data — fall back to the same layout newly-created rooms
+    // are seeded with (see shared/defaultRoomLayout.ts) instead of an
+    // empty floor. Uses the room's own theme so a scifi-office room missing
+    // its saved layout still falls back to a scifi-office-themed default.
+    const fallback = (!savedTiles || !savedFurniture || !savedZones) ? createDefaultOfficeLayout(theme) : null;
+    const tiles = savedTiles || fallback!.tiles;
+
     // Resume where this account last left THIS room, if known (see
     // roomStore.ts's lastKnownPosition doc comment) — otherwise fall back
     // to the room's spawn tile. Keyed by the real account id (uid), not
@@ -373,7 +413,26 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // always reset the player back to spawn regardless of where they'd
     // walked to, which the "Move" spec explicitly calls out as wrong.
     const remembered = getLastKnownPosition(uid, room);
-    const spawn = remembered ?? findSpawnPixel(dbRoom?.tilemapData) ?? { x: 3 * 32 + 16, y: 3 * 32 + 16 };
+    let spawn = remembered ?? findSpawnPixel(dbRoom?.tilemapData) ?? { x: 3 * 32 + 16, y: 3 * 32 + 16 };
+
+    // Bug 8 — the remembered position can be INSIDE a blocked tile: sitting
+    // puts the avatar on the chair's own tile (chair is in BLOCKED_TILES),
+    // and a disconnect/refresh/laptop-sleep mid-sit stores exactly that as
+    // the last known position. The fresh session then starts with
+    // isSitting=false and no sitReturnPos, standing inside collision
+    // geometry where every movement attempt is rejected — the "stuck in the
+    // chair after sitting a while" report (long sits are precisely when a
+    // reconnect happens). Rescue to the nearest adjacent free tile, same
+    // helper the My Seat/summon landings already use.
+    {
+      const spawnTileX = Math.floor(spawn.x / TILE_SIZE);
+      const spawnTileY = Math.floor(spawn.y / TILE_SIZE);
+      if (isTileBlocked(tiles, spawnTileX, spawnTileY)) {
+        const free = findAdjacentFreeTile(tiles, spawnTileX, spawnTileY);
+        spawn = { x: free.x * TILE_SIZE + TILE_SIZE / 2, y: free.y * TILE_SIZE + TILE_SIZE / 2 };
+        console.log(`[room] rescued ${uid}'s spawn off blocked tile (${spawnTileX},${spawnTileY}) -> (${free.x},${free.y}) in ${room}`);
+      }
+    }
 
     // `name` is already the resolved display name (real account name takes
     // priority client-side in useSocket.ts). avatarConfig.name defaults to
@@ -420,51 +479,15 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
     addPlayer(room, newPlayer).then(async () => {
       const state = await getRoomState(room, DEFAULT_ROOM_NAME);
-      const theme: RoomTheme = dbRoom?.theme === 'scifi-office' ? 'scifi-office' : 'modern-interiors';
-      const template = (dbRoom?.template as RoomTemplateId | null) ?? undefined;
-
-      let savedTiles: RoomTile[][] | undefined;
-      let savedFurniture: any[] | undefined;
-      let savedZones: any[] | undefined;
-      // ZEP Room Editor (Potong 1) — once a room is converted, layerData is its
-      // source of truth. The adaptor reconstructs the EXACT same runtime shape
-      // (tiles/furniture/zones), so everything downstream — render, collision,
-      // zones, sit, teleport — is untouched. Rooms without layerData take the
-      // unchanged legacy path below.
-      if (dbRoom?.layerData) {
-        const derived = layerDataToLegacy(dbRoom.layerData as unknown as LayerData);
-        savedTiles = derived.tiles;
-        savedFurniture = derived.furniture;
-        savedZones = derived.zones;
-      } else {
-        if (dbRoom?.tilemapData && Array.isArray(dbRoom.tilemapData) && (dbRoom.tilemapData as any[]).length > 0) {
-          savedTiles = (dbRoom.tilemapData as any[]).map((row: any[], y: number) =>
-            row.map((t: any, x: number) => ({ ...t, x, y, type: t.type || 'floor' }))
-          );
-        }
-        if (dbRoom?.furniture && Array.isArray(dbRoom.furniture)) {
-          savedFurniture = dbRoom.furniture as any[];
-        }
-        if (dbRoom?.zones && Array.isArray(dbRoom.zones)) {
-          savedZones = dbRoom.zones as any[];
-        }
-      }
 
       const playersWithMeta = state.players.map((p) => {
         const puid = findUserIdBySocket(p.id) ?? p.id;
         return { ...p, userId: puid, isAdmin: rs.adminUserIds.has(puid), isMasterAdmin: puid === rs.masterAdminUserId };
       });
 
-      // Rooms created before the default-office-layout seed (or the legacy
-      // DEFAULT_ROOM slug, which has no DB row at all) still have empty or
-      // missing map data — fall back to the same layout newly-created rooms
-      // are seeded with (see shared/defaultRoomLayout.ts) instead of an
-      // empty floor. Computed lazily since most joins already have real
-      // saved data and don't need it. Uses the room's own theme so a
-      // scifi-office room missing its saved layout still falls back to a
-      // scifi-office-themed default, not modern-interiors.
-      const fallback = (!savedTiles || !savedFurniture || !savedZones) ? createDefaultOfficeLayout(theme) : null;
-      const tiles = savedTiles || fallback!.tiles;
+      // tiles/savedFurniture/savedZones/theme/template/fallback were resolved
+      // ABOVE, before the spawn was computed (Bug 8 — the blocked-spawn
+      // rescue needs the real grid). This block only consumes them now.
 
       // Populate movementHandler.ts's collision cache with this room's
       // actual layout — without this, server-side movement validation has

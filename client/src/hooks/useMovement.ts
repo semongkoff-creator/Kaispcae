@@ -144,13 +144,22 @@ export function useMovement({ isBlocked, onMove, isFrozen, isDoor }: UseMovement
       let newX = currentXRef.current;
       let newY = currentYRef.current;
 
+      // Bug 8 safety net — if the avatar is ALREADY embedded in collision
+      // geometry (e.g. restored onto a chair tile after a mid-sit reconnect,
+      // or any other inconsistent state this code can't foresee), normal
+      // collision would reject every move and the player would be stuck
+      // permanently. Already-colliding means it can't get worse: let any
+      // movement through so the player can simply walk out; the moment
+      // they're clear, this is false again and normal collision resumes.
+      const embedded = wouldCollide(currentXRef.current, currentYRef.current);
+
       const targetX = currentXRef.current + stepX;
-      if (!wouldCollide(targetX, currentYRef.current)) {
+      if (embedded || !wouldCollide(targetX, currentYRef.current)) {
         newX = targetX;
       }
 
       const targetY = currentYRef.current + stepY;
-      if (!wouldCollide(currentXRef.current, targetY)) {
+      if (embedded || !wouldCollide(currentXRef.current, targetY)) {
         newY = targetY;
       }
 
@@ -190,11 +199,15 @@ export function useMovement({ isBlocked, onMove, isFrozen, isDoor }: UseMovement
       let newX = curX;
       let newY = curY;
 
+      // Same embedded-escape rule as tryMove (Bug 8 safety net) — a stuck
+      // follower should un-stick by following, same as by walking.
+      const embedded = wouldCollide(curX, curY);
+
       const nextX = curX + stepX;
-      if (!wouldCollide(nextX, curY)) newX = nextX;
+      if (embedded || !wouldCollide(nextX, curY)) newX = nextX;
 
       const nextY = curY + stepY;
-      if (!wouldCollide(curX, nextY)) newY = nextY;
+      if (embedded || !wouldCollide(curX, nextY)) newY = nextY;
 
       return { x: newX, y: newY, direction, isMoving: newX !== curX || newY !== curY, isRunning: false };
     },
