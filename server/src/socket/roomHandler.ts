@@ -842,6 +842,13 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const room = currentRoom; if (!room) return;
     socket.to(room).emit(SocketEvents.AVATAR_UPDATED, { id: socket.id, avatarConfig });
     updatePlayerAvatarConfig(room, socket.id, avatarConfig);
+    // Bug 2 — playerNames only got set once, at JOIN_ROOM. Renaming mid-session
+    // never touched it, so every system-generated message that reads a name
+    // through getPlayerName() (nudge, follow/summon requests, slap, knock,
+    // notice-pin "by X") kept saying the OLD name for the rest of that
+    // session, even though the nametag/ParticipantPanel — which read
+    // playerRecords directly, not this map — updated live and correctly.
+    if (avatarConfig.name) playerNames.set(socket.id, avatarConfig.name);
   });
 
   socket.on(SocketEvents.PLAYER_STATUS_UPDATE, (status: string) => {

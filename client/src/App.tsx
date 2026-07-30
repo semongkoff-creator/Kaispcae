@@ -652,6 +652,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       avatarConfig: config,
     });
     emitAvatarUpdate(config);
+    // Bug 2 — this save path only ever broadcast the change (fine for anyone
+    // ALREADY in the room) and cached it in localStorage; it never told the
+    // server. So a rename never survived the renamer's own refresh/reconnect,
+    // or reached anyone who joined the room fresh afterward — both read the
+    // name back from User.avatarConfig in the DB, which this never touched.
+    // saveAvatarConfig(config) two lines up is the local-only cache; this is
+    // the one that actually persists it. Login is mandatory before a room is
+    // reachable at all, so there's no logged-out case to gate this behind.
+    api.saveAvatar(config).catch(() => {});
     setShowEditor(false);
   }, [emitAvatarUpdate]);
 

@@ -41,6 +41,20 @@ export const avatarUpdateSchema = z.object({
   expression: z.string().optional(),
   name: z.string().max(20).optional(),
   statusTag: z.string().max(10).optional(),
+  // Pixel-art sprite system (shared/types/index.ts's AvatarConfig) — added
+  // for Bug 2's persist-on-rename fix. Without these, safeParse's default
+  // strip-unknown-keys behavior silently dropped every sprite field from
+  // req.body before it reached the DB write: a pixel-avatar player's rename
+  // would save fine, but their body/eyes/outfit/hair sprite picks would
+  // vanish from the PERSISTED config (overwritten with an object missing
+  // them) the moment this endpoint was called with a sprite-mode config.
+  spriteMode: z.string().optional(),
+  bodyId: z.string().optional(),
+  eyesId: z.string().optional(),
+  outfitId: z.string().optional(),
+  hairId: z.string().optional(),
+  spriteAccessoryId: z.string().optional(),
+  premadeId: z.string().optional(),
 });
 
 export function sanitizeChat(text: string): string {
