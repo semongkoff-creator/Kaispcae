@@ -396,8 +396,15 @@ function ScreenSharePanel({ name, stream, isLocal, onClose, onMaximizedChange }:
           // itself stays pinned, so magnifying the content can't become a way
           // to move the window. At zoom 1 this is the identity transform, so
           // object-contain and the aspect ratio behave exactly as before.
+          // object-top, not the object-contain default of centered: when the
+          // shared window's ratio doesn't match the box, the leftover space
+          // used to split evenly above AND below the picture — a visible gap
+          // at the top even after the title-bar row was removed (maximized).
+          // Anchoring to the top puts all of that leftover space at the
+          // bottom instead, where a screen share's actual content (browser
+          // chrome, the app being shown) is never sitting anyway.
           style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}
-          className="absolute inset-0 w-full h-full object-contain"
+          className="absolute inset-0 w-full h-full object-contain object-top"
         />
         {/* The title bar's replacement while maximized — floats over the
             video (z-10, semi-transparent so the picture still reads through
@@ -668,9 +675,13 @@ export function VideoTile({
         // own tile. The wider the window, the worse it got. Height now comes
         // from the cell the tile is placed in; object-cover/contain handles
         // whatever ratio the source happens to be.
+        // object-top on the screen path for the same reason as
+        // ScreenSharePanel's video: object-contain centers leftover space
+        // above AND below by default, and a shared screen's actual content
+        // never sits at the bottom of its own frame.
         className={
           isScreen
-            ? `w-full object-contain bg-black ${large ? 'h-full' : 'h-16'}`
+            ? `w-full object-contain object-top bg-black ${large ? 'h-full' : 'h-16'}`
             : `w-full object-cover bg-purple-100 ${large ? 'h-full' : 'h-16'}`
         }
       />
