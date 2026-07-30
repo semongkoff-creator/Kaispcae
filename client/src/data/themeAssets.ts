@@ -6,6 +6,7 @@
 import { RoomTheme, TileType } from '@virtualmeet/shared';
 import { PaletteEntry, TILE_PALETTE, TILE_PALETTE_BY_ID } from './tilePaletteManifest';
 import { SCIFI_OFFICE_PALETTE, SCIFI_OFFICE_PALETTE_BY_ID } from './scifiOfficePaletteManifest';
+import { LIMEZU_OFFICE_ENTRIES } from './limezu-office-manifest';
 
 // Base folder for each theme's asset set — informational (every actual path
 // used below/elsewhere is already fully-qualified in the two palette
@@ -18,9 +19,17 @@ export const THEME_ASSET_PATHS: Record<RoomTheme, { base: string }> = {
 
 // Placeable furniture/floor/decor/electronics palette, keyed by theme — feeds
 // RoomEditor.tsx's palette panel and GameCanvas.tsx's furniture renderer.
+//
+// LIMEZU_OFFICE_ENTRIES is appended to BOTH themes rather than living only
+// under 'modern-interiors': every existing room defaults to 'scifi-office'
+// (the Prisma schema default AND the Lobby room-creation form's default), so
+// gating a newly-added furniture set behind the OTHER theme meant it would
+// never show up in any room admins were actually editing. It's furniture
+// only (no floor/wall reskin), so it doesn't fight the room's floor/wall art
+// either way — an admin can simply not place a piece that clashes visually.
 export const PALETTE_BY_THEME: Record<RoomTheme, PaletteEntry[]> = {
   'modern-interiors': TILE_PALETTE,
-  'scifi-office': SCIFI_OFFICE_PALETTE,
+  'scifi-office': [...SCIFI_OFFICE_PALETTE, ...LIMEZU_OFFICE_ENTRIES],
 };
 
 // Every palette entry across every theme, merged by id. Palette ids are
