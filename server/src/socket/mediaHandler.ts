@@ -141,7 +141,7 @@ export function registerMediaHandlers(io: Server, socket: Socket): void {
       if (!row) return;
 
       if (!(await canDeleteMedia(prisma, uid, dbRoom.id, dbRoom.ownerId, row.createdBy))) {
-        socket.emit('admin:error', { message: 'Only the creator or an admin can remove this' });
+        socket.emit('admin:error', { message: 'Kamu tidak punya izin menghapus media ini' });
         return;
       }
 
@@ -189,7 +189,7 @@ export function registerMediaHandlers(io: Server, socket: Socket): void {
       const row = await prisma.mapMediaObject.findFirst({ where: { id: data.mediaId, roomId: dbRoom.id } });
       if (!row || row.type !== 'whiteboard') return;
       if (!(await canDeleteMedia(prisma, uid, dbRoom.id, dbRoom.ownerId, row.createdBy))) {
-        socket.emit('admin:error', { message: 'Only the creator or an admin can clear this whiteboard' });
+        socket.emit('admin:error', { message: 'Kamu tidak punya izin menghapus media ini' });
         return;
       }
       const payload = (row.payload as MediaPayload) ?? {};
