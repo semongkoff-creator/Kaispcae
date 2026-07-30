@@ -1,11 +1,12 @@
 import { Router, Response } from 'express';
 import { Server } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess } from '@virtualmeet/shared';
+import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess, LayerData, layerDataToLegacy } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
 import { convertLegacyRoom } from '../lib/convertLegacyRoom';
 import { isRoomLocked } from '../socket/roomHandler';
+import { setCachedTiles } from '../store/roomStore';
 import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
 import { ensureGroupConversation } from '../lib/conversations';
 import { driveEnabled, ensureRoomFolder } from '../lib/larkDrive';
@@ -139,6 +140,57 @@ rooms.get('/rooms/:slug/editor-data', authenticateToken, async (req: AuthRequest
   } catch (err) {
     console.error('[rooms] editor-data error:', err);
     return res.status(500).json({ error: 'Failed to load editor data' });
+  }
+});
+
+// PUT /api/rooms/:slug/editor/floor — Potong 2: write floor-layer edits from
+// the new Room Editor. Admin-gated at the SERVER (room:update). Applies a batch
+// of per-tile changes onto layerData.floor (per-tile last-write-wins, so two
+// admins editing at once never clobber each other's whole grid), persists, and
+// broadcasts ROOM_UPDATED so every player in the room sees the new floor live.
+rooms.put('/rooms/:slug/editor/floor', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    if (!hasFeatureAccess(role, 'room:update')) {
+      return res.status(403).json({ error: 'Admin role required to edit this room' });
+    }
+    if (!room.layerData) {
+      // The editor converts on open, so this shouldn't happen — but never write
+      // a layered edit onto an unconverted room (that would create a second
+      // source of truth).
+      return res.status(409).json({ error: 'Room not in layered format yet' });
+    }
+    const changes = req.body?.changes;
+    if (!Array.isArray(changes)) return res.status(400).json({ error: 'changes must be an array' });
+
+    const layerData = room.layerData as unknown as LayerData;
+    const h = layerData.floor.length;
+    for (const c of changes) {
+      const x = Number(c?.x), y = Number(c?.y);
+      const value = c?.value == null ? null : String(c.value);
+      if (!Number.isInteger(x) || !Number.isInteger(y)) continue;
+      if (y < 0 || y >= h) continue;
+      const row = layerData.floor[y];
+      if (!row || x < 0 || x >= row.length) continue;
+      row[x] = value;
+    }
+
+    await prisma.room.update({ where: { id: room.id }, data: { layerData: layerData as unknown as object } });
+
+    // Re-derive the runtime shape and push it live to everyone in the room
+    // (same event/payload the old editor's socket save used, so the client
+    // handler is unchanged), and refresh the server-side collision cache.
+    const derived = layerDataToLegacy(layerData);
+    setCachedTiles(room.slug, derived.tiles);
+    ioRef?.to(room.slug).emit(SocketEvents.ROOM_UPDATED, { tiles: derived.tiles, furniture: derived.furniture, zones: derived.zones });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[rooms] editor floor save error:', err);
+    return res.status(500).json({ error: 'Failed to save floor' });
   }
 });
 
