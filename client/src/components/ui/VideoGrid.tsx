@@ -105,10 +105,21 @@ export function getVideoTiles(
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 3;
 
-function ScreenSharePanel({ name, stream, isLocal, onClose }: { name: string; stream: MediaStream; isLocal: boolean; onClose: () => void }) {
+function ScreenSharePanel({ name, stream, isLocal, onClose, onMaximizedChange }: { name: string; stream: MediaStream; isLocal: boolean; onClose: () => void; onMaximizedChange?: (maximized: boolean) => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
-  const [maximized, setMaximized] = useState(false);
+  const [maximized, setMaximizedState] = useState(false);
+  // Wraps setMaximized so every path that changes it (the button below, and
+  // Escape) also tells the parent — VideoGrid uses this to auto-hide the
+  // camera-tile rail while the share fills the screen, since a tile column
+  // still floating over a "Layar Penuh" share defeats the point of maximizing.
+  const setMaximized = (next: boolean | ((prev: boolean) => boolean)) => {
+    setMaximizedState((prev) => {
+      const v = typeof next === 'function' ? next(prev) : next;
+      onMaximizedChange?.(v);
+      return v;
+    });
+  };
   // Purely local magnification of the shared picture. Nothing is sent
   // anywhere: the presenter and everyone else keep seeing their own view at
   // their own zoom.
@@ -219,6 +230,76 @@ function ScreenSharePanel({ name, stream, isLocal, onClose }: { name: string; st
     return () => document.removeEventListener('keydown', onKey);
   }, [maximized]);
 
+  // Same control row, rendered two ways: a normal light bar that takes its
+  // own row when the panel is its usual size, or floated as a semi-
+  // transparent dark overlay ON TOP of the video when maximized — "Layar
+  // Penuh" otherwise still lost its top rows to a dedicated title bar, which
+  // read as the picture not actually reaching the top. One function so the
+  // onClick handlers only exist once, never duplicated between the two.
+  const renderControls = (variant: 'light' | 'dark') => {
+    const dim = variant === 'dark'
+      ? 'text-white/70 hover:text-white hover:bg-white/20'
+      : 'text-gray-500 hover:text-purple-700 dark:text-gray-300 dark:hover:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-600';
+    return (
+      <>
+        <DisplayFill size={10} className={`shrink-0 ${variant === 'dark' ? 'text-white/80' : 'text-purple-600 dark:text-purple-300'}`} />
+        <span className={`text-[11px] truncate flex-1 ${variant === 'dark' ? 'text-white/90' : 'text-gray-700 dark:text-gray-200'}`}>{name}</span>
+        {/* Only shown once it's actually zoomed — at 100% there is nothing to
+            explain, and a permanent "100%" badge would just be noise. */}
+        {zoom > 1 && (
+          <span className={`shrink-0 text-[10px] font-medium tabular-nums ${variant === 'dark' ? 'text-white/90' : 'text-purple-700 dark:text-purple-300'}`}>
+            {Math.round(zoom * 100)}%
+          </span>
+        )}
+        <button
+          onClick={() => applyZoom(zoom / 1.25, 0, 0)}
+          disabled={zoom <= MIN_ZOOM}
+          title="Perkecil isi"
+          className={`shrink-0 cursor-pointer p-0.5 rounded disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent ${dim}`}
+        >
+          <DashLg size={12} />
+        </button>
+        <button
+          onClick={() => applyZoom(zoom * 1.25, 0, 0)}
+          disabled={zoom >= MAX_ZOOM}
+          title="Perbesar isi"
+          className={`shrink-0 cursor-pointer p-0.5 rounded disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent ${dim}`}
+        >
+          <PlusLg size={12} />
+        </button>
+        {zoom > 1 && (
+          <button
+            onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}
+            title="Kembalikan ke 100%"
+            className={`shrink-0 cursor-pointer p-0.5 rounded ${dim}`}
+          >
+            <ArrowCounterclockwise size={12} />
+          </button>
+        )}
+        {/* Named for what it does. It used to say "Perbesar", which collided
+            with the enlarge button on the thumbnail — two different actions
+            wearing the same word. */}
+        <button
+          onClick={() => setMaximized((v) => !v)}
+          title={maximized ? 'Keluar layar penuh (Esc)' : 'Layar penuh'}
+          className={`shrink-0 cursor-pointer p-0.5 rounded ${dim}`}
+        >
+          {maximized ? <FullscreenExit size={12} /> : <ArrowsFullscreen size={12} />}
+        </button>
+        {/* Back to a thumbnail. Without this there is no way out of the focus
+            panel short of the presenter stopping — a dead end the spec
+            explicitly forbids. */}
+        <button
+          onClick={onClose}
+          title="Kecilkan ke kolom peserta"
+          className={`shrink-0 cursor-pointer p-0.5 rounded ${variant === 'dark' ? 'text-white/70 hover:text-red-300 hover:bg-white/20' : 'text-gray-500 hover:text-red-500 dark:text-gray-300 hover:bg-red-50 dark:hover:bg-gray-600'}`}
+        >
+          <XLg size={11} />
+        </button>
+      </>
+    );
+  };
+
   return (
     <div
       // Pinned top-centre, sized by whichever of three limits bites first.
@@ -276,68 +357,23 @@ function ScreenSharePanel({ name, stream, isLocal, onClose }: { name: string; st
           : 'left-14 right-2 top-1 bottom-2 rounded-lg'
       }`}
     >
-      {/* A label, not a handle — the panel does not move. */}
-      <div className="flex items-center gap-1.5 px-2 py-1 bg-purple-50 dark:bg-gray-700 select-none">
-        <DisplayFill size={10} className="text-purple-600 dark:text-purple-300 shrink-0" />
-        <span className="text-[11px] text-gray-700 dark:text-gray-200 truncate flex-1">{name}</span>
-        {/* Only shown once it's actually zoomed — at 100% there is nothing to
-            explain, and a permanent "100%" badge would just be noise. */}
-        {zoom > 1 && (
-          <span className="shrink-0 text-[10px] font-medium text-purple-700 dark:text-purple-300 tabular-nums">
-            {Math.round(zoom * 100)}%
-          </span>
-        )}
-        <button
-          onClick={() => applyZoom(zoom / 1.25, 0, 0)}
-          disabled={zoom <= MIN_ZOOM}
-          title="Perkecil isi"
-          className="shrink-0 text-gray-500 hover:text-purple-700 dark:text-gray-300 dark:hover:text-purple-300 cursor-pointer p-0.5 rounded hover:bg-purple-100 dark:hover:bg-gray-600 disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent"
-        >
-          <DashLg size={12} />
-        </button>
-        <button
-          onClick={() => applyZoom(zoom * 1.25, 0, 0)}
-          disabled={zoom >= MAX_ZOOM}
-          title="Perbesar isi"
-          className="shrink-0 text-gray-500 hover:text-purple-700 dark:text-gray-300 dark:hover:text-purple-300 cursor-pointer p-0.5 rounded hover:bg-purple-100 dark:hover:bg-gray-600 disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent"
-        >
-          <PlusLg size={12} />
-        </button>
-        {zoom > 1 && (
-          <button
-            onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}
-            title="Kembalikan ke 100%"
-            className="shrink-0 text-gray-500 hover:text-purple-700 dark:text-gray-300 dark:hover:text-purple-300 cursor-pointer p-0.5 rounded hover:bg-purple-100 dark:hover:bg-gray-600"
-          >
-            <ArrowCounterclockwise size={12} />
-          </button>
-        )}
-        {/* Named for what it does. It used to say "Perbesar", which collided
-            with the enlarge button on the thumbnail — two different actions
-            wearing the same word. */}
-        <button
-          onClick={() => setMaximized((v) => !v)}
-          title={maximized ? 'Keluar layar penuh (Esc)' : 'Layar penuh'}
-          className="shrink-0 text-gray-500 hover:text-purple-700 dark:text-gray-300 dark:hover:text-purple-300 cursor-pointer p-0.5 rounded hover:bg-purple-100 dark:hover:bg-gray-600"
-        >
-          {maximized ? <FullscreenExit size={12} /> : <ArrowsFullscreen size={12} />}
-        </button>
-        {/* Back to a thumbnail. Without this there is no way out of the focus
-            panel short of the presenter stopping — a dead end the spec
-            explicitly forbids. */}
-        <button
-          onClick={onClose}
-          title="Kecilkan ke kolom peserta"
-          className="shrink-0 text-gray-500 hover:text-red-500 dark:text-gray-300 cursor-pointer p-0.5 rounded hover:bg-red-50 dark:hover:bg-gray-600"
-        >
-          <XLg size={11} />
-        </button>
-      </div>
+      {/* A label, not a handle — the panel does not move. Only takes its own
+          row in the non-maximized size; maximized floats the identical
+          controls on top of the video instead (below), so "Layar Penuh"
+          actually gives the picture the full height rather than losing a row
+          of it to a title bar. */}
+      {!maximized && (
+        <div className="flex items-center gap-1.5 px-2 py-1 bg-purple-50 dark:bg-gray-700 select-none">
+          {renderControls('light')}
+        </div>
+      )}
       {/* flex-1 lets the box fill whatever height the panel has left after the
-          title bar (the 16:9 aspect-lock is gone — see the panel comment);
-          object-contain fits any incoming screen ratio inside it, letterboxed
-          on black rather than cropped. overflow-hidden turns it into the
-          viewport the zoomed picture is seen through — without it a magnified
+          title bar — or, maximized, the WHOLE panel, since there's no title
+          row sibling left to share it with (the 16:9 aspect-lock is gone —
+          see the panel comment); object-contain fits any incoming screen
+          ratio inside it, letterboxed on black rather than cropped.
+          overflow-hidden turns it into the viewport the zoomed picture is
+          seen through — without it a magnified
           screen would spill over the panel's edges. */}
       <div
         ref={boxRef}
@@ -363,6 +399,14 @@ function ScreenSharePanel({ name, stream, isLocal, onClose }: { name: string; st
           style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}
           className="absolute inset-0 w-full h-full object-contain"
         />
+        {/* The title bar's replacement while maximized — floats over the
+            video (z-10, semi-transparent so the picture still reads through
+            behind it) instead of pushing it down a row. */}
+        {maximized && (
+          <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1 bg-black/55 backdrop-blur-sm select-none">
+            {renderControls('dark')}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -471,7 +515,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   return (
     <>
       {featured && (
-        <ScreenSharePanel key={featured.key} name={featured.name} stream={featured.stream} isLocal={featured.isLocal} onClose={() => setFeaturedKey(null)} />
+        <ScreenSharePanel key={featured.key} name={featured.name} stream={featured.stream} isLocal={featured.isLocal} onClose={() => setFeaturedKey(null)} onMaximizedChange={setHidden} />
       )}
       <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 pointer-events-none">
         {hideButton}
