@@ -317,27 +317,51 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       isMoving: false,
     });
   }, [zones]);
+  // Last position we know we were legitimately allowed to occupy — restored
+  // when a zone-entry attempt gets refused, so the avatar snaps back out
+  // instead of visibly standing inside a locked room it was denied entry to.
+  const lastAllowedPosRef = useRef({ x: localPlayer.x, y: localPlayer.y });
+
   useEffect(() => {
     const zone = findZoneAt(localPlayer, zones);
     const zoneId = zone?.id ?? null;
-    if (zoneId === currentZoneIdRef.current) return;
+    if (zoneId === currentZoneIdRef.current) {
+      lastAllowedPosRef.current = { x: localPlayer.x, y: localPlayer.y };
+      return;
+    }
 
-    // A locked zone holds you in until its keyholder opens it. The server
-    // refuses the zone:exit anyway (membership drives zone chat + A/V), so
-    // without this the avatar would stand outside while still being IN the
-    // meeting — worse than not letting them walk out at all.
+    // A locked zone holds you in until it's unlocked (even for the person who
+    // locked it — see server zoneLock.ts). The server refuses the zone:exit
+    // anyway (membership drives zone chat + A/V), so without this the avatar
+    // would stand outside while still being IN the meeting — worse than not
+    // letting them walk out at all.
     const leaving = currentZoneIdRef.current;
     if (leaving) {
       const lock = zoneLock.lockOf(leaving);
-      if (lock && !zoneLock.isKeyholder(leaving)) {
+      if (lock) {
         pushBackInside(leaving);
         return;
       }
       emitZoneExit(leaving);
     }
-    if (zoneId) emitZoneEnter(zoneId);
+
+    // A locked zone also holds people OUT — not just chat/AV membership, the
+    // avatar itself must not be able to stand inside it. Checked client-side
+    // against the mirrored lock state (same pattern as the leaving check
+    // above) so the bounce is instant, no round trip needed.
+    if (zoneId) {
+      const lock = zoneLock.lockOf(zoneId);
+      if (lock && !zoneLock.isKeyholder(zoneId) && !zoneLock.isAdmitted(zoneId)) {
+        const back = lastAllowedPosRef.current;
+        useGameStore.getState().setLocalPlayer({ x: back.x, y: back.y, isMoving: false });
+        zoneLock.denyEntry(zoneId);
+        return;
+      }
+      emitZoneEnter(zoneId);
+    }
     currentZoneIdRef.current = zoneId;
     setCurrentZone(zone ? { id: zone.id, name: zone.name } : null);
+    lastAllowedPosRef.current = { x: localPlayer.x, y: localPlayer.y };
     // Walking out of the zone you were bounced from clears the knock prompt.
     if (!zoneId) zoneLock.clearDenied();
   }, [localPlayer.x, localPlayer.y, zones, emitZoneEnter, emitZoneExit]);

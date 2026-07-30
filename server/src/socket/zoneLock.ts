@@ -61,16 +61,19 @@ export function zoneLockStates(room: string): ZoneLockState[] {
   return [...roomLocks(room).keys()].map((zoneId) => stateOf(room, zoneId));
 }
 
-// The lock seals the door BOTH ways: while a zone is locked, the people
-// inside stay put until the keyholder opens it. That's the user's rule —
-// a locked meeting isn't a room you can wander out of.
+// The lock seals the door BOTH ways: while a zone is locked, EVERYONE inside
+// — including the keyholder — stays put until it's unlocked. A keyholder
+// exception was tried earlier and turned out to read as "the lock doesn't
+// actually work": the person who locked the room could just walk out through
+// their own supposedly-shut door. To leave, the keyholder unlocks first (the
+// same "Kunci <zona>" toggle they used to lock it), then walks out — one
+// extra step, but a locked door that only some people can open from either
+// side isn't a locked door.
 //
 // The safety valve is the keyholder's disconnect (see DISCONNECT below), which
 // unlocks the zone: without it, one closed laptop would trap everyone.
-export function isSealedIn(room: string, zoneId: string, userId: string | undefined): boolean {
-  const lock = roomLocks(room).get(zoneId);
-  if (!lock) return false;
-  return lock.lockedByUserId !== userId; // the keyholder may always step out
+export function isSealedIn(room: string, zoneId: string): boolean {
+  return roomLocks(room).has(zoneId);
 }
 
 // Is this user shut inside a locked zone right now? Used by follow and summon

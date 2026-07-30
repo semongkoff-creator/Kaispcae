@@ -59,12 +59,11 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
 
   socket.on(SocketEvents.ZONE_EXIT, (zoneId: string) => {
     if (!currentRoom) return;
-    // Locked zones hold you in: only the keyholder can open the door. The
-    // client also blocks the walk, but membership is what drives zone chat and
-    // A/V — so it must be refused HERE too, or someone could leave the meeting's
-    // audio while still standing in it.
-    const uid = socket.data.userId as string | undefined;
-    if (isSealedIn(currentRoom, zoneId, uid)) {
+    // Locked zones hold everyone in, keyholder included — unlock first, then
+    // walk out. The client also blocks the walk, but membership is what
+    // drives zone chat and A/V — so it must be refused HERE too, or someone
+    // could leave the meeting's audio while still standing in it.
+    if (isSealedIn(currentRoom, zoneId)) {
       socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'sealed_in' });
       return;
     }

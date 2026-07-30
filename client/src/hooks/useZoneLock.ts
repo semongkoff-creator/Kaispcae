@@ -9,6 +9,11 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
   const [knocks, setKnocks] = useState<ZoneKnockRequest[]>([]);
   // The zone we were just bounced from, so the UI can offer "knock?".
   const [deniedZoneId, setDeniedZoneId] = useState<string | null>(null);
+  // Zones the keyholder has admitted us into (via a knock), so App.tsx's
+  // entry check doesn't keep bouncing us back out after we've been let in.
+  // Cleared per-zone the moment it goes fully unlocked — a fresh lock cycle
+  // means admission has to be earned again, not grandfathered in.
+  const [admittedZoneIds, setAdmittedZoneIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -22,7 +27,17 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     const socket = socketRef.current;
     if (!socket) return;
 
-    const onUpdated = (msg: { zones: ZoneLockState[] }) => setZoneLocks(msg?.zones ?? []);
+    const onUpdated = (msg: { zones: ZoneLockState[] }) => {
+      const zones = msg?.zones ?? [];
+      setZoneLocks(zones);
+      const stillLocked = new Set(zones.map((z) => z.zoneId));
+      setAdmittedZoneIds((adm) => {
+        let changed = false;
+        const next = new Set(adm);
+        for (const id of adm) if (!stillLocked.has(id)) { next.delete(id); changed = true; }
+        return changed ? next : adm;
+      });
+    };
     const onDenied = (msg: { zoneId: string; reason?: string; lockedByName?: string }) => {
       if (msg.reason === 'already_locked') { flash(`Zona ini sudah dikunci ${msg.lockedByName ?? 'orang lain'}.`); return; }
       if (msg.reason === 'not_keyholder') { flash(`Hanya ${msg.lockedByName ?? 'yang mengunci'} yang bisa membuka zona ini.`); return; }
@@ -34,6 +49,7 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     };
     const onDecided = (msg: { zoneId: string; admitted: boolean; byName?: string }) => {
       setDeniedZoneId(msg.admitted ? null : msg.zoneId);
+      if (msg.admitted) setAdmittedZoneIds((s) => new Set(s).add(msg.zoneId));
       flash(msg.admitted ? `${msg.byName ?? 'Pengunci'} mengizinkan kamu masuk.` : `${msg.byName ?? 'Pengunci'} menolak permintaanmu.`);
     };
 
@@ -71,5 +87,14 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     return !!l && l.lockedByUserId === myUserId;
   }, [lockOf, myUserId]);
 
-  return { zoneLocks, knocks, deniedZoneId, toast, lockOf, setLock, knock, decide, isKeyholder, clearDenied: () => setDeniedZoneId(null) };
+  const isAdmitted = useCallback((zoneId: string | null) => !!zoneId && admittedZoneIds.has(zoneId), [admittedZoneIds]);
+
+  return {
+    zoneLocks, knocks, deniedZoneId, toast, lockOf, setLock, knock, decide, isKeyholder, isAdmitted,
+    clearDenied: () => setDeniedZoneId(null),
+    // App.tsx's client-side entry check calls this directly (no server round
+    // trip needed — the physical block already happened locally) to surface
+    // the same "knock to enter" prompt a server-side denial would show.
+    denyEntry: (zoneId: string) => setDeniedZoneId(zoneId),
+  };
 }
