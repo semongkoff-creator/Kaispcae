@@ -2,54 +2,19 @@ import { useRef, useEffect, useState } from 'react';
 import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
+import { ChatAvatar, avatarColor } from './ChatAvatar';
 
-// Accent colours for initial bubbles, drawn from the palette already used
-// across MeetKai (the purple the HUD is built on, plus the teal/amber/rose
-// used for zones, badges and alerts) so a tile never introduces a colour the
-// rest of the app doesn't use.
-const INITIAL_COLORS = ['#7c3aed', '#0d9488', '#d97706', '#e11d48', '#4f46e5', '#059669'];
-
-// Same name → same colour, on every screen, for the whole session. A random
-// pick would give the same person a different colour in each viewer's window,
-// which quietly destroys the "colour helps me recognise who this is" benefit
-// that is the entire reason for colouring them at all.
-function colorForName(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  return INITIAL_COLORS[hash % INITIAL_COLORS.length];
-}
-
-// One letter from a single-word name, first + last for a full name.
-// Array.from (not [0]) because indexing a string splits surrogate pairs —
-// an emoji or non-Latin name would render as half a broken character.
-function initialsOf(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return '?';
-  const first = Array.from(words[0])[0] ?? '?';
-  if (words.length === 1) return first.toUpperCase();
-  const last = Array.from(words[words.length - 1])[0] ?? '';
-  return (first + last).toUpperCase();
-}
-
-// What a tile shows while someone's camera is off. Replaces an earlier
-// attempt that drew their in-world pixel character here: on the map that
-// sprite IS the person, but shrunk into a 96px tile next to real webcam
-// video it read as decoration rather than as "this is who is here".
-//
-// No photo branch exists because there is no photo to show — the User model
-// has avatarConfig (pixel-avatar parts) and no image field anywhere in the
-// schema. When profile photos are added, they slot in above the initials as
-// the preferred case; nothing here needs restructuring for that.
-function InitialsAvatar({ name, large }: { name: string; large?: boolean }) {
-  const initials = initialsOf(name);
+// What a tile shows while someone's camera is off — the SAME ChatAvatar used in
+// chat, so it shows the person's profile photo when they have one and otherwise
+// their real-name initials. `name` here must be the REAL name (never a display
+// label like "Kamu"); the caller passes the label separately for the corner
+// text. Centered on a neutral backdrop, sized up on the large (Meeting View) path.
+function TileAvatar({ name, photoUrl, large }: { name: string; photoUrl?: string; large?: boolean }) {
   return (
     <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-gray-700">
-      <div
-        className={`rounded-full flex items-center justify-center font-semibold text-white select-none ${large ? 'w-20 h-20 text-2xl' : 'w-9 h-9 text-xs'}`}
-        style={{ backgroundColor: colorForName(name) }}
-        title={name}
-      >
-        {initials}
+      {/* Wrapper div so ChatAvatar's own `self-end` doesn't bottom-align it. */}
+      <div className="flex">
+        <ChatAvatar name={name} color={avatarColor(name)} photoUrl={photoUrl} size={large ? 88 : 36} />
       </div>
     </div>
   );
@@ -537,6 +502,8 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
 // hand-maintained copy of the mirror/PIP/volume-slider logic.
 export function VideoTile({
   name,
+  avatarName,
+  photoUrl,
   stream,
   isLocal,
   micMuted,
@@ -551,6 +518,13 @@ export function VideoTile({
   speaking,
 }: {
   name: string;
+  // The camera-off avatar draws from the person's REAL identity, not the
+  // corner label: `avatarName` is their real name (so "Kamu" still initials to
+  // "F" for Farrel) and `photoUrl` is their profile photo when they have one.
+  // Both default off `name` when omitted, so callers that don't distinguish
+  // keep the old behaviour.
+  avatarName?: string;
+  photoUrl?: string;
   // Optional: a nearby peer with no camera on (or whose media hasn't arrived
   // yet) has no stream, and still gets a tile showing their initials.
   stream?: MediaStream | null;
@@ -661,7 +635,7 @@ export function VideoTile({
           a black rectangle tells you nothing, the avatar tells you who. */}
       {showAvatar && (
         <div className="absolute inset-0">
-          <InitialsAvatar name={name} large={large} />
+          <TileAvatar name={avatarName ?? name} photoUrl={photoUrl} large={large} />
         </div>
       )}
       </div>

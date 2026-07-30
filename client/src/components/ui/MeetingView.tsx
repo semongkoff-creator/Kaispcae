@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { XLg, PinFill } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteType, EMOTE_LIST, EMOTE_EMOJI, EMOTE_LABELS } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
+import { useProfiles } from '@/hooks/useProfiles';
 import { getVideoTiles, VideoTile, latestReaction } from './VideoGrid';
 
 interface MeetingViewProps {
@@ -24,7 +25,9 @@ interface MeetingViewProps {
 // works off a single list instead of four parallel branches.
 interface MTile {
   key: string;
-  name: string;
+  name: string;          // corner label (may be a role word like "Kamu"/"Layarmu")
+  avatarName?: string;   // REAL name — drives the camera-off initials (Bug 16)
+  photoUrl?: string;     // profile photo for the camera-off avatar, if any
   stream?: MediaStream | null;
   isLocal: boolean;
   isScreen: boolean;
@@ -52,6 +55,8 @@ export function MeetingView({
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localHandRaised = useGameStore((s) => s.localPlayer.handRaised);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
+  const localUserId = useGameStore((s) => s.localUserId);
+  const localName = useGameStore((s) => s.localPlayer.name);
   const emoteEvents = useGameStore((s) => s.emoteEvents);
   const localSpeaking = useGameStore((s) => s.localSpeaking);
   const speakingPlayers = useGameStore((s) => s.speakingPlayers);
@@ -60,17 +65,29 @@ export function MeetingView({
   const videoTiles = getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams, recordedTargetUserId);
   const screenTiles = videoTiles.filter((t) => t.screenStream);
 
+  // Profile photos for the camera-off avatars — resolved by userId, the SAME
+  // hook/source chat uses (Bug 8), so a tile shows the person's current photo
+  // and real-name initials instead of "K" from the label "Kamu" (Bug 16).
+  const profileIds = useMemo(() => {
+    const ids = [localUserId];
+    for (const t of videoTiles) { const uid = playerRecords[t.id]?.userId; if (uid) ids.push(uid); }
+    return ids.filter(Boolean);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localUserId, videoTiles.map((t) => t.id).join(','), playerRecords]);
+  const profiles = useProfiles(profileIds);
+  const profileSig = profileIds.map((id) => { const p = profiles.get(id); return `${id}:${p?.name ?? ''}:${p?.photo ?? ''}`; }).join(',');
+
   // Build the unified tile list. Order matters: it decides the auto-featured
   // fallback (first screen, else first remote, else local).
   const tiles = useMemo<MTile[]>(() => {
     const out: MTile[] = [];
     if (localScreenStream) out.push({ key: 'local-screen', name: 'Layarmu', stream: localScreenStream, isLocal: true, isScreen: true });
     for (const t of screenTiles) out.push({ key: `${t.id}-screen`, name: `Layar ${t.name}`, stream: t.screenStream, isLocal: false, isScreen: true });
-    if (localStream) out.push({ key: 'local-cam', name: 'Kamu', stream: localStream, isLocal: true, isScreen: false, micMuted, cameraOff, handRaised: localHandRaised, isBeingRecorded: isLocalBeingRecorded, speaking: localSpeaking && !micMuted, reactionSourceId: localPlayerId ?? undefined });
-    for (const t of videoTiles) out.push({ key: t.id, name: t.name, stream: t.stream, isLocal: false, isScreen: false, translucent: t.translucent, handRaised: t.handRaised, isBeingRecorded: t.isBeingRecorded, speaking: speakingPlayers.has(t.id), reactionSourceId: t.id, volumeTargetId: t.id });
+    if (localStream) out.push({ key: 'local-cam', name: 'Kamu', avatarName: profiles.get(localUserId)?.name || localName, photoUrl: profiles.get(localUserId)?.photo ?? undefined, stream: localStream, isLocal: true, isScreen: false, micMuted, cameraOff, handRaised: localHandRaised, isBeingRecorded: isLocalBeingRecorded, speaking: localSpeaking && !micMuted, reactionSourceId: localPlayerId ?? undefined });
+    for (const t of videoTiles) { const uid = playerRecords[t.id]?.userId; out.push({ key: t.id, name: t.name, avatarName: (uid ? profiles.get(uid)?.name : '') || t.name, photoUrl: uid ? profiles.get(uid)?.photo ?? undefined : undefined, stream: t.stream, isLocal: false, isScreen: false, translucent: t.translucent, handRaised: t.handRaised, isBeingRecorded: t.isBeingRecorded, speaking: speakingPlayers.has(t.id), reactionSourceId: t.id, volumeTargetId: t.id }); }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [localStream, localScreenStream, micMuted, cameraOff, localHandRaised, isLocalBeingRecorded, localSpeaking, localPlayerId,
+  }, [localStream, localScreenStream, micMuted, cameraOff, localHandRaised, isLocalBeingRecorded, localSpeaking, localPlayerId, localUserId, localName, profileSig,
       videoTiles.map((t) => `${t.id}:${!!t.stream}:${t.translucent}:${t.handRaised}`).join(','),
       screenTiles.map((t) => t.id).join(',')]);
 
@@ -108,6 +125,8 @@ export function MeetingView({
   const renderTile = (t: MTile, main: boolean) => (
     <VideoTile
       name={t.name}
+      avatarName={t.avatarName}
+      photoUrl={t.photoUrl}
       stream={t.stream}
       isLocal={t.isLocal}
       isScreen={t.isScreen}
@@ -140,7 +159,11 @@ export function MeetingView({
       {/* Featured stage — fills the bulk of the screen. */}
       <div className="flex-1 min-h-0 flex items-center justify-center pl-20 pr-6">
         {featured ? (
-          <div className="relative w-full h-full max-w-[1500px] mx-auto">
+          // 16:9 box driven by the available height, so the tile keeps Google-
+          // Meet proportions and the dark stage letterboxes around it instead of
+          // the video stretching to fill the whole panel. max-w-full guards the
+          // rare taller-than-16:9 container.
+          <div className="relative h-full aspect-video max-w-full mx-auto">
             {renderTile(featured, true)}
             {isPinned && (
               <button
