@@ -222,6 +222,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // Potong 6 — which YouTube tile is close enough to auto-embed (proximity).
   const [ytEmbedId, setYtEmbedId] = useState<string | null>(null);
   const ytEmbedRef = useRef<string | null>(null);
+  // Bug 11 — the auto-embed starts muted (autoplay without mute is blocked by
+  // every modern browser's autoplay policy anyway), so it needs a LOUD,
+  // obvious unmute affordance: this tracks whether the currently-embedded
+  // video has been unmuted (via the YT IFrame postMessage API — enablejsapi=1
+  // on the embed URL). Reset whenever the embedded tile changes, so walking
+  // away and back starts muted again, exactly like the fresh embed it is.
+  const [ytUnmuted, setYtUnmuted] = useState(false);
+  const ytIframeRef = useRef<HTMLIFrameElement | null>(null);
+  useEffect(() => { setYtUnmuted(false); }, [ytEmbedId]);
   // §6 — Add Media markers: same DOM-overlay-positioned-via-transform
   // pattern as zone/banner above, one small clickable pin per object.
   const mediaMarkerRefs = useRef(new Map<string, HTMLDivElement>());
@@ -1384,9 +1393,19 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                 // the thumbnail state already has, without covering the
                 // player's own controls.
                 <div className="relative w-56 h-32 -mt-32 -ml-4">
+                  {/* Bug 11 — autoplay=1&mute=1: modern browsers only permit
+                      autoplay when muted, so the video starts playing
+                      silently the moment the player walks near, and the
+                      prominent button below is the sanctioned user gesture
+                      that turns sound on (unMute via the IFrame postMessage
+                      API — enablejsapi=1 — plus playVideo, in case the user
+                      had paused it). The lightbox embed (MediaViewerModal)
+                      is deliberately different: no autoplay, no mute — a
+                      manual play click there starts WITH sound. */}
                   <iframe
+                    ref={ytIframeRef}
                     title="yt"
-                    src={`https://www.youtube.com/embed/${media.payload.videoId}?mute=1&rel=0`}
+                    src={`https://www.youtube.com/embed/${media.payload.videoId}?autoplay=1&mute=1&rel=0&enablejsapi=1`}
                     allow="autoplay; encrypted-media; picture-in-picture"
                     className="w-full h-full rounded-lg shadow-lg border border-purple-300 bg-black"
                   />
@@ -1397,6 +1416,20 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                   >
                     ⛶
                   </button>
+                  {!ytUnmuted && (
+                    <button
+                      onClick={() => {
+                        const w = ytIframeRef.current?.contentWindow;
+                        if (!w) return;
+                        w.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
+                        w.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+                        setYtUnmuted(true);
+                      }}
+                      className="absolute bottom-1.5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-red-600 hover:bg-red-700 text-white text-[11px] font-semibold px-3 py-1 shadow-lg cursor-pointer animate-pulse"
+                    >
+                      🔇 Nyalakan suara
+                    </button>
+                  )}
                 </div>
               ) : (
                 <button
