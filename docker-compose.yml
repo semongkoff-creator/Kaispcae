@@ -38,6 +38,18 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set — see .env.example}
       CLIENT_URL: http://localhost
       CORS_ORIGIN: http://localhost
+    volumes:
+      # server/src/routes/uploads.ts writes chat attachments/Add-Media files
+      # to ./uploads (process.cwd()/uploads = /app/uploads here) whenever
+      # Lark Drive isn't used — every MessengerApp attachment falls here
+      # (it never has a room to resolve a Drive folder from), and so does
+      # any room upload if Drive isn't configured. Without a volume, that
+      # directory lives only in the container's writable layer: the next
+      # `docker compose build server` (any server-side fix, not just an
+      # uploads-related one) recreates the container and wipes every file
+      # that fell back to disk — already-sent attachments start 404ing,
+      # which looks exactly like "the upload failed" even though it didn't.
+      - server_uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,3 +67,4 @@ services:
 
 volumes:
   pgdata:
+  server_uploads:
