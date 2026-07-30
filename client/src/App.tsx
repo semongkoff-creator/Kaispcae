@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { GearFill, Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill } from 'react-bootstrap-icons';
+import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill } from 'react-bootstrap-icons';
 import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -27,7 +27,6 @@ import { MessengerApp } from './components/Messenger/MessengerApp';
 import { NoticeBanner } from './components/ui/NoticeBanner';
 import { EmoteWheel } from './components/ui/EmoteWheel';
 import { Minimap } from './components/hud/Minimap';
-import { RoomEditor } from './components/ui/RoomEditor';
 import { AdminPanel } from './components/ui/AdminPanel';
 import { TeleportPanel } from './components/ui/TeleportPanel';
 import { RoomEditorPage } from './pages/RoomEditorPage';
@@ -105,7 +104,7 @@ const AFK_STATUS = '💤 Away';
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage } = useSocket(authDisplayName, roomSlug, authUserId);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -474,10 +473,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     return () => clearTimeout(timer);
   }, [followResult]);
 
-  // Admin / Editor
+  // Admin / Editor. editorMode (the old in-map overlay editor) can no longer
+  // be switched on — the toggle went with the retired editor (Potong 7) — but
+  // the store field and GameCanvas's editor branches remain, permanently off.
   const isAdmin = useGameStore((s) => s.isAdmin);
   const editorMode = useGameStore((s) => s.editorMode);
-  const toggleEditorMode = useGameStore((s) => s.toggleEditorMode);
   const selectedTileType = useGameStore((s) => s.selectedTileType);
   const selectedPaletteId = useGameStore((s) => s.selectedPaletteId);
   const zoneDrawMode = useGameStore((s) => s.zoneDrawMode);
@@ -485,7 +485,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const pushTileHistory = useGameStore((s) => s.pushTileHistory);
   const setTiles = useGameStore((s) => s.setTiles);
   const tiles = useGameStore((s) => s.tiles);
-  const [editorToast, setEditorToast] = useState('');
   // Bug 12 — "one panel at a time": every main panel derives its open state
   // from a single store field. Opening one closes the rest (and chat / room
   // editor); see gameStore openPanel/closePanel. Names are kept identical to
@@ -539,15 +538,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // they belong to the office, not to a spreadsheet or a document.
   const moduleOpen = dailyTaskActive || leaveActive || calendarViewActive || adminViewActive || attendanceViewActive || messengerViewActive;
 
-  // E key for editor, Tab for admin panel
+  // Tab for admin panel. (The old E-for-editor hotkey went with the retired
+  // overlay editor — Potong 7; editing now lives on the /?roomEditor= page.)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Inert while typing AND while a suite module covers the room: pressing
-      // "e" inside the Calendar's title field used to open the Room Editor.
       if (shouldIgnoreRoomHotkey(e.target, moduleOpen)) return;
-      if (e.key === 'e' || e.key === 'E') {
-        if (isAdmin) toggleEditorMode();
-      }
       if (e.key === 'Tab') {
         e.preventDefault();
         openPanel('adminPanel');
@@ -555,7 +550,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isAdmin, toggleEditorMode, moduleOpen]);
+  }, [moduleOpen]);
 
   const handleTilePaint = useCallback((x: number, y: number, type: TileType) => {
     const state = useGameStore.getState();
@@ -624,14 +619,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     onPortalTravel(target);
     setTimeout(() => { portalTravelGuardRef.current = false; }, 1500);
   }, [roomSlug, onPortalTravel]);
-
-  const handleRoomSave = useCallback(() => {
-    const state = useGameStore.getState();
-    const tileData = state.tiles.map((row) => row.map((t) => ({ type: t.type, x: t.x, y: t.y, floorPaletteId: t.floorPaletteId, portalTarget: t.portalTarget })));
-    emitRoomUpdate({ tiles: tileData, furniture: state.furniture, zones: state.zones });
-    setEditorToast('Room saved!');
-    setTimeout(() => setEditorToast(''), 2000);
-  }, [emitRoomUpdate]);
 
   const handleAvatarSave = useCallback((config: AvatarConfig) => {
     saveAvatarConfig(config);
@@ -1023,8 +1010,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         status={localPlayer.status || ''}
         onSaveStatus={handleStatusSave}
         isAdmin={isAdmin}
-        editorMode={editorMode}
-        onToggleEditorMode={toggleEditorMode}
         onOpenRoomEditor={() => window.open(`/?roomEditor=${encodeURIComponent(roomSlug)}`, '_blank', 'noopener')}
         canTeleport={roleAtLeast(localRole, 'member')}
         showTeleportPanel={showTeleportPanel}
@@ -1113,25 +1098,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </div>
       )}
 
-      {isAdmin && editorMode && (
-        <RoomEditor onSave={handleRoomSave} roomSlug={roomSlug} />
-      )}
-
-      {editorMode && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-purple-600/90 text-white text-xs font-bold px-3 py-1 rounded-full pointer-events-none inline-flex items-center gap-1.5">
-          <GearFill size={11} /> EDIT MODE
-        </div>
-      )}
-
-      {/* w-fit + auto margins instead of left-1/2/-translate-x-1/2: this
-          element also carries animate-fade-in, whose animated transform
-          overrides the centring translate and pushes it off to the right.
-          Same conflict as the screen-share panel in VideoGrid. */}
-      {editorToast && (
-        <div className="absolute top-16 left-0 right-0 mx-auto w-fit z-50 bg-emerald-500/90 text-white text-xs font-bold px-4 py-2 rounded-full animate-fade-in pointer-events-none">
-          {editorToast}
-        </div>
-      )}
 
       {/* Lark Base (database) module — full-screen in-room panel, same z-40
           layer as Meeting View; the room's Sidebar rail (z-50) stays reachable

@@ -28,6 +28,22 @@ export const EDITOR_TOOLS: { id: EditorTool; label: string; key: string }[] = [
 
 export interface EditorViewport { panX: number; panY: number; zoom: number; }
 export interface Selection { x: number; y: number; w: number; h: number; }
+
+// Copy tool (Potong 7): a captured region of EVERY layer, coordinates relative
+// to the region origin so it can be stamped anywhere. Internal-portal targets
+// stay ABSOLUTE on purpose — a pasted portal points at the same destination as
+// the original (the page warns about this on paste). privateArea keeps its
+// areaId, so the pasted copy joins the same audio group — intended (P4 rule:
+// same areaId = one group even when the rectangles are apart).
+export interface EditorClipboard {
+  w: number; h: number;
+  floor: (string | null)[][];
+  wall: boolean[][];
+  objects: Furniture[];
+  topObjects: Furniture[];
+  tileEffects: TileEffect[];
+  areas: AreaEffect[];
+}
 export interface FloorChange { x: number; y: number; value: string | null; }
 export interface WallChange { x: number; y: number; value: boolean; }
 type FloorGrid = (string | null)[][];
@@ -99,6 +115,15 @@ interface EditorState {
   areaAt: (x: number, y: number) => AreaEffect | null;
   addArea: (effect: 'mapLocation' | 'privateArea', rect: Selection, name: string, areaId?: string) => void;
   removeAreaAt: (x: number, y: number) => void;
+
+  // Copy tool (Potong 7). copyRegion captures the selection into the clipboard;
+  // pasteAt stamps it with the clicked tile as the top-left corner. Out-of-map
+  // parts are skipped (result.clipped tells the page to say so). One history
+  // entry per paste.
+  clipboard: EditorClipboard | null;
+  copyRegion: (rect: Selection) => void;
+  clearClipboard: () => void;
+  pasteAt: (x: number, y: number) => { clipped: boolean; portals: number } | null;
 
   // Portal (Potong 5) — one per tile; replaces any effect already there.
   addPortal: (x: number, y: number, cfg: { targetSlug?: string; targetX?: number; targetY?: number; label?: string }) => void;
@@ -209,7 +234,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setDoc: (doc) => {
       undoStack.length = 0; redoStack.length = 0; floorPending.clear(); wallPending.clear();
       objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; resizedDirty = false; strokeSnap = null; strokeChanged = false;
-      set({ doc, revision: 0, undoDepth: 0, redoDepth: 0, selection: null, selectedObjectId: null });
+      set({ doc, revision: 0, undoDepth: 0, redoDepth: 0, selection: null, selectedObjectId: null, clipboard: null });
     },
 
     selectedFloorPaletteId: null,
@@ -322,6 +347,80 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const snap = snapshot();
       d.areas = d.areas.filter((z) => z.id !== a.id);
       areasDirty = true; pushHistory(snap); commit();
+    },
+
+    clipboard: null,
+    clearClipboard: () => set({ clipboard: null }),
+    copyRegion: (rect) => {
+      const d = get().doc; if (!d) return;
+      // Clamp the marquee to the map so the clipboard never holds phantom cells.
+      const x0 = Math.max(0, rect.x), y0 = Math.max(0, rect.y);
+      const x1 = Math.min(d.width, rect.x + rect.w), y1 = Math.min(d.height, rect.y + rect.h);
+      const w = x1 - x0, h = y1 - y0;
+      if (w <= 0 || h <= 0) return;
+      const inRegion = (o: { x: number; y: number }) => o.x >= x0 && o.x < x1 && o.y >= y0 && o.y < y1;
+      set({
+        clipboard: {
+          w, h,
+          floor: Array.from({ length: h }, (_, y) => Array.from({ length: w }, (_, x) => d.floor[y0 + y]?.[x0 + x] ?? null)),
+          wall: Array.from({ length: h }, (_, y) => Array.from({ length: w }, (_, x) => d.wall[y0 + y]?.[x0 + x] ?? false)),
+          // Objects belong to the region by their BASE tile (same rule resize
+          // uses); coordinates become region-relative.
+          objects: d.objects.filter(inRegion).map((o) => ({ ...o, x: o.x - x0, y: o.y - y0 })),
+          topObjects: d.topObjects.filter(inRegion).map((o) => ({ ...o, x: o.x - x0, y: o.y - y0 })),
+          // Portal targetX/Y intentionally NOT rebased — see EditorClipboard.
+          tileEffects: d.tileEffects.filter(inRegion).map((e) => ({ ...e, x: e.x - x0, y: e.y - y0 })),
+          areas: d.areas
+            .filter((a) => a.x < x1 && a.x + a.width > x0 && a.y < y1 && a.y + a.height > y0)
+            .map((a) => { const ax = Math.max(a.x, x0), ay = Math.max(a.y, y0); return { ...a, x: ax - x0, y: ay - y0, width: Math.min(a.x + a.width, x1) - ax, height: Math.min(a.y + a.height, y1) - ay }; }),
+        },
+      });
+    },
+    pasteAt: (px, py) => {
+      const d = get().doc; const cb = get().clipboard;
+      if (!d || !cb) return null;
+      const snap = snapshot();
+      let changed = false;
+      let clipped = px < 0 || py < 0 || px + cb.w > d.width || py + cb.h > d.height;
+      // Grids: exact replication of the copied block (nulls/false included), so
+      // pasting reproduces the source area rather than merging with the target.
+      for (let y = 0; y < cb.h; y++) for (let x = 0; x < cb.w; x++) {
+        const tx = px + x, ty = py + y;
+        if (tx < 0 || tx >= d.width || ty < 0 || ty >= d.height) continue;
+        if (applyFloorCell(tx, ty, cb.floor[y][x])) changed = true;
+        if (applyWallCell(tx, ty, cb.wall[y][x])) changed = true;
+      }
+      const inMap = (o: { x: number; y: number }) => o.x >= 0 && o.x < d.width && o.y >= 0 && o.y < d.height;
+      // Entities: fresh ids so the copies are independent; out-of-map ones are
+      // dropped (reported via `clipped`). privateArea keeps areaId on purpose.
+      for (const o of [...cb.objects, ...cb.topObjects]) {
+        const isTop = cb.topObjects.includes(o);
+        const placed = { ...o, id: crypto.randomUUID(), x: o.x + px, y: o.y + py };
+        if (!inMap(placed)) { clipped = true; continue; }
+        if (isTop) { d.topObjects.push(placed); topDirty = true; } else { d.objects.push(placed); objectsDirty = true; }
+        changed = true;
+      }
+      let portals = 0;
+      for (const e of cb.tileEffects) {
+        const placed = { ...e, x: e.x + px, y: e.y + py };
+        if (!inMap(placed)) { clipped = true; continue; }
+        // One effect per tile (same rule as stampEffectAt/addPortal).
+        d.tileEffects = d.tileEffects.filter((ex) => !(ex.x === placed.x && ex.y === placed.y));
+        d.tileEffects.push(placed);
+        if (placed.kind === 'portal') portals++;
+        effectsDirty = true; changed = true;
+      }
+      for (const a of cb.areas) {
+        const ax = a.x + px, ay = a.y + py;
+        const nx = Math.max(0, ax), ny = Math.max(0, ay);
+        const width = Math.min(ax + a.width, d.width) - nx, height = Math.min(ay + a.height, d.height) - ny;
+        if (width <= 0 || height <= 0) { clipped = true; continue; }
+        if (width !== a.width || height !== a.height) clipped = true;
+        d.areas.push({ ...a, id: crypto.randomUUID(), x: nx, y: ny, width, height });
+        areasDirty = true; changed = true;
+      }
+      if (changed) { pushHistory(snap); commit(); }
+      return { clipped, portals };
     },
 
     addPortal: (x, y, cfg) => {

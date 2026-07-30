@@ -118,8 +118,20 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
 export function RoomEditorPage({ slug }: { slug: string }) {
   const [meta, setMeta] = useState<{ name: string; theme: RoomTheme } | null>(null);
   const [error, setError] = useState<LoadError | null>(null);
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'error'>('idle');
+  // 'dirty' = edits exist that the debounce hasn't flushed yet — the admin must
+  // never read "Tersimpan" while changes are only in memory (Potong 7).
+  const [saveState, setSaveState] = useState<'saved' | 'dirty' | 'saving' | 'error'>('saved');
+  const saveStateRef = useRef(saveState); useEffect(() => { saveStateRef.current = saveState; }, [saveState]);
   const [objTab, setObjTab] = useState<'furniture' | 'decor' | 'electronics'>('furniture');
+  const [objSearch, setObjSearch] = useState('');
+  // Transient notice (paste clipped / pasted portals keep their destination).
+  const [notice, setNotice] = useState('');
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showNotice = useCallback((msg: string) => {
+    setNotice(msg);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(''), 4000);
+  }, []);
   const [resizeOpen, setResizeOpen] = useState(false);
   const [resizeW, setResizeW] = useState(0);
   const [resizeH, setResizeH] = useState(0);
@@ -150,6 +162,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const selectedEffect = useEditorStore((s) => s.selectedEffect);
   const setSelectedEffect = useEditorStore((s) => s.setSelectedEffect);
   const selection = useEditorStore((s) => s.selection);
+  const clipboard = useEditorStore((s) => s.clipboard);
   const revision = useEditorStore((s) => s.revision);
   const undoDepth = useEditorStore((s) => s.undoDepth);
   const redoDepth = useEditorStore((s) => s.redoDepth);
@@ -159,6 +172,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const metaRef = useRef<{ name: string; theme: RoomTheme } | null>(null);
   const spaceHeldRef = useRef(false);
   const dragRef = useRef<{ mode: string; last?: { x: number; y: number }; anchor?: { x: number; y: number } } | null>(null);
+  const hoverTileRef = useRef<{ x: number; y: number } | null>(null); // paste ghost anchor
 
   useEffect(() => { metaRef.current = meta; }, [meta]);
 
@@ -193,22 +207,33 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta]);
 
-  // Debounced save.
+  // Debounced save. The indicator goes 'dirty' the moment an edit commits, so
+  // "Tersimpan" is only ever shown when the server truly has everything.
   useEffect(() => {
     if (revision === 0) return;
+    setSaveState('dirty');
+    const rev = revision;
     const t = setTimeout(() => {
       const p = useEditorStore.getState().takePending();
-      if (!hasChanges(p)) return;
+      if (!hasChanges(p)) { if (useEditorStore.getState().revision === rev) setSaveState('saved'); return; }
       setSaveState('saving');
-      api.saveRoomLayers(slug, p).then(() => setSaveState('idle')).catch(() => { useEditorStore.getState().requeuePending(p); setSaveState('error'); });
+      api.saveRoomLayers(slug, p)
+        // Only report saved if nothing new landed while this save was in
+        // flight — otherwise the rerun of this effect owns the state.
+        .then(() => { if (useEditorStore.getState().revision === rev) setSaveState('saved'); })
+        .catch(() => { useEditorStore.getState().requeuePending(p); setSaveState('error'); });
     }, 900);
     return () => clearTimeout(t);
   }, [revision, slug]);
 
   useEffect(() => {
     const flush = () => { const p = useEditorStore.getState().takePending(); if (hasChanges(p)) api.saveRoomLayers(slug, p).catch(() => {}); };
+    // Closing the tab with unflushed changes: ask first (the pagehide flush is
+    // best-effort only — the request can be cut off mid-flight).
+    const confirmClose = (e: BeforeUnloadEvent) => { if (saveStateRef.current !== 'saved') { e.preventDefault(); e.returnValue = ''; } };
     window.addEventListener('pagehide', flush);
-    return () => window.removeEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', confirmClose);
+    return () => { window.removeEventListener('pagehide', flush); window.removeEventListener('beforeunload', confirmClose); };
   }, [slug]);
 
   // Continuous redraw.
@@ -236,6 +261,15 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             }
             const sel = st.selection;
             if (sel) { ctx.fillStyle = 'rgba(124,58,237,0.18)'; ctx.fillRect(sel.x * TILE_SIZE, sel.y * TILE_SIZE, sel.w * TILE_SIZE, sel.h * TILE_SIZE); ctx.strokeStyle = 'rgba(167,139,250,0.95)'; ctx.lineWidth = 2 / z; ctx.setLineDash([6 / z, 4 / z]); ctx.strokeRect(sel.x * TILE_SIZE, sel.y * TILE_SIZE, sel.w * TILE_SIZE, sel.h * TILE_SIZE); ctx.setLineDash([]); }
+            // Paste ghost: the clipboard's footprint follows the cursor so the
+            // admin sees exactly where the block will land (green = paste).
+            const hov = hoverTileRef.current;
+            if (st.activeTool === 'copy' && st.clipboard && hov) {
+              const gw = st.clipboard.w * TILE_SIZE, gh = st.clipboard.h * TILE_SIZE;
+              ctx.fillStyle = 'rgba(34,197,94,0.12)'; ctx.fillRect(hov.x * TILE_SIZE, hov.y * TILE_SIZE, gw, gh);
+              ctx.strokeStyle = 'rgba(74,222,128,0.95)'; ctx.lineWidth = 2 / z; ctx.setLineDash([6 / z, 4 / z]);
+              ctx.strokeRect(hov.x * TILE_SIZE, hov.y * TILE_SIZE, gw, gh); ctx.setLineDash([]);
+            }
             // Selected object outline (Objects/Top layers).
             if (st.selectedObjectId && (st.activeLayer === 'objects' || st.activeLayer === 'top')) {
               const arr = st.activeLayer === 'top' ? doc.topObjects : doc.objects;
@@ -280,6 +314,8 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       else if (k === 'w') s.setActiveTool('eraser');
       else if (k === 'v') s.setActiveTool('select');
       else if (k === 'h') s.setActiveTool('hand');
+      else if (k === 'c') s.setActiveTool('copy');
+      else if (e.key === 'Escape') { s.clearClipboard(); s.setSelection(null); portalOriginRef.current = null; setPortalHint(false); }
       else if (e.key === 'Delete' || e.key === 'Backspace') {
         if ((s.activeLayer === 'floor' || s.activeLayer === 'wall') && s.selection) { e.preventDefault(); s.fillSelection('erase'); }
         else if ((s.activeLayer === 'objects' || s.activeLayer === 'top') && s.selectedObjectId) { e.preventDefault(); s.deleteSelected(s.activeLayer === 'top' ? 'top' : 'objects'); }
@@ -308,6 +344,23 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     const s = useEditorStore.getState();
     if (s.activeTool === 'hand' || spaceHeldRef.current) { dragRef.current = { mode: 'pan', last: { x: e.clientX, y: e.clientY } }; return; }
     const t = tileAt(e.clientX, e.clientY);
+    // Copy tool (Potong 7) works across ALL layers: no clipboard yet → drag a
+    // marquee to capture; clipboard armed → every click stamps a paste.
+    if (s.activeTool === 'copy') {
+      if (s.clipboard) {
+        const r = s.pasteAt(t.x, t.y);
+        if (r) {
+          const msgs: string[] = [];
+          if (r.clipped) msgs.push('Bagian di luar batas map tidak ditempel.');
+          if (r.portals > 0) msgs.push(`${r.portals} portal tersalin menunjuk tujuan yang SAMA dengan aslinya.`);
+          if (msgs.length) showNotice(msgs.join(' '));
+        }
+      } else {
+        s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 });
+        dragRef.current = { mode: 'copyRect', anchor: { x: t.x, y: t.y } };
+      }
+      return;
+    }
     const layer = s.activeLayer;
     if (layer === 'floor' || layer === 'wall') {
       if (s.activeTool === 'stamp') { s.beginStroke(); layer === 'floor' ? s.paintFloorAt(t.x, t.y) : s.stampWallAt(t.x, t.y); dragRef.current = { mode: layer === 'floor' ? 'floorPaint' : 'wallPaint' }; }
@@ -358,6 +411,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   }, [tileAt]);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
+    hoverTileRef.current = tileAt(e.clientX, e.clientY); // paste-ghost anchor
     const d = dragRef.current; if (!d) return;
     const s = useEditorStore.getState();
     if (d.mode === 'pan' && d.last) { s.panBy(e.clientX - d.last.x, e.clientY - d.last.y); d.last = { x: e.clientX, y: e.clientY }; return; }
@@ -369,12 +423,17 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     else if (d.mode === 'objMove') s.moveSelectedTo(t.x, t.y, s.activeLayer === 'top' ? 'top' : 'objects');
     else if (d.mode === 'effPaint') s.stampEffectAt(t.x, t.y);
     else if (d.mode === 'effErase') s.eraseEffectAt(t.x, t.y);
-    else if ((d.mode === 'selectRect' || d.mode === 'areaRect') && d.anchor) s.setSelection({ x: Math.min(d.anchor.x, t.x), y: Math.min(d.anchor.y, t.y), w: Math.abs(t.x - d.anchor.x) + 1, h: Math.abs(t.y - d.anchor.y) + 1 });
+    else if ((d.mode === 'selectRect' || d.mode === 'areaRect' || d.mode === 'copyRect') && d.anchor) s.setSelection({ x: Math.min(d.anchor.x, t.x), y: Math.min(d.anchor.y, t.y), w: Math.abs(t.x - d.anchor.x) + 1, h: Math.abs(t.y - d.anchor.y) + 1 });
   }, [tileAt]);
 
   const endDrag = useCallback(() => {
     const d = dragRef.current;
     if (d && ['floorPaint', 'floorErase', 'wallPaint', 'wallErase', 'objMove', 'effPaint', 'effErase'].includes(d.mode)) useEditorStore.getState().endStroke();
+    if (d && d.mode === 'copyRect') {
+      const s = useEditorStore.getState();
+      if (s.selection) s.copyRegion(s.selection);
+      s.setSelection(null);
+    }
     if (d && d.mode === 'areaRect') {
       const s = useEditorStore.getState();
       const sel = s.selection; s.setSelection(null);
@@ -458,9 +517,14 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   };
 
   const floorEntries = meta ? PALETTE_BY_THEME[meta.theme].filter((p) => p.category === 'floor') : [];
-  const objEntries = meta ? PALETTE_BY_THEME[meta.theme].filter((p) => p.category === objTab) : [];
+  // Searching looks across ALL object categories (ignoring the active tab) —
+  // the admin types a name because they don't know which tab it lives in.
+  const objQuery = objSearch.trim().toLowerCase();
+  const objEntries = meta
+    ? PALETTE_BY_THEME[meta.theme].filter((p) => objQuery ? p.category !== 'floor' && p.label.toLowerCase().includes(objQuery) : p.category === objTab)
+    : [];
   const canPaint = activeTool === 'stamp' || activeTool === 'eraser';
-  const cursor = (activeTool === 'hand' || spaceHeldRef.current) ? 'grab' : canPaint ? 'crosshair' : activeTool === 'select' ? 'cell' : 'default';
+  const cursor = (activeTool === 'hand' || spaceHeldRef.current) ? 'grab' : canPaint ? 'crosshair' : activeTool === 'select' ? 'cell' : activeTool === 'copy' ? (clipboard ? 'copy' : 'cell') : 'default';
 
   if (error) {
     const msg = error === 'auth' ? 'Kamu harus login dulu untuk membuka editor.' : error === 'forbidden' ? 'Akses ditolak — hanya admin room ini yang boleh membuka editor.' : error === 'notfound' ? 'Room tidak ditemukan.' : 'Gagal memuat editor.';
@@ -482,14 +546,17 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         <div className="w-px h-6 bg-white/10" />
         <div className="flex items-center gap-1">
           {EDITOR_TOOLS.map((t) => (
-            <button key={t.id} onClick={() => setActiveTool(t.id)} title={t.id === 'copy' ? 'Copy (Potong 7)' : `${t.label} (${t.key})`} disabled={t.id === 'copy'}
-              className={`px-2.5 py-1 rounded text-xs font-medium cursor-pointer ${activeTool === t.id ? 'bg-purple-600 text-white' : 'text-white/60 hover:bg-white/10'} ${t.id === 'copy' ? 'opacity-40 cursor-not-allowed' : ''}`}>{t.label}</button>
+            <button key={t.id} onClick={() => setActiveTool(t.id)} title={`${t.label} (${t.key})`}
+              className={`px-2.5 py-1 rounded text-xs font-medium cursor-pointer ${activeTool === t.id ? 'bg-purple-600 text-white' : 'text-white/60 hover:bg-white/10'}`}>{t.label}</button>
           ))}
         </div>
         <div className="w-px h-6 bg-white/10" />
         <button onClick={() => useEditorStore.getState().undo()} disabled={undoDepth === 0} title="Undo (Ctrl+Z)" className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30 inline-flex items-center justify-center cursor-pointer"><ArrowCounterclockwise size={14} /></button>
         <button onClick={() => useEditorStore.getState().redo()} disabled={redoDepth === 0} title="Redo (Ctrl+Y)" className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30 inline-flex items-center justify-center cursor-pointer"><ArrowClockwise size={14} /></button>
-        <span className="text-[11px] text-white/40 w-20">{saveState === 'saving' ? 'Menyimpan…' : saveState === 'error' ? 'Gagal simpan' : 'Tersimpan'}</span>
+        <span className={`text-[11px] w-32 inline-flex items-center gap-1 ${saveState === 'error' ? 'text-red-400' : saveState === 'saved' ? 'text-emerald-400/90' : 'text-amber-300/90'}`}>
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${saveState === 'error' ? 'bg-red-400' : saveState === 'saved' ? 'bg-emerald-400' : 'bg-amber-300 animate-pulse'}`} />
+          {saveState === 'saving' ? 'Menyimpan…' : saveState === 'dirty' ? 'Belum tersimpan…' : saveState === 'error' ? 'Gagal — mencoba lagi' : 'Tersimpan otomatis ✓'}
+        </span>
         <button onClick={openResize} title="Resize map" className="px-2.5 py-1 rounded text-xs font-medium text-white/70 bg-white/10 hover:bg-white/20 cursor-pointer">Resize</button>
         <div className="ml-auto flex items-center gap-1">
           <button onClick={() => zoomBy(1 / 1.2)} className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 cursor-pointer">−</button>
@@ -502,10 +569,11 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         <div ref={wrapRef} className="flex-1 min-w-0 relative overflow-hidden" style={{ cursor }}>
           <canvas ref={canvasRef} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={endDrag} onMouseLeave={endDrag} className="block" />
           <div className="absolute bottom-3 left-3 text-[11px] text-white/40 pointer-events-none">
-            {isObjLayer ? 'Stamp (Q) taruh · Eraser (W) hapus · Select (V) klik+geser pindah, Delete hapus'
+            {activeTool === 'copy' ? (clipboard ? 'Copy (C): klik untuk MENEMPEL blok tersalin · Esc untuk memilih area baru' : 'Copy (C): drag area untuk menyalin SEMUA layer (floor, wall, objek, efek)')
+              : isObjLayer ? 'Stamp (Q) taruh · Eraser (W) hapus · Select (V) klik+geser pindah, Delete hapus · Copy (C)'
               : activeLayer === 'wall' ? 'Wall: Stamp (Q) pasang (impassable) · Eraser (W) hapus · Select area + Enter/Delete'
               : activeLayer === 'effects' ? 'Tile effects: pilih efek di panel · Stamp gambar · Eraser hapus'
-              : 'Stamp (Q) · Eraser (W) · Select (V) + Enter/Delete · Hand (H)/scroll'}
+              : 'Stamp (Q) · Eraser (W) · Select (V) + Enter/Delete · Hand (H)/scroll · Copy (C) · Ctrl+Z/Y undo-redo'}
           </div>
         </div>
 
@@ -536,11 +604,16 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           {isObjLayer && (
             <>
               <p className="text-xs uppercase tracking-wider text-white/40 mb-2">{activeLayer === 'top' ? 'Top objects (di atas avatar)' : 'Objects (di bawah avatar)'}</p>
-              <div className="flex gap-1 mb-2">
+              <input
+                type="text" value={objSearch} onChange={(e) => setObjSearch(e.target.value)} placeholder="Cari objek…"
+                className="w-full mb-2 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 focus:border-purple-400 outline-none"
+              />
+              <div className={`flex gap-1 mb-2 ${objQuery ? 'opacity-40 pointer-events-none' : ''}`}>
                 {OBJ_CATEGORIES.map((c) => (
                   <button key={c.key} onClick={() => setObjTab(c.key)} className={`flex-1 py-1 rounded text-[10px] font-medium cursor-pointer ${objTab === c.key ? 'bg-purple-600 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>{c.label}</button>
                 ))}
               </div>
+              {objQuery && objEntries.length === 0 && <p className="text-[11px] text-white/40 mb-2">Tidak ada objek bernama “{objSearch.trim()}”.</p>}
               <div className="grid grid-cols-3 gap-2">
                 {objEntries.map((p) => (
                   <button key={p.id} onClick={() => setSelectedObject(p.id)} title={p.label} className={`rounded border p-1 flex items-center justify-center bg-black/20 ${selectedObject === p.id ? 'border-purple-400 ring-2 ring-purple-400/50' : 'border-white/10 hover:border-white/30'}`}>
@@ -582,6 +655,21 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           )}
         </div>
       </div>
+
+      {/* Copy tool: clipboard armed → paste mode */}
+      {activeTool === 'copy' && clipboard && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-full shadow-lg">
+          Tersalin {clipboard.w}×{clipboard.h} — klik untuk menempel
+          <button onClick={() => useEditorStore.getState().clearClipboard()} className="ml-2 underline cursor-pointer">pilih ulang (Esc)</button>
+        </div>
+      )}
+
+      {/* Transient notice (paste clipped / portal caveat) */}
+      {notice && (
+        <div className="absolute bottom-14 left-1/2 -translate-x-1/2 max-w-md bg-amber-500/95 text-gray-900 text-xs font-medium px-3 py-1.5 rounded-lg shadow-lg pointer-events-none">
+          {notice}
+        </div>
+      )}
 
       {/* Portal internal-destination hint */}
       {portalHint && (

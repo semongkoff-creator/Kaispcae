@@ -18,11 +18,8 @@ interface SidebarProps {
   onSaveStatus: (status: string) => void;
 
   isAdmin: boolean;
-  editorMode: boolean;
-  onToggleEditorMode: () => void;
-  // ZEP Room Editor (Potong 0) — opens the new full-page editor in a new tab.
-  // The old overlay editor stays available as "Editor Lama" until the new one
-  // is complete.
+  // ZEP Room Editor — opens the full-page editor in a new tab. The old overlay
+  // editor was retired in Potong 7; this is the only edit path now.
   onOpenRoomEditor: () => void;
 
   canTeleport: boolean;
@@ -143,8 +140,6 @@ export function Sidebar({
   status,
   onSaveStatus,
   isAdmin,
-  editorMode,
-  onToggleEditorMode,
   onOpenRoomEditor,
   canTeleport,
   showTeleportPanel,
@@ -311,9 +306,6 @@ export function Sidebar({
                 exists and still guards JOIN_ROOM — it just has no UI. */}
             {isAdmin && (
               <MenuRow icon={<Tools size={15} />} label="Edit Room" onClick={closeAnd(onOpenRoomEditor)} />
-            )}
-            {isAdmin && (
-              <MenuRow icon={<Tools size={15} />} label={editorMode ? 'Editor Lama (aktif)' : 'Editor Lama'} active={editorMode} onClick={closeAnd(onToggleEditorMode)} />
             )}
             {canTeleport && (
               <MenuRow icon={<GeoAltFill size={15} />} label="Teleport" active={showTeleportPanel} onClick={closeAnd(onToggleTeleport)} />
