@@ -300,10 +300,25 @@ export function Sidebar({
                 }
               />
             )}
-            {/* The whole-room "Lock Room" row was removed on request: locking
-                is per-zone now (the row above), which is what people actually
-                meant by "lock the room". The server-side room lock still
-                exists and still guards JOIN_ROOM — it just has no UI. */}
+            {/* Bug 4 — restored. The whole-room "Lock Room" row was removed
+                earlier in favor of the per-zone lock above, on the reasoning
+                that per-zone was what people actually meant by "lock the
+                room". But per-zone only ever gated THAT zone's audio/chat
+                membership — it never touched JOIN_ROOM, so it can't stop a
+                stranger from walking into the room at all. The server-side
+                whole-room gate (roomHandler.ts's JOIN_ROOM handler) was
+                always there and always correct; it just had no way to
+                actually be switched on. canLock is already isAdmin-gated
+                (App.tsx), matching who bypasses the lock server-side. */}
+            {canLock && (
+              <MenuRow
+                icon={roomLocked ? <LockFill size={15} /> : <UnlockFill size={15} />}
+                label={roomLocked ? 'Buka Room' : 'Kunci Room'}
+                active={roomLocked}
+                onClick={closeAnd(onToggleLock)}
+                title={roomLocked ? 'Buka room ini supaya siapa pun bisa bergabung lagi' : 'Kunci room ini — orang baru tidak bisa bergabung sampai dibuka lagi'}
+              />
+            )}
             {isAdmin && (
               <MenuRow icon={<Tools size={15} />} label="Edit Room" onClick={closeAnd(onOpenRoomEditor)} />
             )}
