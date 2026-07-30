@@ -21,8 +21,9 @@ interface MeetingViewProps {
 }
 
 // One normalized descriptor per video surface (local cam, local screen, each
-// remote cam, each remote screen) so the featured-tile + thumbnail-strip layout
-// works off a single list instead of four parallel branches.
+// remote cam, each remote screen) so both the grid and the featured-tile +
+// thumbnail-strip layout work off a single list instead of four parallel
+// branches.
 interface MTile {
   key: string;
   name: string;          // corner label (may be a role word like "Kamu"/"Layarmu")
@@ -41,13 +42,16 @@ interface MTile {
   volumeTargetId?: string;   // remote id whose volume the main tile can adjust
 }
 
-// Bug 16 — Google-Meet-style layout: ONE large "featured" surface fills most of
-// the screen, with everyone else as a bottom thumbnail strip. Featured priority:
-// a pinned tile (click a thumbnail) → a screen share → the first remote → local.
-// A NEW screen share always takes over (auto-pins) so presenting still auto-
-// focuses. The bottom Mic/Camera/Hand/Share control row floats over this from
-// App.tsx (unchanged); this is purely a layout/view mode — no WebRTC changes,
-// and leaving it drops you right back onto the map where you already are.
+// Bug 16 — Google-Meet-style layout, with a second pass fixing the default
+// state: a single large "featured" surface + bottom thumbnail strip only
+// appears once something has EARNED it — a pinned tile (click one, in the
+// strip or the grid below) or an active screen share (auto-pins, so
+// presenting still auto-focuses without a click). Otherwise every tile
+// renders in one even grid — nobody is spotlighted just for being the first
+// remote, or the loudest, when nobody actually asked to feature them. The
+// bottom Mic/Camera/Hand/Share control row floats over this from App.tsx
+// (unchanged); this is purely a layout/view mode — no WebRTC changes, and
+// leaving it drops you right back onto the map where you already are.
 export function MeetingView({
   nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams,
   micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, onClose, onEmote,
@@ -77,8 +81,9 @@ export function MeetingView({
   const profiles = useProfiles(profileIds);
   const profileSig = profileIds.map((id) => { const p = profiles.get(id); return `${id}:${p?.name ?? ''}:${p?.photo ?? ''}`; }).join(',');
 
-  // Build the unified tile list. Order matters: it decides the auto-featured
-  // fallback (first screen, else first remote, else local).
+  // Build the unified tile list. Order matters: screens first, since a new
+  // one auto-pins (see prevScreenKeysRef below) and the grid reads top-left
+  // to bottom-right in this same order.
   const tiles = useMemo<MTile[]>(() => {
     const out: MTile[] = [];
     if (localScreenStream) out.push({ key: 'local-screen', name: 'Layarmu', stream: localScreenStream, isLocal: true, isScreen: true });
@@ -112,14 +117,17 @@ export function MeetingView({
     if (pinnedKey && !keys.includes(pinnedKey)) setPinnedKey(null);
   }, [keys.join(','), pinnedKey]);
 
-  const activeSpeakerKey = tiles.find((t) => !t.isScreen && !t.isLocal && t.speaking)?.key;
-  const autoKey = screenKeys[0]
-    ?? activeSpeakerKey
-    ?? tiles.find((t) => !t.isScreen && !t.isLocal)?.key
-    ?? tiles[0]?.key;
-  const featuredKey = (pinnedKey && keys.includes(pinnedKey)) ? pinnedKey : autoKey;
+  // Single-featured-tile layout is now earned, not default: only an explicit
+  // pin (click a tile) or an active screen share promotes someone to the big
+  // stage. It used to ALSO auto-promote whoever was speaking, or failing
+  // that the first remote/local tile, which meant a lone big tile + a cramped
+  // thumbnail strip was what 3 people just standing around chatting saw —
+  // nobody asked to be "featured", so nothing should be. Absent, the stage
+  // below renders every tile in one even grid instead (Meet's default
+  // "Tiled" view), and clicking any tile there pins it same as the strip.
+  const featuredKey = (pinnedKey && keys.includes(pinnedKey)) ? pinnedKey : (screenKeys[0] ?? null);
   const featured = tiles.find((t) => t.key === featuredKey) ?? null;
-  const thumbnails = tiles.filter((t) => t.key !== featuredKey);
+  const thumbnails = featured ? tiles.filter((t) => t.key !== featuredKey) : [];
   const isPinned = !!pinnedKey && pinnedKey === featuredKey;
 
   const renderTile = (t: MTile, main: boolean) => (
@@ -175,12 +183,36 @@ export function MeetingView({
               </button>
             )}
           </div>
+        ) : tiles.length > 0 ? (
+          // Nobody pinned and nobody's sharing — an even grid, everyone the
+          // same size (Meet's default "Tiled" view), rather than forcing one
+          // person into a spotlight nobody asked for. auto-fit + minmax keeps
+          // cells a sane size and evenly filled regardless of headcount: 3
+          // people land in one neat row on a normal window instead of the
+          // lopsided "1 big + strip" layout. Click any tile to pin it.
+          <div
+            className="w-full h-full grid gap-3 place-content-center overflow-y-auto py-1"
+            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gridAutoRows: 'minmax(146px, 1fr)' }}
+          >
+            {tiles.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setPinnedKey(t.key)}
+                title={`Sorot ${t.name}`}
+                className="relative rounded-lg overflow-hidden cursor-pointer ring-1 ring-white/10 hover:ring-purple-400/70 transition-all"
+              >
+                {renderTile(t, false)}
+              </button>
+            ))}
+          </div>
         ) : (
           <p className="text-white/40 text-sm">Belum ada yang on-camera — dekati seseorang untuk mulai video chat.</p>
         )}
       </div>
 
-      {/* Thumbnail strip — everyone else; click one to pin it as the stage. */}
+      {/* Thumbnail strip — everyone else; click one to pin it as the stage.
+          Only alongside an actual featured tile — the grid above already
+          covers "nobody's featured". */}
       {thumbnails.length > 0 && (
         <div className="shrink-0 flex justify-center pl-20 pr-6 pt-3">
           <div className="flex gap-2 overflow-x-auto max-w-full pb-1">
