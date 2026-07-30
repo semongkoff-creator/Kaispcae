@@ -971,7 +971,7 @@ export interface RoomUpdatePayload {
 
 export { createDefaultOfficeLayout, findSpawnPixel, createRoomLayoutFromTemplate, ROOM_TEMPLATES } from '../defaultRoomLayout';
 export type { RoomTemplateId } from '../defaultRoomLayout';
-export { BLOCKED_TILES, isTileBlocked, findZoneEntryTile, findAdjacentFreeTile } from '../tileCollision';
+export { BLOCKED_TILES, isTileBlocked, isDoorTile, findZoneEntryTile, findAdjacentFreeTile } from '../tileCollision';
 // ZEP Room Editor — Potong 1 layered map format + legacy adaptors.
 export { MAP_FORMAT_VERSION, legacyToLayerData, layerDataToLegacy } from '../mapLayers';
 export type { LayerData, TileEffect, AreaEffect } from '../mapLayers';

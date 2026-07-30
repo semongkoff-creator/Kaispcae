@@ -1,11 +1,11 @@
-import { Avatar, RoomTheme, RoomTemplateId, createRoomLayoutFromTemplate, findSpawnPixel, BLOCKED_TILES, isTileBlocked } from '@virtualmeet/shared';
+import { Avatar, RoomTheme, RoomTemplateId, createRoomLayoutFromTemplate, findSpawnPixel, BLOCKED_TILES, isTileBlocked, isDoorTile } from '@virtualmeet/shared';
 
 // Re-exported for existing consumers (GameCanvas.tsx's movement collision
 // check, App.tsx's minimap click-to-teleport handler) — the actual
 // definition now lives in shared/tileCollision.ts so the server's
 // movementHandler.ts can enforce the exact same rule authoritatively
 // instead of only trusting client-reported positions.
-export { BLOCKED_TILES, isTileBlocked };
+export { BLOCKED_TILES, isTileBlocked, isDoorTile };
 
 // Default avatar colors for generated players
 const AVATAR_COLORS = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a786df', '#6bcb77', '#4d96ff'];

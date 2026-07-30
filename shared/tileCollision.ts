@@ -23,6 +23,20 @@ export function isTileBlocked(tiles: RoomTile[][], tileX: number, tileY: number)
   return BLOCKED_TILES.has(row[tileX].type);
 }
 
+// Bug 7 — doorways are exactly one tile wide, embedded in a wall line, and
+// the client's OWN movement hitbox (see useMovement.ts's wouldCollide) is
+// nearly as wide as a tile — only ~2px of slack on each side — so lining
+// up with a door meant being within a few pixels of dead-center on the
+// perpendicular axis or the hitbox's edge clipped the wall tile right next
+// to it. Used to shrink that hitbox specifically while standing on a door
+// tile, without touching wall collision anywhere else (BLOCKED_TILES,
+// isTileBlocked, and every other tile's hitbox size are untouched).
+export function isDoorTile(tiles: RoomTile[][], tileX: number, tileY: number): boolean {
+  const row = tiles[tileY];
+  if (!row || tileX < 0 || tileX >= row.length) return false;
+  return row[tileX]?.type === 'door';
+}
+
 // Picks a walkable tile inside a zone — used to auto-seed a Team Location
 // (§4.1) for every named Zone in a room's own layout ("denah"), so staff
 // get a ready-made teleport list instead of an empty one they'd have to

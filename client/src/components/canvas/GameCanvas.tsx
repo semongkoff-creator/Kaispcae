@@ -20,7 +20,7 @@ import { useMovement } from '@/hooks/useMovement';
 import { drawAvatar } from './AvatarSprite';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
 import { PALETTE_BY_ID } from '@/data/themeAssets';
-import { isTileBlocked } from '@/utils/createDefaultRoom';
+import { isTileBlocked, isDoorTile } from '@/utils/createDefaultRoom';
 // Bug 16-project (Room Editor) — these map-draw helpers were moved verbatim to
 // mapRender.ts so the editor can render the map identically. GameCanvas's usage
 // is unchanged.
@@ -276,6 +276,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     return isTileBlocked(t, tileX, tileY);
   }, []);
 
+  // Bug 7 — feeds useMovement's door-hitbox leniency (see its wouldCollide).
+  const isDoor = useCallback((tileX: number, tileY: number) => {
+    const t = tilesRef.current;
+    if (t.length === 0) return false;
+    return isDoorTile(t, tileX, tileY);
+  }, []);
+
   const onMoveRef = useRef((x: number, y: number, direction: Direction) => {
     useGameStore.getState().setLocalPlayer({ x, y, direction, isMoving: true });
   });
@@ -284,6 +291,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     isBlocked,
     onMove: onMoveRef.current,
     isFrozen: () => useGameStore.getState().localPlayer.isSitting === true,
+    isDoor,
   });
 
   useEffect(() => {

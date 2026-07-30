@@ -1,6 +1,14 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { Direction, TILE_SIZE, PLAYER_SPEED, PLAYER_RUN_SPEED } from '@virtualmeet/shared';
 
+// Bug 7 — half-width of the movement hitbox while standing/arriving on a
+// door tile, vs. the normal TILE_SIZE/2 - 2 (14px, i.e. a 28px hitbox) used
+// everywhere else. 6px gives a 12px hitbox: about 10px of slack per side
+// along the wall-parallel axis instead of 2px, so lining up with a 1-tile
+// doorway no longer takes near-pixel-perfect alignment, without changing
+// collision against any wall tile itself (see wouldCollide below).
+const DOOR_MARGIN_PX = 6;
+
 interface UseMovementOptions {
   isBlocked: (tileX: number, tileY: number) => boolean;
   onMove: (x: number, y: number, direction: Direction) => void;
@@ -8,6 +16,12 @@ interface UseMovementOptions {
   // while sitting) — checked fresh every frame, same ref pattern as
   // isBlocked, so GameCanvas doesn't need to recreate the hook's callbacks.
   isFrozen?: () => boolean;
+  // Bug 7 — reports whether a tile is a door, so wouldCollide can shrink the
+  // hitbox specifically there (see its own comment). Optional so a caller
+  // that never wires it up (there are none today, but future consumers of
+  // this hook shouldn't be forced to) just keeps the old door-is-a-normal-
+  // tile behaviour.
+  isDoor?: (tileX: number, tileY: number) => boolean;
 }
 
 interface MovementState {
@@ -18,7 +32,7 @@ interface MovementState {
   isRunning: boolean;
 }
 
-export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions) {
+export function useMovement({ isBlocked, onMove, isFrozen, isDoor }: UseMovementOptions) {
   const keysRef = useRef<Set<string>>(new Set());
   const currentXRef = useRef<number>(0);
   const currentYRef = useRef<number>(0);
@@ -33,6 +47,9 @@ export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions)
 
   const isFrozenRef = useRef(isFrozen);
   isFrozenRef.current = isFrozen;
+
+  const isDoorRef = useRef(isDoor);
+  isDoorRef.current = isDoor;
 
   const setPosition = useCallback((x: number, y: number) => {
     currentXRef.current = x;
@@ -78,7 +95,19 @@ export function useMovement({ isBlocked, onMove, isFrozen }: UseMovementOptions)
   // Collision check reads isBlocked from ref — never changes identity
   const wouldCollide = useCallback(
     (px: number, py: number) => {
-      const half = TILE_SIZE / 2 - 2;
+      // Bug 7 — a doorway is exactly one tile wide, so the normal hitbox
+      // (28px out of a 32px tile — only ~2px slack per side) demanded the
+      // player be within a few pixels of dead-center on the axis running
+      // along the wall, or its edge clipped the wall tile right next to the
+      // door. Standing/arriving on a door tile shrinks the hitbox instead
+      // (12px — DOOR_MARGIN_PX slack per side), so squeezing through no
+      // longer needs to be pixel-perfect. Only checked at THIS point, so it
+      // never loosens collision against a wall tile itself — a door tile is
+      // never in BLOCKED_TILES to begin with, this only affects how forgiving
+      // the approach INTO/OUT OF it is.
+      const doorTileX = Math.floor(px / TILE_SIZE);
+      const doorTileY = Math.floor(py / TILE_SIZE);
+      const half = isDoorRef.current?.(doorTileX, doorTileY) ? DOOR_MARGIN_PX : TILE_SIZE / 2 - 2;
       const left = px - half;
       const right = px + half;
       const top = py - half;
