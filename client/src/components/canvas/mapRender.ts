@@ -1,6 +1,7 @@
 import { TILE_SIZE, TileType, RoomTile, Furniture, RoomTheme } from '@virtualmeet/shared';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
 import { PALETTE_BY_ID, THEME_TILE_SPRITES } from '@/data/themeAssets';
+import { ensureLimezuEntry } from '@/data/limezuInteriors';
 
 // Shared, pure map-drawing helpers — extracted verbatim from GameCanvas so the
 // game view AND the new Room Editor render tiles/furniture identically off one
@@ -61,7 +62,15 @@ export function drawFurnitureLayer(
   layer: 'object' | 'overhead',
 ) {
   const entry = PALETTE_BY_ID[item.paletteId];
-  if (!entry) return;
+  if (!entry) {
+    // A limezu-* id whose category manifest hasn't been fetched yet (lazy
+    // pack, see limezuInteriors.ts) — queue the fetch (idempotent) and skip
+    // this frame; the canvas redraws continuously, so the piece appears the
+    // first frame after its manifest+PNG arrive. Any other unknown id stays
+    // a silent skip, exactly as before.
+    ensureLimezuEntry(item.paletteId);
+    return;
+  }
   const screenX = item.x * TILE_SIZE - cameraX;
   const baseRowScreenY = item.y * TILE_SIZE - cameraY;
   const pieceWidthPx = entry.tilesW * TILE_SIZE;

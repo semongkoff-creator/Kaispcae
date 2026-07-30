@@ -10,3 +10,6 @@ server/uploads/
 ui-screenshots/
 test-results/
 playwright-report/
+# scripts/importLimeZuFull.mjs's zip-extraction scratch dir (cleaned up on
+# success; a failed run can leave it behind).
+.temp-limezu-extract/

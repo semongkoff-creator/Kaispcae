@@ -9,6 +9,8 @@ import { useEditorStore, EDITOR_LAYERS, EDITOR_TOOLS, EditorLayer, EditorTool } 
 import { drawTile, drawFloorTile, drawFurnitureLayer } from '@/components/canvas/mapRender';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
 import { PALETTE_BY_THEME, PALETTE_BY_ID } from '@/data/themeAssets';
+import { PaletteEntry } from '@/data/tilePaletteManifest';
+import { LIMEZU_CATEGORIES, loadLimezuCategory } from '@/data/limezuInteriors';
 
 // ZEP-style Room Editor — Potong 3. Adds Wall (tile → collision), Objects
 // (below avatar) and Top objects (above avatar) editing to the Potong 2 floor
@@ -128,6 +130,23 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const saveStateRef = useRef(saveState); useEffect(() => { saveStateRef.current = saveState; }, [saveState]);
   const [objTab, setObjTab] = useState<'furniture' | 'decor' | 'electronics'>('furniture');
   const [objSearch, setObjSearch] = useState('');
+  // LimeZu Interiors — themed pack, lazy-loaded per category (see
+  // limezuInteriors.ts). Non-empty limezuCat overrides the built-in tabs as
+  // the palette's source; '' = built-in tabs active as before.
+  const [limezuCat, setLimezuCat] = useState('');
+  const [limezuEntries, setLimezuEntries] = useState<PaletteEntry[]>([]);
+  const [limezuLoading, setLimezuLoading] = useState(false);
+  useEffect(() => {
+    if (!limezuCat) { setLimezuEntries([]); return; }
+    let alive = true;
+    setLimezuLoading(true);
+    loadLimezuCategory(limezuCat).then((entries) => {
+      if (!alive) return;
+      setLimezuEntries(entries);
+      setLimezuLoading(false);
+    });
+    return () => { alive = false; };
+  }, [limezuCat]);
   // Transient notice (paste clipped / pasted portals keep their destination).
   const [notice, setNotice] = useState('');
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -533,10 +552,16 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const floorEntries = meta ? PALETTE_BY_THEME[meta.theme].filter((p) => p.category === 'floor') : [];
   // Searching looks across ALL object categories (ignoring the active tab) —
   // the admin types a name because they don't know which tab it lives in.
+  // With a LimeZu theme active, search filters within that theme's (already
+  // loaded) entries instead — cross-searching all 21 unloaded LimeZu
+  // manifests at once would mean fetching the whole ~5.400-entry pack, the
+  // exact cost lazy loading exists to avoid.
   const objQuery = objSearch.trim().toLowerCase();
-  const objEntries = meta
-    ? PALETTE_BY_THEME[meta.theme].filter((p) => objQuery ? p.category !== 'floor' && p.label.toLowerCase().includes(objQuery) : p.category === objTab)
-    : [];
+  const objEntries = limezuCat
+    ? limezuEntries.filter((p) => !objQuery || p.label.toLowerCase().includes(objQuery))
+    : meta
+      ? PALETTE_BY_THEME[meta.theme].filter((p) => objQuery ? p.category !== 'floor' && p.label.toLowerCase().includes(objQuery) : p.category === objTab)
+      : [];
   const canPaint = activeTool === 'stamp' || activeTool === 'eraser';
   const cursor = (activeTool === 'hand' || spaceHeldRef.current) ? 'grab' : canPaint ? 'crosshair' : activeTool === 'select' ? 'cell' : activeTool === 'copy' ? (clipboard ? 'copy' : 'cell') : 'default';
 
@@ -622,12 +647,31 @@ export function RoomEditorPage({ slug }: { slug: string }) {
                 type="text" value={objSearch} onChange={(e) => setObjSearch(e.target.value)} placeholder="Cari objek…"
                 className="w-full mb-2 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 focus:border-purple-400 outline-none"
               />
-              <div className={`flex gap-1 mb-2 ${objQuery ? 'opacity-40 pointer-events-none' : ''}`}>
+              <div className={`flex gap-1 mb-2 ${objQuery && !limezuCat ? 'opacity-40 pointer-events-none' : ''}`}>
                 {OBJ_CATEGORIES.map((c) => (
-                  <button key={c.key} onClick={() => setObjTab(c.key)} className={`flex-1 py-1 rounded text-[10px] font-medium cursor-pointer ${objTab === c.key ? 'bg-purple-600 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>{c.label}</button>
+                  <button key={c.key} onClick={() => { setObjTab(c.key); setLimezuCat(''); }} className={`flex-1 py-1 rounded text-[10px] font-medium cursor-pointer ${!limezuCat && objTab === c.key ? 'bg-purple-600 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>{c.label}</button>
                 ))}
               </div>
-              {objQuery && objEntries.length === 0 && <p className="text-[11px] text-white/40 mb-2">Tidak ada objek bernama “{objSearch.trim()}”.</p>}
+              {/* LimeZu Interiors — 21 themed categories, ~5.400 objects, each
+                  category's manifest lazy-fetched on first pick (see
+                  limezuInteriors.ts). A dropdown, not more tabs: 21 more tab
+                  buttons wouldn't fit this 16rem panel. */}
+              <select
+                value={limezuCat}
+                onChange={(e) => setLimezuCat(e.target.value)}
+                className={`w-full mb-2 bg-gray-900 border rounded px-2 py-1 text-xs cursor-pointer outline-none ${limezuCat ? 'border-purple-400 text-white' : 'border-white/10 text-white/50'}`}
+              >
+                <option value="">Tema LimeZu (5.400+ objek)…</option>
+                {LIMEZU_CATEGORIES.map((c) => (
+                  <option key={c.id} value={c.id}>{c.label}</option>
+                ))}
+              </select>
+              {limezuLoading && (
+                <p className="text-[11px] text-white/40 mb-2 flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-full border border-white/40 border-t-transparent animate-spin inline-block" /> Memuat objek…
+                </p>
+              )}
+              {objQuery && objEntries.length === 0 && !limezuLoading && <p className="text-[11px] text-white/40 mb-2">Tidak ada objek bernama “{objSearch.trim()}”.</p>}
               <div className="grid grid-cols-3 gap-2">
                 {objEntries.map((p) => (
                   <button key={p.id} onClick={() => setSelectedObject(p.id)} title={p.label} className={`rounded border p-1 flex items-center justify-center bg-black/20 ${selectedObject === p.id ? 'border-purple-400 ring-2 ring-purple-400/50' : 'border-white/10 hover:border-white/30'}`}>
