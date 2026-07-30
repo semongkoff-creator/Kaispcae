@@ -174,7 +174,10 @@ uploads.get('/uploads/:filename', authenticateUploadRead, async (req: AuthReques
 
   res.setHeader('X-Content-Type-Options', 'nosniff');
   const ext = path.extname(filename).toLowerCase();
-  const isInlineable = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.webm', '.mov', '.avi'].includes(ext);
+  // .pdf included alongside image/video — AttachmentLightbox.tsx previews all
+  // three inline (img/video/iframe). Leaving it out forced a download dialog
+  // instead of ever reaching the iframe, no matter what the client tried to do.
+  const isInlineable = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.webm', '.mov', '.avi', '.pdf'].includes(ext);
   res.setHeader('Content-Disposition', isInlineable ? 'inline' : 'attachment');
   return res.sendFile(filePath);
 });
@@ -208,7 +211,10 @@ uploads.get('/files/:token', authenticateUploadRead, async (req: AuthRequest, re
   if (!dl) return res.status(404).json({ error: 'File not found' });
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Content-Type', dl.contentType);
-  res.setHeader('Content-Disposition', /^(image|video)\//.test(dl.contentType) ? 'inline' : 'attachment');
+  // application/pdf included alongside image/video — same reasoning as the
+  // legacy disk route above: AttachmentLightbox previews PDFs in an <iframe>,
+  // which never got the chance to render while this forced a download first.
+  res.setHeader('Content-Disposition', /^(image|video)\/|^application\/pdf$/.test(dl.contentType) ? 'inline' : 'attachment');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- fetch body is
   // typed as the DOM ReadableStream; Readable.fromWeb wants node:stream/web's.
   Readable.fromWeb(dl.body as any).pipe(res);
