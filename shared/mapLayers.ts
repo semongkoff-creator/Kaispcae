@@ -50,6 +50,11 @@ export interface AreaEffect {
   // ONE audio group even when physically separate (the adaptor gives them the
   // same zone.id). Absent on converted areas (each is its own group by its id).
   areaId?: string;
+  // See Zone.audioIsolated. Left unset lets layerDataToLegacy infer a default
+  // from `effect` (privateArea → isolates, mapLocation → doesn't) so every
+  // area authored before this field existed gets the right behavior without
+  // needing to be re-drawn.
+  audioIsolated?: boolean;
 }
 
 export interface LayerData {
@@ -182,6 +187,17 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     if (a.color != null) z.color = a.color;
     if (a.label != null) z.label = a.label;
     if (a.zoneType != null) z.type = a.zoneType;
+    // Only ever explicitly set to `false` (mapLocation's default) — leaving
+    // it unset for everything else means "isolates" (Zone.audioIsolated's own
+    // documented default), which is what every legacy-converted zone already
+    // is (legacyToLayerData always emits effect:'privateArea', never
+    // 'mapLocation' — that type didn't exist pre-editor), so this can't add a
+    // key the round-trip guard in convertLegacyRoom.ts doesn't expect. This IS
+    // computed at read time rather than stored, so it applies retroactively
+    // to every 'Map location' ever drawn, not just ones drawn after this field
+    // existed.
+    if (a.audioIsolated != null) z.audioIsolated = a.audioIsolated;
+    else if (a.effect === 'mapLocation') z.audioIsolated = false;
     return z;
   });
 

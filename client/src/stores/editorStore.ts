@@ -113,7 +113,7 @@ interface EditorState {
   stampEffectAt: (x: number, y: number) => void; // startingPoint / impassable (per-tile stroke)
   eraseEffectAt: (x: number, y: number) => boolean; // removes a per-tile effect; true if one was there
   areaAt: (x: number, y: number) => AreaEffect | null;
-  addArea: (effect: 'mapLocation' | 'privateArea', rect: Selection, name: string, areaId?: string) => void;
+  addArea: (effect: 'mapLocation' | 'privateArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean) => void;
   removeAreaAt: (x: number, y: number) => void;
 
   // Copy tool (Potong 7). copyRegion captures the selection into the clipboard;
@@ -331,15 +331,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
       for (let i = areas.length - 1; i >= 0; i--) { const a = areas[i]; if (x >= a.x && x < a.x + a.width && y >= a.y && y < a.y + a.height) return a; }
       return null;
     },
-    addArea: (effect, rect, name, areaId) => {
+    addArea: (effect, rect, name, areaId, audioIsolated) => {
       const d = get().doc; if (!d) return;
       const snap = snapshot();
-      // zoneType 'desk' → the game shows a name PILL and groups/isolates audio,
-      // WITHOUT the side effects of 'meeting' (mounts MeetingControl + sets
-      // in_meeting) or 'focus' (makes occupants solo, which would break private
-      // audio). label=name so the pill actually renders (game keys the pill off
-      // zone.label).
-      d.areas.push({ id: crypto.randomUUID(), effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, zoneType: 'desk', areaId });
+      // zoneType 'desk' → the game shows a name PILL and (when audioIsolated)
+      // groups/isolates audio, WITHOUT the side effects of 'meeting' (mounts
+      // MeetingControl + sets in_meeting) or 'focus' (makes occupants solo,
+      // which would break private audio). label=name so the pill actually
+      // renders (game keys the pill off zone.label). audioIsolated left
+      // unset defaults to isolating for privateArea and NOT isolating for
+      // mapLocation — see layerDataToLegacy's inferred default.
+      d.areas.push({ id: crypto.randomUUID(), effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, zoneType: 'desk', areaId, audioIsolated });
       areasDirty = true; pushHistory(snap); commit();
     },
     removeAreaAt: (x, y) => {

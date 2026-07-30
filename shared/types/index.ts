@@ -823,6 +823,15 @@ export interface Zone {
   label?: string;
   color?: string;
   type?: ZoneType;
+  // Does standing in a different zone (or in this zone vs. outside it) cut
+  // off audio, the way a real meeting room's walls would? undefined/true =
+  // yes (every zone behaved this way before this field existed, so absent
+  // means "isolates" for backward compatibility). false = this zone is
+  // purely a name label — useProximity treats it as if it weren't a zone at
+  // all, falling back to plain distance-based hearing. See the Room
+  // Editor's 'Map location' tool, whose whole purpose is a named pin with
+  // no audio effect (unlike 'Private area', which IS meant to isolate).
+  audioIsolated?: boolean;
 }
 
 // Chat. When zoneId is set, the message is private to that zone — the

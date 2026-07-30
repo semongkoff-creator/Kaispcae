@@ -43,7 +43,16 @@ export function useProximity(
   furniture: Furniture[] = [],
 ): ProximityPlayer[] {
   return useMemo(() => {
-    const localZone = findZoneAt(localPlayer, zones);
+    // A zone only overrides distance-based hearing when it isolates audio
+    // (Zone.audioIsolated !== false) — a 'Map location' area (see the Room
+    // Editor's Map Location tool) is just a name pin, so standing near its
+    // boundary should hear people the normal distance-based way instead of
+    // going dead silent the instant someone's one step outside the pin.
+    const audioZoneAt = (pos: { x: number; y: number }): Zone | undefined => {
+      const z = findZoneAt(pos, zones);
+      return z && z.audioIsolated !== false ? z : undefined;
+    };
+    const localZone = audioZoneAt(localPlayer);
     // A3 — Do-Not-Disturb: a focus-mode avatar neither triggers nor receives
     // auto-connect. If WE are in focus, nobody connects to us at all.
     const localFocus = localPlayer.workMode === 'focus';
@@ -79,7 +88,7 @@ export function useProximity(
         return { id: p.id, distanceTiles, visibility: 'full_visible' as VisibilityStatus, viaZone: true };
       }
 
-      const remoteZone = findZoneAt(p, zones);
+      const remoteZone = audioZoneAt(p);
 
       // Zone membership overrides the global distance radius: players who
       // share a private zone always connect (regardless of distance), and

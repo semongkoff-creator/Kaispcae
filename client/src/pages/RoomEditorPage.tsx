@@ -23,8 +23,8 @@ const OBJ_CATEGORIES: { key: 'furniture' | 'decor' | 'electronics'; label: strin
 const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal'; label: string; color: string; hint: string }[] = [
   { id: 'startingPoint', label: 'Starting point', color: 'rgba(16,185,129,0.9)', hint: 'Stamp per tile = titik spawn (bisa banyak; pemain muncul di salah satunya).' },
   { id: 'impassable', label: 'Impassable', color: 'rgba(239,68,68,0.85)', hint: 'Stamp per tile = penghalang tak terlihat (memblok gerak, tanpa tekstur).' },
-  { id: 'mapLocation', label: 'Map location', color: 'rgba(192,132,252,0.95)', hint: 'Stamp: drag area lalu beri nama → pill label muncul di game.' },
-  { id: 'privateArea', label: 'Private area', color: 'rgba(96,165,250,0.95)', hint: 'Stamp: drag area + Area ID. Area ber-ID sama = satu grup audio (walau terpisah).' },
+  { id: 'mapLocation', label: 'Map location', color: 'rgba(192,132,252,0.95)', hint: 'Stamp: drag area lalu beri nama → pill label muncul di game. Bisa pilih kedap suara atau tidak (default: tidak, jarak biasa).' },
+  { id: 'privateArea', label: 'Private area', color: 'rgba(96,165,250,0.95)', hint: 'Stamp: drag area + Area ID. Area ber-ID sama = satu grup audio (walau terpisah). Bisa pilih kedap suara atau tidak (default: kedap suara).' },
   { id: 'portal', label: 'Portal', color: 'rgba(124,58,237,0.95)', hint: 'Stamp klik tile portal → pilih tujuan room lain, atau klik titik tujuan di room ini. Pemain tekan F untuk pindah.' },
 ];
 
@@ -93,8 +93,12 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
       ctx.fillStyle = isPriv ? 'rgba(59,130,246,0.16)' : 'rgba(168,85,247,0.16)'; // blue=private, purple=map location
       ctx.fillRect(zx, zy, zw, zh);
       ctx.strokeStyle = isPriv ? 'rgba(96,165,250,0.95)' : 'rgba(192,132,252,0.95)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(zx, zy, zw, zh); ctx.setLineDash([]);
+      // Same default inference as layerDataToLegacy: unset → isolates for
+      // privateArea, doesn't for mapLocation — shown so the admin can see at
+      // a glance which areas actually cut off audio at their boundary.
+      const isolated = a.audioIsolated ?? isPriv;
       const label = isPriv ? `${a.name || 'Private'}${a.areaId ? ` #${a.areaId}` : ''}` : (a.name || 'Lokasi');
-      ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px sans-serif'; ctx.fillText(label, zx + 4, zy + 14);
+      ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px sans-serif'; ctx.fillText(`${isolated ? '🔇' : '🔊'} ${label}`, zx + 4, zy + 14);
     }
     for (const e of ld.tileEffects) {
       const sx = e.x * TILE_SIZE, sy = e.y * TILE_SIZE, c = TILE_SIZE / 2;
@@ -441,10 +445,20 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         if (s.selectedEffect === 'privateArea') {
           const name = (window.prompt('Nama private area:', 'Private') ?? '').trim();
           const areaId = (window.prompt('Area ID (samakan untuk menggabung area terpisah jadi satu grup):', '1') ?? '').trim();
-          s.addArea('privateArea', sel, name || 'Private', areaId || undefined);
+          // Default OK = kedap suara — that's the entire point of a private
+          // area — but still adjustable per-area for the rare case of "one
+          // grouped audio room split across a boundary that shouldn't also
+          // go silent against its own neighbors".
+          const isolate = window.confirm('Area ini KEDAP SUARA?\n\nOK = ya — orang di luar area ini tidak akan saling dengar dengan yang di dalam (perilaku normal Private Area).\nBatal = tidak — cuma jarak biasa yang menentukan siapa dengar siapa.');
+          s.addArea('privateArea', sel, name || 'Private', areaId || undefined, isolate);
         } else if (s.selectedEffect === 'mapLocation') {
           const name = (window.prompt('Nama lokasi:', '') ?? '').trim();
-          s.addArea('mapLocation', sel, name || 'Lokasi');
+          // Default Batal = TIDAK kedap suara — Map Location is just a named
+          // pin (e.g. "Team C", "Dev Team"), not a meeting room; before this
+          // toggle existed every map location accidentally silenced anyone
+          // standing just outside its boundary like a real private room.
+          const isolate = window.confirm('Area ini KEDAP SUARA?\n\nOK = ya — isolasi audio seperti Private Area.\nBatal (disarankan) = tidak — Map Location cuma label nama, jarak biasa yang menentukan siapa dengar siapa.');
+          s.addArea('mapLocation', sel, name || 'Lokasi', undefined, isolate);
         }
       }
     }
