@@ -51,13 +51,24 @@ export function MediaViewerModal({ media, canDelete, onDelete, onClose, emitWhit
         )}
 
         {media.type === 'file' && (
-          <a
-            href={media.payload.url}
-            download={media.payload.fileName}
-            className="flex items-center justify-center gap-2 py-6 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-600 text-sm font-medium"
-          >
-            <Download size={16} /> Download {media.payload.fileName || 'file'}
-          </a>
+          <>
+            {/* Bug 9 — an uploaded VIDEO file used to render as nothing but a
+                download link; play/pause never worked in the lightbox at all.
+                Detect by the original FILENAME first (Bug 17 — Drive-backed
+                urls are extension-less /api/files/<token> proxies), url as
+                fallback, and give videos a real player. Everything else keeps
+                the plain download row — there's nothing to "play". */}
+            {/\.(mp4|webm|mov|avi)$/i.test(media.payload.fileName || media.payload.url || '') && (
+              <video src={media.payload.url} controls autoPlay className="w-full max-h-[60vh] rounded-lg bg-black mb-3" />
+            )}
+            <a
+              href={media.payload.url}
+              download={media.payload.fileName}
+              className="flex items-center justify-center gap-2 py-6 rounded-lg bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-600 text-sm font-medium"
+            >
+              <Download size={16} /> Download {media.payload.fileName || 'file'}
+            </a>
+          </>
         )}
 
         {media.type === 'whiteboard' && (

@@ -1376,12 +1376,28 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
               {/* Potong 6 — YouTube auto-embeds (muted) when the player is near;
                   website opens a new tab; bgm shows a non-interactive marker. */}
               {media.type === 'youtube' && ytEmbedId === media.id && media.payload.videoId ? (
-                <iframe
-                  title="yt"
-                  src={`https://www.youtube.com/embed/${media.payload.videoId}?mute=1&rel=0`}
-                  allow="autoplay; encrypted-media; picture-in-picture"
-                  className="w-56 h-32 -mt-32 -ml-4 rounded-lg shadow-lg border border-purple-300 bg-black"
-                />
+                // Bug 9 — the auto-embed iframe swallows every click (play/
+                // pause land INSIDE the player), so while it was showing
+                // there was no clickable way to enlarge to the lightbox at
+                // all (only the non-obvious X key). A small overlay button
+                // gives the embed the same clear click-to-enlarge affordance
+                // the thumbnail state already has, without covering the
+                // player's own controls.
+                <div className="relative w-56 h-32 -mt-32 -ml-4">
+                  <iframe
+                    title="yt"
+                    src={`https://www.youtube.com/embed/${media.payload.videoId}?mute=1&rel=0`}
+                    allow="autoplay; encrypted-media; picture-in-picture"
+                    className="w-full h-full rounded-lg shadow-lg border border-purple-300 bg-black"
+                  />
+                  <button
+                    onClick={() => onMediaOpen(media.id)}
+                    title="Perbesar"
+                    className="absolute top-1 right-1 w-6 h-6 rounded bg-black/60 hover:bg-black/80 text-white text-xs flex items-center justify-center cursor-pointer"
+                  >
+                    ⛶
+                  </button>
+                </div>
               ) : (
                 <button
                   onClick={
