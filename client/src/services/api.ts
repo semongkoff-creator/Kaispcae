@@ -373,6 +373,8 @@ export const api = {
       wallChanges?: { x: number; y: number; value: boolean }[];
       objects?: unknown[];
       topObjects?: unknown[];
+      tileEffects?: unknown[];
+      areas?: unknown[];
     },
   ) => request<{ ok: true }>(`/rooms/${slug}/editor/layers`, { method: 'PUT', body: JSON.stringify(payload) }),
 

@@ -41,6 +41,10 @@ export interface AreaEffect {
   color?: string;
   label?: string;
   zoneType?: Zone['type'];
+  // ZEP-style Area ID (Potong 4) — private areas sharing the same areaId form
+  // ONE audio group even when physically separate (the adaptor gives them the
+  // same zone.id). Absent on converted areas (each is its own group by its id).
+  areaId?: string;
 }
 
 export interface LayerData {
@@ -86,7 +90,7 @@ export function legacyToLayerData(tiles: RoomTile[][], furniture: Furniture[], z
       if (type === 'spawn') tileEffects.push({ x, y, kind: 'startingPoint' });
       else if (type === 'portal') tileEffects.push({ x, y, kind: 'portal', targetSlug: t?.portalTarget });
       else if (type === 'door') tileEffects.push({ x, y, kind: 'door' });
-      else if (type === 'desk' || type === 'chair') tileEffects.push({ x, y, kind: 'impassable', tileType: type });
+      else if (type === 'desk' || type === 'chair' || type === 'blocked') tileEffects.push({ x, y, kind: 'impassable', tileType: type });
       // 'wall' → wall grid; 'floor' → nothing extra.
     }
     floor.push(fr);
@@ -135,7 +139,11 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
       else if (eff?.kind === 'startingPoint') type = 'spawn';
       else if (eff?.kind === 'portal') { type = 'portal'; portalTarget = eff.targetSlug; }
       else if (eff?.kind === 'door') type = 'door';
-      else if (eff?.kind === 'impassable') type = eff.tileType ?? 'desk';
+      // Impassable keeps its original blocked type for converted rooms (desk/
+      // chair) and uses the invisible 'blocked' type for effects painted in the
+      // editor (no tileType) — both are in BLOCKED_TILES, so collision is
+      // identical; only the render differs (blocked draws nothing).
+      else if (eff?.kind === 'impassable') type = eff.tileType ?? 'blocked';
 
       const tile: RoomTile = { x, y, type };
       const fp = floor[y]?.[x];
@@ -156,7 +164,11 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
   ];
 
   const zones: Zone[] = ld.areas.map((a) => {
-    const z: Zone = { id: a.id, name: a.name, x: a.x, y: a.y, width: a.width, height: a.height };
+    // ZEP areaId → shared zone.id so same-areaId private areas are ONE audio
+    // group (useProximity compares zone.id). Converted areas have no areaId, so
+    // their id is unchanged — the Potong-1 round-trip stays byte-identical.
+    const id = a.areaId ? `parea:${a.areaId}` : a.id;
+    const z: Zone = { id, name: a.name, x: a.x, y: a.y, width: a.width, height: a.height };
     if (a.color != null) z.color = a.color;
     if (a.label != null) z.label = a.label;
     if (a.zoneType != null) z.type = a.zoneType;

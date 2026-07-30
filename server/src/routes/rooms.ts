@@ -193,6 +193,20 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
     if ('objects' in body) { const o = sanitizeObjs(body.objects); if (o) layerData.objects = o; }
     if ('topObjects' in body) { const o = sanitizeObjs(body.topObjects); if (o) layerData.topObjects = o; }
 
+    // Tile effects (Potong 4): per-tile effects + rectangular areas. Full-array
+    // replace, lightly sanitized. tileEffects drive spawn/impassable via the
+    // adaptor; areas drive labeled + private zones.
+    if ('tileEffects' in body && Array.isArray(body.tileEffects)) {
+      layerData.tileEffects = body.tileEffects
+        .filter((e: unknown) => e && typeof e === 'object' && Number.isInteger((e as { x?: unknown }).x) && Number.isInteger((e as { y?: unknown }).y) && typeof (e as { kind?: unknown }).kind === 'string')
+        .slice(0, 5000) as LayerData['tileEffects'];
+    }
+    if ('areas' in body && Array.isArray(body.areas)) {
+      layerData.areas = body.areas
+        .filter((a: unknown) => a && typeof a === 'object' && typeof (a as { id?: unknown }).id === 'string' && Number.isInteger((a as { width?: unknown }).width) && Number.isInteger((a as { height?: unknown }).height))
+        .slice(0, 500) as LayerData['areas'];
+    }
+
     await prisma.room.update({ where: { id: room.id }, data: { layerData: layerData as unknown as object } });
 
     const derived = layerDataToLegacy(layerData);

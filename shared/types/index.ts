@@ -106,7 +106,10 @@ export interface RoomTile {
 
 // Valid tile types and their visual/semantic meaning. 'portal' and 'spawn'
 // are always walkable (never added to BLOCKED_TILES).
-export type TileType = 'floor' | 'wall' | 'door' | 'desk' | 'chair' | 'portal' | 'spawn';
+// 'blocked' (ZEP editor, Potong 4) is an INVISIBLE impassable tile — it blocks
+// movement like a wall but renders nothing (the floor shows through). Used by
+// the Impassable tile effect. Always in BLOCKED_TILES; the game render skips it.
+export type TileType = 'floor' | 'wall' | 'door' | 'desk' | 'chair' | 'portal' | 'spawn' | 'blocked';
 
 // Which curated art/asset set a room renders with. 'modern-interiors' is the
 // original LimeZu-based tileset (default, for backward compatibility with

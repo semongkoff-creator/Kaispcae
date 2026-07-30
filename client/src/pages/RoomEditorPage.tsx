@@ -20,6 +20,12 @@ type LoadError = 'auth' | 'forbidden' | 'notfound' | 'generic';
 const OBJ_CATEGORIES: { key: 'furniture' | 'decor' | 'electronics'; label: string }[] = [
   { key: 'furniture', label: 'Furniture' }, { key: 'decor', label: 'Decor' }, { key: 'electronics', label: 'Electronics' },
 ];
+const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea'; label: string; color: string; hint: string }[] = [
+  { id: 'startingPoint', label: 'Starting point', color: 'rgba(16,185,129,0.9)', hint: 'Stamp per tile = titik spawn (bisa banyak; pemain muncul di salah satunya).' },
+  { id: 'impassable', label: 'Impassable', color: 'rgba(239,68,68,0.85)', hint: 'Stamp per tile = penghalang tak terlihat (memblok gerak, tanpa tekstur).' },
+  { id: 'mapLocation', label: 'Map location', color: 'rgba(192,132,252,0.95)', hint: 'Stamp: drag area lalu beri nama → pill label muncul di game.' },
+  { id: 'privateArea', label: 'Private area', color: 'rgba(96,165,250,0.95)', hint: 'Stamp: drag area + Area ID. Area ber-ID sama = satu grup audio (walau terpisah).' },
+];
 
 function normalizeTiles(tilemapData: unknown[][] | null): RoomTile[][] {
   if (Array.isArray(tilemapData) && tilemapData.length > 0) {
@@ -68,9 +74,12 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
   } else if (layer === 'effects') {
     for (const a of ld.areas) {
       const zx = a.x * TILE_SIZE, zy = a.y * TILE_SIZE, zw = a.width * TILE_SIZE, zh = a.height * TILE_SIZE;
-      ctx.fillStyle = 'rgba(59,130,246,0.16)'; ctx.fillRect(zx, zy, zw, zh);
-      ctx.strokeStyle = a.color || 'rgba(59,130,246,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(zx, zy, zw, zh); ctx.setLineDash([]);
-      if (a.name) { ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '11px sans-serif'; ctx.fillText(a.name, zx + 4, zy + 14); }
+      const isPriv = a.effect === 'privateArea';
+      ctx.fillStyle = isPriv ? 'rgba(59,130,246,0.16)' : 'rgba(168,85,247,0.16)'; // blue=private, purple=map location
+      ctx.fillRect(zx, zy, zw, zh);
+      ctx.strokeStyle = isPriv ? 'rgba(96,165,250,0.95)' : 'rgba(192,132,252,0.95)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(zx, zy, zw, zh); ctx.setLineDash([]);
+      const label = isPriv ? `${a.name || 'Private'}${a.areaId ? ` #${a.areaId}` : ''}` : (a.name || 'Lokasi');
+      ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px sans-serif'; ctx.fillText(label, zx + 4, zy + 14);
     }
     for (const e of ld.tileEffects) {
       const sx = e.x * TILE_SIZE, sy = e.y * TILE_SIZE, c = TILE_SIZE / 2;
@@ -101,6 +110,8 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const setSelectedFloor = useEditorStore((s) => s.setSelectedFloor);
   const selectedObject = useEditorStore((s) => s.selectedObjectPaletteId);
   const setSelectedObject = useEditorStore((s) => s.setSelectedObject);
+  const selectedEffect = useEditorStore((s) => s.selectedEffect);
+  const setSelectedEffect = useEditorStore((s) => s.setSelectedEffect);
   const selection = useEditorStore((s) => s.selection);
   const revision = useEditorStore((s) => s.revision);
   const undoDepth = useEditorStore((s) => s.undoDepth);
@@ -257,6 +268,15 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         if (entry) s.placeObject({ id: crypto.randomUUID(), paletteId: entry.id, x: t.x, y: t.y, tilesW: entry.tilesW || 1, tilesH: entry.tilesH || 1, isInteractable: !!entry.sittable }, ol);
       } else if (s.activeTool === 'eraser') { const o = s.objectAt(t.x, t.y, ol); if (o) s.removeObject(o.id, ol); }
       else if (s.activeTool === 'select') { s.selectObjectAt(t.x, t.y, ol); if (useEditorStore.getState().selectedObjectId) { s.beginStroke(); dragRef.current = { mode: 'objMove' }; } }
+    } else if (layer === 'effects') {
+      const eff = s.selectedEffect; if (!eff) return;
+      if (eff === 'startingPoint' || eff === 'impassable') {
+        if (s.activeTool === 'stamp') { s.beginStroke(); s.stampEffectAt(t.x, t.y); dragRef.current = { mode: 'effPaint' }; }
+        else if (s.activeTool === 'eraser') { s.beginStroke(); s.eraseEffectAt(t.x, t.y); dragRef.current = { mode: 'effErase' }; }
+      } else { // mapLocation | privateArea — rectangular
+        if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y); }
+        else { s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 }); dragRef.current = { mode: 'areaRect', anchor: { x: t.x, y: t.y } }; }
+      }
     }
   }, [tileAt]);
 
@@ -270,12 +290,28 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     else if (d.mode === 'wallPaint') s.stampWallAt(t.x, t.y);
     else if (d.mode === 'wallErase') s.eraseWallAt(t.x, t.y);
     else if (d.mode === 'objMove') s.moveSelectedTo(t.x, t.y, s.activeLayer === 'top' ? 'top' : 'objects');
-    else if (d.mode === 'selectRect' && d.anchor) s.setSelection({ x: Math.min(d.anchor.x, t.x), y: Math.min(d.anchor.y, t.y), w: Math.abs(t.x - d.anchor.x) + 1, h: Math.abs(t.y - d.anchor.y) + 1 });
+    else if (d.mode === 'effPaint') s.stampEffectAt(t.x, t.y);
+    else if (d.mode === 'effErase') s.eraseEffectAt(t.x, t.y);
+    else if ((d.mode === 'selectRect' || d.mode === 'areaRect') && d.anchor) s.setSelection({ x: Math.min(d.anchor.x, t.x), y: Math.min(d.anchor.y, t.y), w: Math.abs(t.x - d.anchor.x) + 1, h: Math.abs(t.y - d.anchor.y) + 1 });
   }, [tileAt]);
 
   const endDrag = useCallback(() => {
     const d = dragRef.current;
-    if (d && ['floorPaint', 'floorErase', 'wallPaint', 'wallErase', 'objMove'].includes(d.mode)) useEditorStore.getState().endStroke();
+    if (d && ['floorPaint', 'floorErase', 'wallPaint', 'wallErase', 'objMove', 'effPaint', 'effErase'].includes(d.mode)) useEditorStore.getState().endStroke();
+    if (d && d.mode === 'areaRect') {
+      const s = useEditorStore.getState();
+      const sel = s.selection; s.setSelection(null);
+      if (sel) {
+        if (s.selectedEffect === 'privateArea') {
+          const name = (window.prompt('Nama private area:', 'Private') ?? '').trim();
+          const areaId = (window.prompt('Area ID (samakan untuk menggabung area terpisah jadi satu grup):', '1') ?? '').trim();
+          s.addArea('privateArea', sel, name || 'Private', areaId || undefined);
+        } else if (s.selectedEffect === 'mapLocation') {
+          const name = (window.prompt('Nama lokasi:', '') ?? '').trim();
+          s.addArea('mapLocation', sel, name || 'Lokasi');
+        }
+      }
+    }
     dragRef.current = null;
   }, []);
 
@@ -297,10 +333,8 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         <span className="text-sm font-semibold text-white/90 truncate max-w-[160px]">{meta ? meta.name : 'Memuat…'}</span>
         <div className="flex items-center gap-1">
           {EDITOR_LAYERS.map((l) => (
-            <button key={l.id} onClick={() => setActiveLayer(l.id)}
-              title={l.id === 'effects' ? `${l.label} (Potong 4)` : l.label}
-              disabled={l.id === 'effects'}
-              className={`px-2.5 py-1 rounded text-xs font-medium cursor-pointer ${activeLayer === l.id ? 'bg-purple-600 text-white' : 'text-white/60 hover:bg-white/10'} ${l.id === 'effects' ? 'opacity-40 cursor-not-allowed' : ''}`}>{l.label}</button>
+            <button key={l.id} onClick={() => setActiveLayer(l.id)} title={l.label}
+              className={`px-2.5 py-1 rounded text-xs font-medium cursor-pointer ${activeLayer === l.id ? 'bg-purple-600 text-white' : 'text-white/60 hover:bg-white/10'}`}>{l.label}</button>
           ))}
         </div>
         <div className="w-px h-6 bg-white/10" />
@@ -327,7 +361,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           <div className="absolute bottom-3 left-3 text-[11px] text-white/40 pointer-events-none">
             {isObjLayer ? 'Stamp (Q) taruh · Eraser (W) hapus · Select (V) klik+geser pindah, Delete hapus'
               : activeLayer === 'wall' ? 'Wall: Stamp (Q) pasang (impassable) · Eraser (W) hapus · Select area + Enter/Delete'
-              : activeLayer === 'effects' ? 'Tile effects — Potong 4'
+              : activeLayer === 'effects' ? 'Tile effects: pilih efek di panel · Stamp gambar · Eraser hapus'
               : 'Stamp (Q) · Eraser (W) · Select (V) + Enter/Delete · Hand (H)/scroll'}
           </div>
         </div>
@@ -375,7 +409,20 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             </>
           )}
 
-          {activeLayer === 'effects' && <p className="text-white/50 text-sm">Tile effects (starting point, portal, private area, …) menyusul di Potong 4.</p>}
+          {activeLayer === 'effects' && (
+            <>
+              <p className="text-xs uppercase tracking-wider text-white/40 mb-2">Tile Effects</p>
+              <div className="space-y-1.5">
+                {EFFECTS.map((e) => (
+                  <button key={e.id} onClick={() => setSelectedEffect(e.id)}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm cursor-pointer ${selectedEffect === e.id ? 'bg-purple-600/30 border border-purple-400 text-white' : 'border border-white/10 text-white/70 hover:bg-white/5'}`}>
+                    <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: e.color }} /> {e.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-white/50 mt-3 leading-relaxed">{EFFECTS.find((e) => e.id === selectedEffect)?.hint ?? 'Pilih efek lalu gambar di kanvas. Overlay warna ini hanya tampil di editor, tidak di game.'}</p>
+            </>
+          )}
         </div>
       </div>
     </div>

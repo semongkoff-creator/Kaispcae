@@ -1,5 +1,7 @@
 import { create } from 'zustand';
-import type { LayerData, Furniture } from '@virtualmeet/shared';
+import type { LayerData, Furniture, TileEffect, AreaEffect } from '@virtualmeet/shared';
+
+export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea';
 
 // ZEP-style Room Editor state. Potong 0: layers/tools/viewport. Potong 2: floor
 // editing + undo/redo + debounced save. Potong 3: Wall (tile, drives collision),
@@ -38,8 +40,10 @@ const HISTORY_LIMIT = 50;
 const cloneFloor = (f: FloorGrid): FloorGrid => f.map((r) => r.slice());
 const cloneWall = (w: WallGrid): WallGrid => w.map((r) => r.slice());
 const cloneObjs = (o: Furniture[]): Furniture[] => o.map((x) => ({ ...x }));
+const cloneEffects = (e: TileEffect[]): TileEffect[] => e.map((x) => ({ ...x }));
+const cloneAreas = (a: AreaEffect[]): AreaEffect[] => a.map((x) => ({ ...x }));
 
-interface Snapshot { floor: FloorGrid; wall: WallGrid; objects: Furniture[]; topObjects: Furniture[]; }
+interface Snapshot { floor: FloorGrid; wall: WallGrid; objects: Furniture[]; topObjects: Furniture[]; tileEffects: TileEffect[]; areas: AreaEffect[]; }
 
 interface EditorState {
   activeLayer: EditorLayer;
@@ -87,11 +91,29 @@ interface EditorState {
   moveSelectedTo: (x: number, y: number, layer: 'objects' | 'top') => void;
   deleteSelected: (layer: 'objects' | 'top') => void;
 
+  // Tile effects (Potong 4).
+  selectedEffect: TileEffectKind | null;
+  setSelectedEffect: (k: TileEffectKind | null) => void;
+  stampEffectAt: (x: number, y: number) => void; // startingPoint / impassable (per-tile stroke)
+  eraseEffectAt: (x: number, y: number) => boolean; // removes a per-tile effect; true if one was there
+  areaAt: (x: number, y: number) => AreaEffect | null;
+  addArea: (effect: 'mapLocation' | 'privateArea', rect: Selection, name: string, areaId?: string) => void;
+  removeAreaAt: (x: number, y: number) => void;
+
   undo: () => void;
   redo: () => void;
 
-  takePending: () => { floorChanges: FloorChange[]; wallChanges: WallChange[]; objects?: Furniture[]; topObjects?: Furniture[] };
-  requeuePending: (p: { floorChanges: FloorChange[]; wallChanges: WallChange[]; objects?: Furniture[]; topObjects?: Furniture[] }) => void;
+  takePending: () => SavePayload;
+  requeuePending: (p: SavePayload) => void;
+}
+
+interface SavePayload {
+  floorChanges: FloorChange[];
+  wallChanges: WallChange[];
+  objects?: Furniture[];
+  topObjects?: Furniture[];
+  tileEffects?: TileEffect[];
+  areas?: AreaEffect[];
 }
 
 const INITIAL_VIEWPORT: EditorViewport = { panX: 0, panY: 0, zoom: 1 };
@@ -103,6 +125,8 @@ const floorPending = new Map<string, FloorChange>();
 const wallPending = new Map<string, WallChange>();
 let objectsDirty = false;
 let topDirty = false;
+let effectsDirty = false;
+let areasDirty = false;
 let strokeSnap: Snapshot | null = null;
 let strokeChanged = false;
 
@@ -110,7 +134,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   const snapshot = (): Snapshot | null => {
     const d = get().doc;
     if (!d) return null;
-    return { floor: cloneFloor(d.floor), wall: cloneWall(d.wall), objects: cloneObjs(d.objects), topObjects: cloneObjs(d.topObjects) };
+    return { floor: cloneFloor(d.floor), wall: cloneWall(d.wall), objects: cloneObjs(d.objects), topObjects: cloneObjs(d.topObjects), tileEffects: cloneEffects(d.tileEffects), areas: cloneAreas(d.areas) };
   };
   const pushHistory = (snap: Snapshot | null) => { if (!snap) return; undoStack.push(snap); if (undoStack.length > HISTORY_LIMIT) undoStack.shift(); redoStack.length = 0; };
   const commit = () => set((s) => ({ revision: s.revision + 1, undoDepth: undoStack.length, redoDepth: redoStack.length }));
@@ -127,11 +151,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (row[x] === value) return false;
     row[x] = value; wallPending.set(`${x},${y}`, { x, y, value }); return true;
   };
-  // Replace object arrays from a snapshot on undo/redo (mark for full save).
+  // Replace entity arrays from a snapshot on undo/redo (mark for full save).
   const restoreObjects = (snap: Snapshot) => {
     const d = get().doc; if (!d) return;
     d.objects = cloneObjs(snap.objects); d.topObjects = cloneObjs(snap.topObjects);
-    objectsDirty = true; topDirty = true;
+    d.tileEffects = cloneEffects(snap.tileEffects); d.areas = cloneAreas(snap.areas);
+    objectsDirty = true; topDirty = true; effectsDirty = true; areasDirty = true;
   };
 
   return {
@@ -157,7 +182,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     doc: null,
     setDoc: (doc) => {
       undoStack.length = 0; redoStack.length = 0; floorPending.clear(); wallPending.clear();
-      objectsDirty = false; topDirty = false; strokeSnap = null; strokeChanged = false;
+      objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; strokeSnap = null; strokeChanged = false;
       set({ doc, revision: 0, undoDepth: 0, redoDepth: 0, selection: null, selectedObjectId: null });
     },
 
@@ -165,6 +190,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setSelectedFloor: (id) => set({ selectedFloorPaletteId: id }),
     selectedObjectPaletteId: null,
     setSelectedObject: (id) => set({ selectedObjectPaletteId: id }),
+    selectedEffect: null,
+    setSelectedEffect: (k) => set({ selectedEffect: k }),
 
     selection: null,
     setSelection: (selection) => set({ selection }),
@@ -233,6 +260,44 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
     deleteSelected: (layer) => { const id = get().selectedObjectId; if (id) get().removeObject(id, layer); },
 
+    stampEffectAt: (x, y) => {
+      const d = get().doc; const eff = get().selectedEffect;
+      if (!d || (eff !== 'startingPoint' && eff !== 'impassable')) return;
+      const existing = d.tileEffects.find((e) => e.x === x && e.y === y);
+      if (existing && existing.kind === eff) return; // no change
+      d.tileEffects = d.tileEffects.filter((e) => !(e.x === x && e.y === y));
+      d.tileEffects.push(eff === 'impassable' ? { x, y, kind: 'impassable' } : { x, y, kind: 'startingPoint' });
+      effectsDirty = true; strokeChanged = true;
+    },
+    eraseEffectAt: (x, y) => {
+      const d = get().doc; if (!d) return false;
+      if (!d.tileEffects.some((e) => e.x === x && e.y === y)) return false;
+      d.tileEffects = d.tileEffects.filter((e) => !(e.x === x && e.y === y));
+      effectsDirty = true; strokeChanged = true; return true;
+    },
+    areaAt: (x, y) => {
+      const areas = get().doc?.areas; if (!areas) return null;
+      for (let i = areas.length - 1; i >= 0; i--) { const a = areas[i]; if (x >= a.x && x < a.x + a.width && y >= a.y && y < a.y + a.height) return a; }
+      return null;
+    },
+    addArea: (effect, rect, name, areaId) => {
+      const d = get().doc; if (!d) return;
+      const snap = snapshot();
+      // zoneType 'desk' → the game shows a name PILL and groups/isolates audio,
+      // WITHOUT the side effects of 'meeting' (mounts MeetingControl + sets
+      // in_meeting) or 'focus' (makes occupants solo, which would break private
+      // audio). label=name so the pill actually renders (game keys the pill off
+      // zone.label).
+      d.areas.push({ id: crypto.randomUUID(), effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, zoneType: 'desk', areaId });
+      areasDirty = true; pushHistory(snap); commit();
+    },
+    removeAreaAt: (x, y) => {
+      const d = get().doc; const a = get().areaAt(x, y); if (!d || !a) return;
+      const snap = snapshot();
+      d.areas = d.areas.filter((z) => z.id !== a.id);
+      areasDirty = true; pushHistory(snap); commit();
+    },
+
     undo: () => {
       const cur = snapshot(); const target = undoStack.pop();
       if (!cur || !target) return;
@@ -254,13 +319,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     takePending: () => {
       const d = get().doc;
-      const out = {
+      const out: SavePayload = {
         floorChanges: Array.from(floorPending.values()),
         wallChanges: Array.from(wallPending.values()),
         objects: objectsDirty && d ? cloneObjs(d.objects) : undefined,
         topObjects: topDirty && d ? cloneObjs(d.topObjects) : undefined,
+        tileEffects: effectsDirty && d ? cloneEffects(d.tileEffects) : undefined,
+        areas: areasDirty && d ? cloneAreas(d.areas) : undefined,
       };
-      floorPending.clear(); wallPending.clear(); objectsDirty = false; topDirty = false;
+      floorPending.clear(); wallPending.clear(); objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false;
       return out;
     },
     requeuePending: (p) => {
@@ -268,6 +335,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
       for (const c of p.wallChanges) { const k = `${c.x},${c.y}`; if (!wallPending.has(k)) wallPending.set(k, c); }
       if (p.objects) objectsDirty = true;
       if (p.topObjects) topDirty = true;
+      if (p.tileEffects) effectsDirty = true;
+      if (p.areas) areasDirty = true;
       set((s) => ({ revision: s.revision + 1 }));
     },
   };

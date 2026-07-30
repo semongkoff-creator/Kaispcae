@@ -14,7 +14,7 @@ interface ZoneRect {
 // this logic, so a modified/malicious client could report any x,y to
 // PLAYER_MOVE and the server would broadcast it unquestioned (see the
 // "Move" spec's explicit warning: movement must be server-authoritative).
-export const BLOCKED_TILES: Set<TileType> = new Set(['wall', 'desk', 'chair']);
+export const BLOCKED_TILES: Set<TileType> = new Set(['wall', 'desk', 'chair', 'blocked']);
 
 export function isTileBlocked(tiles: RoomTile[][], tileX: number, tileY: number): boolean {
   if (tileY < 0 || tileY >= tiles.length) return true;

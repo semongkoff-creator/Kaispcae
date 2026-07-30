@@ -16,6 +16,9 @@ export const TILE_COLORS: Record<TileType, string> = {
   chair: '#5b8dd9',
   portal: '#e8d5b0',
   spawn: '#e8d5b0',
+  // Invisible impassable tile — never actually drawn (GameCanvas skips it); the
+  // key exists only to satisfy Record<TileType>. Floor shows through.
+  blocked: '#e8d5b0',
 };
 
 // Real tileset art for each generic TileType (used when a tile has no

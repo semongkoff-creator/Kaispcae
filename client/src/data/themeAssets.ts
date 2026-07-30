@@ -57,6 +57,7 @@ const MODERN_INTERIORS_TILE_SPRITES: Record<TileType, TileSpriteDef> = {
   chair: { src: `${OFFICE_SINGLES}/Modern_Office_Singles_32x32_101.png`, srcX: 0, srcY: 64 },
   portal: MODERN_INTERIORS_FLOOR,
   spawn: MODERN_INTERIORS_FLOOR,
+  blocked: MODERN_INTERIORS_FLOOR, // invisible impassable — never drawn (see GameCanvas)
 };
 
 // Sci-fi office generic tile sprites — used for the room's underlying
@@ -73,6 +74,7 @@ const SCIFI_OFFICE_TILE_SPRITES: Record<TileType, TileSpriteDef> = {
   chair: { src: `${SCIFI_BASE}/Furniture/chairs.rsi/office-white.png`, srcX: 0, srcY: 0 },
   portal: SCIFI_OFFICE_FLOOR,
   spawn: SCIFI_OFFICE_FLOOR,
+  blocked: SCIFI_OFFICE_FLOOR, // invisible impassable — never drawn (see GameCanvas)
 };
 
 export const THEME_TILE_SPRITES: Record<RoomTheme, Record<TileType, TileSpriteDef>> = {

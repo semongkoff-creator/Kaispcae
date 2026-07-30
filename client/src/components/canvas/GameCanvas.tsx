@@ -632,7 +632,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         // Furniture/wall tiles have transparent sprite margins, so paint the
         // floor underneath first — otherwise gaps show the dark canvas backdrop.
         drawFloorTile(ctx, tile, screenX, screenY, themeRef.current);
-        if (tile.type !== 'floor' && tile.type !== 'portal' && tile.type !== 'spawn') {
+        // 'blocked' (ZEP impassable effect) blocks movement but renders nothing
+        // — only the floor shows. 'portal'/'spawn' draw their own markers below.
+        if (tile.type !== 'floor' && tile.type !== 'portal' && tile.type !== 'spawn' && tile.type !== 'blocked') {
           drawTile(ctx, tile.type, screenX, screenY, themeRef.current);
         }
 
