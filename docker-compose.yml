@@ -5,8 +5,6 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: virtualmeet
-    ports:
-      - '5432:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -14,30 +12,29 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
   redis:
     image: redis:7-alpine
-    ports:
-      - '6379:6379'
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 5s
       retries: 5
-
   server:
     build:
       context: .
       dockerfile: server/Dockerfile
-    ports:
-      - '3001:3001'
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/virtualmeet
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set — see .env.example}
-      CLIENT_URL: http://localhost
-      CORS_ORIGIN: http://localhost
+      CLIENT_URL: https://office.dev-kaitech.com
+      CORS_ORIGIN: https://office.dev-kaitech.com
+      LARK_APP_ID: ${LARK_APP_ID:-}
+      LARK_APP_SECRET: ${LARK_APP_SECRET:-}
+      LARK_REDIRECT_URI: ${LARK_REDIRECT_URI:-}
+      LARK_TOKEN_ENC_KEY: ${LARK_TOKEN_ENC_KEY:-}
+      LARK_DRIVE_ROOT_FOLDER_TOKEN: ${LARK_DRIVE_ROOT_FOLDER_TOKEN:-}
     volumes:
       # server/src/routes/uploads.ts writes chat attachments/Add-Media files
       # to ./uploads (process.cwd()/uploads = /app/uploads here) whenever
@@ -55,13 +52,17 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-
   nginx:
     build:
       context: .
       dockerfile: client/Dockerfile
+      args:
+        VITE_SERVER_URL: https://office.dev-kaitech.com
+        VITE_TURN_URL: ""
+        VITE_TURN_USERNAME: ""
+        VITE_TURN_CREDENTIAL: ""
     ports:
-      - '80:80'
+      - '127.0.0.1:8090:80'
     depends_on:
       - server
 

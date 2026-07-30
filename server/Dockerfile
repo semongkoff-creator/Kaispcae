@@ -6,6 +6,7 @@
 # ship in the final image.
 FROM node:20-alpine AS builder
 WORKDIR /app
+RUN apk add --no-cache openssl
 COPY . .
 RUN npm ci
 RUN npx prisma generate --schema=server/prisma/schema.prisma
@@ -14,10 +15,7 @@ RUN npm run build --workspace=@virtualmeet/server
 FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
-# Full node_modules (not a pruned/prod-only install) so the generated
-# node_modules/.prisma/client — produced above against server/prisma — and
-# the externalized runtime deps (express, socket.io, prisma, etc. — see the
-# esbuild --external flags in server/package.json) are all present.
+RUN apk add --no-cache openssl
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/server/dist ./server/dist
 COPY --from=builder /app/server/prisma ./server/prisma

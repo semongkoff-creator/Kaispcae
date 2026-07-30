@@ -6,8 +6,15 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY . .
 RUN npm ci
+ARG VITE_SERVER_URL
+ARG VITE_TURN_URL
+ARG VITE_TURN_USERNAME
+ARG VITE_TURN_CREDENTIAL
+ENV VITE_SERVER_URL=$VITE_SERVER_URL \
+    VITE_TURN_URL=$VITE_TURN_URL \
+    VITE_TURN_USERNAME=$VITE_TURN_USERNAME \
+    VITE_TURN_CREDENTIAL=$VITE_TURN_CREDENTIAL
 RUN npm run build --workspace=@virtualmeet/client
-
 FROM nginx:alpine
 COPY --from=builder /app/client/dist /usr/share/nginx/html
 COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf
