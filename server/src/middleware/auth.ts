@@ -14,12 +14,22 @@ export const SESSION_SUPERSEDED_MESSAGE = 'Akun ini baru saja login di perangkat
 // used to justify serving uploads to anyone at all. The session therefore
 // ALSO rides as an HttpOnly cookie, minted alongside every token we hand out.
 //
-// Path is deliberately narrowed to /api/uploads: the browser never attaches
-// this cookie to any other route, so it adds no CSRF surface to the
-// state-changing endpoints — those stay Bearer-only. JS can't read it either,
-// so it doesn't widen XSS impact beyond the token already in localStorage.
+// Path used to be narrowed to /api/uploads — fine until routes/uploads.ts (A8)
+// added a SECOND read route, GET /api/files/:token, for Lark-Drive-backed
+// attachments. A cookie's path match is a plain prefix test with no OR, so
+// /api/uploads never matched /api/files: the browser silently dropped the
+// cookie on every Drive-backed request, authenticateUploadRead saw no
+// credential at all, and every such attachment 401'd — invisibly, since nginx
+// logs a 401 same as any other response, and the failure reads identically to
+// "the upload itself failed" from the chat bubble. Renaming either route
+// isn't an option (every attachmentUrl already stored in the DB points at the
+// old path), so the cookie's path widens to their common ancestor instead.
+// /api is still far narrower than "every route": authenticateUploadRead is
+// the ONLY place that ever reads this cookie's value, so it riding along on
+// other /api/* requests doesn't hand any OTHER endpoint a credential to act
+// on — there is nothing there to widen a CSRF/XSS surface INTO.
 export const UPLOAD_COOKIE_NAME = 'mk_upload_sess';
-const UPLOAD_COOKIE_PATH = '/api/uploads';
+const UPLOAD_COOKIE_PATH = '/api';
 
 // Secure is keyed off the request's ACTUAL protocol, not NODE_ENV. Tying it
 // to NODE_ENV would be a trap: nginx/nginx.conf currently terminates on plain
