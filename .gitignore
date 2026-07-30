@@ -5,3 +5,8 @@ dist/
 *.log
 .DS_Store
 server/uploads/
+# scripts/screenshotUI.mjs output — working reference images for a UI
+# redesign pass, not something to version.
+ui-screenshots/
+test-results/
+playwright-report/
