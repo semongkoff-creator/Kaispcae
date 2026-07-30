@@ -251,7 +251,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const onPortalEnterRef = useRef(onPortalEnter); onPortalEnterRef.current = onPortalEnter;
   const zoneDragStartRef = useRef<{ x: number; y: number } | null>(null);
   const zoneDragCurrentRef = useRef<{ x: number; y: number } | null>(null);
-  const lastPortalTileRef = useRef<string | null>(null);
+  // ZEP portal (Potong 5) — the portal tile the local player is standing on
+  // (if any), driving the "Press F" prompt + trigger. Replaces the old
+  // step-on auto-travel. Cooldown timestamp blocks instant back-and-forth.
+  const nearbyPortalRef = useRef<{ tileX: number; tileY: number; target?: string; targetX?: number; targetY?: number; label?: string } | null>(null);
+  const portalCooldownRef = useRef(0);
 
   const isBlocked = useCallback((tileX: number, tileY: number) => {
     const t = tilesRef.current;
@@ -276,6 +280,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // A4 — double-click a non-blocked tile to teleport there instantly. Refs so
   // the once-attached listener always reads current values without re-binding.
   const emitTeleportToRef = useRef(emitTeleportTo); emitTeleportToRef.current = emitTeleportTo;
+  const setPositionRef = useRef(setPosition); setPositionRef.current = setPosition;
   // Transient fade rings at teleport source + destination (performance.now()
   // timestamps), drawn + expired in the render loop.
   const teleportFlashRef = useRef<{ x: number; y: number; start: number }[]>([]);
@@ -447,6 +452,30 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         return;
       }
 
+      // ZEP portal (Potong 5) — F travels. Internal portals teleport within the
+      // room (reusing the double-click teleport path); cross-room portals go
+      // through the existing room-travel path (onPortalEnter). A short cooldown
+      // stops an instant bounce back through a return portal.
+      if (e.code === 'KeyF') {
+        const np = nearbyPortalRef.current;
+        if (np && portalCooldownRef.current <= performance.now()) {
+          e.preventDefault();
+          portalCooldownRef.current = performance.now() + 1500;
+          if (np.targetX != null && np.targetY != null) {
+            const cx = np.targetX * TILE_SIZE + TILE_SIZE / 2;
+            const cy = np.targetY * TILE_SIZE + TILE_SIZE / 2;
+            const store = useGameStore.getState();
+            teleportFlashRef.current.push({ x: store.localPlayer.x, y: store.localPlayer.y, start: performance.now() }, { x: cx, y: cy, start: performance.now() });
+            setPositionRef.current(cx, cy);
+            store.setLocalPlayer({ x: cx, y: cy, isMoving: false });
+            emitTeleportToRef.current(cx, cy, store.localPlayer.direction);
+          } else if (np.target) {
+            onPortalEnterRef.current(np.target);
+          }
+        }
+        return;
+      }
+
       // Pressing a movement key while sitting stands you up first, instead
       // of silently eating the input (useMovement's isFrozen check would
       // otherwise just ignore it with no feedback).
@@ -602,14 +631,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const pTileX = Math.floor(playerX / TILE_SIZE);
       const pTileY = Math.floor(playerY / TILE_SIZE);
       const pTile = tilesRef.current[pTileY]?.[pTileX];
-      const key = `${pTileX},${pTileY}`;
-      if (pTile?.type === 'portal' && pTile.portalTarget) {
-        if (lastPortalTileRef.current !== key) {
-          lastPortalTileRef.current = key;
-          onPortalEnterRef.current(pTile.portalTarget);
-        }
+      // ZEP portal: no longer auto-travel on step. Just note the portal the
+      // player is standing on so the "Press F" prompt shows and F can trigger it.
+      if (pTile?.type === 'portal' && (pTile.portalTarget || (pTile.portalTargetX != null && pTile.portalTargetY != null))) {
+        nearbyPortalRef.current = { tileX: pTileX, tileY: pTileY, target: pTile.portalTarget, targetX: pTile.portalTargetX, targetY: pTile.portalTargetY, label: pTile.portalLabel };
       } else {
-        lastPortalTileRef.current = null;
+        nearbyPortalRef.current = null;
       }
     }
 
@@ -1026,6 +1053,28 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       // "X" key cap + label
       ctx.fillStyle = '#ffffff';
       ctx.fillText(`${label}  Buka`, msx, by + 13);
+    }
+
+    // ZEP portal (Potong 5) — "Press F — <name>" prompt over the portal tile.
+    if (nearbyPortalRef.current) {
+      const { tileX, tileY, label, target } = nearbyPortalRef.current;
+      const psx = tileX * TILE_SIZE - cameraX + TILE_SIZE / 2;
+      const psy = tileY * TILE_SIZE - cameraY;
+      const bob = Math.sin(timestamp * 0.005) * 2;
+      const name = label || (target ? 'room lain' : 'titik lain');
+      const text = `F — ${name}`;
+      ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+      const tw = ctx.measureText(text).width;
+      const bx = psx - tw / 2 - 8, by = psy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
+      ctx.fillStyle = 'rgba(124, 58, 237, 0.95)';
+      ctx.beginPath();
+      ctx.moveTo(bx + rr, by); ctx.lineTo(bx + bw - rr, by);
+      ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + rr); ctx.lineTo(bx + bw, by + bh - rr);
+      ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - rr, by + bh); ctx.lineTo(bx + rr, by + bh);
+      ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - rr); ctx.lineTo(bx, by + rr);
+      ctx.quadraticCurveTo(bx, by, bx + rr, by); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(text, psx, by + 13);
     }
 
     // Speech bubbles

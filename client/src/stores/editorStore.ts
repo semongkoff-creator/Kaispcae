@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { LayerData, Furniture, TileEffect, AreaEffect } from '@virtualmeet/shared';
 
-export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea';
+export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal';
 
 // ZEP-style Room Editor state. Potong 0: layers/tools/viewport. Potong 2: floor
 // editing + undo/redo + debounced save. Potong 3: Wall (tile, drives collision),
@@ -43,7 +43,7 @@ const cloneObjs = (o: Furniture[]): Furniture[] => o.map((x) => ({ ...x }));
 const cloneEffects = (e: TileEffect[]): TileEffect[] => e.map((x) => ({ ...x }));
 const cloneAreas = (a: AreaEffect[]): AreaEffect[] => a.map((x) => ({ ...x }));
 
-interface Snapshot { floor: FloorGrid; wall: WallGrid; objects: Furniture[]; topObjects: Furniture[]; tileEffects: TileEffect[]; areas: AreaEffect[]; }
+interface Snapshot { width: number; height: number; floor: FloorGrid; wall: WallGrid; objects: Furniture[]; topObjects: Furniture[]; tileEffects: TileEffect[]; areas: AreaEffect[]; }
 
 interface EditorState {
   activeLayer: EditorLayer;
@@ -100,6 +100,12 @@ interface EditorState {
   addArea: (effect: 'mapLocation' | 'privateArea', rect: Selection, name: string, areaId?: string) => void;
   removeAreaAt: (x: number, y: number) => void;
 
+  // Portal (Potong 5) — one per tile; replaces any effect already there.
+  addPortal: (x: number, y: number, cfg: { targetSlug?: string; targetX?: number; targetY?: number; label?: string }) => void;
+  // Resize the map (Potong 5). Grows with empty tiles / shrinks by culling
+  // out-of-bounds content. Caller must have confirmed/validated first.
+  resizeMap: (width: number, height: number) => void;
+
   undo: () => void;
   redo: () => void;
 
@@ -108,8 +114,14 @@ interface EditorState {
 }
 
 interface SavePayload {
-  floorChanges: FloorChange[];
-  wallChanges: WallChange[];
+  floorChanges?: FloorChange[];
+  wallChanges?: WallChange[];
+  // Set only on a resize: full grids + new dimensions (per-tile diffs can't
+  // express a dimension change).
+  width?: number;
+  height?: number;
+  floor?: FloorGrid;
+  wall?: WallGrid;
   objects?: Furniture[];
   topObjects?: Furniture[];
   tileEffects?: TileEffect[];
@@ -127,6 +139,7 @@ let objectsDirty = false;
 let topDirty = false;
 let effectsDirty = false;
 let areasDirty = false;
+let resizedDirty = false; // dims/grids changed → save full floor+wall+dims
 let strokeSnap: Snapshot | null = null;
 let strokeChanged = false;
 
@@ -134,7 +147,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   const snapshot = (): Snapshot | null => {
     const d = get().doc;
     if (!d) return null;
-    return { floor: cloneFloor(d.floor), wall: cloneWall(d.wall), objects: cloneObjs(d.objects), topObjects: cloneObjs(d.topObjects), tileEffects: cloneEffects(d.tileEffects), areas: cloneAreas(d.areas) };
+    return { width: d.width, height: d.height, floor: cloneFloor(d.floor), wall: cloneWall(d.wall), objects: cloneObjs(d.objects), topObjects: cloneObjs(d.topObjects), tileEffects: cloneEffects(d.tileEffects), areas: cloneAreas(d.areas) };
   };
   const pushHistory = (snap: Snapshot | null) => { if (!snap) return; undoStack.push(snap); if (undoStack.length > HISTORY_LIMIT) undoStack.shift(); redoStack.length = 0; };
   const commit = () => set((s) => ({ revision: s.revision + 1, undoDepth: undoStack.length, redoDepth: redoStack.length }));
@@ -157,6 +170,19 @@ export const useEditorStore = create<EditorState>((set, get) => {
     d.objects = cloneObjs(snap.objects); d.topObjects = cloneObjs(snap.topObjects);
     d.tileEffects = cloneEffects(snap.tileEffects); d.areas = cloneAreas(snap.areas);
     objectsDirty = true; topDirty = true; effectsDirty = true; areasDirty = true;
+  };
+  // Restore grids on undo/redo: cell-diff when dims match; full replace when a
+  // resize changed the dimensions (cell-diff can't cross a dim change).
+  const applyGridSnapshot = (target: Snapshot) => {
+    const d = get().doc; if (!d) return;
+    if (target.width !== d.width || target.height !== d.height) {
+      d.width = target.width; d.height = target.height;
+      d.floor = cloneFloor(target.floor); d.wall = cloneWall(target.wall);
+      resizedDirty = true;
+    } else {
+      for (let y = 0; y < target.floor.length; y++) for (let x = 0; x < target.floor[y].length; x++) applyFloorCell(x, y, target.floor[y][x]);
+      for (let y = 0; y < target.wall.length; y++) for (let x = 0; x < target.wall[y].length; x++) applyWallCell(x, y, target.wall[y][x]);
+    }
   };
 
   return {
@@ -182,7 +208,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     doc: null,
     setDoc: (doc) => {
       undoStack.length = 0; redoStack.length = 0; floorPending.clear(); wallPending.clear();
-      objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; strokeSnap = null; strokeChanged = false;
+      objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; resizedDirty = false; strokeSnap = null; strokeChanged = false;
       set({ doc, revision: 0, undoDepth: 0, redoDepth: 0, selection: null, selectedObjectId: null });
     },
 
@@ -298,41 +324,70 @@ export const useEditorStore = create<EditorState>((set, get) => {
       areasDirty = true; pushHistory(snap); commit();
     },
 
+    addPortal: (x, y, cfg) => {
+      const d = get().doc; if (!d) return;
+      const snap = snapshot();
+      d.tileEffects = d.tileEffects.filter((e) => !(e.x === x && e.y === y));
+      d.tileEffects.push({ x, y, kind: 'portal', targetSlug: cfg.targetSlug, targetX: cfg.targetX, targetY: cfg.targetY, label: cfg.label });
+      effectsDirty = true; pushHistory(snap); commit();
+    },
+
+    resizeMap: (width, height) => {
+      const d = get().doc; if (!d || width < 1 || height < 1) return;
+      const snap = snapshot();
+      const oldFloor = d.floor, oldWall = d.wall;
+      d.floor = Array.from({ length: height }, (_, y) => Array.from({ length: width }, (_, x) => (y < oldFloor.length && x < (oldFloor[y]?.length ?? 0)) ? oldFloor[y][x] : null));
+      d.wall = Array.from({ length: height }, (_, y) => Array.from({ length: width }, (_, x) => (y < oldWall.length && x < (oldWall[y]?.length ?? 0)) ? oldWall[y][x] : false));
+      d.width = width; d.height = height;
+      const inB = (o: { x: number; y: number }) => o.x >= 0 && o.x < width && o.y >= 0 && o.y < height;
+      d.objects = d.objects.filter(inB);
+      d.topObjects = d.topObjects.filter(inB);
+      d.tileEffects = d.tileEffects.filter(inB);
+      d.areas = d.areas
+        .map((a) => { const nx = Math.max(0, a.x), ny = Math.max(0, a.y); return { ...a, x: nx, y: ny, width: Math.min(a.x + a.width, width) - nx, height: Math.min(a.y + a.height, height) - ny }; })
+        .filter((a) => a.width > 0 && a.height > 0);
+      resizedDirty = true; objectsDirty = true; topDirty = true; effectsDirty = true; areasDirty = true;
+      pushHistory(snap); set({ selection: null }); commit();
+    },
+
     undo: () => {
       const cur = snapshot(); const target = undoStack.pop();
       if (!cur || !target) return;
       redoStack.push(cur); if (redoStack.length > HISTORY_LIMIT) redoStack.shift();
-      for (let y = 0; y < target.floor.length; y++) for (let x = 0; x < target.floor[y].length; x++) applyFloorCell(x, y, target.floor[y][x]);
-      for (let y = 0; y < target.wall.length; y++) for (let x = 0; x < target.wall[y].length; x++) applyWallCell(x, y, target.wall[y][x]);
-      restoreObjects(target);
+      applyGridSnapshot(target); restoreObjects(target);
       set({ selectedObjectId: null, selection: null }); commit();
     },
     redo: () => {
       const cur = snapshot(); const target = redoStack.pop();
       if (!cur || !target) return;
       undoStack.push(cur); if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
-      for (let y = 0; y < target.floor.length; y++) for (let x = 0; x < target.floor[y].length; x++) applyFloorCell(x, y, target.floor[y][x]);
-      for (let y = 0; y < target.wall.length; y++) for (let x = 0; x < target.wall[y].length; x++) applyWallCell(x, y, target.wall[y][x]);
-      restoreObjects(target);
+      applyGridSnapshot(target); restoreObjects(target);
       set({ selectedObjectId: null, selection: null }); commit();
     },
 
     takePending: () => {
       const d = get().doc;
       const out: SavePayload = {
-        floorChanges: Array.from(floorPending.values()),
-        wallChanges: Array.from(wallPending.values()),
         objects: objectsDirty && d ? cloneObjs(d.objects) : undefined,
         topObjects: topDirty && d ? cloneObjs(d.topObjects) : undefined,
         tileEffects: effectsDirty && d ? cloneEffects(d.tileEffects) : undefined,
         areas: areasDirty && d ? cloneAreas(d.areas) : undefined,
       };
-      floorPending.clear(); wallPending.clear(); objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false;
+      if (resizedDirty && d) {
+        // A resize replaces the whole grid + dims; per-tile diffs don't apply.
+        out.width = d.width; out.height = d.height; out.floor = cloneFloor(d.floor); out.wall = cloneWall(d.wall);
+        floorPending.clear(); wallPending.clear();
+      } else {
+        out.floorChanges = Array.from(floorPending.values());
+        out.wallChanges = Array.from(wallPending.values());
+      }
+      floorPending.clear(); wallPending.clear(); objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; resizedDirty = false;
       return out;
     },
     requeuePending: (p) => {
-      for (const c of p.floorChanges) { const k = `${c.x},${c.y}`; if (!floorPending.has(k)) floorPending.set(k, c); }
-      for (const c of p.wallChanges) { const k = `${c.x},${c.y}`; if (!wallPending.has(k)) wallPending.set(k, c); }
+      for (const c of p.floorChanges ?? []) { const k = `${c.x},${c.y}`; if (!floorPending.has(k)) floorPending.set(k, c); }
+      for (const c of p.wallChanges ?? []) { const k = `${c.x},${c.y}`; if (!wallPending.has(k)) wallPending.set(k, c); }
+      if (p.width != null) resizedDirty = true;
       if (p.objects) objectsDirty = true;
       if (p.topObjects) topDirty = true;
       if (p.tileEffects) effectsDirty = true;

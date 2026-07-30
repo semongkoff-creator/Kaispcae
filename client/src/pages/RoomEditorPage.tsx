@@ -20,12 +20,18 @@ type LoadError = 'auth' | 'forbidden' | 'notfound' | 'generic';
 const OBJ_CATEGORIES: { key: 'furniture' | 'decor' | 'electronics'; label: string }[] = [
   { key: 'furniture', label: 'Furniture' }, { key: 'decor', label: 'Decor' }, { key: 'electronics', label: 'Electronics' },
 ];
-const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea'; label: string; color: string; hint: string }[] = [
+const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal'; label: string; color: string; hint: string }[] = [
   { id: 'startingPoint', label: 'Starting point', color: 'rgba(16,185,129,0.9)', hint: 'Stamp per tile = titik spawn (bisa banyak; pemain muncul di salah satunya).' },
   { id: 'impassable', label: 'Impassable', color: 'rgba(239,68,68,0.85)', hint: 'Stamp per tile = penghalang tak terlihat (memblok gerak, tanpa tekstur).' },
   { id: 'mapLocation', label: 'Map location', color: 'rgba(192,132,252,0.95)', hint: 'Stamp: drag area lalu beri nama → pill label muncul di game.' },
   { id: 'privateArea', label: 'Private area', color: 'rgba(96,165,250,0.95)', hint: 'Stamp: drag area + Area ID. Area ber-ID sama = satu grup audio (walau terpisah).' },
+  { id: 'portal', label: 'Portal', color: 'rgba(124,58,237,0.95)', hint: 'Stamp klik tile portal → pilih tujuan room lain, atau klik titik tujuan di room ini. Pemain tekan F untuk pindah.' },
 ];
+
+type SavePayload = ReturnType<ReturnType<typeof useEditorStore.getState>['takePending']>;
+function hasChanges(p: SavePayload): boolean {
+  return !!(p.floorChanges?.length || p.wallChanges?.length || p.objects || p.topObjects || p.tileEffects || p.areas || p.width != null);
+}
 
 function normalizeTiles(tilemapData: unknown[][] | null): RoomTile[][] {
   if (Array.isArray(tilemapData) && tilemapData.length > 0) {
@@ -85,7 +91,16 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
       const sx = e.x * TILE_SIZE, sy = e.y * TILE_SIZE, c = TILE_SIZE / 2;
       if (e.kind === 'startingPoint') { ctx.fillStyle = 'rgba(16,185,129,0.85)'; ctx.beginPath(); ctx.arc(sx + c, sy + c, c - 3, 0, Math.PI * 2); ctx.fill(); }
       else if (e.kind === 'impassable') { ctx.strokeStyle = 'rgba(239,68,68,0.7)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sx + 4, sy + 4); ctx.lineTo(sx + TILE_SIZE - 4, sy + TILE_SIZE - 4); ctx.moveTo(sx + TILE_SIZE - 4, sy + 4); ctx.lineTo(sx + 4, sy + TILE_SIZE - 4); ctx.stroke(); }
-      else if (e.kind === 'portal') { ctx.strokeStyle = 'rgba(124,58,237,0.9)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(sx + c, sy + c, c - 3, 0, Math.PI * 2); ctx.stroke(); }
+      else if (e.kind === 'portal') {
+        ctx.strokeStyle = 'rgba(124,58,237,0.95)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(sx + c, sy + c, c - 3, 0, Math.PI * 2); ctx.stroke();
+        if (e.targetX != null && e.targetY != null) {
+          const tx = e.targetX * TILE_SIZE + c, ty = e.targetY * TILE_SIZE + c;
+          ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(sx + c, sy + c); ctx.lineTo(tx, ty); ctx.stroke(); ctx.setLineDash([]);
+          ctx.fillStyle = 'rgba(124,58,237,0.45)'; ctx.beginPath(); ctx.arc(tx, ty, c - 6, 0, Math.PI * 2); ctx.fill();
+        }
+        const plabel = e.label || (e.targetSlug ? `→ ${e.targetSlug}` : '→ dalam room');
+        ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(plabel, sx + c, sy - 2); ctx.textAlign = 'left';
+      }
       else if (e.kind === 'door') { ctx.fillStyle = 'rgba(212,160,86,0.8)'; ctx.fillRect(sx + 3, sy + 3, TILE_SIZE - 6, TILE_SIZE - 6); }
     }
   }
@@ -96,6 +111,11 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const [error, setError] = useState<LoadError | null>(null);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'error'>('idle');
   const [objTab, setObjTab] = useState<'furniture' | 'decor' | 'electronics'>('furniture');
+  const [resizeOpen, setResizeOpen] = useState(false);
+  const [resizeW, setResizeW] = useState(0);
+  const [resizeH, setResizeH] = useState(0);
+  const [portalHint, setPortalHint] = useState(false); // awaiting internal-portal destination click
+  const portalOriginRef = useRef<{ x: number; y: number } | null>(null);
 
   const activeLayer = useEditorStore((s) => s.activeLayer);
   const setActiveLayer = useEditorStore((s) => s.setActiveLayer);
@@ -160,7 +180,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     if (revision === 0) return;
     const t = setTimeout(() => {
       const p = useEditorStore.getState().takePending();
-      if (!p.floorChanges.length && !p.wallChanges.length && !p.objects && !p.topObjects) return;
+      if (!hasChanges(p)) return;
       setSaveState('saving');
       api.saveRoomLayers(slug, p).then(() => setSaveState('idle')).catch(() => { useEditorStore.getState().requeuePending(p); setSaveState('error'); });
     }, 900);
@@ -168,7 +188,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   }, [revision, slug]);
 
   useEffect(() => {
-    const flush = () => { const p = useEditorStore.getState().takePending(); if (p.floorChanges.length || p.wallChanges.length || p.objects || p.topObjects) api.saveRoomLayers(slug, p).catch(() => {}); };
+    const flush = () => { const p = useEditorStore.getState().takePending(); if (hasChanges(p)) api.saveRoomLayers(slug, p).catch(() => {}); };
     window.addEventListener('pagehide', flush);
     return () => window.removeEventListener('pagehide', flush);
   }, [slug]);
@@ -273,6 +293,25 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       if (eff === 'startingPoint' || eff === 'impassable') {
         if (s.activeTool === 'stamp') { s.beginStroke(); s.stampEffectAt(t.x, t.y); dragRef.current = { mode: 'effPaint' }; }
         else if (s.activeTool === 'eraser') { s.beginStroke(); s.eraseEffectAt(t.x, t.y); dragRef.current = { mode: 'effErase' }; }
+      } else if (eff === 'portal') {
+        if (s.activeTool === 'eraser') { s.eraseEffectAt(t.x, t.y); return; }
+        if (s.activeTool !== 'stamp') return;
+        // Second click of an internal portal = pick the destination tile.
+        if (portalOriginRef.current) {
+          const origin = portalOriginRef.current; portalOriginRef.current = null; setPortalHint(false);
+          const label = (window.prompt('Nama portal (opsional):', '') ?? '').trim();
+          s.addPortal(origin.x, origin.y, { targetX: t.x, targetY: t.y, label: label || undefined });
+          return;
+        }
+        // First click: choose cross-room vs internal.
+        if (window.confirm('Portal ke ROOM LAIN?\n\nOK = pilih room lain · Batal = titik dalam room ini')) {
+          const target = (window.prompt('Kode room tujuan (slug dari URL/share):', '') ?? '').trim();
+          if (!target) return;
+          const label = (window.prompt('Nama portal (opsional):', '') ?? '').trim();
+          s.addPortal(t.x, t.y, { targetSlug: target, label: label || undefined });
+        } else {
+          portalOriginRef.current = { x: t.x, y: t.y }; setPortalHint(true);
+        }
       } else { // mapLocation | privateArea — rectangular
         if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y); }
         else { s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 }); dragRef.current = { mode: 'areaRect', anchor: { x: t.x, y: t.y } }; }
@@ -315,6 +354,35 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     dragRef.current = null;
   }, []);
 
+  const openResize = () => { const d = useEditorStore.getState().doc; if (d) { setResizeW(d.width); setResizeH(d.height); } setResizeOpen(true); };
+  const applyResize = () => {
+    const d = useEditorStore.getState().doc; if (!d) return;
+    const w = Math.max(1, Math.min(200, Math.floor(resizeW))), h = Math.max(1, Math.min(200, Math.floor(resizeH)));
+    if (w === d.width && h === d.height) { setResizeOpen(false); return; }
+    const oob = (o: { x: number; y: number }) => o.x >= w || o.y >= h;
+    const outObj = d.objects.filter(oob).length + d.topObjects.filter(oob).length;
+    let outWall = 0;
+    for (let y = 0; y < d.wall.length; y++) for (let x = 0; x < (d.wall[y]?.length ?? 0); x++) if ((x >= w || y >= h) && d.wall[y][x]) outWall++;
+    const outEff = d.tileEffects.filter(oob).length;
+    const outAreas = d.areas.filter((a) => a.x + a.width > w || a.y + a.height > h).length;
+    // Block: can't remove every starting point.
+    const sp = d.tileEffects.filter((e) => e.kind === 'startingPoint');
+    if (sp.length > 0 && sp.every((e) => e.x >= w || e.y >= h)) {
+      window.alert('Resize diblokir: semua starting point akan terpotong. Pindahkan minimal satu ke dalam batas baru dulu.');
+      return;
+    }
+    // Block: an internal portal's destination would be cut.
+    if (d.tileEffects.some((e) => e.kind === 'portal' && e.targetX != null && e.targetY != null && (e.targetX >= w || e.targetY >= h))) {
+      window.alert('Resize diblokir: ada tujuan portal internal yang akan terpotong. Pindahkan/hapus portal itu dulu.');
+      return;
+    }
+    const shrinking = w < d.width || h < d.height;
+    const losses = outObj + outWall + outEff + outAreas;
+    if (shrinking && losses > 0 && !window.confirm(`Mengecilkan map akan MENGHAPUS konten di luar batas baru:\n\n• ${outObj} objek\n• ${outWall} tile wall\n• ${outEff} tile efek\n• ${outAreas} area\n\nLanjutkan?`)) return;
+    useEditorStore.getState().resizeMap(w, h);
+    setResizeOpen(false);
+  };
+
   const floorEntries = meta ? PALETTE_BY_THEME[meta.theme].filter((p) => p.category === 'floor') : [];
   const objEntries = meta ? PALETTE_BY_THEME[meta.theme].filter((p) => p.category === objTab) : [];
   const canPaint = activeTool === 'stamp' || activeTool === 'eraser';
@@ -348,6 +416,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         <button onClick={() => useEditorStore.getState().undo()} disabled={undoDepth === 0} title="Undo (Ctrl+Z)" className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30 inline-flex items-center justify-center cursor-pointer"><ArrowCounterclockwise size={14} /></button>
         <button onClick={() => useEditorStore.getState().redo()} disabled={redoDepth === 0} title="Redo (Ctrl+Y)" className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30 inline-flex items-center justify-center cursor-pointer"><ArrowClockwise size={14} /></button>
         <span className="text-[11px] text-white/40 w-20">{saveState === 'saving' ? 'Menyimpan…' : saveState === 'error' ? 'Gagal simpan' : 'Tersimpan'}</span>
+        <button onClick={openResize} title="Resize map" className="px-2.5 py-1 rounded text-xs font-medium text-white/70 bg-white/10 hover:bg-white/20 cursor-pointer">Resize</button>
         <div className="ml-auto flex items-center gap-1">
           <button onClick={() => zoomBy(1 / 1.2)} className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 cursor-pointer">−</button>
           <span className="text-xs text-white/60 w-12 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
@@ -425,6 +494,33 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           )}
         </div>
       </div>
+
+      {/* Portal internal-destination hint */}
+      {portalHint && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 bg-purple-600 text-white text-xs px-3 py-1.5 rounded-full shadow-lg">
+          Klik titik TUJUAN portal di dalam room ini…
+          <button onClick={() => { portalOriginRef.current = null; setPortalHint(false); }} className="ml-2 underline cursor-pointer">batal</button>
+        </div>
+      )}
+
+      {/* Resize modal */}
+      {resizeOpen && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60" onMouseDown={() => setResizeOpen(false)}>
+          <div className="bg-gray-800 border border-white/10 rounded-xl p-5 w-80" onMouseDown={(e) => e.stopPropagation()}>
+            <p className="text-white font-semibold mb-1">Resize map</p>
+            <p className="text-white/50 text-xs mb-3">Ukuran dalam tile. Mengecilkan akan memotong konten di luar batas (dikonfirmasi dulu).</p>
+            <div className="flex items-center gap-3 mb-4">
+              <label className="text-xs text-white/60">Lebar<input type="number" min={1} max={200} value={resizeW} onChange={(e) => setResizeW(Number(e.target.value))} className="mt-1 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-sm text-white" /></label>
+              <span className="text-white/40 mt-4">×</span>
+              <label className="text-xs text-white/60">Tinggi<input type="number" min={1} max={200} value={resizeH} onChange={(e) => setResizeH(Number(e.target.value))} className="mt-1 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-sm text-white" /></label>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={applyResize} className="flex-1 py-1.5 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium cursor-pointer">Terapkan</button>
+              <button onClick={() => setResizeOpen(false)} className="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white/80 text-sm cursor-pointer">Batal</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -24,7 +24,12 @@ export interface TileEffect {
   y: number;
   kind: 'startingPoint' | 'impassable' | 'portal' | 'door';
   tileType?: TileType; // for 'impassable' — original type ('desk' | 'chair' | …)
-  targetSlug?: string; // for 'portal'
+  // Portal destination: targetSlug = another room (cross-room), or targetX/Y =
+  // a tile in THIS room (internal). label = optional portal name.
+  targetSlug?: string;
+  targetX?: number;
+  targetY?: number;
+  label?: string;
 }
 
 // A rectangular region effect. Legacy zones convert to 'privateArea' (the audio
@@ -88,7 +93,7 @@ export function legacyToLayerData(tiles: RoomTile[][], furniture: Furniture[], z
       fr.push(t?.floorPaletteId ?? null);
       wr.push(type === 'wall');
       if (type === 'spawn') tileEffects.push({ x, y, kind: 'startingPoint' });
-      else if (type === 'portal') tileEffects.push({ x, y, kind: 'portal', targetSlug: t?.portalTarget });
+      else if (type === 'portal') tileEffects.push({ x, y, kind: 'portal', targetSlug: t?.portalTarget, targetX: t?.portalTargetX, targetY: t?.portalTargetY, label: t?.portalLabel });
       else if (type === 'door') tileEffects.push({ x, y, kind: 'door' });
       else if (type === 'desk' || type === 'chair' || type === 'blocked') tileEffects.push({ x, y, kind: 'impassable', tileType: type });
       // 'wall' → wall grid; 'floor' → nothing extra.
@@ -134,10 +139,10 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     for (let x = 0; x < width; x++) {
       const eff = effAt.get(`${x},${y}`);
       let type: TileType = 'floor';
-      let portalTarget: string | undefined;
+      let portalEff: TileEffect | undefined;
       if (wall[y]?.[x]) type = 'wall';
       else if (eff?.kind === 'startingPoint') type = 'spawn';
-      else if (eff?.kind === 'portal') { type = 'portal'; portalTarget = eff.targetSlug; }
+      else if (eff?.kind === 'portal') { type = 'portal'; portalEff = eff; }
       else if (eff?.kind === 'door') type = 'door';
       // Impassable keeps its original blocked type for converted rooms (desk/
       // chair) and uses the invisible 'blocked' type for effects painted in the
@@ -148,7 +153,12 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
       const tile: RoomTile = { x, y, type };
       const fp = floor[y]?.[x];
       if (fp != null) tile.floorPaletteId = fp;
-      if (portalTarget != null) tile.portalTarget = portalTarget;
+      if (portalEff) {
+        if (portalEff.targetSlug != null) tile.portalTarget = portalEff.targetSlug;
+        if (portalEff.targetX != null) tile.portalTargetX = portalEff.targetX;
+        if (portalEff.targetY != null) tile.portalTargetY = portalEff.targetY;
+        if (portalEff.label != null) tile.portalLabel = portalEff.label;
+      }
       row.push(tile);
     }
     tiles.push(row);

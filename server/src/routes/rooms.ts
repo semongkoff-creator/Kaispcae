@@ -1,12 +1,12 @@
 import { Router, Response } from 'express';
 import { Server } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess, LayerData, layerDataToLegacy } from '@virtualmeet/shared';
+import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess, LayerData, layerDataToLegacy, findSpawnPixel, TILE_SIZE } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
 import { convertLegacyRoom } from '../lib/convertLegacyRoom';
 import { isRoomLocked } from '../socket/roomHandler';
-import { setCachedTiles } from '../store/roomStore';
+import { setCachedTiles, getPlayers, updatePlayerPosition } from '../store/roomStore';
 import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
 import { ensureGroupConversation } from '../lib/conversations';
 import { driveEnabled, ensureRoomFolder } from '../lib/larkDrive';
@@ -167,6 +167,18 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
     const layerData = room.layerData as unknown as LayerData;
     const body = req.body ?? {};
 
+    // Resize (Potong 5): full grid + dimension replace. A resize save carries
+    // width/height/floor/wall instead of per-tile diffs.
+    let resized = false;
+    if (Number.isInteger(body.width) && Number.isInteger(body.height) && Array.isArray(body.floor) && Array.isArray(body.wall)
+        && body.width >= 1 && body.width <= 200 && body.height >= 1 && body.height <= 200) {
+      layerData.width = body.width;
+      layerData.height = body.height;
+      layerData.floor = body.floor;
+      layerData.wall = body.wall;
+      resized = true;
+    }
+
     for (const c of Array.isArray(body.floorChanges) ? body.floorChanges : []) {
       const x = Number(c?.x), y = Number(c?.y);
       if (!Number.isInteger(x) || !Number.isInteger(y)) continue;
@@ -212,6 +224,20 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
     const derived = layerDataToLegacy(layerData);
     setCachedTiles(room.slug, derived.tiles);
     ioRef?.to(room.slug).emit(SocketEvents.ROOM_UPDATED, { tiles: derived.tiles, furniture: derived.furniture, zones: derived.zones });
+
+    // On shrink, rescue any player now standing outside the new bounds to a
+    // spawn tile so no avatar is stranded off-map (Potong 5).
+    if (resized) {
+      const maxX = layerData.width * TILE_SIZE, maxY = layerData.height * TILE_SIZE;
+      const spawn = findSpawnPixel(derived.tiles) ?? { x: TILE_SIZE + TILE_SIZE / 2, y: TILE_SIZE + TILE_SIZE / 2 };
+      const players = await getPlayers(room.slug);
+      for (const p of players) {
+        if (p.x < 0 || p.x >= maxX || p.y < 0 || p.y >= maxY) {
+          updatePlayerPosition(room.slug, p.id, spawn.x, spawn.y, 'down');
+          ioRef?.to(room.slug).emit(SocketEvents.PLAYER_TELEPORTED, { id: p.id, x: spawn.x, y: spawn.y, direction: 'down' });
+        }
+      }
+    }
 
     return res.json({ ok: true });
   } catch (err) {

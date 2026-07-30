@@ -375,6 +375,11 @@ export const api = {
       topObjects?: unknown[];
       tileEffects?: unknown[];
       areas?: unknown[];
+      // Resize (Potong 5): full grids + new dimensions.
+      width?: number;
+      height?: number;
+      floor?: (string | null)[][];
+      wall?: boolean[][];
     },
   ) => request<{ ok: true }>(`/rooms/${slug}/editor/layers`, { method: 'PUT', body: JSON.stringify(payload) }),
 

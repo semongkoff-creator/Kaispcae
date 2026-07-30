@@ -101,7 +101,14 @@ export interface RoomTile {
   y: number;
   type: TileType;
   floorPaletteId?: string;
+  // portalTarget = destination ROOM slug (cross-room portal). For an INTERNAL
+  // portal (same room), portalTargetX/Y hold the destination tile instead.
+  // portalLabel is an optional name shown by the "Press F" prompt. All only
+  // meaningful when type === 'portal'.
   portalTarget?: string;
+  portalTargetX?: number;
+  portalTargetY?: number;
+  portalLabel?: string;
 }
 
 // Valid tile types and their visual/semantic meaning. 'portal' and 'spawn'
