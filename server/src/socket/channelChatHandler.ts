@@ -41,6 +41,7 @@ function toMessageDto(m: {
   attachmentUrl: string | null;
   attachmentName: string | null;
   createdAt: Date;
+  clientId?: string | null;
 }): ChannelMessage {
   return {
     id: m.id,
@@ -53,6 +54,12 @@ function toMessageDto(m: {
     attachmentUrl: m.attachmentUrl ?? undefined,
     attachmentName: m.attachmentName ?? undefined,
     createdAt: m.createdAt.getTime(),
+    // Bug 6 — round-tripped so the SENDER's client can match this confirmed
+    // broadcast back to the optimistic bubble it already showed (by clientId,
+    // since the optimistic bubble's temp id IS the clientId) and swap it in
+    // place instead of appending a duplicate. Meaningless to anyone else —
+    // clientId is the sender's own dedup key, harmless to expose.
+    clientId: m.clientId ?? undefined,
   };
 }
 

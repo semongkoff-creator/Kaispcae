@@ -243,6 +243,14 @@ export interface GameState {
   setTargetMessages: (key: string, messages: ChannelMessage[]) => void;
   prependTargetMessages: (key: string, messages: ChannelMessage[]) => void;
   appendTargetMessage: (key: string, message: ChannelMessage) => void;
+  // Bug 6 — optimistic send. addPendingMessage shows the bubble the instant
+  // Send is clicked (id === clientId, a temp id, status:'pending'), before any
+  // network round trip. markMessageFailed/markMessagePending flip that same
+  // entry's status in place (never remove it) so a failed send stays visible
+  // with a retry affordance rather than silently vanishing.
+  addPendingMessage: (key: string, message: ChannelMessage) => void;
+  markMessageFailed: (key: string, clientId: string) => void;
+  markMessagePending: (key: string, clientId: string) => void;
   // Remove a deleted message live (see shared MESSAGE_DELETED). parentId set
   // → it was a thread reply (also decrements the parent's replyCount);
   // otherwise a top-level message (also drops its cached thread).
@@ -643,11 +651,53 @@ export const useGameStore = create<GameState>((set, get) => ({
   // deduped server-side and echoed back to the sender alone (see
   // channelChatHandler.ts's createMessageDeduped), so the sender can legitimately
   // see the same id twice — once from the original broadcast, once from the echo.
+  //
+  // Bug 6 — a confirmed message whose clientId matches a still-pending local
+  // bubble (this sender's own optimistic echo) REPLACES that entry in place
+  // rather than appending a second one: same list position, temp id swapped
+  // for the real one, status cleared. Anyone else's incoming message (no
+  // matching pending entry) just falls through to the plain append below. A
+  // blob: preview URL (see the file-upload optimistic path) is revoked here,
+  // now that the real attachmentUrl has taken over — revoking any earlier
+  // would blank the image while the bubble still legitimately said "Mengirim…".
   appendTargetMessage: (key, message) =>
     set((state) => {
       const existing = state.messagesByTarget[key] ?? [];
+      if (message.clientId) {
+        const pendingIdx = existing.findIndex((m) => m.id === message.clientId && m.status != null);
+        if (pendingIdx !== -1) {
+          const stale = existing[pendingIdx];
+          if (stale.attachmentUrl?.startsWith('blob:')) URL.revokeObjectURL(stale.attachmentUrl);
+          const updated = [...existing];
+          updated[pendingIdx] = message;
+          return { messagesByTarget: { ...state.messagesByTarget, [key]: updated } };
+        }
+      }
       if (existing.some((m) => m.id === message.id)) return {};
       return { messagesByTarget: { ...state.messagesByTarget, [key]: [...existing, message].slice(-CHAT_TARGET_MAX) } };
+    }),
+  addPendingMessage: (key, message) =>
+    set((state) => {
+      const existing = state.messagesByTarget[key] ?? [];
+      return { messagesByTarget: { ...state.messagesByTarget, [key]: [...existing, message].slice(-CHAT_TARGET_MAX) } };
+    }),
+  markMessageFailed: (key, clientId) =>
+    set((state) => {
+      const existing = state.messagesByTarget[key]; if (!existing) return {};
+      const idx = existing.findIndex((m) => m.id === clientId && m.status === 'pending');
+      if (idx === -1) return {};
+      const updated = [...existing];
+      updated[idx] = { ...updated[idx], status: 'failed' };
+      return { messagesByTarget: { ...state.messagesByTarget, [key]: updated } };
+    }),
+  markMessagePending: (key, clientId) =>
+    set((state) => {
+      const existing = state.messagesByTarget[key]; if (!existing) return {};
+      const idx = existing.findIndex((m) => m.id === clientId && m.status === 'failed');
+      if (idx === -1) return {};
+      const updated = [...existing];
+      updated[idx] = { ...updated[idx], status: 'pending' };
+      return { messagesByTarget: { ...state.messagesByTarget, [key]: updated } };
     }),
   bumpReplyCount: (targetKey, parentId) =>
     set((state) => {

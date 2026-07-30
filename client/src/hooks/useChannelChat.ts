@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { ChannelMessage } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { api } from '@/services/api';
+
+// Bug 6 — plain socket emits have no ack/response, so there's no direct
+// signal that a send ever reached the server at all (dropped connection,
+// server hiccup, ...). Silence past this long after a send is treated as a
+// failure the user can retry, rather than leaving a "Mengirim…" bubble
+// stuck forever with no way out. Comfortably above any real round trip
+// (normally tens to a few hundred ms) so a merely-slow connection doesn't
+// get falsely marked failed out from under a send that's still arriving.
+const PENDING_TIMEOUT_MS = 10_000;
 
 interface ChannelChatEmitters {
   emitChannelJoin: (channelId: string) => void;
@@ -115,6 +125,17 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
 
   const activeMessages = activeChatTarget ? messagesByTarget[targetKey(activeChatTarget)] ?? [] : [];
 
+  // Bug 6 — arms the "still pending after N seconds" failure fallback for one
+  // send. Shared by the first attempt and every retry, since both need the
+  // exact same "nothing arrived in time" check.
+  const armPendingTimeout = useCallback((key: string, clientId: string) => {
+    setTimeout(() => {
+      const list = useGameStore.getState().messagesByTarget[key] ?? [];
+      const stillPending = list.some((m) => m.id === clientId && m.status === 'pending');
+      if (stillPending) useGameStore.getState().markMessageFailed(key, clientId);
+    }, PENDING_TIMEOUT_MS);
+  }, []);
+
   const sendMessage = useCallback(
     (text: string, parentId?: string, attachment?: { url: string; fileName: string }) => {
       if (!activeChatTarget) return;
@@ -124,10 +145,131 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
       // to be generated HERE, once per send — regenerating it on a retry
       // would defeat the entire purpose.
       const clientId = crypto.randomUUID();
+
+      // Bug 6 — show the bubble NOW, before the socket emit even goes out:
+      // that's the whole fix for "chat feels slow" — the sender was always
+      // waiting for a full server round trip (persist + broadcast back) just
+      // to see their OWN message appear. Thread replies are intentionally
+      // skipped: they live in repliesByParent (see appendParentReply in
+      // useSocket.ts), a separate store slice this optimistic path doesn't
+      // reconcile against yet — inserting one here would show a duplicate
+      // that never gets cleaned up.
+      if (!parentId) {
+        const state = useGameStore.getState();
+        const key = targetKey(activeChatTarget);
+        const optimistic: ChannelMessage = {
+          id: clientId,
+          clientId,
+          channelId: activeChatTarget.type === 'channel' ? activeChatTarget.id : undefined,
+          conversationId: activeChatTarget.type === 'dm' ? activeChatTarget.id : undefined,
+          senderId: state.localUserId,
+          senderName: state.localPlayer.name,
+          text,
+          createdAt: Date.now(),
+          attachmentUrl: attachment?.url,
+          attachmentName: attachment?.fileName,
+          status: 'pending',
+        };
+        state.addPendingMessage(key, optimistic);
+        armPendingTimeout(key, clientId);
+      }
+
       if (activeChatTarget.type === 'channel') emitters.emitChannelMessageSend(activeChatTarget.id, text, parentId, attachment?.url, attachment?.fileName, clientId);
       else emitters.emitDmMessageSend(activeChatTarget.id, text, parentId, attachment?.url, attachment?.fileName, clientId);
     },
-    [activeChatTarget, emitters]
+    [activeChatTarget, emitters, armPendingTimeout]
+  );
+
+  // Bug 6 — the OTHER half of the delay: attaching a file used to await the
+  // ENTIRE upload before anything showed up, then wait the full send round
+  // trip on top of that. Now the bubble appears the instant a file is picked
+  // (image/video get a local blob: preview — literally free, no network
+  // involved), the upload runs in the background, and the real send only
+  // fires once it resolves — same clientId throughout, so the eventual
+  // server confirmation reconciles this exact bubble instead of adding a new
+  // one (see appendTargetMessage's blob: revoke, which waits for that swap).
+  const pendingFilesRef = useRef(new Map<string, File>());
+
+  const sendFileMessage = useCallback(
+    async (file: File) => {
+      if (!activeChatTarget) return;
+      const clientId = crypto.randomUUID();
+      const key = targetKey(activeChatTarget);
+      const previewUrl = URL.createObjectURL(file);
+      pendingFilesRef.current.set(clientId, file);
+
+      const state = useGameStore.getState();
+      state.addPendingMessage(key, {
+        id: clientId,
+        clientId,
+        channelId: activeChatTarget.type === 'channel' ? activeChatTarget.id : undefined,
+        conversationId: activeChatTarget.type === 'dm' ? activeChatTarget.id : undefined,
+        senderId: state.localUserId,
+        senderName: state.localPlayer.name,
+        text: '',
+        createdAt: Date.now(),
+        attachmentUrl: previewUrl,
+        attachmentName: file.name,
+        status: 'pending',
+      });
+
+      try {
+        const { url, fileName } = await api.uploadMedia(file);
+        // The File itself is only ever needed to RETRY the upload step —
+        // once it succeeds, every future retry (if the send confirmation
+        // itself later times out) only needs to re-emit the already-known
+        // real url, not the file again (see retryMessage's non-file branch).
+        pendingFilesRef.current.delete(clientId);
+        if (activeChatTarget.type === 'channel') emitters.emitChannelMessageSend(activeChatTarget.id, '', undefined, url, fileName, clientId);
+        else emitters.emitDmMessageSend(activeChatTarget.id, '', undefined, url, fileName, clientId);
+        armPendingTimeout(key, clientId);
+      } catch (e) {
+        console.error('[chat] file upload failed:', e);
+        useGameStore.getState().markMessageFailed(key, clientId);
+        // pendingFilesRef keeps the File (retry needs it) and the blob:
+        // preview is NOT revoked: the failed bubble keeps showing this exact
+        // preview (with a retry affordance) — only a successful
+        // reconciliation (appendTargetMessage) revokes it, once the real URL
+        // has taken over.
+      }
+    },
+    [activeChatTarget, emitters, armPendingTimeout]
+  );
+
+  // Re-attempts a message still sitting in 'failed' status. Reuses the exact
+  // same clientId (the server's dedup on it is what makes this safe to call
+  // freely — never a duplicate row even if the original actually DID land
+  // and only the confirmation was lost) and, for a file send, the original
+  // File kept in pendingFilesRef (a fresh upload needs the real File object —
+  // there's no way to re-derive one from an already-revoked/broken blob: URL).
+  const retryMessage = useCallback(
+    async (message: ChannelMessage) => {
+      if (!activeChatTarget || !message.clientId || message.status !== 'failed') return;
+      const key = targetKey(activeChatTarget);
+      const clientId = message.clientId;
+      const file = pendingFilesRef.current.get(clientId);
+
+      if (file) {
+        useGameStore.getState().markMessagePending(key, clientId);
+        try {
+          const { url, fileName } = await api.uploadMedia(file);
+          pendingFilesRef.current.delete(clientId);
+          if (activeChatTarget.type === 'channel') emitters.emitChannelMessageSend(activeChatTarget.id, '', undefined, url, fileName, clientId);
+          else emitters.emitDmMessageSend(activeChatTarget.id, '', undefined, url, fileName, clientId);
+          armPendingTimeout(key, clientId);
+        } catch (e) {
+          console.error('[chat] retry upload failed:', e);
+          useGameStore.getState().markMessageFailed(key, clientId);
+        }
+        return;
+      }
+
+      useGameStore.getState().markMessagePending(key, clientId);
+      if (activeChatTarget.type === 'channel') emitters.emitChannelMessageSend(activeChatTarget.id, message.text, message.parentId, message.attachmentUrl, message.attachmentName, clientId);
+      else emitters.emitDmMessageSend(activeChatTarget.id, message.text, message.parentId, message.attachmentUrl, message.attachmentName, clientId);
+      armPendingTimeout(key, clientId);
+    },
+    [activeChatTarget, emitters, armPendingTimeout]
   );
 
   // Fire a typing ping for the active target, throttled so a burst of
@@ -200,6 +342,8 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
     setChatPanelOpen,
     activeMessages,
     sendMessage,
+    sendFileMessage,
+    retryMessage,
     notifyTyping,
     deleteMessage,
     editMessage,

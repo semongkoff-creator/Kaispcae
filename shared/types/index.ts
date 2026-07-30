@@ -918,6 +918,17 @@ export interface ChannelMessage {
   // attachment, or both — never neither.
   attachmentUrl?: string;
   attachmentName?: string;
+  // Bug 6 — optimistic send. clientId round-trips from the sender's own send
+  // through the server and back unchanged (see ChatMessage.clientId
+  // server-side), so the client can match its own already-on-screen
+  // optimistic bubble to the confirmed broadcast and swap it in place instead
+  // of appending a duplicate. status is CLIENT-ONLY — the server never sends
+  // it — it's the local echo shown the instant Send is clicked, before any
+  // network round trip completes: 'pending' while in flight, 'failed' if it
+  // never confirmed (upload error, or no broadcast within the timeout),
+  // absent once the real server-confirmed message has replaced it.
+  clientId?: string;
+  status?: 'pending' | 'failed';
 }
 
 // Emotes

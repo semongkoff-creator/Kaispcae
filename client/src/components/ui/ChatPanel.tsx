@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
-import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill } from 'react-bootstrap-icons';
+import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -49,6 +49,12 @@ interface ChatPanelProps {
   onSelectTarget: (target: { type: 'channel' | 'dm'; id: string }) => void;
   messages: ChannelMessage[];
   onSend: (text: string, parentId?: string, attachment?: { url: string; fileName: string }) => void;
+  // Bug 6 — attaching a file now shows the bubble immediately (local blob:
+  // preview) and uploads in the background, rather than blocking on the
+  // whole upload before onSend is even called. See useChannelChat.ts's
+  // sendFileMessage. onRetry re-attempts a message stuck in status:'failed'.
+  onSendFile?: (file: File) => void;
+  onRetry?: (message: ChannelMessage) => void;
   // Throttled ping while composing, for the "X is typing…" indicator.
   onTyping?: () => void;
   // Delete one of your own persisted channel/DM messages (see MESSAGE_DELETE).
@@ -77,6 +83,8 @@ export function ChatPanel({
   onSelectTarget,
   messages,
   onSend,
+  onSendFile,
+  onRetry,
   onTyping,
   onDeleteMessage,
   onEditMessage,
@@ -126,7 +134,6 @@ export function ChatPanel({
   const threadReplies = expandedThreadId ? repliesByParent[expandedThreadId] ?? [] : [];
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
-  const [uploadingFile, setUploadingFile] = useState(false);
   const [attachError, setAttachError] = useState('');
   // Scroll container (not an anchor element): we drive scrollTop directly,
   // which is steadier under React re-renders than scrollIntoView (that can
@@ -215,30 +222,25 @@ export function ChatPanel({
     setText((prev) => prev + emoji);
   };
 
-  // Reuses the same POST /api/uploads endpoint Add Media uses (see
-  // server/src/routes/uploads.ts) — same 10MB limit and mime allowlist,
-  // just sent as its own chat message (empty text + attachment) instead of
-  // a map object. Only available for persisted Channel/DM tabs: zone/bubble
-  // chat (ChatMessage) has no attachment field at all.
+  // Bug 6 — this used to await the ENTIRE upload here before calling onSend
+  // at all, so the bubble (and every send-round-trip-wait on top of it)
+  // never appeared until the file had already finished uploading. onSendFile
+  // (useChannelChat.ts's sendFileMessage) now shows the bubble immediately
+  // (local blob: preview) and runs the upload in the background — this
+  // function only does the synchronous size pre-check, which still belongs
+  // here since it should reject before any bubble is even created. A failed
+  // upload/send shows up as that bubble's own status:'failed' with a retry
+  // button (see the message-list rendering below), not a generic banner.
   const handleAttachFile = useCallback(
-    async (file: File) => {
+    (file: File) => {
       setAttachError('');
       if (file.size > MAX_ATTACHMENT_BYTES) {
-        setAttachError('File is too large — max 10MB.');
+        setAttachError(`File is too large — max ${Math.round(MAX_ATTACHMENT_BYTES / (1024 * 1024))}MB.`);
         return;
       }
-      setUploadingFile(true);
-      try {
-        const { url, fileName } = await api.uploadMedia(file);
-        onSend('', undefined, { url, fileName });
-      } catch (err) {
-        console.error('[chat] file upload failed:', err);
-        setAttachError('Upload failed — check the file type and try again.');
-      } finally {
-        setUploadingFile(false);
-      }
+      onSendFile?.(file);
     },
-    [onSend]
+    [onSendFile]
   );
 
   const handleLoadOlder = useCallback(async () => {
@@ -495,6 +497,29 @@ export function ChatPanel({
                         {m.attachmentUrl && (
                           <ChatAttachment url={m.attachmentUrl} fileName={m.attachmentName} isOwn={isOwn} onOpen={setLightbox} />
                         )}
+                        {/* Bug 6 — this bubble is the sender's own optimistic
+                            echo, shown before the server has confirmed
+                            anything. 'pending' auto-clears the moment the
+                            real broadcast reconciles it (see
+                            appendTargetMessage); 'failed' stays until Retry
+                            or the page reloads, same pattern chat apps use
+                            for "message not delivered". */}
+                        {m.status === 'pending' && (
+                          <span className="mt-0.5 flex items-center gap-1 text-[9px] opacity-70">
+                            <span className="w-2 h-2 rounded-full border border-current border-t-transparent animate-spin" />
+                            Mengirim…
+                          </span>
+                        )}
+                        {m.status === 'failed' && (
+                          <button
+                            type="button"
+                            onClick={() => onRetry?.(m)}
+                            title="Coba kirim lagi"
+                            className="mt-0.5 flex items-center gap-1 text-[9px] text-red-300 hover:text-red-100 cursor-pointer"
+                          >
+                            <ExclamationTriangleFill size={9} /> Gagal terkirim — coba lagi <ArrowClockwise size={9} />
+                          </button>
+                        )}
                       </MessageBubble>
 
                       {expandedThreadId === m.id && (
@@ -616,7 +641,6 @@ export function ChatPanel({
             {!viewingZone && !proximityMode && (
               <AttachmentMenuButton
                 onFile={handleAttachFile}
-                disabled={uploadingFile}
                 title="Lampirkan"
                 buttonClassName="text-purple-600 dark:text-purple-400 disabled:opacity-40 cursor-pointer"
               />
@@ -630,14 +654,13 @@ export function ChatPanel({
                 if (e.target.value && !viewingZone && !proximityMode) onTyping?.();
               }}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder={uploadingFile ? 'Uploading file...' : viewingZone ? `Message ${currentZone?.name}...` : proximityMode ? 'Say nearby...' : 'Type a message...'}
+              placeholder={viewingZone ? `Message ${currentZone?.name}...` : proximityMode ? 'Say nearby...' : 'Type a message...'}
               maxLength={200}
-              disabled={uploadingFile}
               className="flex-1 bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 disabled:opacity-60"
             />
             <button
               onClick={handleSend}
-              disabled={!text.trim() || uploadingFile}
+              disabled={!text.trim()}
               className="bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-xs px-3 py-1.5 rounded cursor-pointer"
             >
               Send

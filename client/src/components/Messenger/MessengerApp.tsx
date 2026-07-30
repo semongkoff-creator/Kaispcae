@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill, ExclamationTriangleFill } from 'react-bootstrap-icons';
+import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise } from 'react-bootstrap-icons';
 import { ChannelMessage, Channel, DirectConversationSummary } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -118,6 +118,12 @@ interface MessengerAppProps {
   onSelectTarget: (t: Target) => void;
   messages: ChannelMessage[];
   onSend: (text: string, parentId?: string, attachment?: { url: string; fileName: string }) => void;
+  // Bug 6 — mirrors ChatPanel.tsx: attaching a file shows the bubble
+  // immediately (local blob: preview) and uploads in the background instead
+  // of blocking on the whole upload first. onRetry re-attempts a message
+  // stuck in status:'failed'.
+  onSendFile?: (file: File) => void;
+  onRetry?: (message: ChannelMessage) => void;
   onTyping?: () => void;
   onDeleteMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string, text: string) => void;
@@ -136,6 +142,8 @@ export function MessengerApp({
   onSelectTarget,
   messages,
   onSend,
+  onSendFile,
+  onRetry,
   onTyping,
   onDeleteMessage,
   onEditMessage,
@@ -162,7 +170,6 @@ export function MessengerApp({
   const [editText, setEditText] = useState('');
   // Bug 10 — attachment preview opens in this in-app lightbox, not a new tab.
   const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
-  const [uploading, setUploading] = useState(false);
   const [attachError, setAttachError] = useState('');
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
@@ -241,25 +248,24 @@ export function MessengerApp({
     setShowEmoji(false);
   }, [text, onSend]);
 
+  // Bug 6 — mirrors ChatPanel.tsx's handleAttachFile: this used to await the
+  // ENTIRE upload before onSend was even called, so the bubble never showed
+  // until the file had finished uploading. onSendFile (useChannelChat.ts's
+  // sendFileMessage) shows it immediately (local blob: preview) and uploads
+  // in the background — this only keeps the synchronous size pre-check,
+  // which should still reject before any bubble exists. A failed upload/send
+  // shows as that bubble's own status:'failed' with a retry button, not a
+  // generic banner, so `uploading` no longer needs to block the composer.
   const handleFile = useCallback(
-    async (file: File) => {
+    (file: File) => {
       setAttachError('');
       if (file.size > MAX_ATTACHMENT_BYTES) {
         setAttachError('File terlalu besar (maks 50MB).');
         return;
       }
-      setUploading(true);
-      try {
-        const { url, fileName } = await api.uploadMedia(file);
-        onSend('', undefined, { url, fileName });
-      } catch (e) {
-        console.error('[messenger] upload gagal:', e);
-        setAttachError('Upload gagal — cek tipe filenya.');
-      } finally {
-        setUploading(false);
-      }
+      onSendFile?.(file);
     },
-    [onSend]
+    [onSendFile]
   );
 
   const loadOlder = useCallback(async () => {
@@ -510,6 +516,26 @@ export function MessengerApp({
                               {m.text}
                             </div>
                           )}
+                          {/* Bug 6 — this bubble is the sender's own optimistic
+                              echo, shown before the server confirms anything.
+                              'pending' clears itself once the real broadcast
+                              reconciles it; 'failed' stays until Retry. */}
+                          {m.status === 'pending' && (
+                            <span className="mt-0.5 flex items-center gap-1 text-[10px] text-gray-400">
+                              <span className="w-2 h-2 rounded-full border border-current border-t-transparent animate-spin" />
+                              Mengirim…
+                            </span>
+                          )}
+                          {m.status === 'failed' && (
+                            <button
+                              type="button"
+                              onClick={() => onRetry?.(m)}
+                              title="Coba kirim lagi"
+                              className="mt-0.5 flex items-center gap-1 text-[10px] text-red-500 hover:text-red-600 cursor-pointer"
+                            >
+                              <ExclamationTriangleFill size={10} /> Gagal terkirim — coba lagi <ArrowClockwise size={10} />
+                            </button>
+                          )}
                           {own && editingId !== m.id && (
                             <div className={`absolute top-1/2 -translate-y-1/2 ${own ? 'right-full mr-1.5' : 'left-full ml-1.5'} hidden group-hover:flex gap-0.5`}>
                               {m.text && (
@@ -564,8 +590,7 @@ export function MessengerApp({
                   <EmojiSmile size={15} />
                 </button>
                 <AttachmentMenuButton
-                  onFile={(f) => void handleFile(f)}
-                  disabled={uploading}
+                  onFile={handleFile}
                   title="Lampirkan file"
                   iconSize={15}
                   buttonClassName="w-7 h-7 rounded hover:bg-gray-100 dark:hover:bg-gray-700 inline-flex items-center justify-center text-gray-400 shrink-0 disabled:opacity-50"
@@ -587,13 +612,12 @@ export function MessengerApp({
                 />
                 <button
                   onClick={send}
-                  disabled={!text.trim() || uploading}
+                  disabled={!text.trim()}
                   className="w-8 h-8 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 disabled:hover:bg-indigo-500 text-white inline-flex items-center justify-center shrink-0"
                 >
                   <SendFill size={13} />
                 </button>
               </div>
-              {uploading && <p className="text-xs text-gray-400 mt-1.5">Mengunggah…</p>}
             </div>
           </>
         )}

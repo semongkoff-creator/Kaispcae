@@ -1158,6 +1158,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onSelectTarget={channelChat.setActiveChatTarget}
           messages={channelChat.activeMessages}
           onSend={channelChat.sendMessage}
+          onSendFile={channelChat.sendFileMessage}
+          onRetry={channelChat.retryMessage}
           onTyping={channelChat.notifyTyping}
           onDeleteMessage={channelChat.deleteMessage}
           onEditMessage={channelChat.editMessage}
@@ -1455,6 +1457,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onSelectTarget={channelChat.setActiveChatTarget}
         messages={channelChat.activeMessages}
         onSend={channelChat.sendMessage}
+        onSendFile={channelChat.sendFileMessage}
+        onRetry={channelChat.retryMessage}
         onTyping={channelChat.notifyTyping}
         onDeleteMessage={channelChat.deleteMessage}
         onEditMessage={channelChat.editMessage}
