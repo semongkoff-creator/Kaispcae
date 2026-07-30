@@ -363,10 +363,18 @@ export const api = {
       zones: unknown[];
     }>(`/rooms/${slug}/editor-data`),
 
-  // Potong 2 — persist floor-layer edits (per-tile changes). Admin-gated server
-  // side; the server broadcasts ROOM_UPDATED so game clients update live.
-  saveRoomFloor: (slug: string, changes: { x: number; y: number; value: string | null }[]) =>
-    request<{ ok: true }>(`/rooms/${slug}/editor/floor`, { method: 'PUT', body: JSON.stringify({ changes }) }),
+  // Potong 2/3 — persist layered edits: floor + wall per-tile changes, and
+  // full objects/topObjects arrays when they changed. Admin-gated server side;
+  // the server broadcasts ROOM_UPDATED so game clients update live.
+  saveRoomLayers: (
+    slug: string,
+    payload: {
+      floorChanges?: { x: number; y: number; value: string | null }[];
+      wallChanges?: { x: number; y: number; value: boolean }[];
+      objects?: unknown[];
+      topObjects?: unknown[];
+    },
+  ) => request<{ ok: true }>(`/rooms/${slug}/editor/layers`, { method: 'PUT', body: JSON.stringify(payload) }),
 
   createRoom: (name: string, maxPlayers?: number, isPublic?: boolean, theme?: 'modern-interiors' | 'scifi-office', template?: RoomTemplateId) =>
     request<RoomInfo>('/rooms', {

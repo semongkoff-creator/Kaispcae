@@ -106,7 +106,16 @@ export function legacyToLayerData(tiles: RoomTile[][], furniture: Furniture[], z
     zoneType: z.type,
   }));
 
-  return { version: MAP_FORMAT_VERSION, width, height, floor, wall, objects: [...furniture], topObjects: [], areas, tileEffects };
+  // Split by the topLayer flag so a round-trip is lossless even after the
+  // editor has authored top-layer pieces. Legacy furniture has no flag → all
+  // land in `objects`, topObjects empty (exactly what conversion expects).
+  const objects: Furniture[] = [];
+  const topObjects: Furniture[] = [];
+  for (const f of furniture) {
+    if (f.topLayer) { const { topLayer: _drop, ...rest } = f; topObjects.push(rest as Furniture); }
+    else objects.push(f);
+  }
+  return { version: MAP_FORMAT_VERSION, width, height, floor, wall, objects, topObjects, areas, tileEffects };
 }
 
 // Read-time adaptor: reconstruct the exact runtime shape from LayerData.
@@ -137,7 +146,14 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     tiles.push(row);
   }
 
-  const furniture: Furniture[] = [...ld.objects, ...ld.topObjects];
+  // Tag top-layer pieces so the game renders them above the avatar. objects
+  // stay untagged. (For a freshly-converted room topObjects is empty, so this
+  // reproduces the original furniture list exactly — the round-trip guard in
+  // convertLegacyRoom relies on that.)
+  const furniture: Furniture[] = [
+    ...ld.objects,
+    ...ld.topObjects.map((o) => ({ ...o, topLayer: true as const })),
+  ];
 
   const zones: Zone[] = ld.areas.map((a) => {
     const z: Zone = { id: a.id, name: a.name, x: a.x, y: a.y, width: a.width, height: a.height };

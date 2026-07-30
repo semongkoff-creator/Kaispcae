@@ -764,6 +764,11 @@ export interface Furniture {
   // desk still shows whose it is even while that person is offline.
   assignedToUserId?: string;
   assignedToName?: string;
+  // ZEP editor (Potong 3) — true for pieces placed on the "Top objects" layer,
+  // which render ABOVE the avatar (roof edges, tree crowns, hanging lamps). Set
+  // by the layerDataToLegacy adaptor from LayerData.topObjects; absent for
+  // ordinary below-avatar objects. See GameCanvas's furniture passes.
+  topLayer?: boolean;
 }
 
 // Zones. 'meeting' zones render a big banner across the top of the area

@@ -660,6 +660,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const furnitureList = furnitureRef.current;
     for (const item of furnitureList) {
       if (item.kind === 'banner') continue;
+      // Top-layer objects (ZEP editor) draw entirely AFTER avatars — skip them
+      // in this before-avatars pass; the overhead pass below draws them whole.
+      if (item.topLayer) continue;
       if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
       drawFurnitureLayer(ctx, item, cameraX, cameraY, 'object');
     }
@@ -955,6 +958,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     for (const item of furnitureList) {
       if (item.kind === 'banner') continue;
       if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
+      // Top-layer objects draw whole here (base + overhead) so the avatar
+      // passes BEHIND them; ordinary objects only draw their overhead rows.
+      if (item.topLayer) drawFurnitureLayer(ctx, item, cameraX, cameraY, 'object');
       drawFurnitureLayer(ctx, item, cameraX, cameraY, 'overhead');
     }
 

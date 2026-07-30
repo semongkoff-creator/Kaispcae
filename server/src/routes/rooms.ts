@@ -143,12 +143,12 @@ rooms.get('/rooms/:slug/editor-data', authenticateToken, async (req: AuthRequest
   }
 });
 
-// PUT /api/rooms/:slug/editor/floor — Potong 2: write floor-layer edits from
-// the new Room Editor. Admin-gated at the SERVER (room:update). Applies a batch
-// of per-tile changes onto layerData.floor (per-tile last-write-wins, so two
-// admins editing at once never clobber each other's whole grid), persists, and
-// broadcasts ROOM_UPDATED so every player in the room sees the new floor live.
-rooms.put('/rooms/:slug/editor/floor', authenticateToken, async (req: AuthRequest, res: Response) => {
+// PUT /api/rooms/:slug/editor/layers — Potong 2/3: write layered edits from the
+// new Room Editor. Admin-gated (room:update). Applies floor + wall per-tile
+// changes (per-tile last-write-wins) and, when present, replaces the objects /
+// topObjects arrays. Persists, refreshes the collision cache (walls change it),
+// and broadcasts ROOM_UPDATED so everyone in the room sees it live — no refresh.
+rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
     const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
@@ -163,34 +163,46 @@ rooms.put('/rooms/:slug/editor/floor', authenticateToken, async (req: AuthReques
       // source of truth).
       return res.status(409).json({ error: 'Room not in layered format yet' });
     }
-    const changes = req.body?.changes;
-    if (!Array.isArray(changes)) return res.status(400).json({ error: 'changes must be an array' });
 
     const layerData = room.layerData as unknown as LayerData;
-    const h = layerData.floor.length;
-    for (const c of changes) {
+    const body = req.body ?? {};
+
+    for (const c of Array.isArray(body.floorChanges) ? body.floorChanges : []) {
       const x = Number(c?.x), y = Number(c?.y);
-      const value = c?.value == null ? null : String(c.value);
       if (!Number.isInteger(x) || !Number.isInteger(y)) continue;
-      if (y < 0 || y >= h) continue;
       const row = layerData.floor[y];
       if (!row || x < 0 || x >= row.length) continue;
-      row[x] = value;
+      row[x] = c?.value == null ? null : String(c.value);
     }
+    for (const c of Array.isArray(body.wallChanges) ? body.wallChanges : []) {
+      const x = Number(c?.x), y = Number(c?.y);
+      if (!Number.isInteger(x) || !Number.isInteger(y)) continue;
+      const row = layerData.wall[y];
+      if (!row || x < 0 || x >= row.length) continue;
+      row[x] = !!c?.value;
+    }
+    // Objects / top objects: full-array replace (small entity lists). Lightly
+    // sanitized so a bad payload can't corrupt the shape.
+    const sanitizeObjs = (arr: unknown): LayerData['objects'] | null => {
+      if (!Array.isArray(arr)) return null;
+      return arr
+        .filter((o) => o && typeof o === 'object' && typeof (o as { paletteId?: unknown }).paletteId === 'string'
+          && Number.isInteger((o as { x?: unknown }).x) && Number.isInteger((o as { y?: unknown }).y))
+        .slice(0, 2000) as LayerData['objects'];
+    };
+    if ('objects' in body) { const o = sanitizeObjs(body.objects); if (o) layerData.objects = o; }
+    if ('topObjects' in body) { const o = sanitizeObjs(body.topObjects); if (o) layerData.topObjects = o; }
 
     await prisma.room.update({ where: { id: room.id }, data: { layerData: layerData as unknown as object } });
 
-    // Re-derive the runtime shape and push it live to everyone in the room
-    // (same event/payload the old editor's socket save used, so the client
-    // handler is unchanged), and refresh the server-side collision cache.
     const derived = layerDataToLegacy(layerData);
     setCachedTiles(room.slug, derived.tiles);
     ioRef?.to(room.slug).emit(SocketEvents.ROOM_UPDATED, { tiles: derived.tiles, furniture: derived.furniture, zones: derived.zones });
 
     return res.json({ ok: true });
   } catch (err) {
-    console.error('[rooms] editor floor save error:', err);
-    return res.status(500).json({ error: 'Failed to save floor' });
+    console.error('[rooms] editor layers save error:', err);
+    return res.status(500).json({ error: 'Failed to save layers' });
   }
 });
 
