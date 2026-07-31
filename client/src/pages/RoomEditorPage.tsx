@@ -160,6 +160,21 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const [resizeH, setResizeH] = useState(0);
   const [portalHint, setPortalHint] = useState(false); // awaiting internal-portal destination click
   const portalOriginRef = useRef<{ x: number; y: number } | null>(null);
+  // Bug 14 — a native window.confirm/prompt opened SYNCHRONOUSLY from a
+  // mousedown/mouseup handler blocks the main thread, but the OS keeps
+  // delivering the physical second click of a double-click gesture straight
+  // to that dialog (the page's JS can't receive it while blocked) — so it
+  // silently hits whatever button the dialog defaults to, often reading as
+  // an instant, unintended Cancel the user never consciously saw. Deferring
+  // every such dialog past the double-click window (a real click stops
+  // producing further mouse events after ~a frame; a double-click's second
+  // click physically lands within ~300-500ms) lets that second click finish
+  // being dispatched as an ordinary click on the CANVAS — nothing is open
+  // yet to steal it — before any dialog appears. The guard flag stops the
+  // now-later-arriving second click from re-entering the same branch and
+  // opening a SECOND dialog of its own.
+  const dialogPendingRef = useRef(false);
+  const DIALOG_DEFER_MS = 350;
   // Potong 6 — media effects (reuse MapMediaObject via REST). Not part of
   // layerData; fetched separately and drawn as editor markers.
   const [mediaMode, setMediaMode] = useState<'image' | 'youtube' | 'website' | 'bgm' | null>(null);
@@ -410,22 +425,33 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       } else if (eff === 'portal') {
         if (s.activeTool === 'eraser') { s.eraseEffectAt(t.x, t.y); return; }
         if (s.activeTool !== 'stamp') return;
+        if (dialogPendingRef.current) return; // Bug 14 — a dialog from this same click-gesture is already about to open
         // Second click of an internal portal = pick the destination tile.
         if (portalOriginRef.current) {
           const origin = portalOriginRef.current; portalOriginRef.current = null; setPortalHint(false);
-          const label = (window.prompt('Nama portal (opsional):', '') ?? '').trim();
-          s.addPortal(origin.x, origin.y, { targetX: t.x, targetY: t.y, label: label || undefined });
+          dialogPendingRef.current = true;
+          setTimeout(() => {
+            const label = (window.prompt('Nama portal (opsional):', '') ?? '').trim();
+            dialogPendingRef.current = false;
+            s.addPortal(origin.x, origin.y, { targetX: t.x, targetY: t.y, label: label || undefined });
+          }, DIALOG_DEFER_MS);
           return;
         }
         // First click: choose cross-room vs internal.
-        if (window.confirm('Portal ke ROOM LAIN?\n\nOK = pilih room lain · Batal = titik dalam room ini')) {
-          const target = (window.prompt('Kode room tujuan (slug dari URL/share):', '') ?? '').trim();
-          if (!target) return;
-          const label = (window.prompt('Nama portal (opsional):', '') ?? '').trim();
-          s.addPortal(t.x, t.y, { targetSlug: target, label: label || undefined });
-        } else {
-          portalOriginRef.current = { x: t.x, y: t.y }; setPortalHint(true);
-        }
+        dialogPendingRef.current = true;
+        setTimeout(() => {
+          const wantsCrossRoom = window.confirm('Portal ke ROOM LAIN?\n\nOK = pilih room lain · Batal = titik dalam room ini');
+          if (wantsCrossRoom) {
+            const target = (window.prompt('Kode room tujuan (slug dari URL/share):', '') ?? '').trim();
+            dialogPendingRef.current = false;
+            if (!target) return;
+            const label = (window.prompt('Nama portal (opsional):', '') ?? '').trim();
+            s.addPortal(t.x, t.y, { targetSlug: target, label: label || undefined });
+          } else {
+            dialogPendingRef.current = false;
+            portalOriginRef.current = { x: t.x, y: t.y }; setPortalHint(true);
+          }
+        }, DIALOG_DEFER_MS);
       } else { // mapLocation | privateArea — rectangular
         if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y); }
         else { s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 }); dragRef.current = { mode: 'areaRect', anchor: { x: t.x, y: t.y } }; }
@@ -460,25 +486,34 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     if (d && d.mode === 'areaRect') {
       const s = useEditorStore.getState();
       const sel = s.selection; s.setSelection(null);
-      if (sel) {
-        if (s.selectedEffect === 'privateArea') {
-          const name = (window.prompt('Nama private area:', 'Private') ?? '').trim();
-          const areaId = (window.prompt('Area ID (samakan untuk menggabung area terpisah jadi satu grup):', '1') ?? '').trim();
-          // Default OK = kedap suara — that's the entire point of a private
-          // area — but still adjustable per-area for the rare case of "one
-          // grouped audio room split across a boundary that shouldn't also
-          // go silent against its own neighbors".
-          const isolate = window.confirm('Area ini KEDAP SUARA?\n\nOK = ya — orang di luar area ini tidak akan saling dengar dengan yang di dalam (perilaku normal Private Area).\nBatal = tidak — cuma jarak biasa yang menentukan siapa dengar siapa.');
-          s.addArea('privateArea', sel, name || 'Private', areaId || undefined, isolate);
-        } else if (s.selectedEffect === 'mapLocation') {
-          const name = (window.prompt('Nama lokasi:', '') ?? '').trim();
-          // Default Batal = TIDAK kedap suara — Map Location is just a named
-          // pin (e.g. "Team C", "Dev Team"), not a meeting room; before this
-          // toggle existed every map location accidentally silenced anyone
-          // standing just outside its boundary like a real private room.
-          const isolate = window.confirm('Area ini KEDAP SUARA?\n\nOK = ya — isolasi audio seperti Private Area.\nBatal (disarankan) = tidak — Map Location cuma label nama, jarak biasa yang menentukan siapa dengar siapa.');
-          s.addArea('mapLocation', sel, name || 'Lokasi', undefined, isolate);
-        }
+      // Bug 14 — same double-click-dismisses-the-dialog issue as the portal
+      // flow above: a quick click-release here (a 1x1 selection) fires this
+      // prompt on mouseup, and a double-click's second physical click can
+      // land on/dismiss it before the user ever consciously sees it. Deferred
+      // + guarded the same way.
+      if (sel && !dialogPendingRef.current) {
+        dialogPendingRef.current = true;
+        setTimeout(() => {
+          if (s.selectedEffect === 'privateArea') {
+            const name = (window.prompt('Nama private area:', 'Private') ?? '').trim();
+            const areaId = (window.prompt('Area ID (samakan untuk menggabung area terpisah jadi satu grup):', '1') ?? '').trim();
+            // Default OK = kedap suara — that's the entire point of a private
+            // area — but still adjustable per-area for the rare case of "one
+            // grouped audio room split across a boundary that shouldn't also
+            // go silent against its own neighbors".
+            const isolate = window.confirm('Area ini KEDAP SUARA?\n\nOK = ya — orang di luar area ini tidak akan saling dengar dengan yang di dalam (perilaku normal Private Area).\nBatal = tidak — cuma jarak biasa yang menentukan siapa dengar siapa.');
+            s.addArea('privateArea', sel, name || 'Private', areaId || undefined, isolate);
+          } else if (s.selectedEffect === 'mapLocation') {
+            const name = (window.prompt('Nama lokasi:', '') ?? '').trim();
+            // Default Batal = TIDAK kedap suara — Map Location is just a named
+            // pin (e.g. "Team C", "Dev Team"), not a meeting room; before this
+            // toggle existed every map location accidentally silenced anyone
+            // standing just outside its boundary like a real private room.
+            const isolate = window.confirm('Area ini KEDAP SUARA?\n\nOK = ya — isolasi audio seperti Private Area.\nBatal (disarankan) = tidak — Map Location cuma label nama, jarak biasa yang menentukan siapa dengar siapa.');
+            s.addArea('mapLocation', sel, name || 'Lokasi', undefined, isolate);
+          }
+          dialogPendingRef.current = false;
+        }, DIALOG_DEFER_MS);
       }
     }
     dragRef.current = null;
