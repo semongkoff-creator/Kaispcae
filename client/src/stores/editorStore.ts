@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { LayerData, Furniture, TileEffect, AreaEffect } from '@virtualmeet/shared';
+import type { LayerData, Furniture, TileEffect, AreaEffect, CustomAssetEntry } from '@virtualmeet/shared';
 
 export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal';
 
@@ -39,15 +39,23 @@ export interface EditorClipboard {
   w: number; h: number;
   floor: (string | null)[][];
   wall: boolean[][];
+  // Fitur 15 — custom wall skin travels with the copied region, same as
+  // floor's paletteId grid.
+  wallPaletteId: WallPaletteGrid;
   objects: Furniture[];
   topObjects: Furniture[];
   tileEffects: TileEffect[];
   areas: AreaEffect[];
 }
 export interface FloorChange { x: number; y: number; value: string | null; }
-export interface WallChange { x: number; y: number; value: boolean; }
+// paletteId only set on a stamp (never on an erase — see applyWallCell):
+// null/absent means "plain wall, no custom skin", not "leave whatever skin
+// was there before".
+export interface WallChange { x: number; y: number; value: boolean; paletteId?: string | null; }
 type FloorGrid = (string | null)[][];
 type WallGrid = boolean[][];
+type WallPaletteGrid = (string | null)[][];
+const emptyWallPaletteGrid = (w: number, h: number): WallPaletteGrid => Array.from({ length: h }, () => Array.from({ length: w }, () => null));
 
 const MIN_ZOOM = 0.25, MAX_ZOOM = 3;
 const clampZoom = (z: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
@@ -55,11 +63,12 @@ const HISTORY_LIMIT = 50;
 
 const cloneFloor = (f: FloorGrid): FloorGrid => f.map((r) => r.slice());
 const cloneWall = (w: WallGrid): WallGrid => w.map((r) => r.slice());
+const cloneWallPaletteId = (w: WallPaletteGrid): WallPaletteGrid => w.map((r) => r.slice());
 const cloneObjs = (o: Furniture[]): Furniture[] => o.map((x) => ({ ...x }));
 const cloneEffects = (e: TileEffect[]): TileEffect[] => e.map((x) => ({ ...x }));
 const cloneAreas = (a: AreaEffect[]): AreaEffect[] => a.map((x) => ({ ...x }));
 
-interface Snapshot { width: number; height: number; floor: FloorGrid; wall: WallGrid; objects: Furniture[]; topObjects: Furniture[]; tileEffects: TileEffect[]; areas: AreaEffect[]; }
+interface Snapshot { width: number; height: number; floor: FloorGrid; wall: WallGrid; wallPaletteId: WallPaletteGrid; objects: Furniture[]; topObjects: Furniture[]; tileEffects: TileEffect[]; areas: AreaEffect[]; }
 
 interface EditorState {
   activeLayer: EditorLayer;
@@ -81,6 +90,15 @@ interface EditorState {
   setSelectedFloor: (id: string | null) => void;
   selectedObjectPaletteId: string | null;
   setSelectedObject: (id: string | null) => void;
+  // Fitur 15 — a custom Wall asset selected for stamping. null = plain wall
+  // (the theme's default look, same as before this existed).
+  selectedWallPaletteId: string | null;
+  setSelectedWall: (id: string | null) => void;
+  // This room's uploaded custom Floor/Wall/Object assets (Fitur 15). Not
+  // undo/redo-tracked like the grids/entities above — an upload isn't a
+  // paint stroke to step back through, it's a one-way "this asset now
+  // exists for this room" registration (removing one is out of scope here).
+  addCustomAsset: (entry: CustomAssetEntry) => void;
 
   selection: Selection | null;
   setSelection: (sel: Selection | null) => void;
@@ -147,10 +165,12 @@ interface SavePayload {
   height?: number;
   floor?: FloorGrid;
   wall?: WallGrid;
+  wallPaletteId?: WallPaletteGrid;
   objects?: Furniture[];
   topObjects?: Furniture[];
   tileEffects?: TileEffect[];
   areas?: AreaEffect[];
+  customAssets?: CustomAssetEntry[];
 }
 
 const INITIAL_VIEWPORT: EditorViewport = { panX: 0, panY: 0, zoom: 1 };
@@ -164,6 +184,7 @@ let objectsDirty = false;
 let topDirty = false;
 let effectsDirty = false;
 let areasDirty = false;
+let customAssetsDirty = false; // Fitur 15 — a custom asset was registered this session
 let resizedDirty = false; // dims/grids changed → save full floor+wall+dims
 let strokeSnap: Snapshot | null = null;
 let strokeChanged = false;
@@ -172,7 +193,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
   const snapshot = (): Snapshot | null => {
     const d = get().doc;
     if (!d) return null;
-    return { width: d.width, height: d.height, floor: cloneFloor(d.floor), wall: cloneWall(d.wall), objects: cloneObjs(d.objects), topObjects: cloneObjs(d.topObjects), tileEffects: cloneEffects(d.tileEffects), areas: cloneAreas(d.areas) };
+    return {
+      width: d.width, height: d.height,
+      floor: cloneFloor(d.floor), wall: cloneWall(d.wall),
+      wallPaletteId: cloneWallPaletteId(d.wallPaletteId ?? emptyWallPaletteGrid(d.width, d.height)),
+      objects: cloneObjs(d.objects), topObjects: cloneObjs(d.topObjects), tileEffects: cloneEffects(d.tileEffects), areas: cloneAreas(d.areas),
+    };
   };
   const pushHistory = (snap: Snapshot | null) => { if (!snap) return; undoStack.push(snap); if (undoStack.length > HISTORY_LIMIT) undoStack.shift(); redoStack.length = 0; };
   const commit = () => set((s) => ({ revision: s.revision + 1, undoDepth: undoStack.length, redoDepth: redoStack.length }));
@@ -183,11 +209,24 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (row[x] === value) return false;
     row[x] = value; floorPending.set(`${x},${y}`, { x, y, value }); return true;
   };
-  const applyWallCell = (x: number, y: number, value: boolean): boolean => {
-    const row = get().doc?.wall[y];
-    if (!row || x < 0 || x >= row.length) return false;
-    if (row[x] === value) return false;
-    row[x] = value; wallPending.set(`${x},${y}`, { x, y, value }); return true;
+  // Fitur 15 — `paletteId` is only ever meaningful when `value` is true (a
+  // stamp); an erase always clears any custom skin the tile had, so callers
+  // never need to pass it there. Lazily allocates doc.wallPaletteId on first
+  // use — older rooms/sessions that never touch a custom wall skin never pay
+  // for this grid at all.
+  const applyWallCell = (x: number, y: number, value: boolean, paletteId?: string | null): boolean => {
+    const d = get().doc;
+    const row = d?.wall[y];
+    if (!d || !row || x < 0 || x >= row.length) return false;
+    if (!d.wallPaletteId) d.wallPaletteId = emptyWallPaletteGrid(d.width, d.height);
+    const wpRow = d.wallPaletteId[y];
+    const wpId: string | null = value ? (paletteId ?? null) : null;
+    const wpChanged = !!wpRow && wpRow[x] !== wpId;
+    if (row[x] === value && !wpChanged) return false;
+    row[x] = value;
+    if (wpRow) wpRow[x] = wpId;
+    wallPending.set(`${x},${y}`, { x, y, value, paletteId: wpId });
+    return true;
   };
   // Replace entity arrays from a snapshot on undo/redo (mark for full save).
   const restoreObjects = (snap: Snapshot) => {
@@ -203,10 +242,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (target.width !== d.width || target.height !== d.height) {
       d.width = target.width; d.height = target.height;
       d.floor = cloneFloor(target.floor); d.wall = cloneWall(target.wall);
+      d.wallPaletteId = cloneWallPaletteId(target.wallPaletteId);
       resizedDirty = true;
     } else {
       for (let y = 0; y < target.floor.length; y++) for (let x = 0; x < target.floor[y].length; x++) applyFloorCell(x, y, target.floor[y][x]);
-      for (let y = 0; y < target.wall.length; y++) for (let x = 0; x < target.wall[y].length; x++) applyWallCell(x, y, target.wall[y][x]);
+      for (let y = 0; y < target.wall.length; y++) for (let x = 0; x < target.wall[y].length; x++) applyWallCell(x, y, target.wall[y][x], target.wallPaletteId[y]?.[x] ?? null);
     }
   };
 
@@ -233,7 +273,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     doc: null,
     setDoc: (doc) => {
       undoStack.length = 0; redoStack.length = 0; floorPending.clear(); wallPending.clear();
-      objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; resizedDirty = false; strokeSnap = null; strokeChanged = false;
+      objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; customAssetsDirty = false; resizedDirty = false; strokeSnap = null; strokeChanged = false;
       set({ doc, revision: 0, undoDepth: 0, redoDepth: 0, selection: null, selectedObjectId: null, clipboard: null });
     },
 
@@ -241,6 +281,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setSelectedFloor: (id) => set({ selectedFloorPaletteId: id }),
     selectedObjectPaletteId: null,
     setSelectedObject: (id) => set({ selectedObjectPaletteId: id }),
+    selectedWallPaletteId: null,
+    setSelectedWall: (id) => set({ selectedWallPaletteId: id }),
+    addCustomAsset: (entry) => {
+      const d = get().doc; if (!d) return;
+      d.customAssets = [...(d.customAssets ?? []), entry];
+      customAssetsDirty = true;
+      commit();
+    },
     selectedEffect: null,
     setSelectedEffect: (k) => set({ selectedEffect: k }),
 
@@ -255,18 +303,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     paintFloorAt: (x, y) => { const id = get().selectedFloorPaletteId; if (id == null) return; if (applyFloorCell(x, y, id)) strokeChanged = true; },
     eraseFloorAt: (x, y) => { if (applyFloorCell(x, y, null)) strokeChanged = true; },
-    stampWallAt: (x, y) => { if (applyWallCell(x, y, true)) strokeChanged = true; },
+    stampWallAt: (x, y) => { if (applyWallCell(x, y, true, get().selectedWallPaletteId)) strokeChanged = true; },
     eraseWallAt: (x, y) => { if (applyWallCell(x, y, false)) strokeChanged = true; },
 
     fillSelection: (mode) => {
-      const { doc, selection, selectedFloorPaletteId, activeLayer } = get();
+      const { doc, selection, selectedFloorPaletteId, selectedWallPaletteId, activeLayer } = get();
       if (!doc || !selection || (activeLayer !== 'floor' && activeLayer !== 'wall')) return;
       const snap = snapshot();
       let changed = false;
       for (let y = selection.y; y < selection.y + selection.h; y++) {
         for (let x = selection.x; x < selection.x + selection.w; x++) {
           if (activeLayer === 'floor') { const v = mode === 'stamp' ? selectedFloorPaletteId : null; if (mode === 'stamp' && v == null) continue; if (applyFloorCell(x, y, v)) changed = true; }
-          else { if (applyWallCell(x, y, mode === 'stamp')) changed = true; }
+          else { if (applyWallCell(x, y, mode === 'stamp', selectedWallPaletteId)) changed = true; }
         }
       }
       if (changed) { pushHistory(snap); commit(); }
@@ -366,6 +414,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           w, h,
           floor: Array.from({ length: h }, (_, y) => Array.from({ length: w }, (_, x) => d.floor[y0 + y]?.[x0 + x] ?? null)),
           wall: Array.from({ length: h }, (_, y) => Array.from({ length: w }, (_, x) => d.wall[y0 + y]?.[x0 + x] ?? false)),
+          wallPaletteId: Array.from({ length: h }, (_, y) => Array.from({ length: w }, (_, x) => d.wallPaletteId?.[y0 + y]?.[x0 + x] ?? null)),
           // Objects belong to the region by their BASE tile (same rule resize
           // uses); coordinates become region-relative.
           objects: d.objects.filter(inRegion).map((o) => ({ ...o, x: o.x - x0, y: o.y - y0 })),
@@ -390,7 +439,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const tx = px + x, ty = py + y;
         if (tx < 0 || tx >= d.width || ty < 0 || ty >= d.height) continue;
         if (applyFloorCell(tx, ty, cb.floor[y][x])) changed = true;
-        if (applyWallCell(tx, ty, cb.wall[y][x])) changed = true;
+        if (applyWallCell(tx, ty, cb.wall[y][x], cb.wallPaletteId[y][x])) changed = true;
       }
       const inMap = (o: { x: number; y: number }) => o.x >= 0 && o.x < d.width && o.y >= 0 && o.y < d.height;
       // Entities: fresh ids so the copies are independent; out-of-map ones are
@@ -436,9 +485,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
     resizeMap: (width, height) => {
       const d = get().doc; if (!d || width < 1 || height < 1) return;
       const snap = snapshot();
-      const oldFloor = d.floor, oldWall = d.wall;
+      const oldFloor = d.floor, oldWall = d.wall, oldWallPaletteId = d.wallPaletteId ?? emptyWallPaletteGrid(d.width, d.height);
       d.floor = Array.from({ length: height }, (_, y) => Array.from({ length: width }, (_, x) => (y < oldFloor.length && x < (oldFloor[y]?.length ?? 0)) ? oldFloor[y][x] : null));
       d.wall = Array.from({ length: height }, (_, y) => Array.from({ length: width }, (_, x) => (y < oldWall.length && x < (oldWall[y]?.length ?? 0)) ? oldWall[y][x] : false));
+      d.wallPaletteId = Array.from({ length: height }, (_, y) => Array.from({ length: width }, (_, x) => (y < oldWallPaletteId.length && x < (oldWallPaletteId[y]?.length ?? 0)) ? oldWallPaletteId[y][x] : null));
       d.width = width; d.height = height;
       const inB = (o: { x: number; y: number }) => o.x >= 0 && o.x < width && o.y >= 0 && o.y < height;
       d.objects = d.objects.filter(inB);
@@ -473,16 +523,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
         topObjects: topDirty && d ? cloneObjs(d.topObjects) : undefined,
         tileEffects: effectsDirty && d ? cloneEffects(d.tileEffects) : undefined,
         areas: areasDirty && d ? cloneAreas(d.areas) : undefined,
+        customAssets: customAssetsDirty && d ? [...(d.customAssets ?? [])] : undefined,
       };
       if (resizedDirty && d) {
         // A resize replaces the whole grid + dims; per-tile diffs don't apply.
         out.width = d.width; out.height = d.height; out.floor = cloneFloor(d.floor); out.wall = cloneWall(d.wall);
+        out.wallPaletteId = cloneWallPaletteId(d.wallPaletteId ?? emptyWallPaletteGrid(d.width, d.height));
         floorPending.clear(); wallPending.clear();
       } else {
         out.floorChanges = Array.from(floorPending.values());
         out.wallChanges = Array.from(wallPending.values());
       }
-      floorPending.clear(); wallPending.clear(); objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; resizedDirty = false;
+      floorPending.clear(); wallPending.clear(); objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; customAssetsDirty = false; resizedDirty = false;
       return out;
     },
     requeuePending: (p) => {
@@ -493,6 +545,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (p.topObjects) topDirty = true;
       if (p.tileEffects) effectsDirty = true;
       if (p.areas) areasDirty = true;
+      if (p.customAssets) customAssetsDirty = true;
       set((s) => ({ revision: s.revision + 1 }));
     },
   };

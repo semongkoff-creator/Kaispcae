@@ -371,16 +371,20 @@ export const api = {
     slug: string,
     payload: {
       floorChanges?: { x: number; y: number; value: string | null }[];
-      wallChanges?: { x: number; y: number; value: boolean }[];
+      // Fitur 15 — paletteId alongside the boolean, only present when a
+      // custom wall skin was painted/erased at that tile.
+      wallChanges?: { x: number; y: number; value: boolean; paletteId?: string | null }[];
       objects?: unknown[];
       topObjects?: unknown[];
       tileEffects?: unknown[];
       areas?: unknown[];
+      customAssets?: unknown[];
       // Resize (Potong 5): full grids + new dimensions.
       width?: number;
       height?: number;
       floor?: (string | null)[][];
       wall?: boolean[][];
+      wallPaletteId?: (string | null)[][];
     },
   ) => request<{ ok: true }>(`/rooms/${slug}/editor/layers`, { method: 'PUT', body: JSON.stringify(payload) }),
 

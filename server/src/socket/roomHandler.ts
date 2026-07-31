@@ -501,6 +501,12 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         notice: roomNoticeMap.get(room) ?? null,
         locked: !!rs.locked,
         role: getRole(rs, uid),
+        // Fitur 15 — this room's custom Floor/Wall/Object uploads. Every
+        // joining player needs these registered into PALETTE_BY_ID (see
+        // useSocket.ts's ROOM_STATE handler) before `tiles`/`furniture` above
+        // can resolve any custom paletteId they reference — not just the
+        // admin who's in the (separate) Room Editor tab.
+        customAssets: (dbRoom?.layerData as unknown as LayerData | undefined)?.customAssets ?? [],
       });
     });
   });

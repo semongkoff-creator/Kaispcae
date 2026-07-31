@@ -6,6 +6,7 @@ import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
 import { playNudgeSound, playHandRaiseSound } from '@/services/soundEffects';
 import { SERVER_URL } from '@/services/serverUrl';
+import { registerCustomAssets } from '@/data/customAssets';
 
 // Bump a chat target's unread count unless the user is actively looking at
 // it right now (panel open AND that exact target selected) — in which case
@@ -113,6 +114,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
     socket.on(SocketEvents.ROOM_STATE, (roomState) => {
       console.log('[socket] room:state received — players:', roomState.players?.length, 'tiles:', roomState.tiles?.length ?? 0);
+      // Fitur 15 — register this room's custom Floor/Wall/Object uploads
+      // into PALETTE_BY_ID BEFORE setRoomState/the render loop reads `tiles`/
+      // `furniture` above, which may already reference their paletteIds.
+      registerCustomAssets(roomState.customAssets);
       setRoomState(roomState);
       useGameStore.getState().setRoomStateReceived(true);
 

@@ -24,7 +24,7 @@ import { isTileBlocked, isDoorTile } from '@/utils/createDefaultRoom';
 // Bug 16-project (Room Editor) — these map-draw helpers were moved verbatim to
 // mapRender.ts so the editor can render the map identically. GameCanvas's usage
 // is unchanged.
-import { drawTile, drawFloorTile, drawFurnitureLayer, TILE_COLORS } from './mapRender';
+import { drawTile, drawFloorTile, drawWallTile, drawFurnitureLayer, TILE_COLORS } from './mapRender';
 
 const AVATAR_RADIUS = 14;
 
@@ -705,7 +705,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         drawFloorTile(ctx, tile, screenX, screenY, themeRef.current);
         // 'blocked' (ZEP impassable effect) blocks movement but renders nothing
         // — only the floor shows. 'portal'/'spawn' draw their own markers below.
-        if (tile.type !== 'floor' && tile.type !== 'portal' && tile.type !== 'spawn' && tile.type !== 'blocked') {
+        if (tile.type === 'wall') {
+          // Fitur 15 — a wall tile may carry a custom-uploaded skin.
+          drawWallTile(ctx, tile, screenX, screenY, themeRef.current);
+        } else if (tile.type !== 'floor' && tile.type !== 'portal' && tile.type !== 'spawn' && tile.type !== 'blocked') {
           drawTile(ctx, tile.type, screenX, screenY, themeRef.current);
         }
 

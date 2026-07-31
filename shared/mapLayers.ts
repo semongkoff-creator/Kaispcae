@@ -15,6 +15,26 @@ import type { Furniture, RoomTile, Zone, TileType } from './types/index';
 
 export const MAP_FORMAT_VERSION = 1;
 
+// Fitur 15 — a room-uploaded image (PNG/JPG, via the existing /api/uploads
+// service) registered as a placeable Floor/Wall/Object palette entry, scoped
+// to THIS room only (see RoomEditorPage.tsx's report for why: every other
+// per-admin-placed-thing in this schema — MapMediaObject, TeleportLocation —
+// is roomId-scoped with no cross-room reuse, and layerData already IS the
+// room-scoped JSON blob, so storing it here needs no new table/migration).
+// `category` picks which palette the entry shows up in; 'wall' entries are
+// keyed onto LayerData.wallPaletteId, not the `wall` boolean grid.
+export interface CustomAssetEntry {
+  id: string; // `custom-<uuid>` — lets renderers recognize it as a Fitur-15 entry
+  label: string;
+  category: 'floor' | 'wall' | 'object';
+  src: string; // must be a same-origin /api/uploads or /api/files URL
+  tilesW: number;
+  tilesH: number;
+  createdBy: string;
+  createdByName: string;
+  createdAt: number;
+}
+
 // Per-coordinate effect (sparse). 'impassable' carries the original blocked
 // tile type so collision + rendering reconstruct exactly; 'portal' carries its
 // destination room slug. 'startingPoint' = spawn; 'door' = the walkable door
@@ -68,6 +88,12 @@ export interface LayerData {
   // Wall tiles (visual wall + impassable). Kept as its own grid — it's the
   // densest layer and the primary structural collision source.
   wall: boolean[][];
+  // Fitur 15 — custom wall skin per tile (CustomAssetEntry.id), sparse/absent
+  // grid. Purely cosmetic: `wall` alone still decides collision, so a room
+  // saved before this field existed (or a tile that's just a plain wall)
+  // renders exactly as before. Only present where an admin painted a custom
+  // wall texture.
+  wallPaletteId?: (string | null)[][];
   // Furniture below the avatar. On conversion ALL legacy furniture lands here.
   objects: Furniture[];
   // Furniture above the avatar. Empty on conversion (the current renderer
@@ -78,6 +104,10 @@ export interface LayerData {
   areas: AreaEffect[];
   // Sparse per-tile effects (spawn / impassable / portal / door).
   tileEffects: TileEffect[];
+  // Fitur 15 — this room's uploaded custom Floor/Wall/Object assets. Absent on
+  // every room converted before this field existed — treated as `[]`
+  // everywhere it's read, never populated retroactively.
+  customAssets?: CustomAssetEntry[];
 }
 
 // Convert the legacy runtime shape (already-normalized RoomTile[][], furniture,
@@ -158,6 +188,8 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
       const tile: RoomTile = { x, y, type };
       const fp = floor[y]?.[x];
       if (fp != null) tile.floorPaletteId = fp;
+      const wp = ld.wallPaletteId?.[y]?.[x];
+      if (type === 'wall' && wp != null) tile.wallPaletteId = wp;
       if (portalEff) {
         if (portalEff.targetSlug != null) tile.portalTarget = portalEff.targetSlug;
         if (portalEff.targetX != null) tile.portalTargetX = portalEff.targetX;

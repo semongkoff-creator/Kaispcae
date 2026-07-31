@@ -50,6 +50,21 @@ export function drawFloorTile(ctx: CanvasRenderingContext2D, tile: RoomTile, scr
   drawTile(ctx, 'floor', screenX, screenY, theme);
 }
 
+// Fitur 15 — draws a wall tile, preferring its custom-uploaded skin
+// (RoomTile.wallPaletteId, set via the Room Editor) and falling back to the
+// theme's default wall art — same fallback pattern as drawFloorTile above.
+// Collision is untouched either way: it's driven purely by `type === 'wall'`.
+export function drawWallTile(ctx: CanvasRenderingContext2D, tile: RoomTile, screenX: number, screenY: number, theme: RoomTheme) {
+  if (tile.wallPaletteId) {
+    const entry = PALETTE_BY_ID[tile.wallPaletteId];
+    if (entry && drawSpriteFrame(ctx, entry.src, {
+      srcX: entry.srcX, srcY: entry.srcY, cellWidth: TILE_SIZE, cellHeight: TILE_SIZE,
+      dx: screenX, dy: screenY,
+    })) return;
+  }
+  drawTile(ctx, 'wall', screenX, screenY, theme);
+}
+
 // Furniture is anchored at its bottom-left tile. The bottom tile row (the
 // piece's "base") draws on the object layer, before avatars. Anything above
 // that (tilesH > 1) draws on the overhead layer, after avatars, so players

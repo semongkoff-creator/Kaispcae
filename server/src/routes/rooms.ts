@@ -6,7 +6,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
 import { convertLegacyRoom } from '../lib/convertLegacyRoom';
 import { isRoomLocked } from '../socket/roomHandler';
-import { isValidMediaPayload } from '../socket/mediaHandler';
+import { isValidMediaPayload, isUploadUrl } from '../socket/mediaHandler';
 import { deleteUploadedFile } from './uploads';
 import { setCachedTiles, getPlayers, updatePlayerPosition } from '../store/roomStore';
 
@@ -183,6 +183,9 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
       layerData.height = body.height;
       layerData.floor = body.floor;
       layerData.wall = body.wall;
+      // Fitur 15 — optional; older clients/resizes that don't know about
+      // custom wall skins simply omit it, and the wall grid still saves fine.
+      if (Array.isArray(body.wallPaletteId)) layerData.wallPaletteId = body.wallPaletteId;
       resized = true;
     }
 
@@ -199,6 +202,20 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
       const row = layerData.wall[y];
       if (!row || x < 0 || x >= row.length) continue;
       row[x] = !!c?.value;
+      // Fitur 15 — per-cell custom wall skin, carried alongside the boolean
+      // wall change (same tile, same click). Lazily allocate the grid the
+      // first time any room actually uses it, matching the room's current
+      // dimensions — older rooms never touch this path at all.
+      if ('paletteId' in (c ?? {})) {
+        if (!layerData.wallPaletteId) {
+          layerData.wallPaletteId = Array.from({ length: layerData.height }, () => Array.from({ length: layerData.width }, () => null));
+        }
+        const wpRow = layerData.wallPaletteId[y];
+        if (wpRow && x >= 0 && x < wpRow.length) {
+          const pid = (c as { paletteId?: unknown }).paletteId;
+          wpRow[x] = typeof pid === 'string' ? pid : null;
+        }
+      }
     }
     // Objects / top objects: full-array replace (small entity lists). Lightly
     // sanitized so a bad payload can't corrupt the shape.
@@ -224,6 +241,33 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
       layerData.areas = body.areas
         .filter((a: unknown) => a && typeof a === 'object' && typeof (a as { id?: unknown }).id === 'string' && Number.isInteger((a as { width?: unknown }).width) && Number.isInteger((a as { height?: unknown }).height))
         .slice(0, 500) as LayerData['areas'];
+    }
+
+    // Fitur 15 — custom Floor/Wall/Object uploads. Full-array replace, like
+    // areas/tileEffects above. `src` must be a same-origin upload URL (the
+    // exact same check MapMediaObject payloads use) — never store/serve an
+    // arbitrary external URL as if it were room art. createdBy/createdByName/
+    // createdAt are never taken from the client: existing entries (matched by
+    // id) keep their ORIGINAL stored attribution unconditionally (a client
+    // can't rewrite who uploaded something by resending an edited copy), and
+    // genuinely new ids get stamped from the authenticated request — same
+    // convention POST /editor/media already uses for MapMediaObject.
+    if ('customAssets' in body && Array.isArray(body.customAssets)) {
+      const existingById = new Map((layerData.customAssets ?? []).map((a) => [a.id, a]));
+      const valid = body.customAssets.filter((a: unknown) => a && typeof a === 'object'
+        && typeof (a as { id?: unknown }).id === 'string'
+        && typeof (a as { label?: unknown }).label === 'string'
+        && ['floor', 'wall', 'object'].includes((a as { category?: unknown }).category as string)
+        && isUploadUrl((a as { src?: unknown }).src)
+        && Number.isInteger((a as { tilesW?: unknown }).tilesW) && (a as { tilesW: number }).tilesW >= 1
+        && Number.isInteger((a as { tilesH?: unknown }).tilesH) && (a as { tilesH: number }).tilesH >= 1);
+      const hasNew = valid.some((a: { id: string }) => !existingById.has(a.id));
+      const actor = hasNew ? await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } }) : null;
+      layerData.customAssets = valid.slice(0, 300).map((a: { id: string; label: string; category: 'floor' | 'wall' | 'object'; src: string; tilesW: number; tilesH: number }) => {
+        const existing = existingById.get(a.id);
+        if (existing) return existing;
+        return { id: a.id, label: a.label, category: a.category, src: a.src, tilesW: a.tilesW, tilesH: a.tilesH, createdBy: req.userId!, createdByName: actor?.displayName ?? 'Admin', createdAt: Date.now() };
+      });
     }
 
     await prisma.room.update({ where: { id: room.id }, data: { layerData: layerData as unknown as object } });

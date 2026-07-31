@@ -2,15 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowCounterclockwise, ArrowClockwise } from 'react-bootstrap-icons';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, RoomTile, Furniture, Zone, RoomTheme,
-  LayerData, legacyToLayerData,
+  LayerData, legacyToLayerData, CustomAssetEntry,
 } from '@virtualmeet/shared';
 import { api, ApiError } from '@/services/api';
 import { useEditorStore, EDITOR_LAYERS, EDITOR_TOOLS, EditorLayer, EditorTool } from '@/stores/editorStore';
-import { drawTile, drawFloorTile, drawFurnitureLayer } from '@/components/canvas/mapRender';
+import { drawFloorTile, drawWallTile, drawFurnitureLayer } from '@/components/canvas/mapRender';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
 import { PALETTE_BY_THEME, PALETTE_BY_ID } from '@/data/themeAssets';
 import { PaletteEntry } from '@/data/tilePaletteManifest';
 import { LIMEZU_CATEGORIES, loadLimezuCategory } from '@/data/limezuInteriors';
+import { registerCustomAssets } from '@/data/customAssets';
 
 // ZEP-style Room Editor — Potong 3. Adds Wall (tile → collision), Objects
 // (below avatar) and Top objects (above avatar) editing to the Potong 2 floor
@@ -41,7 +42,7 @@ function pickFile(accept: string): Promise<File | null> {
 
 type SavePayload = ReturnType<ReturnType<typeof useEditorStore.getState>['takePending']>;
 function hasChanges(p: SavePayload): boolean {
-  return !!(p.floorChanges?.length || p.wallChanges?.length || p.objects || p.topObjects || p.tileEffects || p.areas || p.width != null);
+  return !!(p.floorChanges?.length || p.wallChanges?.length || p.objects || p.topObjects || p.tileEffects || p.areas || p.customAssets || p.width != null);
 }
 
 function normalizeTiles(tilemapData: unknown[][] | null): RoomTile[][] {
@@ -83,7 +84,7 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
       drawFloorTile(ctx, { x, y, type: 'floor', floorPaletteId: ld.floor[y]?.[x] ?? undefined }, x * TILE_SIZE, y * TILE_SIZE, theme);
   } else if (layer === 'wall') {
     for (let y = 0; y < ld.height; y++) for (let x = 0; x < ld.width; x++)
-      if (ld.wall[y]?.[x]) drawTile(ctx, 'wall', x * TILE_SIZE, y * TILE_SIZE, theme);
+      if (ld.wall[y]?.[x]) drawWallTile(ctx, { x, y, type: 'wall', wallPaletteId: ld.wallPaletteId?.[y]?.[x] ?? undefined }, x * TILE_SIZE, y * TILE_SIZE, theme);
   } else if (layer === 'objects') {
     for (const item of ld.objects) { drawFurnitureLayer(ctx, item, 0, 0, 'object'); drawFurnitureLayer(ctx, item, 0, 0, 'overhead'); }
   } else if (layer === 'top') {
@@ -128,7 +129,8 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   // never read "Tersimpan" while changes are only in memory (Potong 7).
   const [saveState, setSaveState] = useState<'saved' | 'dirty' | 'saving' | 'error'>('saved');
   const saveStateRef = useRef(saveState); useEffect(() => { saveStateRef.current = saveState; }, [saveState]);
-  const [objTab, setObjTab] = useState<'furniture' | 'decor' | 'electronics'>('furniture');
+  // 'custom' — Fitur 15's "Uploads Kamu" tab, alongside the built-in ones.
+  const [objTab, setObjTab] = useState<'furniture' | 'decor' | 'electronics' | 'custom'>('furniture');
   const [objSearch, setObjSearch] = useState('');
   // LimeZu Interiors — themed pack, lazy-loaded per category (see
   // limezuInteriors.ts). Non-empty limezuCat overrides the built-in tabs as
@@ -158,6 +160,61 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const [resizeOpen, setResizeOpen] = useState(false);
   const [resizeW, setResizeW] = useState(0);
   const [resizeH, setResizeH] = useState(0);
+
+  // Fitur 15 — Import Image: upload a custom PNG/JPG, then ask which
+  // palette (Floor/Wall/Object) it belongs to. Category defaults to whatever
+  // layer is active when the button is clicked (the common case), but stays
+  // editable — an admin importing while on the Objects layer may still want
+  // it as a Floor texture, etc.
+  const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importCategory, setImportCategory] = useState<'floor' | 'wall' | 'object'>('object');
+  const [importLabel, setImportLabel] = useState('');
+  const [importBusy, setImportBusy] = useState(false);
+  const [importErr, setImportErr] = useState('');
+  const openImportPicker = async () => {
+    const f = await pickFile('image/png,image/jpeg');
+    if (!f) return;
+    if (!['image/png', 'image/jpeg'].includes(f.type)) { window.alert('Hanya file PNG atau JPG yang diperbolehkan.'); return; }
+    if (f.size > MAX_IMPORT_BYTES) { window.alert(`Ukuran file maksimal 5MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
+    setImportFile(f);
+    setImportLabel(f.name.replace(/\.[^.]+$/, ''));
+    setImportCategory(activeLayer === 'floor' ? 'floor' : activeLayer === 'wall' ? 'wall' : 'object');
+    setImportErr('');
+    setImportOpen(true);
+  };
+  const confirmImport = async () => {
+    if (!importFile) return;
+    setImportBusy(true); setImportErr('');
+    try {
+      const { url } = await api.uploadMedia(importFile, slug);
+      // tilesW/tilesH fixed at 1x1 (one 32px tile) — Fitur 15's own scope note
+      // keeps this to a basic import; a multi-tile footprint picker is a
+      // reasonable follow-up, not part of this pass.
+      const entry: CustomAssetEntry = {
+        id: `custom-${crypto.randomUUID()}`,
+        label: importLabel.trim() || importFile.name,
+        category: importCategory,
+        src: url,
+        tilesW: 1,
+        tilesH: 1,
+        // Server-authoritative on save (see PUT /editor/layers) — these are
+        // placeholders only for the brief window before the next reload.
+        createdBy: '', createdByName: 'Kamu', createdAt: Date.now(),
+      };
+      registerCustomAssets([entry]);
+      useEditorStore.getState().addCustomAsset(entry);
+      if (importCategory === 'floor') { setActiveLayer('floor'); setSelectedFloor(entry.id); }
+      else if (importCategory === 'wall') { setActiveLayer('wall'); setSelectedWall(entry.id); }
+      else { setActiveLayer('objects'); setObjTab('custom'); setLimezuCat(''); setSelectedObject(entry.id); }
+      setImportOpen(false); setImportFile(null);
+    } catch {
+      setImportErr('Gagal upload gambar. Coba lagi.');
+    } finally {
+      setImportBusy(false);
+    }
+  };
   const [portalHint, setPortalHint] = useState(false); // awaiting internal-portal destination click
   const portalOriginRef = useRef<{ x: number; y: number } | null>(null);
   // Bug 14 — a native window.confirm/prompt opened SYNCHRONOUSLY from a
@@ -197,6 +254,9 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const setSelectedFloor = useEditorStore((s) => s.setSelectedFloor);
   const selectedObject = useEditorStore((s) => s.selectedObjectPaletteId);
   const setSelectedObject = useEditorStore((s) => s.setSelectedObject);
+  const selectedWall = useEditorStore((s) => s.selectedWallPaletteId);
+  const setSelectedWall = useEditorStore((s) => s.setSelectedWall);
+  const customAssets = useEditorStore((s) => s.doc?.customAssets ?? []);
   const selectedEffect = useEditorStore((s) => s.selectedEffect);
   const setSelectedEffect = useEditorStore((s) => s.setSelectedEffect);
   const selection = useEditorStore((s) => s.selection);
@@ -222,6 +282,9 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         if (!alive) return;
         const theme = ((r.theme as RoomTheme) || 'modern-interiors') as RoomTheme;
         const layer = r.layerData ?? legacyToLayerData(normalizeTiles(r.tilemapData), (r.furniture as Furniture[]) ?? [], (r.zones as Zone[]) ?? []);
+        // Fitur 15 — the editor is its own browser tab (never goes through
+        // useSocket's ROOM_STATE), so it must hydrate PALETTE_BY_ID here too.
+        registerCustomAssets(layer.customAssets);
         setMeta({ name: r.name, theme });
         setDoc(layer);
         refetchMedia();
@@ -585,6 +648,10 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   };
 
   const floorEntries = meta ? PALETTE_BY_THEME[meta.theme].filter((p) => p.category === 'floor') : [];
+  // Fitur 15 — this room's uploads, split by which palette they belong to.
+  const customFloorEntries = customAssets.filter((a) => a.category === 'floor');
+  const customWallEntries = customAssets.filter((a) => a.category === 'wall');
+  const customObjectEntries = customAssets.filter((a) => a.category === 'object');
   // Searching looks across ALL object categories (ignoring the active tab) —
   // the admin types a name because they don't know which tab it lives in.
   // With a LimeZu theme active, search filters within that theme's (already
@@ -594,9 +661,13 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const objQuery = objSearch.trim().toLowerCase();
   const objEntries = limezuCat
     ? limezuEntries.filter((p) => !objQuery || p.label.toLowerCase().includes(objQuery))
-    : meta
-      ? PALETTE_BY_THEME[meta.theme].filter((p) => objQuery ? p.category !== 'floor' && p.label.toLowerCase().includes(objQuery) : p.category === objTab)
-      : [];
+    : objTab === 'custom'
+      // Fitur 15 — already-registered in PALETTE_BY_ID by registerCustomAssets;
+      // reuse it as the render source, same as every other tab here.
+      ? customObjectEntries.map((a) => PALETTE_BY_ID[a.id]).filter((p): p is PaletteEntry => !!p && (!objQuery || p.label.toLowerCase().includes(objQuery)))
+      : meta
+        ? PALETTE_BY_THEME[meta.theme].filter((p) => objQuery ? p.category !== 'floor' && p.label.toLowerCase().includes(objQuery) : p.category === objTab)
+        : [];
   const canPaint = activeTool === 'stamp' || activeTool === 'eraser';
   const cursor = (activeTool === 'hand' || spaceHeldRef.current) ? 'grab' : canPaint ? 'crosshair' : activeTool === 'select' ? 'cell' : activeTool === 'copy' ? (clipboard ? 'copy' : 'cell') : 'default';
 
@@ -632,6 +703,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           {saveState === 'saving' ? 'Menyimpan…' : saveState === 'dirty' ? 'Belum tersimpan…' : saveState === 'error' ? 'Gagal — mencoba lagi' : 'Tersimpan otomatis ✓'}
         </span>
         <button onClick={openResize} title="Resize map" className="px-2.5 py-1 rounded text-xs font-medium text-white/70 bg-white/10 hover:bg-white/20 cursor-pointer">Resize</button>
+        <button onClick={openImportPicker} title="Upload gambar sendiri sebagai Floor/Wall/Object" className="px-2.5 py-1 rounded text-xs font-medium text-white/70 bg-white/10 hover:bg-white/20 cursor-pointer">Import Image</button>
         <div className="ml-auto flex items-center gap-1">
           <button onClick={() => zoomBy(1 / 1.2)} className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 cursor-pointer">−</button>
           <span className="text-xs text-white/60 w-12 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
@@ -663,15 +735,37 @@ export function RoomEditorPage({ slug }: { slug: string }) {
                   </button>
                 ))}
               </div>
+              {customFloorEntries.length > 0 && (
+                <>
+                  <p className="text-xs uppercase tracking-wider text-white/40 mt-3 mb-2">Uploads Kamu</p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {customFloorEntries.map((p) => (
+                      <button key={p.id} onClick={() => setSelectedFloor(p.id)} title={p.label} className={`h-10 rounded border overflow-hidden bg-black/20 ${selectedFloor === p.id ? 'border-purple-400 ring-2 ring-purple-400/50' : 'border-white/10 hover:border-white/30'}`}>
+                        <span className="block w-full h-full bg-center bg-no-repeat" style={{ backgroundImage: `url(${p.src})`, backgroundSize: 'contain', imageRendering: 'pixelated' }} />
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </>
           )}
 
           {activeLayer === 'wall' && (
             <>
               <p className="text-xs uppercase tracking-wider text-white/40 mb-2">Wall</p>
-              <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-white/70">
+              <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-white/70 mb-3">
                 Gunakan <span className="text-white/90">Stamp (Q)</span> untuk memasang dinding (otomatis <span className="text-red-300">impassable</span> di game) dan <span className="text-white/90">Eraser (W)</span> untuk menghapus. Select + Enter/Delete untuk area.
               </div>
+              <p className="text-[11px] text-white/40 mb-2">Tampilan wall yang di-Stamp:</p>
+              <div className="grid grid-cols-4 gap-2">
+                <button onClick={() => setSelectedWall(null)} title="Default (tampilan tema)" className={`h-10 rounded border text-[10px] text-white/60 flex items-center justify-center ${selectedWall === null ? 'border-purple-400 bg-purple-500/20' : 'border-white/10 hover:border-white/30'}`}>—</button>
+                {customWallEntries.map((p) => (
+                  <button key={p.id} onClick={() => setSelectedWall(p.id)} title={p.label} className={`h-10 rounded border overflow-hidden bg-black/20 ${selectedWall === p.id ? 'border-purple-400 ring-2 ring-purple-400/50' : 'border-white/10 hover:border-white/30'}`}>
+                    <span className="block w-full h-full bg-center bg-no-repeat" style={{ backgroundImage: `url(${p.src})`, backgroundSize: 'contain', imageRendering: 'pixelated' }} />
+                  </button>
+                ))}
+              </div>
+              {customWallEntries.length === 0 && <p className="text-[11px] text-white/40 mt-2">Belum ada wall custom — pakai tombol Import Image di atas.</p>}
             </>
           )}
 
@@ -686,6 +780,8 @@ export function RoomEditorPage({ slug }: { slug: string }) {
                 {OBJ_CATEGORIES.map((c) => (
                   <button key={c.key} onClick={() => { setObjTab(c.key); setLimezuCat(''); }} className={`flex-1 py-1 rounded text-[10px] font-medium cursor-pointer ${!limezuCat && objTab === c.key ? 'bg-purple-600 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>{c.label}</button>
                 ))}
+                {/* Fitur 15 — this room's uploaded custom objects. */}
+                <button onClick={() => { setObjTab('custom'); setLimezuCat(''); }} className={`flex-1 py-1 rounded text-[10px] font-medium cursor-pointer ${!limezuCat && objTab === 'custom' ? 'bg-purple-600 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>Uploads Kamu</button>
               </div>
               {/* LimeZu Interiors — 21 themed categories, ~5.400 objects, each
                   category's manifest lazy-fetched on first pick (see
@@ -707,6 +803,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
                 </p>
               )}
               {objQuery && objEntries.length === 0 && !limezuLoading && <p className="text-[11px] text-white/40 mb-2">Tidak ada objek bernama “{objSearch.trim()}”.</p>}
+              {!objQuery && objTab === 'custom' && !limezuCat && objEntries.length === 0 && <p className="text-[11px] text-white/40 mb-2">Belum ada object custom — pakai tombol Import Image di atas.</p>}
               <div className="grid grid-cols-3 gap-2">
                 {objEntries.map((p) => (
                   <button key={p.id} onClick={() => setSelectedObject(p.id)} title={p.label} className={`rounded border p-1 flex items-center justify-center bg-black/20 ${selectedObject === p.id ? 'border-purple-400 ring-2 ring-purple-400/50' : 'border-white/10 hover:border-white/30'}`}>
@@ -786,6 +883,33 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             <div className="flex gap-2">
               <button onClick={applyResize} className="flex-1 py-1.5 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium cursor-pointer">Terapkan</button>
               <button onClick={() => setResizeOpen(false)} className="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white/80 text-sm cursor-pointer">Batal</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fitur 15 — Import Image: category picker shown right after the file
+          is picked and validated (size/type already checked in
+          openImportPicker before this even opens). */}
+      {importOpen && importFile && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60" onMouseDown={() => !importBusy && setImportOpen(false)}>
+          <div className="bg-gray-800 border border-white/10 rounded-xl p-5 w-80" onMouseDown={(e) => e.stopPropagation()}>
+            <p className="text-white font-semibold mb-1">Import Image</p>
+            <p className="text-white/50 text-xs mb-3 truncate">{importFile.name} ({(importFile.size / 1024).toFixed(0)}KB)</p>
+            <label className="text-xs text-white/60 block mb-3">
+              Nama
+              <input type="text" value={importLabel} onChange={(e) => setImportLabel(e.target.value)} className="mt-1 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-sm text-white" />
+            </label>
+            <p className="text-xs text-white/60 mb-1.5">Dipakai sebagai:</p>
+            <div className="flex gap-1.5 mb-4">
+              {([['floor', 'Floor'], ['wall', 'Wall'], ['object', 'Object']] as const).map(([id, label]) => (
+                <button key={id} onClick={() => setImportCategory(id)} className={`flex-1 py-1.5 rounded text-xs font-medium cursor-pointer ${importCategory === id ? 'bg-purple-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{label}</button>
+              ))}
+            </div>
+            {importErr && <p className="text-red-400 text-xs mb-3">{importErr}</p>}
+            <div className="flex gap-2">
+              <button onClick={confirmImport} disabled={importBusy} className="flex-1 py-1.5 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium cursor-pointer">{importBusy ? 'Mengupload…' : 'Import'}</button>
+              <button onClick={() => setImportOpen(false)} disabled={importBusy} className="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white/80 text-sm cursor-pointer">Batal</button>
             </div>
           </div>
         </div>

@@ -101,6 +101,10 @@ export interface RoomTile {
   y: number;
   type: TileType;
   floorPaletteId?: string;
+  // Custom-uploaded wall skin (Fitur 15) — only meaningful when type === 'wall'.
+  // Absent means the theme's default wall art (unchanged from before this
+  // existed). Never affects collision — that's still purely `type === 'wall'`.
+  wallPaletteId?: string;
   // portalTarget = destination ROOM slug (cross-room portal). For an INTERNAL
   // portal (same room), portalTargetX/Y hold the destination tile instead.
   // portalLabel is an optional name shown by the "Press F" prompt. All only
@@ -974,7 +978,7 @@ export type { RoomTemplateId } from '../defaultRoomLayout';
 export { BLOCKED_TILES, isTileBlocked, isDoorTile, findZoneEntryTile, findAdjacentFreeTile } from '../tileCollision';
 // ZEP Room Editor — Potong 1 layered map format + legacy adaptors.
 export { MAP_FORMAT_VERSION, legacyToLayerData, layerDataToLegacy } from '../mapLayers';
-export type { LayerData, TileEffect, AreaEffect } from '../mapLayers';
+export type { LayerData, TileEffect, AreaEffect, CustomAssetEntry } from '../mapLayers';
 export type { Role, FeatureKey } from '../permissions';
 export { roleAtLeast, hasFeatureAccess, FEATURE_MIN_ROLE } from '../permissions';
 export type { ShiftDef, AttendanceStatus, WorkTotals, Geofence, Coords, GeofenceResult } from '../attendanceRules';

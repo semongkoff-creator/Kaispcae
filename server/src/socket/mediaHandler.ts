@@ -16,7 +16,7 @@ import { deleteUploadedFile } from '../routes/uploads';
 
 const MEDIA_TYPES: MediaType[] = ['image', 'youtube', 'whiteboard', 'file', 'website', 'bgm'];
 // Uploaded-file locators: legacy disk (/api/uploads/) or Lark Drive (/api/files/, A8).
-const isUploadUrl = (u: unknown): u is string => typeof u === 'string' && (u.startsWith('/api/uploads/') || u.startsWith('/api/files/'));
+export const isUploadUrl = (u: unknown): u is string => typeof u === 'string' && (u.startsWith('/api/uploads/') || u.startsWith('/api/files/'));
 const IMAGE_FILE_TTL_MS = 24 * 60 * 60 * 1000; // 24h — spec §6's table, Image row (and File, see doc comment on the model)
 
 const canAddMedia = socketRateLimit(2);
