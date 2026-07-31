@@ -84,12 +84,15 @@ function PieceThumb({ paletteId, size = 40 }: { paletteId: string; size?: number
 // the Interactive Object system — only 'text_popup' is wired up so far
 // (more of ZEP's pop-up/website/developer types land incrementally).
 function ObjectSettingsPanel({
-  furniture, layer, onBack,
+  furniture, layer, slug, onBack,
 }: {
   furniture: Furniture | null;
   layer: 'objects' | 'top';
+  slug: string;
   onBack: () => void;
 }) {
+  const [imgBusy, setImgBusy] = useState(false);
+  const [imgErr, setImgErr] = useState('');
   if (!furniture) return null;
   const patch = (p: Partial<Furniture>) => useEditorStore.getState().updateSelectedObject(p, layer);
   const rotation = furniture.rotation ?? 0;
@@ -98,6 +101,21 @@ function ObjectSettingsPanel({
   const offX = furniture.offsetPx?.x ?? 0;
   const offY = furniture.offsetPx?.y ?? 0;
   const interactiveType = furniture.interactiveType;
+
+  const pickImage = async () => {
+    const f = await pickFile('image/png,image/jpeg');
+    if (!f) return;
+    if (f.size > 10 * 1024 * 1024) { setImgErr('Gambar maksimal 10MB.'); return; }
+    setImgBusy(true); setImgErr('');
+    try {
+      const { url } = await api.uploadMedia(f, slug);
+      patch({ interactiveConfig: { ...furniture.interactiveConfig, imageUrl: url } });
+    } catch {
+      setImgErr('Gagal upload gambar. Coba lagi.');
+    } finally {
+      setImgBusy(false);
+    }
+  };
 
   return (
     <div>
@@ -118,6 +136,7 @@ function ObjectSettingsPanel({
       >
         <option value="">— Furniture biasa —</option>
         <option value="text_popup">Text pop-up</option>
+        <option value="image_popup">Image pop-up</option>
       </select>
 
       <p className="text-[11px] text-white/50 mb-1.5">Name</p>
@@ -140,6 +159,26 @@ function ObjectSettingsPanel({
             rows={3}
             className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white resize-none outline-none focus:border-purple-400"
           />
+        </>
+      )}
+
+      {interactiveType === 'image_popup' && (
+        <>
+          <p className="text-[11px] text-white/50 mb-1.5">Image File</p>
+          <button onClick={pickImage} disabled={imgBusy} className="w-full mb-1.5 py-1.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white/80 text-xs cursor-pointer">
+            {imgBusy ? 'Mengupload…' : 'Select file'}
+          </button>
+          {imgErr && <p className="text-red-400 text-[11px] mb-1.5">{imgErr}</p>}
+          {furniture.interactiveConfig?.imageUrl && (
+            <div className="mb-3 rounded border border-white/10 overflow-hidden bg-black/20">
+              <img src={furniture.interactiveConfig.imageUrl} alt="" className="w-full max-h-32 object-contain" />
+            </div>
+          )}
+        </>
+      )}
+
+      {interactiveType && (
+        <>
           <p className="text-[11px] text-white/50 mb-1.5">Trigger Range (tile)</p>
           <input
             type="number" min={1} max={10} value={furniture.triggerRange ?? 1}
@@ -897,6 +936,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               key={selectedObjectId}
               furniture={selectedFurniture}
               layer={selectedFurnitureLayer}
+              slug={slug}
               onBack={() => useEditorStore.getState().clearSelectedObject()}
             />
           )}

@@ -821,7 +821,7 @@ export interface Furniture {
   interactiveConfig?: InteractiveObjectConfig;
 }
 
-export type InteractiveObjectType = 'text_popup';
+export type InteractiveObjectType = 'text_popup' | 'image_popup';
 export type TriggerMethod = 'press_f' | 'automatic';
 
 // Per-type config bag — only the field(s) relevant to `interactiveType` are
@@ -830,6 +830,10 @@ export type TriggerMethod = 'press_f' | 'automatic';
 export interface InteractiveObjectConfig {
   // text_popup
   text?: string;
+  // image_popup — an /api/uploads or /api/files URL (same upload service as
+  // everything else; validated server-side the same way media payloads are,
+  // see mediaHandler.isUploadUrl).
+  imageUrl?: string;
 }
 
 // Zones. 'meeting' zones render a big banner across the top of the area

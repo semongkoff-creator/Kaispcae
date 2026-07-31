@@ -224,6 +224,19 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
       return arr
         .filter((o) => o && typeof o === 'object' && typeof (o as { paletteId?: unknown }).paletteId === 'string'
           && Number.isInteger((o as { x?: unknown }).x) && Number.isInteger((o as { y?: unknown }).y))
+        // Fitur 15B — image_popup's imageUrl must be a same-origin upload URL,
+        // same rule as MapMediaObject payloads (isUploadUrl). Rather than
+        // rejecting the whole piece over a bad/foreign URL, just drop the
+        // image so the rest of its placement (position, other fields) still
+        // saves — the editor's own upload flow never produces a URL that
+        // would fail this anyway.
+        .map((o) => {
+          const obj = o as { interactiveType?: unknown; interactiveConfig?: { imageUrl?: unknown } };
+          if (obj.interactiveType === 'image_popup' && obj.interactiveConfig && !isUploadUrl(obj.interactiveConfig.imageUrl)) {
+            return { ...obj, interactiveConfig: { ...obj.interactiveConfig, imageUrl: undefined } };
+          }
+          return o;
+        })
         .slice(0, 2000) as LayerData['objects'];
     };
     if ('objects' in body) { const o = sanitizeObjs(body.objects); if (o) layerData.objects = o; }
