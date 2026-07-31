@@ -93,6 +93,11 @@ interface GameCanvasProps {
   // A4 — free double-click teleport.
   emitTeleportTo: (x: number, y: number, direction: Direction) => void;
   onMediaOpen: (mediaId: string) => void;
+  // Fitur 15B — fires when the local player triggers an Interactive Object
+  // (Press F in range, or automatic on entering range). The parent looks up
+  // the Furniture by id (already has the full furniture list) to read its
+  // interactiveType/interactiveConfig and show the right modal.
+  onInteractiveTrigger: (furnitureId: string) => void;
 }
 
 const MEDIA_ICON: Record<string, string> = { image: '🖼️', youtube: '▶️', whiteboard: '📝', file: '📎', website: '🔗', bgm: '🎵' };
@@ -168,7 +173,7 @@ function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: numb
   return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, onMediaOpen }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, onMediaOpen, onInteractiveTrigger }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -180,6 +185,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const emitJumpRef = useRef(emitJump); emitJumpRef.current = emitJump;
   const emitNudgeRef = useRef(emitNudge); emitNudgeRef.current = emitNudge;
   const onMediaOpenRef = useRef(onMediaOpen); onMediaOpenRef.current = onMediaOpen;
+  const onInteractiveTriggerRef = useRef(onInteractiveTrigger); onInteractiveTriggerRef.current = onInteractiveTrigger;
   const emitSitRef = useRef(emitSit); emitSitRef.current = emitSit;
   const emitFollowUnfollowRef = useRef(emitFollowUnfollow); emitFollowUnfollowRef.current = emitFollowUnfollow;
 
@@ -351,6 +357,16 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // (image/youtube/whiteboard/file) within one tile of the player, if any.
   // Recomputed each frame in the draw loop (same pattern as nearbyChairRef).
   const nearbyMediaRef = useRef<{ id: string; tileX: number; tileY: number } | null>(null);
+  // Fitur 15B — nearest press_f-type Interactive Object within ITS OWN
+  // triggerRange (unlike media's fixed INTERACT_TILE_RADIUS, this is
+  // per-piece — see the recompute below). Drives the "Press F" prompt;
+  // KeyF fires it same as the portal branch does, whichever is present.
+  const nearbyInteractiveRef = useRef<{ id: string; tileX: number; tileY: number } | null>(null);
+  // 'automatic' pieces fire once per range-ENTRY, not once ever and not every
+  // frame while still inside — tracked as a set of currently-inside ids so
+  // leaving and re-entering fires it again, matching "Automatically trigger"'s
+  // plain-English meaning.
+  const autoTriggeredIdsRef = useRef<Set<string>>(new Set());
 
   const performSit = useCallback((chair: Furniture, tileX: number, tileY: number) => {
     // Seat at the exact tile faced, not always the furniture's anchor tile —
@@ -502,6 +518,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           } else if (np.target) {
             onPortalEnterRef.current(np.target);
           }
+          return;
+        }
+        // Fitur 15B — no portal claiming F this tile: press_f Interactive
+        // Objects get it instead.
+        if (nearbyInteractiveRef.current) {
+          e.preventDefault();
+          onInteractiveTriggerRef.current(nearbyInteractiveRef.current.id);
         }
         return;
       }
@@ -646,6 +669,33 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         if (d <= INTERACT_TILE_RADIUS && d < bestDist) { bestDist = d; best = { id: m.id, tileX: m.x, tileY: m.y }; }
       }
       nearbyMediaRef.current = best;
+
+      // Fitur 15B — Interactive Objects. Each piece's OWN triggerRange gates
+      // it (unlike media's fixed INTERACT_TILE_RADIUS), and press_f/automatic
+      // are handled differently: press_f only arms the prompt (KeyF fires
+      // it); automatic fires immediately on entry, tracked so it fires once
+      // per entry rather than every frame while still in range.
+      let bestInteractive: { id: string; tileX: number; tileY: number } | null = null;
+      let bestInteractiveDist = Infinity;
+      const stillInRange = new Set<string>();
+      for (const f of furnitureRef.current) {
+        if (!f.interactiveType) continue;
+        const d = Math.max(Math.abs(f.x - baseTileX), Math.abs(f.y - baseTileY));
+        const range = f.triggerRange ?? 1;
+        if (d > range) continue;
+        stillInRange.add(f.id);
+        if (f.triggerMethod === 'automatic') {
+          if (!autoTriggeredIdsRef.current.has(f.id)) {
+            autoTriggeredIdsRef.current.add(f.id);
+            onInteractiveTriggerRef.current(f.id);
+          }
+        } else if (d < bestInteractiveDist) {
+          bestInteractiveDist = d; bestInteractive = { id: f.id, tileX: f.x, tileY: f.y };
+        }
+      }
+      // Drop ids that fell out of range, so re-entering fires 'automatic' again.
+      for (const id of autoTriggeredIdsRef.current) if (!stillInRange.has(id)) autoTriggeredIdsRef.current.delete(id);
+      nearbyInteractiveRef.current = bestInteractive;
 
       // Potong 6 — nearest YouTube tile within YT_EMBED_RADIUS auto-embeds its
       // player (muted). Toggled via React state only when it changes, so the
@@ -1122,6 +1172,30 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       ctx.quadraticCurveTo(bx, by, bx + rr, by); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#ffffff';
       ctx.fillText(text, psx, by + 13);
+    }
+
+    // Fitur 15B — "Press F" prompt over a press_f-type Interactive Object in
+    // range (only shown when no portal already claimed F this frame — see
+    // nearbyInteractiveRef's own comment on why the two never actually
+    // overlap in practice).
+    if (!nearbyPortalRef.current && nearbyInteractiveRef.current) {
+      const { tileX, tileY } = nearbyInteractiveRef.current;
+      const isx = tileX * TILE_SIZE - cameraX + TILE_SIZE / 2;
+      const isy = tileY * TILE_SIZE - cameraY;
+      const bob = Math.sin(timestamp * 0.005) * 2;
+      const text = 'F — Buka';
+      ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+      const tw = ctx.measureText(text).width;
+      const bx = isx - tw / 2 - 8, by = isy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
+      ctx.fillStyle = 'rgba(124, 58, 237, 0.95)';
+      ctx.beginPath();
+      ctx.moveTo(bx + rr, by); ctx.lineTo(bx + bw - rr, by);
+      ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + rr); ctx.lineTo(bx + bw, by + bh - rr);
+      ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - rr, by + bh); ctx.lineTo(bx + rr, by + bh);
+      ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - rr); ctx.lineTo(bx, by + rr);
+      ctx.quadraticCurveTo(bx, by, bx + rr, by); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(text, isx, by + 13);
     }
 
     // Speech bubbles

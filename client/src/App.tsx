@@ -33,6 +33,7 @@ import { RoomEditorPage } from './pages/RoomEditorPage';
 import { useBgm } from './hooks/useBgm';
 import { AddMediaPanel } from './components/ui/AddMediaPanel';
 import { MediaViewerModal } from './components/ui/MediaViewerModal';
+import { InteractiveObjectModal } from './components/ui/InteractiveObjectModal';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
 import { ActivityFeed } from './components/ui/ActivityFeed';
 import { PendingRequestToast } from './components/ui/PendingRequestToast';
@@ -520,6 +521,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const showTeleportPanel = activePanel === 'teleport';
   const showAddMediaPanel = activePanel === 'addMedia';
   const [viewingMediaId, setViewingMediaId] = useState<string | null>(null);
+  // Fitur 15B — Interactive Object trigger (Press F / automatic). Holds the
+  // Furniture id; the modal itself resolves the piece from `furniture` below.
+  const [triggeredInteractiveId, setTriggeredInteractiveId] = useState<string | null>(null);
   const localRole = useGameStore((s) => s.localRole);
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -757,6 +761,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
   const viewingMedia = viewingMediaId ? mediaObjects.find((m) => m.id === viewingMediaId) ?? null : null;
   const canDeleteViewingMedia = !!viewingMedia && (viewingMedia.createdBy === localUserId || isAdmin);
+  const triggeredInteractive = triggeredInteractiveId ? furniture.find((f) => f.id === triggeredInteractiveId) ?? null : null;
 
   const handleEmoteSelect = useCallback((emote: EmoteType) => {
     const lp = useGameStore.getState().localPlayer;
@@ -883,6 +888,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         emitFollowUnfollow={emitFollowUnfollow}
         emitTeleportTo={emitTeleportTo}
         onMediaOpen={setViewingMediaId}
+        onInteractiveTrigger={setTriggeredInteractiveId}
       />
 
       {/* A5 — meeting controls, only while standing inside a meeting-type zone */}
@@ -1213,6 +1219,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onClose={() => setViewingMediaId(null)}
           emitWhiteboardStroke={emitWhiteboardStroke}
           emitWhiteboardClear={emitWhiteboardClear}
+        />
+      )}
+
+      {triggeredInteractive && (
+        <InteractiveObjectModal
+          furniture={triggeredInteractive}
+          onClose={() => setTriggeredInteractiveId(null)}
         />
       )}
 

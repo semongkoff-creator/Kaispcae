@@ -86,21 +86,36 @@ export function drawFurnitureLayer(
     ensureLimezuEntry(item.paletteId);
     return;
   }
-  const screenX = item.x * TILE_SIZE - cameraX;
-  const baseRowScreenY = item.y * TILE_SIZE - cameraY;
+  // Fitur 15B — ZEP-style Rotate & Flip / Size(%) / Reposition(px), generic
+  // to any placed piece. offsetPx shifts the draw position; rotation/flip/
+  // scale pivot around the piece's own center, applied via a canvas
+  // transform around the (otherwise unchanged) drawSpriteFrame call — never
+  // touches placement (item.x/y) or collision, purely how it's painted.
+  const screenX = item.x * TILE_SIZE - cameraX + (item.offsetPx?.x ?? 0);
+  const baseRowScreenY = item.y * TILE_SIZE - cameraY + (item.offsetPx?.y ?? 0);
   const pieceWidthPx = entry.tilesW * TILE_SIZE;
+  const scaleW = (item.sizePercent?.w ?? 100) / 100;
+  const scaleH = (item.sizePercent?.h ?? 100) / 100;
+  const hasTransform = !!item.rotation || !!item.flipH || !!item.flipV || scaleW !== 1 || scaleH !== 1;
+
+  const drawPiece = (srcY: number, cellHeightPx: number, dy: number) => {
+    if (!hasTransform) {
+      drawSpriteFrame(ctx, entry.src, { srcX: entry.srcX, srcY, cellWidth: pieceWidthPx, cellHeight: cellHeightPx, dx: screenX, dy });
+      return;
+    }
+    const cx = screenX + pieceWidthPx / 2, cy = dy + cellHeightPx / 2;
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (item.rotation) ctx.rotate((item.rotation * Math.PI) / 180);
+    ctx.scale((item.flipH ? -1 : 1) * scaleW, (item.flipV ? -1 : 1) * scaleH);
+    drawSpriteFrame(ctx, entry.src, { srcX: entry.srcX, srcY, cellWidth: pieceWidthPx, cellHeight: cellHeightPx, dx: -pieceWidthPx / 2, dy: -cellHeightPx / 2 });
+    ctx.restore();
+  };
 
   if (layer === 'object') {
-    const baseSrcY = entry.srcY + (entry.tilesH - 1) * TILE_SIZE;
-    drawSpriteFrame(ctx, entry.src, {
-      srcX: entry.srcX, srcY: baseSrcY, cellWidth: pieceWidthPx, cellHeight: TILE_SIZE,
-      dx: screenX, dy: baseRowScreenY,
-    });
+    drawPiece(entry.srcY + (entry.tilesH - 1) * TILE_SIZE, TILE_SIZE, baseRowScreenY);
   } else if (entry.tilesH > 1) {
     const overheadHeightPx = (entry.tilesH - 1) * TILE_SIZE;
-    drawSpriteFrame(ctx, entry.src, {
-      srcX: entry.srcX, srcY: entry.srcY, cellWidth: pieceWidthPx, cellHeight: overheadHeightPx,
-      dx: screenX, dy: baseRowScreenY - overheadHeightPx,
-    });
+    drawPiece(entry.srcY, overheadHeightPx, baseRowScreenY - overheadHeightPx);
   }
 }

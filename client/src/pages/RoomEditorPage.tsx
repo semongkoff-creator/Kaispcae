@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowCounterclockwise, ArrowClockwise } from 'react-bootstrap-icons';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, RoomTile, Furniture, Zone, RoomTheme,
-  LayerData, legacyToLayerData, CustomAssetEntry,
+  LayerData, legacyToLayerData, CustomAssetEntry, InteractiveObjectType, TriggerMethod,
 } from '@virtualmeet/shared';
 import { api, ApiError } from '@/services/api';
 import { useEditorStore, EDITOR_LAYERS, EDITOR_TOOLS, EditorLayer, EditorTool } from '@/stores/editorStore';
@@ -76,6 +76,117 @@ function PieceThumb({ paletteId, size = 40 }: { paletteId: string; size?: number
     return () => cancelAnimationFrame(raf);
   }, [paletteId, size]);
   return <canvas ref={ref} width={size} height={size} className="block" />;
+}
+
+// Fitur 15B — ZEP-style "Object Settings" panel: shown instead of the
+// palette grid while a placed piece is selected (Select tool). Rotate&Flip/
+// Size/Reposition are generic to any piece; the Type dropdown below them is
+// the Interactive Object system — only 'text_popup' is wired up so far
+// (more of ZEP's pop-up/website/developer types land incrementally).
+function ObjectSettingsPanel({
+  furniture, layer, onBack,
+}: {
+  furniture: Furniture | null;
+  layer: 'objects' | 'top';
+  onBack: () => void;
+}) {
+  if (!furniture) return null;
+  const patch = (p: Partial<Furniture>) => useEditorStore.getState().updateSelectedObject(p, layer);
+  const rotation = furniture.rotation ?? 0;
+  const sizeW = furniture.sizePercent?.w ?? 100;
+  const sizeH = furniture.sizePercent?.h ?? 100;
+  const offX = furniture.offsetPx?.x ?? 0;
+  const offY = furniture.offsetPx?.y ?? 0;
+  const interactiveType = furniture.interactiveType;
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <button onClick={onBack} title="Kembali ke palette" className="w-6 h-6 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer text-white/70">←</button>
+        <p className="text-xs uppercase tracking-wider text-white/40">Object Settings</p>
+      </div>
+
+      <p className="text-[11px] text-white/50 mb-1.5">Type</p>
+      <select
+        value={interactiveType ?? ''}
+        onChange={(e) => {
+          const v = e.target.value as InteractiveObjectType | '';
+          if (!v) { patch({ interactiveType: undefined, interactiveConfig: undefined, triggerRange: undefined, triggerMethod: undefined }); return; }
+          patch({ interactiveType: v, triggerRange: furniture.triggerRange ?? 1, triggerMethod: furniture.triggerMethod ?? 'press_f', interactiveConfig: furniture.interactiveConfig ?? {} });
+        }}
+        className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white cursor-pointer outline-none"
+      >
+        <option value="">— Furniture biasa —</option>
+        <option value="text_popup">Text pop-up</option>
+      </select>
+
+      <p className="text-[11px] text-white/50 mb-1.5">Name</p>
+      <input
+        type="text" value={furniture.name ?? ''} onChange={(e) => patch({ name: e.target.value || undefined })}
+        placeholder="Please enter the object name"
+        className="w-full mb-1.5 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
+      />
+      <label className="flex items-center gap-2 text-[11px] text-white/60 mb-3 cursor-pointer">
+        <input type="checkbox" checked={!!furniture.hideObjectName} onChange={(e) => patch({ hideObjectName: e.target.checked || undefined })} />
+        Hide object name
+      </label>
+
+      {interactiveType === 'text_popup' && (
+        <>
+          <p className="text-[11px] text-white/50 mb-1.5">Text</p>
+          <textarea
+            value={furniture.interactiveConfig?.text ?? ''}
+            onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, text: e.target.value } })}
+            rows={3}
+            className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white resize-none outline-none focus:border-purple-400"
+          />
+          <p className="text-[11px] text-white/50 mb-1.5">Trigger Range (tile)</p>
+          <input
+            type="number" min={1} max={10} value={furniture.triggerRange ?? 1}
+            onChange={(e) => patch({ triggerRange: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })}
+            className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none"
+          />
+          <p className="text-[11px] text-white/50 mb-1.5">Trigger Method</p>
+          <div className="space-y-1 mb-3">
+            {([['press_f', 'Press F to trigger'], ['automatic', 'Automatically trigger']] as [TriggerMethod, string][]).map(([id, label]) => (
+              <label key={id} className="flex items-center gap-2 text-xs text-white/70 cursor-pointer">
+                <input type="radio" checked={(furniture.triggerMethod ?? 'press_f') === id} onChange={() => patch({ triggerMethod: id })} />
+                {label}
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="h-px bg-white/10 my-3" />
+
+      <p className="text-[11px] text-white/50 mb-1.5">Rotate & Flip</p>
+      <div className="flex gap-1.5 mb-3">
+        <button onClick={() => patch({ rotation: ((rotation + 90) % 360) as 0 | 90 | 180 | 270 })} title="Rotate 90°" className="flex-1 py-1.5 rounded bg-white/5 hover:bg-white/10 text-white/70 text-xs cursor-pointer">⟳ {rotation}°</button>
+        <button onClick={() => patch({ flipH: !furniture.flipH })} title="Flip horizontal" className={`flex-1 py-1.5 rounded text-xs cursor-pointer ${furniture.flipH ? 'bg-purple-600 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'}`}>Flip H</button>
+        <button onClick={() => patch({ flipV: !furniture.flipV })} title="Flip vertical" className={`flex-1 py-1.5 rounded text-xs cursor-pointer ${furniture.flipV ? 'bg-purple-600 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'}`}>Flip V</button>
+      </div>
+
+      <p className="text-[11px] text-white/50 mb-1.5">Size(%)</p>
+      <div className="flex items-center gap-2 mb-3">
+        <label className="flex-1 text-[10px] text-white/40">W<input type="number" value={sizeW} onChange={(e) => patch({ sizePercent: { w: Number(e.target.value) || 100, h: sizeH } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
+        <label className="flex-1 text-[10px] text-white/40">H<input type="number" value={sizeH} onChange={(e) => patch({ sizePercent: { w: sizeW, h: Number(e.target.value) || 100 } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
+      </div>
+
+      <p className="text-[11px] text-white/50 mb-1.5">Reposition(px)</p>
+      <div className="flex items-center gap-2 mb-3">
+        <label className="flex-1 text-[10px] text-white/40">X<input type="number" value={offX} onChange={(e) => patch({ offsetPx: { x: Number(e.target.value) || 0, y: offY } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
+        <label className="flex-1 text-[10px] text-white/40">Y<input type="number" value={offY} onChange={(e) => patch({ offsetPx: { x: offX, y: Number(e.target.value) || 0 } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
+      </div>
+
+      <button
+        onClick={() => patch({ rotation: undefined, flipH: undefined, flipV: undefined, sizePercent: undefined, offsetPx: undefined })}
+        className="w-full py-1.5 rounded bg-white/10 hover:bg-white/20 text-white/70 text-xs cursor-pointer"
+      >
+        ↺ Reset Settings
+      </button>
+    </div>
+  );
 }
 
 function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomTheme, layer: EditorLayer) {
@@ -260,6 +371,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const selectedEffect = useEditorStore((s) => s.selectedEffect);
   const setSelectedEffect = useEditorStore((s) => s.setSelectedEffect);
   const selection = useEditorStore((s) => s.selection);
+  const selectedObjectId = useEditorStore((s) => s.selectedObjectId);
   const clipboard = useEditorStore((s) => s.clipboard);
   const revision = useEditorStore((s) => s.revision);
   const undoDepth = useEditorStore((s) => s.undoDepth);
@@ -677,6 +789,14 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   }
 
   const isObjLayer = activeLayer === 'objects' || activeLayer === 'top';
+  // Fitur 15B — read straight off the live doc (not a memoized selector):
+  // this component already re-renders on every edit (subscribed to
+  // `revision`) and on selection changes (subscribed to `selectedObjectId`
+  // above), so this is always fresh by the time it's read.
+  const selectedFurnitureLayer: 'objects' | 'top' = activeLayer === 'top' ? 'top' : 'objects';
+  const selectedFurniture = isObjLayer && selectedObjectId
+    ? (useEditorStore.getState().doc?.[selectedFurnitureLayer === 'top' ? 'topObjects' : 'objects'] ?? []).find((f) => f.id === selectedObjectId) ?? null
+    : null;
 
   return (
     <div className="fixed inset-0 flex flex-col bg-gray-900 text-gray-100 select-none">
@@ -769,7 +889,19 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             </>
           )}
 
-          {isObjLayer && (
+          {/* Fitur 15B — selecting a placed piece (Select tool) swaps the
+              palette grid for its own settings panel, mirroring ZEP's
+              behavior exactly (a back arrow returns to the palette). */}
+          {isObjLayer && selectedObjectId && (
+            <ObjectSettingsPanel
+              key={selectedObjectId}
+              furniture={selectedFurniture}
+              layer={selectedFurnitureLayer}
+              onBack={() => useEditorStore.getState().clearSelectedObject()}
+            />
+          )}
+
+          {isObjLayer && !selectedObjectId && (
             <>
               <p className="text-xs uppercase tracking-wider text-white/40 mb-2">{activeLayer === 'top' ? 'Top objects (di atas avatar)' : 'Objects (di bawah avatar)'}</p>
               <input

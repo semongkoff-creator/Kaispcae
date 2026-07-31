@@ -122,8 +122,14 @@ interface EditorState {
   placeObject: (obj: Furniture, layer: 'objects' | 'top') => void;
   removeObject: (id: string, layer: 'objects' | 'top') => void;
   selectObjectAt: (x: number, y: number, layer: 'objects' | 'top') => void;
+  clearSelectedObject: () => void;
   moveSelectedTo: (x: number, y: number, layer: 'objects' | 'top') => void;
   deleteSelected: (layer: 'objects' | 'top') => void;
+  // Fitur 15B — patches Rotate&Flip/Size/Reposition + Interactive Object
+  // fields on the currently-selected piece (the "Object Settings" panel).
+  // One history entry per call — the panel's number inputs already only
+  // commit on blur/change, not on every keystroke.
+  updateSelectedObject: (patch: Partial<Furniture>, layer: 'objects' | 'top') => void;
 
   // Tile effects (Potong 4).
   selectedEffect: TileEffectKind | null;
@@ -348,6 +354,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       pushHistory(snap); commit();
     },
     selectObjectAt: (x, y, layer) => set({ selectedObjectId: get().objectAt(x, y, layer)?.id ?? null }),
+    clearSelectedObject: () => set({ selectedObjectId: null }),
     moveSelectedTo: (x, y, layer) => {
       const d = get().doc; const id = get().selectedObjectId; if (!d || !id) return;
       const arr = layer === 'top' ? d.topObjects : d.objects;
@@ -358,6 +365,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
       strokeChanged = true;
     },
     deleteSelected: (layer) => { const id = get().selectedObjectId; if (id) get().removeObject(id, layer); },
+    updateSelectedObject: (patch, layer) => {
+      const d = get().doc; const id = get().selectedObjectId; if (!d || !id) return;
+      const arr = layer === 'top' ? d.topObjects : d.objects;
+      const idx = arr.findIndex((o) => o.id === id); if (idx < 0) return;
+      const snap = snapshot();
+      arr[idx] = { ...arr[idx], ...patch };
+      if (layer === 'top') topDirty = true; else objectsDirty = true;
+      pushHistory(snap); commit();
+    },
 
     stampEffectAt: (x, y) => {
       const d = get().doc; const eff = get().selectedEffect;

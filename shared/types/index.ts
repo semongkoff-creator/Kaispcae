@@ -790,6 +790,46 @@ export interface Furniture {
   // by the layerDataToLegacy adaptor from LayerData.topObjects; absent for
   // ordinary below-avatar objects. See GameCanvas's furniture passes.
   topLayer?: boolean;
+
+  // Fitur 15B — ZEP-style placement controls ("Rotate & Flip" / "Size(%)" /
+  // "Reposition(px)"), generic to ANY placed piece (not just Interactive
+  // Objects — a decorative object can be rotated/resized too). Absent means
+  // "as authored" (0°, no flip, 100%, no offset) — every piece placed before
+  // this existed renders byte-for-byte unchanged.
+  rotation?: 0 | 90 | 180 | 270;
+  flipH?: boolean;
+  flipV?: boolean;
+  sizePercent?: { w: number; h: number };
+  offsetPx?: { x: number; y: number };
+  // ZEP's "Name" / "Hide object name" — an admin-chosen label, distinct from
+  // any interactiveConfig text. Display-only today (Fitur 15B doesn't render
+  // it above the piece yet — that's ZEP's separate "Show object name"
+  // Display Function, out of this pass's scope); stored now so it round-trips
+  // once that or an interactive modal's title wants to read it.
+  name?: string;
+  hideObjectName?: boolean;
+
+  // Fitur 15B — ZEP-style "Interactive Object". Absent = ordinary furniture,
+  // same as before this existed. Only 'text_popup' is implemented so far;
+  // more of ZEP's Pop-up Settings / Website Functions / Developer Functions
+  // types land incrementally, one at a time, per the feature's own spec.
+  interactiveType?: InteractiveObjectType;
+  // Chebyshev tile distance (see useProximity.calcDistanceTiles) that counts
+  // as "in range" of this object. Default 1 tile when unset.
+  triggerRange?: number;
+  triggerMethod?: TriggerMethod;
+  interactiveConfig?: InteractiveObjectConfig;
+}
+
+export type InteractiveObjectType = 'text_popup';
+export type TriggerMethod = 'press_f' | 'automatic';
+
+// Per-type config bag — only the field(s) relevant to `interactiveType` are
+// ever set. A flat optional bag (not a discriminated union) so adding the
+// next type is one new optional field, not a type migration.
+export interface InteractiveObjectConfig {
+  // text_popup
+  text?: string;
 }
 
 // Zones. 'meeting' zones render a big banner across the top of the area
