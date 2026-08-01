@@ -1257,6 +1257,17 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
     const players = await getPlayers(room);
     const player = players.find((p) => p.id === socket.id);
     if (player) saveLastKnownPosition(leavingUid, room, player.x, player.y, player.direction);
+
+    // A knock-admitted user's allowlist entry is a one-time entry pass, not
+    // a standing grant — otherwise once let in, they (and anyone reading
+    // their uid off the wire) could leave and walk straight back into a
+    // still-locked room with no further host approval, defeating the whole
+    // point of locking it. Revoke it the instant they leave (for ANY
+    // reason — LEAVE_ROOM, disconnect, or PLAYER_KICK all funnel through
+    // here); admins/owner never needed the allowlist to begin with (see the
+    // JOIN_ROOM gate's own `!isAdmin` check), so this never affects them.
+    const rs = getRoomAdmin(room);
+    rs.knockAllowlist?.delete(leavingUid);
   }
 
   removePlayer(room, socket.id);
