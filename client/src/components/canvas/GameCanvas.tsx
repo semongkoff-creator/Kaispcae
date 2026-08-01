@@ -205,6 +205,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // stale until some unrelated state change happens to re-render GameCanvas.
   const nudgedPlayers = useGameStore((s) => s.nudgedPlayers);
   const nudgerPlayers = useGameStore((s) => s.nudgerPlayers);
+  // Bug 21 — same reason as nudgedPlayers above: a chat bubble landing while
+  // the local avatar (and everyone else on screen) is standing still never
+  // got picked up until some unrelated re-render happened to sync bubblesRef.
+  // That's exactly the "bubble shows for others nearby but not for the
+  // sender" symptom — nearby users are usually still moving (re-rendering
+  // often), while the sender is stationary composing/sending the message.
+  const speechBubbles = useGameStore((s) => s.speechBubbles);
 
   const tilesRef = useRef(tiles);
   const themeRef = useRef(theme);
@@ -212,7 +219,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const playerRecordsRef = useRef(useGameStore.getState().playerRecords);
   const localPlayerRef = useRef(localPlayer);
   const localPlayerIdRef = useRef(localPlayerId);
-  const bubblesRef = useRef(useGameStore.getState().speechBubbles);
+  const bubblesRef = useRef(speechBubbles);
   // Fitur 15B — momentary display Interactive Object reveals ('show_name',
   // 'show_word_balloon'), same lazy-resync pattern as bubblesRef above
   // (re-read from the store whenever this component next re-renders for any
@@ -258,7 +265,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     playerRecordsRef.current = useGameStore.getState().playerRecords;
     localPlayerRef.current = localPlayer;
     localPlayerIdRef.current = localPlayerId;
-    bubblesRef.current = useGameStore.getState().speechBubbles;
+    bubblesRef.current = speechBubbles;
     momentaryRevealsRef.current = useGameStore.getState().momentaryReveals;
     emotesRef.current = useGameStore.getState().emoteEvents;
     jumpingPlayersRef.current = useGameStore.getState().jumpingPlayers;

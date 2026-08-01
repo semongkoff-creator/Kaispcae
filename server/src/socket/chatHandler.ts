@@ -48,7 +48,12 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
 
   socket.on(SocketEvents.CHAT_BUBBLE, (text: string) => {
     if (!currentRoom) return;
-    socket.to(currentRoom).emit(SocketEvents.CHAT_BUBBLE, {
+    // Bug 21 — socket.to() excludes the emitting socket itself, so the
+    // sender's own bubble never rendered on their own screen even though
+    // everyone else in the room saw it. io.to() includes every member of
+    // the room, sender included — same fix already applied to CHAT_MESSAGE
+    // above (see its "sender always gets their own message" comment).
+    io.to(currentRoom).emit(SocketEvents.CHAT_BUBBLE, {
       playerId: socket.id,
       text: text.slice(0, 100),
     });
