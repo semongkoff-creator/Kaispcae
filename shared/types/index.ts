@@ -839,7 +839,7 @@ export interface Furniture {
   interactiveConfig?: InteractiveObjectConfig;
 }
 
-export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'website_tab' | 'password' | 'multiple_choice' | 'api_call' | 'show_name';
+export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'website_tab' | 'password' | 'multiple_choice' | 'api_call' | 'show_name' | 'show_word_balloon';
 export type TriggerMethod = 'press_f' | 'automatic';
 
 export interface MultipleChoiceOption {
@@ -898,6 +898,12 @@ export interface InteractiveObjectConfig {
   // server looks up the room's own stored apiUrl and performs the POST
   // itself. Must be https:// (same rule as website's url).
   apiUrl?: string;
+  // show_word_balloon — 'random' picks a color once per trigger (see
+  // gameStore.momentaryReveals' `variant`), so it doesn't flicker every
+  // frame while the balloon is shown; 'default' is always the same plain
+  // white bubble the player-chat speech bubbles already use.
+  wordBalloonType?: 'default' | 'random';
+  wordBalloonText?: string;
 }
 
 export interface InteractivePasswordCheckPayload {

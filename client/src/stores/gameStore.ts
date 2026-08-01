@@ -341,14 +341,18 @@ export interface GameState {
   jumpingPlayers: Map<string, number>;
   triggerJump: (playerId: string, timestamp: number) => void;
 
-  // Fitur 15B — 'show_name' Interactive Object. Keyed by furnitureId →
-  // expiry epoch ms (same Map-of-most-recent shape as jumpingPlayers above),
-  // set by App.tsx's handleInteractiveTrigger whenever one fires (press_f or
+  // Fitur 15B — momentary display-only Interactive Object types
+  // ('show_name', 'show_word_balloon'). Keyed by furnitureId → {expireAt,
+  // variant?}, same Map-of-most-recent shape as jumpingPlayers above. Set by
+  // App.tsx's handleInteractiveTrigger whenever one fires (press_f or
   // automatic — both just call this with a fixed duration); GameCanvas reads
-  // it each frame to know whether to still draw that piece's floating name
-  // label. Expired entries are simply ignored at read time, never pruned.
-  revealedNames: Map<string, number>;
-  revealName: (furnitureId: string, durationMs: number) => void;
+  // it each frame to know whether to still draw that piece's floating
+  // label/balloon. `variant` is opaque here — e.g. show_word_balloon's
+  // "Random" style picks a color ONCE at trigger time (so it doesn't
+  // flicker every frame) and threads it through as this string. Expired
+  // entries are simply ignored at read time, never pruned.
+  momentaryReveals: Map<string, { expireAt: number; variant?: string }>;
+  triggerMomentaryReveal: (furnitureId: string, durationMs: number, variant?: string) => void;
 
   // Nudge ("senggol") — same Map-of-most-recent-timestamp shape as
   // jumpingPlayers above, keyed by the player being nudged (the one whose
@@ -865,12 +869,12 @@ export const useGameStore = create<GameState>((set, get) => ({
       return { jumpingPlayers: next };
     }),
 
-  revealedNames: new Map(),
-  revealName: (furnitureId, durationMs) =>
+  momentaryReveals: new Map(),
+  triggerMomentaryReveal: (furnitureId, durationMs, variant) =>
     set((state) => {
-      const next = new Map(state.revealedNames);
-      next.set(furnitureId, Date.now() + durationMs);
-      return { revealedNames: next };
+      const next = new Map(state.momentaryReveals);
+      next.set(furnitureId, { expireAt: Date.now() + durationMs, variant });
+      return { momentaryReveals: next };
     }),
 
   nudgedPlayers: new Map(),

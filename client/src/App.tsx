@@ -103,6 +103,10 @@ function releaseMovementKeys() {
 const AFK_IDLE_MS = 120000; // 2 minutes
 const AFK_STATUS = '💤 Away';
 
+// Fitur 15B — 'show_word_balloon' Interactive Object's "Random" style pool,
+// picked once per trigger (see handleInteractiveTrigger below).
+const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#ddd6fe'];
+
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
   const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall } = useSocket(authDisplayName, roomSlug, authUserId);
@@ -792,10 +796,22 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     }
     if (f.interactiveType === 'show_name') {
       // No modal — GameCanvas draws the floating label directly off
-      // revealedNames for a fixed duration (matches speech bubbles' own
+      // momentaryReveals for a fixed duration (matches speech bubbles' own
       // 4s convention). hideObjectName is a hard override.
       if (!f.name || f.hideObjectName) return;
-      useGameStore.getState().revealName(f.id, 4000);
+      useGameStore.getState().triggerMomentaryReveal(f.id, 4000);
+      return;
+    }
+    if (f.interactiveType === 'show_word_balloon') {
+      const cfg = f.interactiveConfig;
+      if (!cfg?.wordBalloonText) return;
+      // 'random' picks the color ONCE here (trigger time) — see
+      // momentaryReveals' own doc comment for why it can't be chosen at
+      // draw time (would flicker every frame instead of staying stable).
+      const variant = cfg.wordBalloonType === 'random'
+        ? WORD_BALLOON_RANDOM_COLORS[Math.floor(Math.random() * WORD_BALLOON_RANDOM_COLORS.length)]
+        : undefined;
+      useGameStore.getState().triggerMomentaryReveal(f.id, 4000, variant);
       return;
     }
     // Fresh object → any stale reply from a PREVIOUS password/choice object

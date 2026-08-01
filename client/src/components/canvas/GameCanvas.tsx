@@ -208,10 +208,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const localPlayerRef = useRef(localPlayer);
   const localPlayerIdRef = useRef(localPlayerId);
   const bubblesRef = useRef(useGameStore.getState().speechBubbles);
-  // Fitur 15B — 'show_name' Interactive Object reveals, same lazy-resync
-  // pattern as bubblesRef above (re-read from the store whenever this
-  // component next re-renders for any reason, not a reactive subscription).
-  const revealedNamesRef = useRef(useGameStore.getState().revealedNames);
+  // Fitur 15B — momentary display Interactive Object reveals ('show_name',
+  // 'show_word_balloon'), same lazy-resync pattern as bubblesRef above
+  // (re-read from the store whenever this component next re-renders for any
+  // reason, not a reactive subscription).
+  const momentaryRevealsRef = useRef(useGameStore.getState().momentaryReveals);
   const emotesRef = useRef(useGameStore.getState().emoteEvents);
   const jumpingPlayersRef = useRef(useGameStore.getState().jumpingPlayers);
   const nudgedPlayersRef = useRef(nudgedPlayers);
@@ -253,7 +254,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     localPlayerRef.current = localPlayer;
     localPlayerIdRef.current = localPlayerId;
     bubblesRef.current = useGameStore.getState().speechBubbles;
-    revealedNamesRef.current = useGameStore.getState().revealedNames;
+    momentaryRevealsRef.current = useGameStore.getState().momentaryReveals;
     emotesRef.current = useGameStore.getState().emoteEvents;
     jumpingPlayersRef.current = useGameStore.getState().jumpingPlayers;
     nudgedPlayersRef.current = nudgedPlayers;
@@ -1204,13 +1205,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     }
 
     // Fitur 15B — 'show_name' Interactive Object: floating name label for
-    // any piece with an active reveal (revealedNamesRef — set by App.tsx's
+    // any piece with an active reveal (momentaryRevealsRef — set by App.tsx's
     // handleInteractiveTrigger, itself fired by the same press_f/automatic
     // proximity dispatch every other Interactive Object already uses).
     for (const f of furnitureRef.current) {
       if (f.interactiveType !== 'show_name' || !f.name) continue;
-      const expiry = revealedNamesRef.current.get(f.id);
-      if (!expiry || now > expiry) continue;
+      const reveal = momentaryRevealsRef.current.get(f.id);
+      if (!reveal || now > reveal.expireAt) continue;
       const nsx = f.x * TILE_SIZE - cameraX + TILE_SIZE / 2;
       const nsy = f.y * TILE_SIZE - cameraY;
       const bob = Math.sin(timestamp * 0.005) * 2;
@@ -1226,6 +1227,47 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       ctx.quadraticCurveTo(bx, by, bx + rr, by); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#ffffff';
       ctx.fillText(f.name, nsx, by + 13);
+    }
+
+    // Fitur 15B — 'show_word_balloon' Interactive Object: same
+    // proper speech-bubble-with-tail shape (+ wrapText) as player chat
+    // bubbles below, anchored over the OBJECT's tile instead of a player.
+    // 'variant' (a hex color, only set for the "Random" style) was chosen
+    // ONCE at trigger time in App.tsx — never re-rolled here, or it would
+    // flicker a new color every frame while the balloon is shown.
+    for (const f of furnitureRef.current) {
+      if (f.interactiveType !== 'show_word_balloon') continue;
+      const text = f.interactiveConfig?.wordBalloonText;
+      if (!text) continue;
+      const reveal = momentaryRevealsRef.current.get(f.id);
+      if (!reveal || now > reveal.expireAt) continue;
+      const wsx = f.x * TILE_SIZE - cameraX + TILE_SIZE / 2;
+      const wsy = f.y * TILE_SIZE - cameraY;
+      const alpha = Math.max(0, 1 - (now - reveal.expireAt + 1000) / 1000);
+      ctx.save(); ctx.globalAlpha = alpha;
+      ctx.font = '10px sans-serif';
+      const lines = wrapText(ctx, text, 100);
+      const lineH = 13; const pad = 5;
+      const wbw = Math.min(110, ctx.measureText(text).width + pad * 2);
+      const wbh = lines.length * lineH + pad * 2;
+      const wbx = wsx - wbw / 2;
+      const wby = wsy - 40 - wbh;
+      ctx.fillStyle = reveal.variant || 'rgba(255,255,255,0.9)';
+      ctx.beginPath();
+      ctx.moveTo(wbx + 4, wby); ctx.lineTo(wbx + wbw - 4, wby);
+      ctx.quadraticCurveTo(wbx + wbw, wby, wbx + wbw, wby + 4);
+      ctx.lineTo(wbx + wbw, wby + wbh - 4);
+      ctx.quadraticCurveTo(wbx + wbw, wby + wbh, wbx + wbw - 4, wby + wbh);
+      ctx.lineTo(wbx + 4 + 6, wby + wbh); ctx.lineTo(wbx + 6, wby + wbh + 6);
+      ctx.lineTo(wbx + 2, wby + wbh); ctx.lineTo(wbx + 4, wby + wbh);
+      ctx.quadraticCurveTo(wbx, wby + wbh, wbx, wby + wbh - 4);
+      ctx.lineTo(wbx, wby + 4); ctx.quadraticCurveTo(wbx, wby, wbx + 4, wby);
+      ctx.fill();
+      ctx.fillStyle = '#333'; ctx.textAlign = 'center';
+      for (let li = 0; li < lines.length; li++) {
+        ctx.fillText(lines[li], wbx + wbw / 2, wby + pad + lineH * (li + 1) - 2);
+      }
+      ctx.restore();
     }
 
     // Speech bubbles

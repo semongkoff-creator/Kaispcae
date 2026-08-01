@@ -150,6 +150,7 @@ function ObjectSettingsPanel({
         <option value="multiple_choice">Multiple choice pop-up</option>
         <option value="api_call">API call (POST)</option>
         <option value="show_name">Show object name</option>
+        <option value="show_word_balloon">Show word balloons</option>
       </select>
 
       <p className="text-[11px] text-white/50 mb-1.5">Name</p>
@@ -165,6 +166,27 @@ function ObjectSettingsPanel({
 
       {interactiveType === 'show_name' && (
         <p className="text-[11px] text-white/40 mb-3">Trigger akan menampilkan isi field Name di atas sebagai label mengambang. Kosong = tidak ada yang ditampilkan.</p>
+      )}
+
+      {interactiveType === 'show_word_balloon' && (
+        <>
+          <p className="text-[11px] text-white/50 mb-1.5">Word Balloon Type</p>
+          <div className="space-y-1 mb-3">
+            {([['default', 'Default'], ['random', 'Random']] as const).map(([id, label]) => (
+              <label key={id} className="flex items-center gap-2 text-xs text-white/70 cursor-pointer">
+                <input type="radio" checked={(furniture.interactiveConfig?.wordBalloonType ?? 'default') === id} onChange={() => patch({ interactiveConfig: { ...furniture.interactiveConfig, wordBalloonType: id } })} />
+                {label}
+              </label>
+            ))}
+          </div>
+          <p className="text-[11px] text-white/50 mb-1.5">Word Balloon Text</p>
+          <textarea
+            value={furniture.interactiveConfig?.wordBalloonText ?? ''}
+            onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, wordBalloonText: e.target.value } })}
+            rows={2}
+            className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white resize-none outline-none focus:border-purple-400"
+          />
+        </>
       )}
 
       {interactiveType === 'text_popup' && (
