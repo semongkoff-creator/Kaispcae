@@ -363,9 +363,12 @@ export enum SocketEvents {
   // person (vibrate + soft sound + shake + toast). SLAP is the sender's request
   // (by nickname, like SUMMON_USER); the server relays SLAPPED only to the
   // target socket after a Focus + 30s-per-target cooldown check. Nothing is
-  // persisted (optional activity_log only).
+  // persisted (optional activity_log only). SLAP_SENT goes back to the sender
+  // ONLY (never broadcast to the room) so they get a local confirmation sound —
+  // sound for a slap must be audible on exactly 2 devices: sender + target.
   SLAP = 'slap',
   SLAPPED = 'slapped',
+  SLAP_SENT = 'slap:sent',
 
   // §6 — Add Media. Portal (spec's ~10s ephemeral variant) is deliberately
   // NOT included — this app already has a permanent portal tile placed via

@@ -543,6 +543,13 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       state.setSlappedBy(data.fromName || 'Seseorang');
     });
 
+    // A10 — local confirmation for the SENDER only, mirroring the receiver's
+    // sound so a slap is audible on exactly 2 devices (sender + target) and
+    // nowhere else in the room.
+    socket.on(SocketEvents.SLAP_SENT, () => {
+      playNudgeSound(false);
+    });
+
     // Bug 14 — someone in my zone raised their hand. Server already scoped this
     // to the zone + applied a per-sender cooldown, so just play the polite
     // chime. A3 — Focus/DND mutes the SOUND only; the ✋ badge still updates via

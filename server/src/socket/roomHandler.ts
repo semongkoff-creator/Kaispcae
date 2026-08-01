@@ -1042,7 +1042,11 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     }
     slapCooldown.set(key, now);
 
+    // Scoped to exactly these 2 sockets — target gets SLAPPED, sender gets
+    // SLAP_SENT as a local confirmation. Neither is broadcast to the room, so
+    // bystanders never receive an event to play a sound from.
     io.to(target.id).emit(SocketEvents.SLAPPED, { fromName: getPlayerName(socket.id), fromId: socket.id });
+    socket.emit(SocketEvents.SLAP_SENT, { targetName: target.name });
 
     // Optional, non-fatal: usage stats. logActivity is a guarded no-op unless
     // the Lark Base activity table is configured (see lib/larkBase).
