@@ -341,6 +341,15 @@ export interface GameState {
   jumpingPlayers: Map<string, number>;
   triggerJump: (playerId: string, timestamp: number) => void;
 
+  // Fitur 15B — 'show_name' Interactive Object. Keyed by furnitureId →
+  // expiry epoch ms (same Map-of-most-recent shape as jumpingPlayers above),
+  // set by App.tsx's handleInteractiveTrigger whenever one fires (press_f or
+  // automatic — both just call this with a fixed duration); GameCanvas reads
+  // it each frame to know whether to still draw that piece's floating name
+  // label. Expired entries are simply ignored at read time, never pruned.
+  revealedNames: Map<string, number>;
+  revealName: (furnitureId: string, durationMs: number) => void;
+
   // Nudge ("senggol") — same Map-of-most-recent-timestamp shape as
   // jumpingPlayers above, keyed by the player being nudged (the one whose
   // avatar shakes + gets the spark burst), not the one who pressed Z.
@@ -854,6 +863,14 @@ export const useGameStore = create<GameState>((set, get) => ({
       const next = new Map(state.jumpingPlayers);
       next.set(playerId, timestamp);
       return { jumpingPlayers: next };
+    }),
+
+  revealedNames: new Map(),
+  revealName: (furnitureId, durationMs) =>
+    set((state) => {
+      const next = new Map(state.revealedNames);
+      next.set(furnitureId, Date.now() + durationMs);
+      return { revealedNames: next };
     }),
 
   nudgedPlayers: new Map(),

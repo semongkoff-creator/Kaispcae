@@ -149,6 +149,7 @@ function ObjectSettingsPanel({
         <option value="password">Password prompt</option>
         <option value="multiple_choice">Multiple choice pop-up</option>
         <option value="api_call">API call (POST)</option>
+        <option value="show_name">Show object name</option>
       </select>
 
       <p className="text-[11px] text-white/50 mb-1.5">Name</p>
@@ -161,6 +162,10 @@ function ObjectSettingsPanel({
         <input type="checkbox" checked={!!furniture.hideObjectName} onChange={(e) => patch({ hideObjectName: e.target.checked || undefined })} />
         Hide object name
       </label>
+
+      {interactiveType === 'show_name' && (
+        <p className="text-[11px] text-white/40 mb-3">Trigger akan menampilkan isi field Name di atas sebagai label mengambang. Kosong = tidak ada yang ditampilkan.</p>
+      )}
 
       {interactiveType === 'text_popup' && (
         <>

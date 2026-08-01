@@ -790,6 +790,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       emitInteractiveApiCall(f.id);
       return;
     }
+    if (f.interactiveType === 'show_name') {
+      // No modal — GameCanvas draws the floating label directly off
+      // revealedNames for a fixed duration (matches speech bubbles' own
+      // 4s convention). hideObjectName is a hard override.
+      if (!f.name || f.hideObjectName) return;
+      useGameStore.getState().revealName(f.id, 4000);
+      return;
+    }
     // Fresh object → any stale reply from a PREVIOUS password/choice object
     // must not leak in as if it were this one's result.
     useGameStore.getState().setInteractivePasswordResult(null);

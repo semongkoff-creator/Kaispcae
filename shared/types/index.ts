@@ -819,10 +819,11 @@ export interface Furniture {
   sizePercent?: { w: number; h: number };
   offsetPx?: { x: number; y: number };
   // ZEP's "Name" / "Hide object name" — an admin-chosen label, distinct from
-  // any interactiveConfig text. Display-only today (Fitur 15B doesn't render
-  // it above the piece yet — that's ZEP's separate "Show object name"
-  // Display Function, out of this pass's scope); stored now so it round-trips
-  // once that or an interactive modal's title wants to read it.
+  // any interactiveConfig text. Read by InteractiveObjectModal's title, and
+  // by 'show_name' below (interactiveType === 'show_name' reveals THIS same
+  // field as a floating label above the piece — no config field of its own,
+  // it's just a trigger on an already-existing piece of data). hideObjectName
+  // is a hard override: if set, 'show_name' is a no-op regardless of trigger.
   name?: string;
   hideObjectName?: boolean;
 
@@ -838,7 +839,7 @@ export interface Furniture {
   interactiveConfig?: InteractiveObjectConfig;
 }
 
-export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'website_tab' | 'password' | 'multiple_choice' | 'api_call';
+export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'website_tab' | 'password' | 'multiple_choice' | 'api_call' | 'show_name';
 export type TriggerMethod = 'press_f' | 'automatic';
 
 export interface MultipleChoiceOption {

@@ -208,6 +208,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const localPlayerRef = useRef(localPlayer);
   const localPlayerIdRef = useRef(localPlayerId);
   const bubblesRef = useRef(useGameStore.getState().speechBubbles);
+  // Fitur 15B — 'show_name' Interactive Object reveals, same lazy-resync
+  // pattern as bubblesRef above (re-read from the store whenever this
+  // component next re-renders for any reason, not a reactive subscription).
+  const revealedNamesRef = useRef(useGameStore.getState().revealedNames);
   const emotesRef = useRef(useGameStore.getState().emoteEvents);
   const jumpingPlayersRef = useRef(useGameStore.getState().jumpingPlayers);
   const nudgedPlayersRef = useRef(nudgedPlayers);
@@ -249,6 +253,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     localPlayerRef.current = localPlayer;
     localPlayerIdRef.current = localPlayerId;
     bubblesRef.current = useGameStore.getState().speechBubbles;
+    revealedNamesRef.current = useGameStore.getState().revealedNames;
     emotesRef.current = useGameStore.getState().emoteEvents;
     jumpingPlayersRef.current = useGameStore.getState().jumpingPlayers;
     nudgedPlayersRef.current = nudgedPlayers;
@@ -1196,6 +1201,31 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       ctx.quadraticCurveTo(bx, by, bx + rr, by); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#ffffff';
       ctx.fillText(text, isx, by + 13);
+    }
+
+    // Fitur 15B — 'show_name' Interactive Object: floating name label for
+    // any piece with an active reveal (revealedNamesRef — set by App.tsx's
+    // handleInteractiveTrigger, itself fired by the same press_f/automatic
+    // proximity dispatch every other Interactive Object already uses).
+    for (const f of furnitureRef.current) {
+      if (f.interactiveType !== 'show_name' || !f.name) continue;
+      const expiry = revealedNamesRef.current.get(f.id);
+      if (!expiry || now > expiry) continue;
+      const nsx = f.x * TILE_SIZE - cameraX + TILE_SIZE / 2;
+      const nsy = f.y * TILE_SIZE - cameraY;
+      const bob = Math.sin(timestamp * 0.005) * 2;
+      ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+      const tw = ctx.measureText(f.name).width;
+      const bx = nsx - tw / 2 - 8, by = nsy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
+      ctx.fillStyle = 'rgba(30,41,59,0.9)';
+      ctx.beginPath();
+      ctx.moveTo(bx + rr, by); ctx.lineTo(bx + bw - rr, by);
+      ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + rr); ctx.lineTo(bx + bw, by + bh - rr);
+      ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - rr, by + bh); ctx.lineTo(bx + rr, by + bh);
+      ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - rr); ctx.lineTo(bx, by + rr);
+      ctx.quadraticCurveTo(bx, by, bx + rr, by); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(f.name, nsx, by + 13);
     }
 
     // Speech bubbles
