@@ -145,6 +145,7 @@ function ObjectSettingsPanel({
         <option value="text_popup">Text pop-up</option>
         <option value="image_popup">Image pop-up</option>
         <option value="website">Open website in a new window</option>
+        <option value="website_tab">Open website in a new tab</option>
         <option value="password">Password prompt</option>
         <option value="multiple_choice">Multiple choice pop-up</option>
         <option value="api_call">API call (POST)</option>
@@ -188,7 +189,7 @@ function ObjectSettingsPanel({
         </>
       )}
 
-      {interactiveType === 'website' && (
+      {(interactiveType === 'website' || interactiveType === 'website_tab') && (
         <>
           <p className="text-[11px] text-white/50 mb-1.5">Website Link</p>
           <input
@@ -198,21 +199,28 @@ function ObjectSettingsPanel({
             className="w-full mb-1.5 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
           />
           <p className="text-[11px] text-white/40 mb-2">Harus https:// — URL lain akan ditolak saat disimpan.</p>
-          <div className="space-y-1 mb-2">
-            <label className="flex items-center gap-2 text-xs text-white/70 cursor-pointer">
-              <input type="radio" checked={furniture.interactiveConfig?.fullscreen !== false} onChange={() => patch({ interactiveConfig: { ...furniture.interactiveConfig, fullscreen: true } })} />
-              Open fullscreen
-            </label>
-            <label className="flex items-center gap-2 text-xs text-white/70 cursor-pointer">
-              <input type="radio" checked={furniture.interactiveConfig?.fullscreen === false} onChange={() => patch({ interactiveConfig: { ...furniture.interactiveConfig, fullscreen: false } })} />
-              Set size
-            </label>
-          </div>
-          {furniture.interactiveConfig?.fullscreen === false && (
-            <div className="flex items-center gap-2 mb-3">
-              <label className="flex-1 text-[10px] text-white/40">Width (px)<input type="number" value={furniture.interactiveConfig?.width ?? ''} onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, width: Number(e.target.value) || undefined } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
-              <label className="flex-1 text-[10px] text-white/40">Height (px)<input type="number" value={furniture.interactiveConfig?.height ?? ''} onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, height: Number(e.target.value) || undefined } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
-            </div>
+          {interactiveType === 'website' && (
+            <>
+              <div className="space-y-1 mb-2">
+                <label className="flex items-center gap-2 text-xs text-white/70 cursor-pointer">
+                  <input type="radio" checked={furniture.interactiveConfig?.fullscreen !== false} onChange={() => patch({ interactiveConfig: { ...furniture.interactiveConfig, fullscreen: true } })} />
+                  Open fullscreen
+                </label>
+                <label className="flex items-center gap-2 text-xs text-white/70 cursor-pointer">
+                  <input type="radio" checked={furniture.interactiveConfig?.fullscreen === false} onChange={() => patch({ interactiveConfig: { ...furniture.interactiveConfig, fullscreen: false } })} />
+                  Set size
+                </label>
+              </div>
+              {furniture.interactiveConfig?.fullscreen === false && (
+                <div className="flex items-center gap-2 mb-3">
+                  <label className="flex-1 text-[10px] text-white/40">Width (px)<input type="number" value={furniture.interactiveConfig?.width ?? ''} onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, width: Number(e.target.value) || undefined } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
+                  <label className="flex-1 text-[10px] text-white/40">Height (px)<input type="number" value={furniture.interactiveConfig?.height ?? ''} onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, height: Number(e.target.value) || undefined } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
+                </div>
+              )}
+            </>
+          )}
+          {interactiveType === 'website_tab' && (
+            <p className="text-[11px] text-white/40 mb-3">Selalu buka tab baru biasa — dipakai kalau situsnya tidak bisa dibuka dengan baik lewat popup ukuran tertentu.</p>
           )}
         </>
       )}

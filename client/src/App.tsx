@@ -763,11 +763,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const canDeleteViewingMedia = !!viewingMedia && (viewingMedia.createdBy === localUserId || isAdmin);
   const triggeredInteractive = triggeredInteractiveId ? furniture.find((f) => f.id === triggeredInteractiveId) ?? null : null;
 
-  // Fitur 15B — 'website' and 'api_call' have no modal of their own
-  // (ZEP's own behavior for website is just opening a new window/tab, and
-  // api_call has nothing to show but a toast) — both are handled here
-  // instead of by InteractiveObjectModal, which only ever renders the
-  // pop-up-style types (text/image/password/multiple_choice).
+  // Fitur 15B — 'website'/'website_tab' and 'api_call' have no modal of
+  // their own (ZEP's own behavior for both website types is just opening a
+  // new window/tab, and api_call has nothing to show but a toast) — all are
+  // handled here instead of by InteractiveObjectModal, which only ever
+  // renders the pop-up-style types (text/image/password/multiple_choice).
   const handleInteractiveTrigger = useCallback((id: string) => {
     const f = useGameStore.getState().furniture.find((ff) => ff.id === id);
     if (!f) return;
@@ -776,6 +776,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       if (!cfg?.url) return;
       const features = cfg.fullscreen === false ? `noopener,noreferrer,width=${cfg.width || 900},height=${cfg.height || 700}` : 'noopener,noreferrer';
       window.open(cfg.url, '_blank', features);
+      return;
+    }
+    if (f.interactiveType === 'website_tab') {
+      // Deliberately no size/fullscreen options — always a plain new-tab
+      // open, ZEP's own documented fallback for sites that misbehave in a
+      // sized popup window.
+      if (!f.interactiveConfig?.url) return;
+      window.open(f.interactiveConfig.url, '_blank', 'noopener,noreferrer');
       return;
     }
     if (f.interactiveType === 'api_call') {

@@ -240,7 +240,7 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
           // existing website MEDIA type enforces, mediaHandler.isValidMediaPayload)
           // — never javascript:/data:/http: etc. Drop rather than reject the
           // whole piece, same reasoning as image_popup above.
-          if (obj.interactiveType === 'website' && obj.interactiveConfig && !(typeof obj.interactiveConfig.url === 'string' && /^https:\/\/\S+$/i.test(obj.interactiveConfig.url))) {
+          if ((obj.interactiveType === 'website' || obj.interactiveType === 'website_tab') && obj.interactiveConfig && !(typeof obj.interactiveConfig.url === 'string' && /^https:\/\/\S+$/i.test(obj.interactiveConfig.url))) {
             return { ...obj, interactiveConfig: { ...obj.interactiveConfig, url: undefined } };
           }
           // api_call's apiUrl — same https:// rule, doubly important here

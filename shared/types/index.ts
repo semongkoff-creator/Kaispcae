@@ -838,7 +838,7 @@ export interface Furniture {
   interactiveConfig?: InteractiveObjectConfig;
 }
 
-export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'password' | 'multiple_choice' | 'api_call';
+export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'website_tab' | 'password' | 'multiple_choice' | 'api_call';
 export type TriggerMethod = 'press_f' | 'automatic';
 
 export interface MultipleChoiceOption {
@@ -861,12 +861,16 @@ export interface InteractiveObjectConfig {
   // everything else; validated server-side the same way media payloads are,
   // see mediaHandler.isUploadUrl).
   imageUrl?: string;
-  // website ("Open website in a new window") — url must be https:// (same
+  // website ("Open website in a new window") / website_tab ("Open website
+  // in a new tab") share this same `url` field — url must be https:// (same
   // rule the existing website MEDIA type already enforces server-side).
-  // fullscreen=true opens a plain new tab (no size constraint, closest a
-  // browser gets to ZEP's "fullscreen" without a real Fullscreen API call a
-  // popup can't make on someone else's page); fullscreen=false uses
-  // width/height as the popup window's size.
+  // fullscreen/width/height are only meaningful for 'website': fullscreen=
+  // true opens a plain new tab (no size constraint, closest a browser gets
+  // to ZEP's "fullscreen" without a real Fullscreen API call a popup can't
+  // make on someone else's page); fullscreen=false uses width/height as the
+  // popup window's size. 'website_tab' ignores all three — it's always a
+  // plain window.open(url, '_blank') new tab, ZEP's own documented fallback
+  // "when the website does not open properly" in a sized popup.
   url?: string;
   fullscreen?: boolean;
   width?: number;
