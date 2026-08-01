@@ -510,9 +510,16 @@ rooms.delete('/rooms/:slug', authenticateToken, async (req: AuthRequest, res: Re
 rooms.put('/users/me/avatar', authenticateToken, validate(avatarUpdateSchema), async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
+    // Bug: chat (channelChatHandler.ts's `sender.displayName` join, and
+    // /users/profile-photos) has always resolved a message's CURRENT sender
+    // name from User.displayName — but this is the only rename UI in the
+    // app (there is no separate account-settings name field), and it only
+    // ever wrote avatarConfig. displayName never moved, so chat could never
+    // reflect an in-room rename. Keep them in sync here.
+    const newName = typeof req.body.name === 'string' ? req.body.name.trim() : '';
     await prisma.user.update({
       where: { id: req.userId },
-      data: { avatarConfig: req.body },
+      data: newName ? { avatarConfig: req.body, displayName: newName } : { avatarConfig: req.body },
     });
     return res.json({ success: true, avatarConfig: req.body });
   } catch (err) {

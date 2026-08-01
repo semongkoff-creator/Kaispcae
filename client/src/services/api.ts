@@ -395,7 +395,7 @@ export const api = {
     }),
 
   saveAvatar: (config: any) =>
-    request<{ success: boolean }>('/rooms/users/me/avatar', {
+    request<{ success: boolean }>('/users/me/avatar', {
       method: 'PUT',
       body: JSON.stringify(config),
     }),

@@ -22,6 +22,7 @@ import { useZoneLock } from './hooks/useZoneLock';
 import { ZoneLockBar } from './components/ui/ZoneLockBar';
 import { MiniMode, isMiniModeSupported, openMiniModeWindow } from './components/ui/MiniMode';
 import { ChatPanel } from './components/ui/ChatPanel';
+import { setProfileName } from './hooks/useProfiles';
 import { JoinGate, JoinRequestPanel } from './components/ui/JoinApproval';
 import { MessengerApp } from './components/Messenger/MessengerApp';
 import { NoticeBanner } from './components/ui/NoticeBanner';
@@ -664,6 +665,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       avatarConfig: config,
     });
     emitAvatarUpdate(config);
+    // Chat's sender-name cache (useProfiles) resolves by userId and never
+    // refetches once cached — AVATAR_UPDATED (above) excludes the sender's
+    // own socket, so the renamer's OWN chat view needs this pushed directly
+    // too, or their own new messages would still show their old cached name.
+    if (localUserId && config.name) setProfileName(localUserId, config.name);
     // Bug 2 — this save path only ever broadcast the change (fine for anyone
     // ALREADY in the room) and cached it in localStorage; it never told the
     // server. So a rename never survived the renamer's own refresh/reconnect,
@@ -674,7 +680,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     // reachable at all, so there's no logged-out case to gate this behind.
     api.saveAvatar(config).catch(() => {});
     setShowEditor(false);
-  }, [emitAvatarUpdate]);
+  }, [emitAvatarUpdate, localUserId]);
 
   // ─── AFK auto-away (ZEP/Gather-style) ────────────────────────────────
   // After AFK_IDLE_MS with no keyboard/pointer/touch input, the player's

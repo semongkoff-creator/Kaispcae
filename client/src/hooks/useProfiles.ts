@@ -18,9 +18,28 @@ export interface Profile {
 // sender's LATEST name/photo the next time chat is opened.
 const cache = new Map<string, Profile>();
 
+// A cached entry never expires on its own, so a rename mid-session (no page
+// reload) would otherwise keep showing whatever name was first resolved —
+// the live AVATAR_UPDATED broadcast (see useSocket.ts) already tells us the
+// instant someone's name changes, so push it straight into the cache and
+// notify every mounted useProfiles() to re-render, instead of waiting for a
+// refetch that would never happen on its own.
+const subscribers = new Set<() => void>();
+export function setProfileName(userId: string, name: string): void {
+  const existing = cache.get(userId);
+  cache.set(userId, { name, photo: existing?.photo ?? null });
+  subscribers.forEach((notify) => notify());
+}
+
 export function useProfiles(userIds: string[]): Map<string, Profile> {
   const [, tick] = useState(0);
   const key = userIds.join(',');
+
+  useEffect(() => {
+    const notify = () => tick((n) => n + 1);
+    subscribers.add(notify);
+    return () => { subscribers.delete(notify); };
+  }, []);
 
   useEffect(() => {
     const missing = userIds.filter((id) => id && !cache.has(id));

@@ -7,6 +7,7 @@ import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
 import { playNudgeSound, playHandRaiseSound } from '@/services/soundEffects';
 import { SERVER_URL } from '@/services/serverUrl';
 import { registerCustomAssets } from '@/data/customAssets';
+import { setProfileName } from '@/hooks/useProfiles';
 
 // Bump a chat target's unread count unless the user is actively looking at
 // it right now (panel open AND that exact target selected) — in which case
@@ -171,9 +172,15 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     });
 
     socket.on(SocketEvents.AVATAR_UPDATED, (data: { id: string; avatarConfig: AvatarConfig }) => {
-      console.log('[socket] avatar updated for:', data.id);
       const state = useGameStore.getState();
       if (data.id === state.localPlayerId) return;
+      // Bug: chat's sender-name cache (useProfiles) resolves by userId and
+      // never refetches once cached, so a rename mid-session never reached
+      // it — the nametag/panel updated live via playerRecords, chat didn't.
+      // We already know the new name right here in real time, so push it in
+      // directly instead of waiting for a refetch that would never happen.
+      const userId = state.playerRecords[data.id]?.userId;
+      if (userId && data.avatarConfig.name) setProfileName(userId, data.avatarConfig.name);
       upsertPlayer({
         id: data.id,
         avatarConfig: data.avatarConfig,
