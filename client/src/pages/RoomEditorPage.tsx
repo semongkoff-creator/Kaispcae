@@ -151,6 +151,7 @@ function ObjectSettingsPanel({
         <option value="api_call">API call (POST)</option>
         <option value="show_name">Show object name</option>
         <option value="show_word_balloon">Show word balloons</option>
+        <option value="change_object">Change object</option>
       </select>
 
       <p className="text-[11px] text-white/50 mb-1.5">Name</p>
@@ -186,6 +187,21 @@ function ObjectSettingsPanel({
             rows={2}
             className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white resize-none outline-none focus:border-purple-400"
           />
+        </>
+      )}
+
+      {interactiveType === 'change_object' && (
+        <>
+          <p className="text-[11px] text-white/40 mb-1.5">Remove or replace object when the user approaches or interacts with it.</p>
+          <p className="text-[11px] text-white/50 mb-1.5">After Action</p>
+          <select
+            value={furniture.interactiveConfig?.afterAction ?? 'disappear'}
+            onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, afterAction: e.target.value as 'disappear' } })}
+            className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white cursor-pointer outline-none"
+          >
+            <option value="disappear">Object disappears</option>
+          </select>
+          <p className="text-[11px] text-white/40 mb-3">Trigger oleh SIAPA SAJA akan menghapus objek ini permanen dari map, untuk semua pemain — bukan cuma yang trigger.</p>
         </>
       )}
 

@@ -388,6 +388,11 @@ export enum SocketEvents {
   // to an admin-supplied external URL).
   INTERACTIVE_API_CALL = 'interactive:api_call',
   INTERACTIVE_API_CALL_RESULT = 'interactive:api_call_result',
+  // Fitur 15B — 'change_object'. No _RESULT event: the piece disappearing
+  // from everyone's ROOM_UPDATED furniture list (the server mutates the
+  // room's actual saved layerData, not just a per-socket reply) IS the
+  // feedback — there's nothing else to tell the triggering client.
+  INTERACTIVE_CHANGE_OBJECT = 'interactive:change_object',
   // Whiteboard strokes are additive (two people drawing at once never
   // "conflict" the way concurrent text edits do), so a plain broadcast of
   // each completed stroke gives real-time multi-user sync without needing
@@ -839,7 +844,7 @@ export interface Furniture {
   interactiveConfig?: InteractiveObjectConfig;
 }
 
-export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'website_tab' | 'password' | 'multiple_choice' | 'api_call' | 'show_name' | 'show_word_balloon';
+export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'website_tab' | 'password' | 'multiple_choice' | 'api_call' | 'show_name' | 'show_word_balloon' | 'change_object';
 export type TriggerMethod = 'press_f' | 'automatic';
 
 export interface MultipleChoiceOption {
@@ -904,6 +909,12 @@ export interface InteractiveObjectConfig {
   // white bubble the player-chat speech bubbles already use.
   wordBalloonType?: 'default' | 'random';
   wordBalloonText?: string;
+  // change_object — unlike every other type, this MUTATES the room's actual
+  // saved map (removes the piece), for every player, not just the trigger-er.
+  // Only 'disappear' exists so far (ZEP's own confirmed example); a future
+  // "replace with another object" option is a natural follow-up but needs a
+  // palette picker this pass doesn't have reference detail for.
+  afterAction?: 'disappear';
 }
 
 export interface InteractivePasswordCheckPayload {
@@ -931,6 +942,9 @@ export interface InteractiveChoiceResultPayload {
 }
 
 export interface InteractiveApiCallPayload {
+  furnitureId: string;
+}
+export interface InteractiveChangeObjectPayload {
   furnitureId: string;
 }
 export interface InteractiveApiCallResultPayload {

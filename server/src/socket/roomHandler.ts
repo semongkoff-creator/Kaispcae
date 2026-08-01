@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, InteractivePasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, InteractivePasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerWorkMode, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -21,6 +21,7 @@ const canKnock = socketRateLimit(1); // max 1 knock/sec per socket — no spammi
 const canSlap = socketRateLimit(3); // A10 — burst guard; the real limit is the 30s/target cooldown below
 const canCheckInteractive = socketRateLimit(3); // Fitur 15B — throttle brute-force guessing of a password/multiple-choice prompt
 const canApiCall = socketRateLimit(1); // Fitur 15B — API call hits a THIRD-PARTY server; heavier than a DB compare, so a tighter cap
+const canChangeObject = socketRateLimit(2); // Fitur 15B — mutates + saves the room's actual layerData
 
 // A10 — Slap ("colek") cooldown: 30s per (sender socket → target socket) pair,
 // so you can't spam-poke the same person. Ephemeral (socket-id keyed); a
@@ -635,6 +636,39 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       }
     } catch (e) {
       console.warn('[room] api call error:', e);
+    }
+  });
+
+  // Fitur 15B — Change object. Unlike every other Interactive Object type,
+  // this one MUTATES the room's actual saved layerData (not a per-socket
+  // reply): any player who triggers it removes the piece for EVERYONE,
+  // matching ZEP's own intent (a shared gameplay object, not a personal
+  // popup). Re-reads the room fresh from the DB and re-derives/broadcasts
+  // through the exact same path the Room Editor's own save already uses
+  // (layerDataToLegacy + redactInteractiveSecrets + ROOM_UPDATED), so every
+  // client's furniture list updates the same way it would from an editor
+  // save — no separate client-side removal logic needed anywhere.
+  socket.on(SocketEvents.INTERACTIVE_CHANGE_OBJECT, async (data: InteractiveChangeObjectPayload) => {
+    if (!canChangeObject(socket.id)) return;
+    const room = currentRoom; if (!room) return;
+    const furnitureId = data?.furnitureId;
+    if (typeof furnitureId !== 'string') return;
+    try {
+      const dbRoom = await getPrisma().room.findUnique({ where: { slug: room } });
+      if (!dbRoom?.layerData) return;
+      const ld = dbRoom.layerData as unknown as LayerData;
+      const piece = [...(ld.objects ?? []), ...(ld.topObjects ?? [])].find((f) => f.id === furnitureId);
+      if (!piece || piece.interactiveType !== 'change_object') return;
+      if ((piece.interactiveConfig?.afterAction ?? 'disappear') === 'disappear') {
+        ld.objects = (ld.objects ?? []).filter((f) => f.id !== furnitureId);
+        ld.topObjects = (ld.topObjects ?? []).filter((f) => f.id !== furnitureId);
+        await getPrisma().room.update({ where: { id: dbRoom.id }, data: { layerData: ld as unknown as object } });
+        const derived = layerDataToLegacy(ld);
+        setCachedTiles(room, derived.tiles);
+        io.to(room).emit(SocketEvents.ROOM_UPDATED, { tiles: derived.tiles, furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones });
+      }
+    } catch (e) {
+      console.warn('[room] change object error:', e);
     }
   });
 
