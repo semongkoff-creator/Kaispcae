@@ -232,9 +232,13 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
         // saves — the editor's own upload flow never produces a URL that
         // would fail this anyway.
         .map((o) => {
-          const obj = o as { interactiveType?: unknown; interactiveConfig?: { imageUrl?: unknown; url?: unknown; apiUrl?: unknown } };
+          const obj = o as { interactiveType?: unknown; interactiveConfig?: { imageUrl?: unknown; url?: unknown; apiUrl?: unknown; spriteFile?: unknown } };
           if (obj.interactiveType === 'image_popup' && obj.interactiveConfig && !isUploadUrl(obj.interactiveConfig.imageUrl)) {
             return { ...obj, interactiveConfig: { ...obj.interactiveConfig, imageUrl: undefined } };
+          }
+          // animation's spriteFile — same upload-URL rule as image_popup.
+          if (obj.interactiveType === 'animation' && obj.interactiveConfig && !isUploadUrl(obj.interactiveConfig.spriteFile)) {
+            return { ...obj, interactiveConfig: { ...obj.interactiveConfig, spriteFile: undefined } };
           }
           // Fitur 15B — website's url must be https:// (same rule the
           // existing website MEDIA type enforces, mediaHandler.isValidMediaPayload)

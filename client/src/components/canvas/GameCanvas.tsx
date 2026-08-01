@@ -118,6 +118,11 @@ const NUDGE_SPARK_COUNT = 8;
 // diagonals) and still get the prompt, while nearest-wins selection keeps two
 // nearby pieces from being confused for one another.
 const INTERACT_TILE_RADIUS = 2;
+// Fitur 15B — 'animation' Interactive Object overlay: how long a trigger
+// plays for (must match the duration App.tsx passes to
+// triggerMomentaryReveal for this type) and how fast frames advance (~8fps).
+const ANIMATION_OVERLAY_DURATION_MS = 4000;
+const ANIMATION_FRAME_MS = 120;
 // Chairs are the exception: SPACE means BOTH "sit" and "jump", and sit wins
 // whenever a seat is in range — at radius 2 an office map full of desks left
 // almost nowhere Space still jumped ("kalo diem gabisa loncat"). Radius 1
@@ -1268,6 +1273,30 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         ctx.fillText(lines[li], wbx + wbw / 2, wby + pad + lineH * (li + 1) - 2);
       }
       ctx.restore();
+    }
+
+    // Fitur 15B — 'animation' Interactive Object: floating animated
+    // sprite-sheet overlay for any piece with an active reveal (frames laid
+    // out left-to-right in one image; see the config's own doc comment for
+    // why this is an overlay above the piece rather than a base-sprite
+    // replacement — that would need touching the two-pass object/overhead
+    // furniture draw order elsewhere in this file).
+    for (const f of furnitureRef.current) {
+      if (f.interactiveType !== 'animation') continue;
+      const cfg = f.interactiveConfig;
+      if (!cfg?.spriteFile || !cfg.spriteFrameWidth || !cfg.spriteFrameHeight || !cfg.spriteFrameCount) continue;
+      const reveal = momentaryRevealsRef.current.get(f.id);
+      if (!reveal || now > reveal.expireAt) continue;
+      const elapsed = ANIMATION_OVERLAY_DURATION_MS - (reveal.expireAt - now);
+      const frameIndex = Math.floor(elapsed / ANIMATION_FRAME_MS) % cfg.spriteFrameCount;
+      const asx = f.x * TILE_SIZE - cameraX + TILE_SIZE / 2;
+      const asy = f.y * TILE_SIZE - cameraY;
+      const scale = Math.min(TILE_SIZE / cfg.spriteFrameWidth, TILE_SIZE / cfg.spriteFrameHeight, 1.5);
+      const dw = cfg.spriteFrameWidth * scale, dh = cfg.spriteFrameHeight * scale;
+      drawSpriteFrame(ctx, cfg.spriteFile, {
+        srcX: frameIndex * cfg.spriteFrameWidth, srcY: 0, cellWidth: cfg.spriteFrameWidth, cellHeight: cfg.spriteFrameHeight,
+        dx: asx - dw / 2, dy: asy - dh - 8, dWidth: dw, dHeight: dh,
+      });
     }
 
     // Speech bubbles

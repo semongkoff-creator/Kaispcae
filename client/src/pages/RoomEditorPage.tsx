@@ -93,6 +93,8 @@ function ObjectSettingsPanel({
 }) {
   const [imgBusy, setImgBusy] = useState(false);
   const [imgErr, setImgErr] = useState('');
+  const [spriteBusy, setSpriteBusy] = useState(false);
+  const [spriteErr, setSpriteErr] = useState('');
   if (!furniture) return null;
   const patch = (p: Partial<Furniture>) => useEditorStore.getState().updateSelectedObject(p, layer);
   const rotation = furniture.rotation ?? 0;
@@ -114,6 +116,21 @@ function ObjectSettingsPanel({
       setImgErr('Gagal upload gambar. Coba lagi.');
     } finally {
       setImgBusy(false);
+    }
+  };
+
+  const pickSprite = async () => {
+    const f = await pickFile('image/png,image/jpeg');
+    if (!f) return;
+    if (f.size > 10 * 1024 * 1024) { setSpriteErr('Gambar maksimal 10MB.'); return; }
+    setSpriteBusy(true); setSpriteErr('');
+    try {
+      const { url } = await api.uploadMedia(f, slug);
+      patch({ interactiveConfig: { ...furniture.interactiveConfig, spriteFile: url } });
+    } catch {
+      setSpriteErr('Gagal upload gambar. Coba lagi.');
+    } finally {
+      setSpriteBusy(false);
     }
   };
 
@@ -152,6 +169,7 @@ function ObjectSettingsPanel({
         <option value="show_name">Show object name</option>
         <option value="show_word_balloon">Show word balloons</option>
         <option value="change_object">Change object</option>
+        <option value="animation">Animation functions</option>
       </select>
 
       <p className="text-[11px] text-white/50 mb-1.5">Name</p>
@@ -202,6 +220,30 @@ function ObjectSettingsPanel({
             <option value="disappear">Object disappears</option>
           </select>
           <p className="text-[11px] text-white/40 mb-3">Trigger oleh SIAPA SAJA akan menghapus objek ini permanen dari map, untuk semua pemain — bukan cuma yang trigger.</p>
+        </>
+      )}
+
+      {interactiveType === 'animation' && (
+        <>
+          <p className="text-[11px] text-white/40 mb-1.5">Implement moving objects through sprite files. Saat trigger, sprite ini muncul sebagai animasi mengambang di atas objek selama beberapa detik.</p>
+          <p className="text-[11px] text-white/50 mb-1.5">Image Sprite File</p>
+          <button onClick={pickSprite} disabled={spriteBusy} className="w-full mb-1.5 py-1.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white/80 text-xs cursor-pointer">
+            {spriteBusy ? 'Mengupload…' : 'Select file'}
+          </button>
+          {spriteErr && <p className="text-red-400 text-[11px] mb-1.5">{spriteErr}</p>}
+          {furniture.interactiveConfig?.spriteFile && (
+            <p className="text-[11px] text-white/40 mb-1.5 truncate">{furniture.interactiveConfig.spriteFile}</p>
+          )}
+          <div className="flex items-center gap-2 mb-1.5">
+            <label className="flex-1 text-[10px] text-white/40">Image Width (px)<input type="number" value={furniture.interactiveConfig?.spriteFrameWidth ?? ''} onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, spriteFrameWidth: Number(e.target.value) || undefined } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
+            <label className="flex-1 text-[10px] text-white/40">Image Height (px)<input type="number" value={furniture.interactiveConfig?.spriteFrameHeight ?? ''} onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, spriteFrameHeight: Number(e.target.value) || undefined } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
+          </div>
+          <p className="text-[11px] text-white/50 mb-1.5">Frame Number</p>
+          <input
+            type="number" min={1} value={furniture.interactiveConfig?.spriteFrameCount ?? ''}
+            onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, spriteFrameCount: Math.max(1, Number(e.target.value) || 1) } })}
+            className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none"
+          />
         </>
       )}
 

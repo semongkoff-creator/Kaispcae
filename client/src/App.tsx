@@ -821,6 +821,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       useGameStore.getState().triggerMomentaryReveal(f.id, 4000, variant);
       return;
     }
+    if (f.interactiveType === 'animation') {
+      // Simplified from ZEP's own "moving objects through sprite files" —
+      // plays as a floating overlay above the piece for a fixed window
+      // (GameCanvas reads spriteFile/frame* off the config directly at draw
+      // time), not a permanent swap of the piece's own base sprite. See the
+      // config's own doc comment in shared/types for why.
+      const cfg = f.interactiveConfig;
+      if (!cfg?.spriteFile || !cfg.spriteFrameWidth || !cfg.spriteFrameHeight || !cfg.spriteFrameCount) return;
+      useGameStore.getState().triggerMomentaryReveal(f.id, 4000);
+      return;
+    }
     // Fresh object → any stale reply from a PREVIOUS password/choice object
     // must not leak in as if it were this one's result.
     useGameStore.getState().setInteractivePasswordResult(null);

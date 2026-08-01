@@ -844,7 +844,7 @@ export interface Furniture {
   interactiveConfig?: InteractiveObjectConfig;
 }
 
-export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'website_tab' | 'password' | 'multiple_choice' | 'api_call' | 'show_name' | 'show_word_balloon' | 'change_object';
+export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'website_tab' | 'password' | 'multiple_choice' | 'api_call' | 'show_name' | 'show_word_balloon' | 'change_object' | 'animation';
 export type TriggerMethod = 'press_f' | 'automatic';
 
 export interface MultipleChoiceOption {
@@ -915,6 +915,20 @@ export interface InteractiveObjectConfig {
   // "replace with another object" option is a natural follow-up but needs a
   // palette picker this pass doesn't have reference detail for.
   afterAction?: 'disappear';
+  // animation — a horizontal sprite-sheet strip (spriteFrameCount frames,
+  // each spriteFrameWidth x spriteFrameHeight px, laid left-to-right).
+  // Simplified from ZEP's own "moving objects through sprite files": this
+  // pass plays the animation as a floating overlay above the piece for a
+  // fixed window on trigger (same momentaryReveals mechanism as show_name/
+  // show_word_balloon), rather than permanently replacing the piece's own
+  // base sprite — swapping the actual base render mid-animation would need
+  // touching GameCanvas's two-pass (object/overhead) furniture draw order,
+  // out of scope for this first cut. spriteFile must be an upload URL (same
+  // rule as image_popup's imageUrl).
+  spriteFile?: string;
+  spriteFrameWidth?: number;
+  spriteFrameHeight?: number;
+  spriteFrameCount?: number;
 }
 
 export interface InteractivePasswordCheckPayload {
