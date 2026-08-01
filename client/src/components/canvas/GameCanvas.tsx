@@ -212,6 +212,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // sender" symptom — nearby users are usually still moving (re-rendering
   // often), while the sender is stationary composing/sending the message.
   const speechBubbles = useGameStore((s) => s.speechBubbles);
+  // Same reason as nudgedPlayers/speechBubbles above: a jump triggered while
+  // standing still (nothing else on screen re-rendering) never got picked up
+  // by jumpingPlayersRef below until some unrelated state change happened to
+  // re-render GameCanvas — which read as "the jump button does nothing at
+  // all" whenever the presser (or anyone visible) wasn't already moving.
+  const jumpingPlayers = useGameStore((s) => s.jumpingPlayers);
 
   const tilesRef = useRef(tiles);
   const themeRef = useRef(theme);
@@ -226,7 +232,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // reason, not a reactive subscription).
   const momentaryRevealsRef = useRef(useGameStore.getState().momentaryReveals);
   const emotesRef = useRef(useGameStore.getState().emoteEvents);
-  const jumpingPlayersRef = useRef(useGameStore.getState().jumpingPlayers);
+  const jumpingPlayersRef = useRef(jumpingPlayers);
   const nudgedPlayersRef = useRef(nudgedPlayers);
   const nudgerPlayersRef = useRef(nudgerPlayers);
   const zones = useGameStore((s) => s.zones);
@@ -268,7 +274,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     bubblesRef.current = speechBubbles;
     momentaryRevealsRef.current = useGameStore.getState().momentaryReveals;
     emotesRef.current = useGameStore.getState().emoteEvents;
-    jumpingPlayersRef.current = useGameStore.getState().jumpingPlayers;
+    jumpingPlayersRef.current = jumpingPlayers;
     nudgedPlayersRef.current = nudgedPlayers;
     nudgerPlayersRef.current = nudgerPlayers;
     zonesRef.current = zones;
