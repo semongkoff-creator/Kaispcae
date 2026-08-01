@@ -147,6 +147,7 @@ function ObjectSettingsPanel({
         <option value="website">Open website in a new window</option>
         <option value="password">Password prompt</option>
         <option value="multiple_choice">Multiple choice pop-up</option>
+        <option value="api_call">API call (POST)</option>
       </select>
 
       <p className="text-[11px] text-white/50 mb-1.5">Name</p>
@@ -319,6 +320,20 @@ function ObjectSettingsPanel({
             onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, incorrectMessage: e.target.value } })}
             className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none focus:border-purple-400"
           />
+        </>
+      )}
+
+      {interactiveType === 'api_call' && (
+        <>
+          <p className="text-[11px] text-white/40 mb-2">Call API. Kirim POST ke URL ini lewat server MeetKai (bukan langsung dari browser) tiap kali objek ini di-trigger.</p>
+          <p className="text-[11px] text-white/50 mb-1.5">Link API</p>
+          <input
+            type="text" value={furniture.interactiveConfig?.apiUrl ?? ''}
+            onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, apiUrl: e.target.value } })}
+            placeholder="https://…"
+            className="w-full mb-1.5 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
+          />
+          <p className="text-[11px] text-white/40 mb-3">Harus https:// — URL lain akan ditolak saat disimpan.</p>
         </>
       )}
 

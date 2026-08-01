@@ -382,6 +382,12 @@ export enum SocketEvents {
   // Multiple choice pop-up's isCorrect flags.
   INTERACTIVE_CHOICE_CHECK = 'interactive:choice_check',
   INTERACTIVE_CHOICE_RESULT = 'interactive:choice_result',
+  // Fitur 15B — last of the 6 types. Client only ever sends {furnitureId};
+  // the server resolves the real apiUrl itself and does the POST server-side
+  // (never the browser — SSRF + CORS both argue against a client-side fetch
+  // to an admin-supplied external URL).
+  INTERACTIVE_API_CALL = 'interactive:api_call',
+  INTERACTIVE_API_CALL_RESULT = 'interactive:api_call_result',
   // Whiteboard strokes are additive (two people drawing at once never
   // "conflict" the way concurrent text edits do), so a plain broadcast of
   // each completed stroke gives real-time multi-user sync without needing
@@ -832,7 +838,7 @@ export interface Furniture {
   interactiveConfig?: InteractiveObjectConfig;
 }
 
-export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'password' | 'multiple_choice';
+export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'password' | 'multiple_choice' | 'api_call';
 export type TriggerMethod = 'press_f' | 'automatic';
 
 export interface MultipleChoiceOption {
@@ -882,6 +888,11 @@ export interface InteractiveObjectConfig {
   question?: string;
   options?: MultipleChoiceOption[];
   incorrectMessage?: string;
+  // api_call — apiUrl is NEVER fetched from the browser (SSRF risk + CORS):
+  // the client only ever sends {furnitureId} over INTERACTIVE_API_CALL; the
+  // server looks up the room's own stored apiUrl and performs the POST
+  // itself. Must be https:// (same rule as website's url).
+  apiUrl?: string;
 }
 
 export interface InteractivePasswordCheckPayload {
@@ -906,6 +917,15 @@ export interface InteractiveChoiceResultPayload {
   // Only one of these is meaningful, matching `correct`.
   correctText?: string;
   incorrectMessage?: string;
+}
+
+export interface InteractiveApiCallPayload {
+  furnitureId: string;
+}
+export interface InteractiveApiCallResultPayload {
+  furnitureId: string;
+  success: boolean;
+  error?: string;
 }
 
 // Zones. 'meeting' zones render a big banner across the top of the area

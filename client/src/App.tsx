@@ -105,7 +105,7 @@ const AFK_STATUS = '💤 Away';
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall } = useSocket(authDisplayName, roomSlug, authUserId);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -763,10 +763,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const canDeleteViewingMedia = !!viewingMedia && (viewingMedia.createdBy === localUserId || isAdmin);
   const triggeredInteractive = triggeredInteractiveId ? furniture.find((f) => f.id === triggeredInteractiveId) ?? null : null;
 
-  // Fitur 15B — 'website' has no modal of its own (ZEP's own behavior is
-  // just opening a new window/tab, not a pop-up dialog) — it's handled here
+  // Fitur 15B — 'website' and 'api_call' have no modal of their own
+  // (ZEP's own behavior for website is just opening a new window/tab, and
+  // api_call has nothing to show but a toast) — both are handled here
   // instead of by InteractiveObjectModal, which only ever renders the
-  // pop-up-style types (text/image, more later).
+  // pop-up-style types (text/image/password/multiple_choice).
   const handleInteractiveTrigger = useCallback((id: string) => {
     const f = useGameStore.getState().furniture.find((ff) => ff.id === id);
     if (!f) return;
@@ -777,12 +778,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       window.open(cfg.url, '_blank', features);
       return;
     }
+    if (f.interactiveType === 'api_call') {
+      emitInteractiveApiCall(f.id);
+      return;
+    }
     // Fresh object → any stale reply from a PREVIOUS password/choice object
     // must not leak in as if it were this one's result.
     useGameStore.getState().setInteractivePasswordResult(null);
     useGameStore.getState().setInteractiveChoiceResult(null);
     setTriggeredInteractiveId(id);
-  }, []);
+  }, [emitInteractiveApiCall]);
 
   const handleCheckPassword = useCallback((furnitureId: string, attempt: string) => {
     useGameStore.getState().setInteractivePasswordResult(null);

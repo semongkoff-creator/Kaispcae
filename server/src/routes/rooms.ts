@@ -232,7 +232,7 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
         // saves — the editor's own upload flow never produces a URL that
         // would fail this anyway.
         .map((o) => {
-          const obj = o as { interactiveType?: unknown; interactiveConfig?: { imageUrl?: unknown; url?: unknown } };
+          const obj = o as { interactiveType?: unknown; interactiveConfig?: { imageUrl?: unknown; url?: unknown; apiUrl?: unknown } };
           if (obj.interactiveType === 'image_popup' && obj.interactiveConfig && !isUploadUrl(obj.interactiveConfig.imageUrl)) {
             return { ...obj, interactiveConfig: { ...obj.interactiveConfig, imageUrl: undefined } };
           }
@@ -242,6 +242,12 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
           // whole piece, same reasoning as image_popup above.
           if (obj.interactiveType === 'website' && obj.interactiveConfig && !(typeof obj.interactiveConfig.url === 'string' && /^https:\/\/\S+$/i.test(obj.interactiveConfig.url))) {
             return { ...obj, interactiveConfig: { ...obj.interactiveConfig, url: undefined } };
+          }
+          // api_call's apiUrl — same https:// rule, doubly important here
+          // since it's the SERVER (not a browser tab) that ends up making
+          // the request to it — see INTERACTIVE_API_CALL in roomHandler.ts.
+          if (obj.interactiveType === 'api_call' && obj.interactiveConfig && !(typeof obj.interactiveConfig.apiUrl === 'string' && /^https:\/\/\S+$/i.test(obj.interactiveConfig.apiUrl))) {
+            return { ...obj, interactiveConfig: { ...obj.interactiveConfig, apiUrl: undefined } };
           }
           return o;
         })

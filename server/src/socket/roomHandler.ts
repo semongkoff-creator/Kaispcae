@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, InteractivePasswordCheckPayload, InteractiveChoiceCheckPayload } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, InteractivePasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerWorkMode, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -20,6 +20,7 @@ const canSummonUser = socketRateLimit(3); // max 3 single-target summon requests
 const canKnock = socketRateLimit(1); // max 1 knock/sec per socket — no spamming the host
 const canSlap = socketRateLimit(3); // A10 — burst guard; the real limit is the 30s/target cooldown below
 const canCheckInteractive = socketRateLimit(3); // Fitur 15B — throttle brute-force guessing of a password/multiple-choice prompt
+const canApiCall = socketRateLimit(1); // Fitur 15B — API call hits a THIRD-PARTY server; heavier than a DB compare, so a tighter cap
 
 // A10 — Slap ("colek") cooldown: 30s per (sender socket → target socket) pair,
 // so you can't spam-poke the same person. Ephemeral (socket-id keyed); a
@@ -587,6 +588,53 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       });
     } catch (e) {
       console.warn('[room] choice check error:', e);
+    }
+  });
+
+  // Fitur 15B — API call (POST), the last of the 6 Interactive Object types.
+  // The client only ever sends {furnitureId} — never a URL. The server
+  // resolves the room's OWN stored apiUrl (already https://-only, see
+  // rooms.ts's sanitizeObjs) and performs the POST itself: doing this from
+  // the browser would mean either a CORS failure against most third-party
+  // APIs, or — if it somehow worked — the browser making requests an admin
+  // configured, to wherever they configured, on every visiting player's own
+  // network egress (SSRF-by-proxy). Bounded with a timeout so one slow
+  // third-party endpoint can't hang this handler indefinitely.
+  socket.on(SocketEvents.INTERACTIVE_API_CALL, async (data: InteractiveApiCallPayload) => {
+    if (!canApiCall(socket.id)) return;
+    const room = currentRoom; if (!room) return;
+    const furnitureId = data?.furnitureId;
+    if (typeof furnitureId !== 'string') return;
+    const uid = findUserIdBySocket(socket.id);
+    const name = playerNames.get(socket.id) || 'Someone';
+    try {
+      const dbRoom = await getPrisma().room.findUnique({ where: { slug: room }, select: { layerData: true, name: true } });
+      if (!dbRoom?.layerData) return;
+      const ld = dbRoom.layerData as unknown as LayerData;
+      const piece = [...(ld.objects ?? []), ...(ld.topObjects ?? [])].find((f) => f.id === furnitureId);
+      const apiUrl = piece?.interactiveType === 'api_call' ? piece.interactiveConfig?.apiUrl : undefined;
+      if (!apiUrl) {
+        socket.emit(SocketEvents.INTERACTIVE_API_CALL_RESULT, { furnitureId, success: false, error: 'API URL belum diatur.' });
+        return;
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      try {
+        const res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: uid, displayName: name, roomSlug: room, roomName: dbRoom.name, furnitureId, timestamp: Date.now() }),
+          signal: controller.signal,
+        });
+        if (!res.ok) { socket.emit(SocketEvents.INTERACTIVE_API_CALL_RESULT, { furnitureId, success: false, error: `Server API membalas status ${res.status}.` }); return; }
+        socket.emit(SocketEvents.INTERACTIVE_API_CALL_RESULT, { furnitureId, success: true });
+      } catch {
+        socket.emit(SocketEvents.INTERACTIVE_API_CALL_RESULT, { furnitureId, success: false, error: 'Gagal menghubungi API (timeout atau jaringan).' });
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (e) {
+      console.warn('[room] api call error:', e);
     }
   });
 
