@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveChoiceResultPayload } from '@virtualmeet/shared';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -308,6 +308,8 @@ export interface GameState {
   // request/reply shape as summonResult above.
   interactivePasswordResult: InteractivePasswordResultPayload | null;
   setInteractivePasswordResult: (result: InteractivePasswordResultPayload | null) => void;
+  interactiveChoiceResult: InteractiveChoiceResultPayload | null;
+  setInteractiveChoiceResult: (result: InteractiveChoiceResultPayload | null) => void;
 
   // §6 — Add Media. Full list synced from MEDIA_LIST (on join) then kept
   // live via MEDIA_ADDED/MEDIA_REMOVED; whiteboard strokes are mutated
@@ -812,6 +814,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   setSummonResult: (result) => set({ summonResult: result }),
   interactivePasswordResult: null,
   setInteractivePasswordResult: (result) => set({ interactivePasswordResult: result }),
+  interactiveChoiceResult: null,
+  setInteractiveChoiceResult: (result) => set({ interactiveChoiceResult: result }),
 
   followerUserIds: [],
   setFollowerUserIds: (ids) => set({ followerUserIds: ids }),

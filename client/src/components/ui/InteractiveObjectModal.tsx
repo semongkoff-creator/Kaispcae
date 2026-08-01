@@ -1,33 +1,42 @@
 import { useState } from 'react';
 import { X } from 'react-bootstrap-icons';
-import { Furniture, InteractivePasswordResultPayload } from '@virtualmeet/shared';
+import { Furniture, InteractivePasswordResultPayload, InteractiveChoiceResultPayload } from '@virtualmeet/shared';
 
 interface InteractiveObjectModalProps {
   furniture: Furniture;
   onClose: () => void;
-  // Fitur 15B — only meaningful for interactiveType === 'password'. The real
-  // password never reaches this component at all (see redactFurniturePasswords
-  // server-side) — the attempt is checked over the socket, never compared
-  // locally.
+  // Fitur 15B — only meaningful for interactiveType === 'password'/'multiple_choice'.
+  // The real password / isCorrect flags never reach this component at all
+  // (see redactInteractiveSecrets server-side) — both are checked over the
+  // socket, never compared locally.
   onCheckPassword: (furnitureId: string, attempt: string) => void;
   passwordResult: InteractivePasswordResultPayload | null;
+  onCheckChoice: (furnitureId: string, selectedIndex: number) => void;
+  choiceResult: InteractiveChoiceResultPayload | null;
 }
 
 // Fitur 15B — renders whichever Interactive Object type triggered. Only
-// 'text_popup'/'image_popup'/'password' have a modal of their own so far
-// ('website' opens a real window instead — see App.tsx's
-// handleInteractiveTrigger). More of ZEP's pop-up/developer types each get
-// their own branch here as they're implemented (same one-component-per-
-// modal-family pattern as MediaViewerModal).
-export function InteractiveObjectModal({ furniture, onClose, onCheckPassword, passwordResult }: InteractiveObjectModalProps) {
+// 'text_popup'/'image_popup'/'password'/'multiple_choice' have a modal of
+// their own so far ('website' opens a real window instead — see App.tsx's
+// handleInteractiveTrigger). More of ZEP's developer types each get their
+// own branch here as they're implemented (same one-component-per-modal-
+// family pattern as MediaViewerModal).
+export function InteractiveObjectModal({ furniture, onClose, onCheckPassword, passwordResult, onCheckChoice, choiceResult }: InteractiveObjectModalProps) {
   const isImage = furniture.interactiveType === 'image_popup';
   const isPassword = furniture.interactiveType === 'password';
+  const isChoice = furniture.interactiveType === 'multiple_choice';
   const [attempt, setAttempt] = useState('');
-  const result = passwordResult && passwordResult.furnitureId === furniture.id ? passwordResult : null;
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const pwResult = passwordResult && passwordResult.furnitureId === furniture.id ? passwordResult : null;
+  const chResult = choiceResult && choiceResult.furnitureId === furniture.id ? choiceResult : null;
 
   const submitPassword = () => {
     if (!attempt) return;
     onCheckPassword(furniture.id, attempt);
+  };
+  const submitChoice = () => {
+    if (selectedIndex == null) return;
+    onCheckChoice(furniture.id, selectedIndex);
   };
 
   return (
@@ -52,10 +61,10 @@ export function InteractiveObjectModal({ furniture, onClose, onCheckPassword, pa
         )}
 
         {isPassword && (
-          result?.correct ? (
+          pwResult?.correct ? (
             // Correct — same rendering as text_popup, using the piece's
             // own correctText (ZEP's "Set Action After Password Entered").
-            <p className="text-gray-800 dark:text-gray-100 text-sm whitespace-pre-wrap">{result.correctText || ''}</p>
+            <p className="text-gray-800 dark:text-gray-100 text-sm whitespace-pre-wrap">{pwResult.correctText || ''}</p>
           ) : (
             <>
               {furniture.interactiveConfig?.passwordDescription && (
@@ -68,12 +77,44 @@ export function InteractiveObjectModal({ furniture, onClose, onCheckPassword, pa
                 autoFocus
                 className="w-full mb-2 bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-white/10 rounded px-3 py-2 text-sm text-gray-900 dark:text-white outline-none focus:border-purple-400"
               />
-              {result && !result.correct && (
-                <p className="text-red-500 text-xs mb-2">{result.failureMessage || 'Password salah.'}</p>
+              {pwResult && !pwResult.correct && (
+                <p className="text-red-500 text-xs mb-2">{pwResult.failureMessage || 'Password salah.'}</p>
               )}
               <button
                 onClick={submitPassword}
                 className="w-full py-2 rounded bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium cursor-pointer"
+              >
+                Submit
+              </button>
+            </>
+          )
+        )}
+
+        {isChoice && (
+          chResult?.correct ? (
+            // Correct — same rendering as text_popup, using the piece's own
+            // correctText (ZEP's "Set Action After Choosing Correct Answer").
+            <p className="text-gray-800 dark:text-gray-100 text-sm whitespace-pre-wrap">{chResult.correctText || ''}</p>
+          ) : (
+            <>
+              {furniture.interactiveConfig?.question && (
+                <p className="text-gray-800 dark:text-gray-100 text-sm mb-3">{furniture.interactiveConfig.question}</p>
+              )}
+              <div className="space-y-1.5 mb-2">
+                {(furniture.interactiveConfig?.options ?? []).map((opt, i) => (
+                  <label key={i} className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200 cursor-pointer">
+                    <input type="radio" name="mc-option" checked={selectedIndex === i} onChange={() => setSelectedIndex(i)} />
+                    {opt.text}
+                  </label>
+                ))}
+              </div>
+              {chResult && !chResult.correct && (
+                <p className="text-red-500 text-xs mb-2">{chResult.incorrectMessage || 'Jawaban salah.'}</p>
+              )}
+              <button
+                onClick={submitChoice}
+                disabled={selectedIndex == null}
+                className="w-full py-2 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium cursor-pointer"
               >
                 Submit
               </button>

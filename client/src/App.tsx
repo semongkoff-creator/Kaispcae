@@ -105,7 +105,7 @@ const AFK_STATUS = '💤 Away';
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck } = useSocket(authDisplayName, roomSlug, authUserId);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -777,9 +777,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       window.open(cfg.url, '_blank', features);
       return;
     }
-    // Fresh object → any stale reply from a PREVIOUS password object must not
-    // leak in as if it were this one's result.
+    // Fresh object → any stale reply from a PREVIOUS password/choice object
+    // must not leak in as if it were this one's result.
     useGameStore.getState().setInteractivePasswordResult(null);
+    useGameStore.getState().setInteractiveChoiceResult(null);
     setTriggeredInteractiveId(id);
   }, []);
 
@@ -788,7 +789,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     emitInteractivePasswordCheck(furnitureId, attempt);
   }, [emitInteractivePasswordCheck]);
 
+  const handleCheckChoice = useCallback((furnitureId: string, selectedIndex: number) => {
+    useGameStore.getState().setInteractiveChoiceResult(null);
+    emitInteractiveChoiceCheck(furnitureId, selectedIndex);
+  }, [emitInteractiveChoiceCheck]);
+
   const interactivePasswordResult = useGameStore((s) => s.interactivePasswordResult);
+  const interactiveChoiceResult = useGameStore((s) => s.interactiveChoiceResult);
 
   const handleEmoteSelect = useCallback((emote: EmoteType) => {
     const lp = useGameStore.getState().localPlayer;
@@ -1252,9 +1259,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {triggeredInteractive && (
         <InteractiveObjectModal
           furniture={triggeredInteractive}
-          onClose={() => { setTriggeredInteractiveId(null); useGameStore.getState().setInteractivePasswordResult(null); }}
+          onClose={() => { setTriggeredInteractiveId(null); useGameStore.getState().setInteractivePasswordResult(null); useGameStore.getState().setInteractiveChoiceResult(null); }}
           onCheckPassword={handleCheckPassword}
           passwordResult={interactivePasswordResult}
+          onCheckChoice={handleCheckChoice}
+          choiceResult={interactiveChoiceResult}
         />
       )}
 

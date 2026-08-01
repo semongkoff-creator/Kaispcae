@@ -130,7 +130,14 @@ function ObjectSettingsPanel({
         onChange={(e) => {
           const v = e.target.value as InteractiveObjectType | '';
           if (!v) { patch({ interactiveType: undefined, interactiveConfig: undefined, triggerRange: undefined, triggerMethod: undefined }); return; }
-          patch({ interactiveType: v, triggerRange: furniture.triggerRange ?? 1, triggerMethod: furniture.triggerMethod ?? 'press_f', interactiveConfig: furniture.interactiveConfig ?? {} });
+          const cfg = furniture.interactiveConfig ?? {};
+          // Multiple choice needs at least one option to have anywhere to
+          // mark "Correct" — seed two blank ones the first time this type is
+          // picked, same as ZEP's own default of Option 1/Option 2.
+          const seeded = v === 'multiple_choice' && !cfg.options?.length
+            ? { ...cfg, options: [{ text: '', isCorrect: true }, { text: '', isCorrect: false }] }
+            : cfg;
+          patch({ interactiveType: v, triggerRange: furniture.triggerRange ?? 1, triggerMethod: furniture.triggerMethod ?? 'press_f', interactiveConfig: seeded });
         }}
         className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white cursor-pointer outline-none"
       >
@@ -139,6 +146,7 @@ function ObjectSettingsPanel({
         <option value="image_popup">Image pop-up</option>
         <option value="website">Open website in a new window</option>
         <option value="password">Password prompt</option>
+        <option value="multiple_choice">Multiple choice pop-up</option>
       </select>
 
       <p className="text-[11px] text-white/50 mb-1.5">Name</p>
@@ -240,6 +248,76 @@ function ObjectSettingsPanel({
             onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, failureMessage: e.target.value } })}
             placeholder="Enter incorrect answer message"
             className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
+          />
+        </>
+      )}
+
+      {interactiveType === 'multiple_choice' && (
+        <>
+          <p className="text-[11px] text-white/50 mb-1.5">Question</p>
+          <input
+            type="text" value={furniture.interactiveConfig?.question ?? ''}
+            onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, question: e.target.value } })}
+            className="w-full mb-2 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none focus:border-purple-400"
+          />
+          <div className="space-y-1.5 mb-1.5">
+            {(furniture.interactiveConfig?.options ?? []).map((opt, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <input
+                  type="text" value={opt.text} placeholder={`Option ${i + 1}`}
+                  onChange={(e) => {
+                    const options = [...(furniture.interactiveConfig?.options ?? [])];
+                    options[i] = { ...options[i], text: e.target.value };
+                    patch({ interactiveConfig: { ...furniture.interactiveConfig, options } });
+                  }}
+                  className="flex-1 min-w-0 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
+                />
+                <label title="Correct" className="flex items-center gap-1 text-[10px] text-white/50 shrink-0 cursor-pointer">
+                  <input
+                    type="radio" checked={opt.isCorrect}
+                    onChange={() => {
+                      // Only one option is ever correct — ZEP's own radio behavior.
+                      const options = (furniture.interactiveConfig?.options ?? []).map((o, j) => ({ ...o, isCorrect: j === i }));
+                      patch({ interactiveConfig: { ...furniture.interactiveConfig, options } });
+                    }}
+                  />
+                  Correct
+                </label>
+                {(furniture.interactiveConfig?.options?.length ?? 0) > 2 && (
+                  <button
+                    onClick={() => {
+                      const options = (furniture.interactiveConfig?.options ?? []).filter((_, j) => j !== i);
+                      patch({ interactiveConfig: { ...furniture.interactiveConfig, options } });
+                    }}
+                    title="Hapus opsi" className="shrink-0 w-5 h-5 rounded bg-white/10 hover:bg-white/20 text-white/50 text-xs cursor-pointer"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={() => {
+              const options = [...(furniture.interactiveConfig?.options ?? []), { text: '', isCorrect: false }];
+              patch({ interactiveConfig: { ...furniture.interactiveConfig, options } });
+            }}
+            className="w-full mb-3 py-1 rounded bg-white/10 hover:bg-white/20 text-white/70 text-xs cursor-pointer"
+          >
+            + Add option
+          </button>
+          <p className="text-[11px] text-white/50 mb-1.5">Text (muncul kalau jawaban benar)</p>
+          <textarea
+            value={furniture.interactiveConfig?.correctText ?? ''}
+            onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, correctText: e.target.value } })}
+            rows={2}
+            className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white resize-none outline-none focus:border-purple-400"
+          />
+          <p className="text-[11px] text-white/50 mb-1.5">Message After Choosing Incorrect Answer</p>
+          <input
+            type="text" value={furniture.interactiveConfig?.incorrectMessage ?? ''}
+            onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, incorrectMessage: e.target.value } })}
+            className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none focus:border-purple-400"
           />
         </>
       )}

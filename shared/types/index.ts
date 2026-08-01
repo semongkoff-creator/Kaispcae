@@ -378,6 +378,10 @@ export enum SocketEvents {
   // never trusting a client-cached copy) and replies correct/incorrect.
   INTERACTIVE_PASSWORD_CHECK = 'interactive:password_check',
   INTERACTIVE_PASSWORD_RESULT = 'interactive:password_result',
+  // Fitur 15B — same request/reply shape as the password pair above, for
+  // Multiple choice pop-up's isCorrect flags.
+  INTERACTIVE_CHOICE_CHECK = 'interactive:choice_check',
+  INTERACTIVE_CHOICE_RESULT = 'interactive:choice_result',
   // Whiteboard strokes are additive (two people drawing at once never
   // "conflict" the way concurrent text edits do), so a plain broadcast of
   // each completed stroke gives real-time multi-user sync without needing
@@ -828,8 +832,18 @@ export interface Furniture {
   interactiveConfig?: InteractiveObjectConfig;
 }
 
-export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'password';
+export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'password' | 'multiple_choice';
 export type TriggerMethod = 'press_f' | 'automatic';
+
+export interface MultipleChoiceOption {
+  text: string;
+  // Fitur 15B — never sent to a normal player's client (see
+  // redactInteractiveSecrets, which zeroes every option's isCorrect before
+  // ROOM_STATE/ROOM_UPDATED) — only the admin-gated Room Editor sees the real
+  // flags. INTERACTIVE_CHOICE_CHECK is the only way a client learns whether
+  // its pick was right.
+  isCorrect: boolean;
+}
 
 // Per-type config bag — only the field(s) relevant to `interactiveType` are
 // ever set. A flat optional bag (not a discriminated union) so adding the
@@ -853,14 +867,21 @@ export interface InteractiveObjectConfig {
   height?: number;
   // password — `password` itself must NEVER reach a normal player's client.
   // roomHandler.ts's ROOM_STATE emit and rooms.ts's ROOM_UPDATED broadcast
-  // both strip it (see redactFurniturePasswords); only the Room Editor's own
+  // both strip it (see redactInteractiveSecrets); only the Room Editor's own
   // admin-gated GET /editor-data returns the real value, for the admin to
   // read/edit it. Verification is the INTERACTIVE_PASSWORD_CHECK round trip
   // below — the client never compares the attempt itself.
   passwordDescription?: string;
   password?: string;
-  correctText?: string; // shown via a text_popup after a correct password
+  correctText?: string; // shown via a text_popup after a correct password/answer
   failureMessage?: string;
+  // multiple_choice — options' isCorrect redacted the same way password is
+  // (see MultipleChoiceOption's own doc comment). incorrectMessage is its own
+  // field (not `failureMessage`) to keep each type's field names traceable
+  // straight back to ZEP's own label for it.
+  question?: string;
+  options?: MultipleChoiceOption[];
+  incorrectMessage?: string;
 }
 
 export interface InteractivePasswordCheckPayload {
@@ -873,6 +894,18 @@ export interface InteractivePasswordResultPayload {
   // Only one of these is meaningful, matching `correct`.
   correctText?: string;
   failureMessage?: string;
+}
+
+export interface InteractiveChoiceCheckPayload {
+  furnitureId: string;
+  selectedIndex: number;
+}
+export interface InteractiveChoiceResultPayload {
+  furnitureId: string;
+  correct: boolean;
+  // Only one of these is meaningful, matching `correct`.
+  correctText?: string;
+  incorrectMessage?: string;
 }
 
 // Zones. 'meeting' zones render a big banner across the top of the area
