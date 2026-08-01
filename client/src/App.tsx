@@ -763,6 +763,23 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const canDeleteViewingMedia = !!viewingMedia && (viewingMedia.createdBy === localUserId || isAdmin);
   const triggeredInteractive = triggeredInteractiveId ? furniture.find((f) => f.id === triggeredInteractiveId) ?? null : null;
 
+  // Fitur 15B — 'website' has no modal of its own (ZEP's own behavior is
+  // just opening a new window/tab, not a pop-up dialog) — it's handled here
+  // instead of by InteractiveObjectModal, which only ever renders the
+  // pop-up-style types (text/image, more later).
+  const handleInteractiveTrigger = useCallback((id: string) => {
+    const f = useGameStore.getState().furniture.find((ff) => ff.id === id);
+    if (!f) return;
+    if (f.interactiveType === 'website') {
+      const cfg = f.interactiveConfig;
+      if (!cfg?.url) return;
+      const features = cfg.fullscreen === false ? `noopener,noreferrer,width=${cfg.width || 900},height=${cfg.height || 700}` : 'noopener,noreferrer';
+      window.open(cfg.url, '_blank', features);
+      return;
+    }
+    setTriggeredInteractiveId(id);
+  }, []);
+
   const handleEmoteSelect = useCallback((emote: EmoteType) => {
     const lp = useGameStore.getState().localPlayer;
     emitEmote(emote, lp.x, lp.y);
@@ -888,7 +905,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         emitFollowUnfollow={emitFollowUnfollow}
         emitTeleportTo={emitTeleportTo}
         onMediaOpen={setViewingMediaId}
-        onInteractiveTrigger={setTriggeredInteractiveId}
+        onInteractiveTrigger={handleInteractiveTrigger}
       />
 
       {/* A5 — meeting controls, only while standing inside a meeting-type zone */}

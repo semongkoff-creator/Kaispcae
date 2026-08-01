@@ -137,6 +137,7 @@ function ObjectSettingsPanel({
         <option value="">— Furniture biasa —</option>
         <option value="text_popup">Text pop-up</option>
         <option value="image_popup">Image pop-up</option>
+        <option value="website">Open website in a new window</option>
       </select>
 
       <p className="text-[11px] text-white/50 mb-1.5">Name</p>
@@ -172,6 +173,35 @@ function ObjectSettingsPanel({
           {furniture.interactiveConfig?.imageUrl && (
             <div className="mb-3 rounded border border-white/10 overflow-hidden bg-black/20">
               <img src={furniture.interactiveConfig.imageUrl} alt="" className="w-full max-h-32 object-contain" />
+            </div>
+          )}
+        </>
+      )}
+
+      {interactiveType === 'website' && (
+        <>
+          <p className="text-[11px] text-white/50 mb-1.5">Website Link</p>
+          <input
+            type="text" value={furniture.interactiveConfig?.url ?? ''}
+            onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, url: e.target.value } })}
+            placeholder="https://…"
+            className="w-full mb-1.5 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
+          />
+          <p className="text-[11px] text-white/40 mb-2">Harus https:// — URL lain akan ditolak saat disimpan.</p>
+          <div className="space-y-1 mb-2">
+            <label className="flex items-center gap-2 text-xs text-white/70 cursor-pointer">
+              <input type="radio" checked={furniture.interactiveConfig?.fullscreen !== false} onChange={() => patch({ interactiveConfig: { ...furniture.interactiveConfig, fullscreen: true } })} />
+              Open fullscreen
+            </label>
+            <label className="flex items-center gap-2 text-xs text-white/70 cursor-pointer">
+              <input type="radio" checked={furniture.interactiveConfig?.fullscreen === false} onChange={() => patch({ interactiveConfig: { ...furniture.interactiveConfig, fullscreen: false } })} />
+              Set size
+            </label>
+          </div>
+          {furniture.interactiveConfig?.fullscreen === false && (
+            <div className="flex items-center gap-2 mb-3">
+              <label className="flex-1 text-[10px] text-white/40">Width (px)<input type="number" value={furniture.interactiveConfig?.width ?? ''} onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, width: Number(e.target.value) || undefined } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
+              <label className="flex-1 text-[10px] text-white/40">Height (px)<input type="number" value={furniture.interactiveConfig?.height ?? ''} onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, height: Number(e.target.value) || undefined } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
             </div>
           )}
         </>

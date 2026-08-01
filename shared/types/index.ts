@@ -821,7 +821,7 @@ export interface Furniture {
   interactiveConfig?: InteractiveObjectConfig;
 }
 
-export type InteractiveObjectType = 'text_popup' | 'image_popup';
+export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website';
 export type TriggerMethod = 'press_f' | 'automatic';
 
 // Per-type config bag — only the field(s) relevant to `interactiveType` are
@@ -834,6 +834,16 @@ export interface InteractiveObjectConfig {
   // everything else; validated server-side the same way media payloads are,
   // see mediaHandler.isUploadUrl).
   imageUrl?: string;
+  // website ("Open website in a new window") — url must be https:// (same
+  // rule the existing website MEDIA type already enforces server-side).
+  // fullscreen=true opens a plain new tab (no size constraint, closest a
+  // browser gets to ZEP's "fullscreen" without a real Fullscreen API call a
+  // popup can't make on someone else's page); fullscreen=false uses
+  // width/height as the popup window's size.
+  url?: string;
+  fullscreen?: boolean;
+  width?: number;
+  height?: number;
 }
 
 // Zones. 'meeting' zones render a big banner across the top of the area
