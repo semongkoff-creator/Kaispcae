@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, InteractivePasswordCheckPayload } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerWorkMode, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -11,6 +11,7 @@ import { getPrisma } from '../lib/prisma';
 import { resolveEntry } from '../lib/roomMembership';
 import { logActivity } from '../lib/larkBase';
 import { socketRateLimit } from '../middleware/rateLimit';
+import { redactFurniturePasswords } from '../lib/redactFurniture';
 
 const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec per socket
 const canTeleport = socketRateLimit(2); // max 2 teleport requests/sec per socket
@@ -18,6 +19,7 @@ const canUpdateRoom = socketRateLimit(2); // max 2 room:update (DB write) calls/
 const canSummonUser = socketRateLimit(3); // max 3 single-target summon requests/sec per socket
 const canKnock = socketRateLimit(1); // max 1 knock/sec per socket — no spamming the host
 const canSlap = socketRateLimit(3); // A10 — burst guard; the real limit is the 30s/target cooldown below
+const canCheckPassword = socketRateLimit(3); // Fitur 15B — throttle brute-force guessing of a password prompt
 
 // A10 — Slap ("colek") cooldown: 30s per (sender socket → target socket) pair,
 // so you can't spam-poke the same person. Ephemeral (socket-id keyed); a
@@ -496,7 +498,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       setCachedTiles(room, tiles);
 
       socket.emit(SocketEvents.ROOM_STATE, {
-        ...state, tiles, furniture: savedFurniture || fallback!.furniture, zones: savedZones || fallback!.zones, players: playersWithMeta,
+        ...state, tiles, furniture: redactFurniturePasswords(savedFurniture || fallback!.furniture), zones: savedZones || fallback!.zones, players: playersWithMeta,
         adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId, staffUserIds: Array.from(rs.staffUserIds), theme, template,
         notice: roomNoticeMap.get(room) ?? null,
         locked: !!rs.locked,
@@ -530,6 +532,35 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // the playerCount/removed lobby events already use (see Lobby.tsx).
     io.emit('lobby:room_lock', { roomId: room, locked: rs.locked });
     console.log(`[room] ${room} ${rs.locked ? 'LOCKED' : 'unlocked'} by uid=${senderUid}`);
+  });
+
+  // Fitur 15B — Password prompt verification. The attempt is compared
+  // against the room's OWN stored layerData, fetched fresh from the DB right
+  // here — never against anything the client sent or cached, and the real
+  // password never reaches this or any other client (see
+  // redactFurniturePasswords, applied to every furniture list this socket
+  // otherwise receives).
+  socket.on(SocketEvents.INTERACTIVE_PASSWORD_CHECK, async (data: InteractivePasswordCheckPayload) => {
+    if (!canCheckPassword(socket.id)) return;
+    const room = currentRoom; if (!room) return;
+    const furnitureId = data?.furnitureId, attempt = data?.attempt;
+    if (typeof furnitureId !== 'string' || typeof attempt !== 'string') return;
+    try {
+      const dbRoom = await getPrisma().room.findUnique({ where: { slug: room }, select: { layerData: true } });
+      if (!dbRoom?.layerData) return;
+      const ld = dbRoom.layerData as unknown as LayerData;
+      const piece = [...(ld.objects ?? []), ...(ld.topObjects ?? [])].find((f) => f.id === furnitureId);
+      if (!piece || piece.interactiveType !== 'password') return;
+      const correct = (piece.interactiveConfig?.password ?? '') === attempt;
+      socket.emit(SocketEvents.INTERACTIVE_PASSWORD_RESULT, {
+        furnitureId,
+        correct,
+        correctText: correct ? piece.interactiveConfig?.correctText : undefined,
+        failureMessage: correct ? undefined : (piece.interactiveConfig?.failureMessage || 'Password salah.'),
+      });
+    } catch (e) {
+      console.warn('[room] password check error:', e);
+    }
   });
 
   socket.on(SocketEvents.ROOM_KNOCK, (data: { roomId: string }) => {

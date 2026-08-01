@@ -138,6 +138,7 @@ function ObjectSettingsPanel({
         <option value="text_popup">Text pop-up</option>
         <option value="image_popup">Image pop-up</option>
         <option value="website">Open website in a new window</option>
+        <option value="password">Password prompt</option>
       </select>
 
       <p className="text-[11px] text-white/50 mb-1.5">Name</p>
@@ -204,6 +205,42 @@ function ObjectSettingsPanel({
               <label className="flex-1 text-[10px] text-white/40">Height (px)<input type="number" value={furniture.interactiveConfig?.height ?? ''} onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, height: Number(e.target.value) || undefined } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
             </div>
           )}
+        </>
+      )}
+
+      {interactiveType === 'password' && (
+        <>
+          <p className="text-[11px] text-white/50 mb-1.5">Password Description</p>
+          <input
+            type="text" value={furniture.interactiveConfig?.passwordDescription ?? ''}
+            onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, passwordDescription: e.target.value } })}
+            className="w-full mb-1.5 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none focus:border-purple-400"
+          />
+          <p className="text-[11px] text-white/50 mb-1.5">Password</p>
+          {/* Fitur 15B — this value only ever reaches the Room Editor (this
+              admin-gated GET /editor-data response) — every other client
+              (ROOM_STATE/ROOM_UPDATED) gets it stripped, see
+              redactFurniturePasswords server-side. */}
+          <input
+            type="text" value={furniture.interactiveConfig?.password ?? ''}
+            onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, password: e.target.value } })}
+            placeholder="Please enter the password"
+            className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
+          />
+          <p className="text-[11px] text-white/50 mb-1.5">Text (muncul kalau password benar)</p>
+          <textarea
+            value={furniture.interactiveConfig?.correctText ?? ''}
+            onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, correctText: e.target.value } })}
+            rows={2}
+            className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white resize-none outline-none focus:border-purple-400"
+          />
+          <p className="text-[11px] text-white/50 mb-1.5">Password Failure Message</p>
+          <input
+            type="text" value={furniture.interactiveConfig?.failureMessage ?? ''}
+            onChange={(e) => patch({ interactiveConfig: { ...furniture.interactiveConfig, failureMessage: e.target.value } })}
+            placeholder="Enter incorrect answer message"
+            className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
+          />
         </>
       )}
 

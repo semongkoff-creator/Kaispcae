@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload } from '@virtualmeet/shared';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -304,6 +304,10 @@ export interface GameState {
   setIncomingKnock: (req: KnockRequestPayload | null) => void;
   summonResult: SummonResultPayload | null;
   setSummonResult: (result: SummonResultPayload | null) => void;
+  // Fitur 15B — reply to MY OWN INTERACTIVE_PASSWORD_CHECK, same
+  // request/reply shape as summonResult above.
+  interactivePasswordResult: InteractivePasswordResultPayload | null;
+  setInteractivePasswordResult: (result: InteractivePasswordResultPayload | null) => void;
 
   // §6 — Add Media. Full list synced from MEDIA_LIST (on join) then kept
   // live via MEDIA_ADDED/MEDIA_REMOVED; whiteboard strokes are mutated
@@ -806,6 +810,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   setIncomingKnock: (req) => set({ incomingKnock: req }),
   summonResult: null,
   setSummonResult: (result) => set({ summonResult: result }),
+  interactivePasswordResult: null,
+  setInteractivePasswordResult: (result) => set({ interactivePasswordResult: result }),
 
   followerUserIds: [],
   setFollowerUserIds: (ids) => set({ followerUserIds: ids }),

@@ -7,6 +7,7 @@ import { resolveRoomRole } from '../lib/roles';
 import { convertLegacyRoom } from '../lib/convertLegacyRoom';
 import { isRoomLocked } from '../socket/roomHandler';
 import { isValidMediaPayload, isUploadUrl } from '../socket/mediaHandler';
+import { redactFurniturePasswords } from '../lib/redactFurniture';
 import { deleteUploadedFile } from './uploads';
 import { setCachedTiles, getPlayers, updatePlayerPosition } from '../store/roomStore';
 
@@ -294,7 +295,7 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
 
     const derived = layerDataToLegacy(layerData);
     setCachedTiles(room.slug, derived.tiles);
-    ioRef?.to(room.slug).emit(SocketEvents.ROOM_UPDATED, { tiles: derived.tiles, furniture: derived.furniture, zones: derived.zones });
+    ioRef?.to(room.slug).emit(SocketEvents.ROOM_UPDATED, { tiles: derived.tiles, furniture: redactFurniturePasswords(derived.furniture), zones: derived.zones });
 
     // On shrink, rescue any player now standing outside the new bounds to a
     // spawn tile so no avatar is stranded off-map (Potong 5).

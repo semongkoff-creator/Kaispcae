@@ -371,6 +371,13 @@ export enum SocketEvents {
   MEDIA_ADDED = 'media:added',
   MEDIA_REMOVE = 'media:remove',
   MEDIA_REMOVED = 'media:removed',
+  // Fitur 15B — Password prompt objects never send their real password to
+  // any client (see roomHandler.ts's redaction on ROOM_STATE/ROOM_UPDATED).
+  // Verification is this one round trip: client sends its attempt, the
+  // server compares against the room's OWN stored layerData (fetched fresh,
+  // never trusting a client-cached copy) and replies correct/incorrect.
+  INTERACTIVE_PASSWORD_CHECK = 'interactive:password_check',
+  INTERACTIVE_PASSWORD_RESULT = 'interactive:password_result',
   // Whiteboard strokes are additive (two people drawing at once never
   // "conflict" the way concurrent text edits do), so a plain broadcast of
   // each completed stroke gives real-time multi-user sync without needing
@@ -821,7 +828,7 @@ export interface Furniture {
   interactiveConfig?: InteractiveObjectConfig;
 }
 
-export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website';
+export type InteractiveObjectType = 'text_popup' | 'image_popup' | 'website' | 'password';
 export type TriggerMethod = 'press_f' | 'automatic';
 
 // Per-type config bag — only the field(s) relevant to `interactiveType` are
@@ -844,6 +851,28 @@ export interface InteractiveObjectConfig {
   fullscreen?: boolean;
   width?: number;
   height?: number;
+  // password — `password` itself must NEVER reach a normal player's client.
+  // roomHandler.ts's ROOM_STATE emit and rooms.ts's ROOM_UPDATED broadcast
+  // both strip it (see redactFurniturePasswords); only the Room Editor's own
+  // admin-gated GET /editor-data returns the real value, for the admin to
+  // read/edit it. Verification is the INTERACTIVE_PASSWORD_CHECK round trip
+  // below — the client never compares the attempt itself.
+  passwordDescription?: string;
+  password?: string;
+  correctText?: string; // shown via a text_popup after a correct password
+  failureMessage?: string;
+}
+
+export interface InteractivePasswordCheckPayload {
+  furnitureId: string;
+  attempt: string;
+}
+export interface InteractivePasswordResultPayload {
+  furnitureId: string;
+  correct: boolean;
+  // Only one of these is meaningful, matching `correct`.
+  correctText?: string;
+  failureMessage?: string;
 }
 
 // Zones. 'meeting' zones render a big banner across the top of the area
