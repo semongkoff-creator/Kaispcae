@@ -59,6 +59,27 @@ function clearPendingSummon(targetSocketId: string) {
   }
 }
 
+// A pending "knock to enter" — keyed by the KNOCKER's own socket id (unlike
+// pendingSummons, there's no single "target": a knock fans out to every
+// connected admin at once, so this remembers exactly which admin sockets
+// were told, so a cancel (or the knocker disconnecting) can tell precisely
+// those same sockets to drop it — never a broadcast to the whole room.
+interface PendingKnock {
+  uid: string;
+  name: string;
+  notifiedAdminSocketIds: string[];
+}
+const pendingKnocks = new Map<string, PendingKnock>();
+
+function cancelKnock(knockerSocketId: string, io: Server) {
+  const pending = pendingKnocks.get(knockerSocketId);
+  if (!pending) return;
+  pendingKnocks.delete(knockerSocketId);
+  for (const adminSocketId of pending.notifiedAdminSocketIds) {
+    io.to(adminSocketId).emit(SocketEvents.ROOM_KNOCK_CANCELLED, { userId: pending.uid });
+  }
+}
+
 
 const AVATAR_COLORS = ['#4ecdc4', '#ffe66d', '#a786df', '#6bcb77', '#4d96ff', '#ff6b6b'];
 
@@ -682,16 +703,28 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const name = playerNames.get(socket.id) || 'Someone';
     // Ring only the admins currently connected to that room (resolved via the
     // uid→socket map) — the knock UI is admin-only, so this avoids leaking the
-    // knocker's identity to every member.
-    let reached = 0;
+    // knocker's identity to every member. Remembered (by the KNOCKER's own
+    // socket id) so a later ROOM_KNOCK_CANCEL — or the knocker simply
+    // disconnecting — can tell exactly these same admin sockets to drop it,
+    // instead of leaving a stale "X is knocking" toast up after they changed
+    // their mind or left.
+    const notifiedAdminSocketIds: string[] = [];
     for (const adminUid of rs.adminUserIds) {
       const adminSocketId = userSocketMap.get(adminUid);
       if (adminSocketId && io.sockets.sockets.get(adminSocketId)) {
         io.to(adminSocketId).emit(SocketEvents.ROOM_KNOCK_REQUEST, { userId: uid, name });
-        reached++;
+        notifiedAdminSocketIds.push(adminSocketId);
       }
     }
-    console.log(`[room] ${name} (uid=${uid}) knocked on ${room} — ${reached} admin(s) notified`);
+    pendingKnocks.set(socket.id, { uid, name, notifiedAdminSocketIds });
+    console.log(`[room] ${name} (uid=${uid}) knocked on ${room} — ${notifiedAdminSocketIds.length} admin(s) notified`);
+  });
+
+  // The knocker changed their mind before the host responded — tell every
+  // admin socket that got the original ROOM_KNOCK_REQUEST to drop it, so the
+  // host can't admit/reject a request that's already been withdrawn.
+  socket.on(SocketEvents.ROOM_KNOCK_CANCEL, () => {
+    cancelKnock(socket.id, io);
   });
 
   socket.on(SocketEvents.ROOM_KNOCK_ADMIT, (data: { userId: string }) => {
@@ -703,6 +736,16 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       return;
     }
     if (typeof data?.userId !== 'string') return;
+    // Only honor this if there's still a matching PENDING knock — closes the
+    // race where the knocker cancels the instant the host clicks Admit. A
+    // cancelled request must never be approvable, not just visually hidden.
+    let matchedSid: string | null = null;
+    for (const [sid, pk] of pendingKnocks) { if (pk.uid === data.userId) { matchedSid = sid; break; } }
+    if (!matchedSid) {
+      socket.emit('admin:error', { message: 'Permintaan ini sudah dibatalkan' });
+      return;
+    }
+    pendingKnocks.delete(matchedSid);
     if (!rs.knockAllowlist) rs.knockAllowlist = new Set();
     rs.knockAllowlist.add(data.userId);
     // Ping the knocker's socket so their client can auto-retry the join.
@@ -1285,4 +1328,10 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
   for (const [targetId, pending] of pendingSummons) {
     if (pending.fromSocketId === socket.id) clearPendingSummon(targetId);
   }
+
+  // Same reasoning for a pending knock: if the knocker left/disconnected
+  // before the host responded, the admin's "X is knocking" toast is now
+  // stale (there's no one left to admit) — same cleanup as an explicit
+  // ROOM_KNOCK_CANCEL.
+  cancelKnock(socket.id, io);
 }

@@ -603,6 +603,17 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().setIncomingKnock(payload);
     });
 
+    // The knocker cancelled before we responded — but only clear OUR toast if
+    // it's still showing THIS SAME knock; a newer knock from someone else may
+    // have already overwritten incomingKnock by the time this arrives (it's a
+    // single-value slot, not a queue), and this must not dismiss that one.
+    socket.on(SocketEvents.ROOM_KNOCK_CANCELLED, (payload: { userId: string }) => {
+      const current = useGameStore.getState().incomingKnock;
+      if (current && current.userId === payload.userId) {
+        useGameStore.getState().setIncomingKnock(null);
+      }
+    });
+
     socket.on(SocketEvents.ROOM_KNOCK_ADMITTED, () => {
       // The host let us in — retry the join (this time the server's lock gate
       // finds us on the allowlist) and clear the denied overlay.
@@ -848,6 +859,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.ROOM_KNOCK, { roomId });
   }, []);
 
+  // Withdraw a knock before the host responds — no payload needed, the
+  // server already knows which pending knock is ours (keyed by this socket).
+  const emitKnockCancel = useCallback(() => {
+    socketRef.current?.emit(SocketEvents.ROOM_KNOCK_CANCEL);
+  }, []);
+
   const emitKnockAdmit = useCallback((userId: string) => {
     socketRef.current?.emit(SocketEvents.ROOM_KNOCK_ADMIT, { userId });
   }, []);
@@ -917,5 +934,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject };
 }

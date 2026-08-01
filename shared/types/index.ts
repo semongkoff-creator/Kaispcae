@@ -231,9 +231,15 @@ export enum SocketEvents {
   // "Knock to enter": a denied joiner can knock (ROOM_KNOCK) — admins in the
   // room get ROOM_KNOCK_REQUEST and may admit (ROOM_KNOCK_ADMIT), which
   // adds them to the lock allowlist and pings the knocker (ROOM_KNOCK_ADMITTED)
-  // to auto-retry the join.
+  // to auto-retry the join. ROOM_KNOCK_CANCEL is the knocker withdrawing a
+  // request before the host responds (no payload — the server already knows
+  // which pending knock is theirs, keyed by their own socket); every admin
+  // who got the original ROOM_KNOCK_REQUEST gets ROOM_KNOCK_CANCELLED so
+  // their approval toast can't act on a request that's already gone.
   ROOM_KNOCK = 'room:knock',
   ROOM_KNOCK_REQUEST = 'room:knock_request',
+  ROOM_KNOCK_CANCEL = 'room:knock_cancel',
+  ROOM_KNOCK_CANCELLED = 'room:knock_cancelled',
   ROOM_KNOCK_ADMIT = 'room:knock_admit',
   ROOM_KNOCK_ADMITTED = 'room:knock_admitted',
 
