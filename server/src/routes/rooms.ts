@@ -1,14 +1,17 @@
 import { Router, Response } from 'express';
 import { Server } from 'socket.io';
+import multer from 'multer';
+import fs from 'fs';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess, LayerData, layerDataToLegacy, findSpawnPixel, TILE_SIZE, MediaType, MediaPayload } from '@virtualmeet/shared';
+import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess, LayerData, layerDataToLegacy, findSpawnPixel, TILE_SIZE, MediaType, MediaPayload, SoundboardSoundData, SOUNDBOARD_MAX_DURATION_MS, SOUNDBOARD_MAX_FILE_BYTES } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
+import { canEnterRoom } from '../lib/roomMembership';
 import { convertLegacyRoom } from '../lib/convertLegacyRoom';
 import { isRoomLocked } from '../socket/roomHandler';
 import { isValidMediaPayload, isUploadUrl } from '../socket/mediaHandler';
 import { redactInteractiveSecrets, redactDoorPasswords } from '../lib/redactFurniture';
-import { deleteUploadedFile } from './uploads';
+import { deleteUploadedFile, storage as uploadStorage } from './uploads';
 import { setCachedTiles, getPlayers, updatePlayerPosition } from '../store/roomStore';
 
 // Client shape for a MapMediaObject row (mirrors mediaHandler.toClientShape).
@@ -381,6 +384,82 @@ rooms.delete('/rooms/:slug/editor/media/:id', authenticateToken, async (req: Aut
     ioRef?.to(room.slug).emit(SocketEvents.MEDIA_REMOVED, { id: row.id });
     return res.json({ ok: true });
   } catch (err) { console.error('[rooms] editor media delete error:', err); return res.status(500).json({ error: 'Failed' }); }
+});
+
+// Soundboard — unlike editor/media above, this is NOT admin-gated: any
+// approved member of the room can upload a custom sound (canEnterRoom is the
+// same "may this user even be in this room" check the socket join path
+// uses — resolveRoomRole would wrongly default a total stranger to
+// 'member', it only escalates roles for people already established here).
+// Reuses uploads.ts's own disk storage (own multer instance here purely for
+// the audio-only fileFilter + much smaller size cap) and its existing
+// GET /uploads/:filename to serve the file back — no new serving route.
+function soundShape(row: { id: string; name: string; url: string; durationMs: number; createdByName: string }): SoundboardSoundData {
+  return { id: row.id, name: row.name, url: row.url, durationMs: row.durationMs, createdByName: row.createdByName };
+}
+
+const soundboardUpload = multer({
+  storage: uploadStorage,
+  limits: { fileSize: SOUNDBOARD_MAX_FILE_BYTES },
+  fileFilter: (_req, file, cb) => {
+    const ext = file.originalname.slice(file.originalname.lastIndexOf('.')).toLowerCase();
+    const okMime = ['audio/mpeg', 'audio/mp3', 'audio/ogg', 'audio/wav', 'audio/x-wav', 'audio/wave'].includes(file.mimetype);
+    const okExt = ['.mp3', '.ogg', '.wav'].includes(ext);
+    cb(null, okMime || okExt);
+  },
+});
+
+rooms.get('/rooms/:slug/soundboard', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    if (!(await canEnterRoom(prisma, room, req.userId!))) return res.status(403).json({ error: 'Not a member of this room' });
+    const rows = await prisma.soundboardSound.findMany({ where: { roomId: room.id }, orderBy: { createdAt: 'asc' } });
+    return res.json({ sounds: rows.map(soundShape) });
+  } catch (err) { console.error('[rooms] soundboard list error:', err); return res.status(500).json({ error: 'Failed' }); }
+});
+
+rooms.post('/rooms/:slug/soundboard', authenticateToken, soundboardUpload.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'File tidak valid — hanya mp3/ogg/wav, maksimal beberapa ratus KB.' });
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    if (!room) { fs.unlink(req.file.path, () => {}); return res.status(404).json({ error: 'Room not found' }); }
+    if (!(await canEnterRoom(prisma, room, req.userId!))) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(403).json({ error: 'Not a member of this room' });
+    }
+    // durationMs is reported by the CLIENT (from the browser's own
+    // HTMLAudioElement.duration, checked before upload even starts — see
+    // SoundboardPanel.tsx's handleUpload). There is no audio-decoding
+    // library in this project to independently verify it server-side; the
+    // real, unspoofable backstop is the multer fileSize limit just above
+    // (SOUNDBOARD_MAX_FILE_BYTES), which a genuinely-short clip can't
+    // exceed regardless of what duration a modified client claims. This
+    // check just rejects an honest client's too-long clip with a clear
+    // reason instead of silently truncating or accepting it.
+    const durationMs = Number(req.body?.durationMs);
+    if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > SOUNDBOARD_MAX_DURATION_MS) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: `Maksimal ${SOUNDBOARD_MAX_DURATION_MS / 1000} detik.` });
+    }
+    const name = String(req.body?.name || '').trim().slice(0, 30) || req.file.originalname.slice(0, 30);
+    const actor = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
+    const row = await prisma.soundboardSound.create({
+      data: {
+        roomId: room.id, name, url: `/api/uploads/${req.file.filename}`,
+        durationMs: Math.round(durationMs), createdBy: req.userId!, createdByName: actor?.displayName ?? 'Someone',
+      },
+    });
+    const shaped = soundShape(row);
+    ioRef?.to(room.slug).emit(SocketEvents.SOUNDBOARD_SOUND_ADDED, shaped);
+    return res.status(201).json(shaped);
+  } catch (err) {
+    if (req.file) fs.unlink(req.file.path, () => {});
+    console.error('[rooms] soundboard upload error:', err);
+    return res.status(500).json({ error: 'Failed' });
+  }
 });
 
 // POST /api/rooms — create room

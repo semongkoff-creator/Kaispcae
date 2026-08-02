@@ -1,10 +1,10 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
-import { playNudgeSound, playHandRaiseSound } from '@/services/soundEffects';
+import { playNudgeSound, playHandRaiseSound, playSoundboardClip } from '@/services/soundEffects';
 import { SERVER_URL } from '@/services/serverUrl';
 import { registerCustomAssets } from '@/data/customAssets';
 import { setProfileName } from '@/hooks/useProfiles';
@@ -18,6 +18,16 @@ function markUnreadIfHidden(key: string): void {
   const activeKey = active ? `${active.type}:${active.id}` : null;
   if (state.chatPanelOpen && activeKey === key) return;
   state.bumpUnread(key);
+}
+
+// Soundboard — a soundId is either one of the static SOUNDBOARD_DEFAULT_SOUNDS
+// (client already has these, no server round trip) or one of this room's own
+// uploaded sounds (synced via SOUNDBOARD_LIST/SOUNDBOARD_SOUND_ADDED). Used by
+// both the optimistic local play (emitSoundboardPlay) and the SOUNDBOARD_PLAYED
+// listener for nearby recipients.
+function resolveSoundboardSound(soundId: string): SoundboardSoundData | undefined {
+  return SOUNDBOARD_DEFAULT_SOUNDS.find((s) => s.id === soundId)
+    ?? useGameStore.getState().soundboardSounds.find((s) => s.id === soundId);
 }
 
 export function useSocket(authUserName: string = '', roomSlug: string = 'main-office', authUserId: string = '') {
@@ -356,6 +366,26 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     });
     socket.on(SocketEvents.WHITEBOARD_CLEARED, (data: { mediaId: string }) => {
       clearWhiteboardStrokes(data.mediaId);
+    });
+
+    // Soundboard — SOUNDBOARD_LIST arrives once right after ROOM_STATE, same
+    // "list right after room:state" shape as MEDIA_LIST above; defaults need
+    // no server round trip at all (SOUNDBOARD_DEFAULT_SOUNDS is static).
+    socket.on(SocketEvents.SOUNDBOARD_LIST, (data: { sounds: SoundboardSoundData[] }) => {
+      useGameStore.getState().setSoundboardSounds(data.sounds);
+    });
+    socket.on(SocketEvents.SOUNDBOARD_SOUND_ADDED, (data: SoundboardSoundData) => {
+      useGameStore.getState().addSoundboardSound(data);
+    });
+    // Server already scoped this to proximity/zone (see getNearbyRecipients,
+    // shared with HAND_RAISED_ALERT) and never echoes it back to the sender —
+    // the sender's own playback is the optimistic local play in
+    // emitSoundboardPlay below, not this listener.
+    socket.on(SocketEvents.SOUNDBOARD_PLAYED, (data: SoundboardPlayedPayload) => {
+      const sound = resolveSoundboardSound(data.soundId);
+      if (!sound) return;
+      playSoundboardClip(sound.url);
+      useGameStore.getState().triggerSoundboardPlaying(data.fromId, Date.now() + Math.max(sound.durationMs, 800));
     });
 
     // §7 — only ever arrives for clients allowed to see it at all (see
@@ -924,6 +954,20 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.SLAP, { nickname });
   }, []);
 
+  // Soundboard — the server never echoes SOUNDBOARD_PLAYED back to its own
+  // sender (see getNearbyRecipients, which excludes senderSocketId), so the
+  // sender's own audio + indicator is played optimistically here, right on
+  // click — same "local confirmation, independent of the round trip" pattern
+  // as SLAP_SENT/raise-hand's own chime.
+  const emitSoundboardPlay = useCallback((soundId: string) => {
+    socketRef.current?.emit(SocketEvents.SOUNDBOARD_PLAY, { soundId });
+    const sound = resolveSoundboardSound(soundId);
+    if (!sound) return;
+    playSoundboardClip(sound.url);
+    const state = useGameStore.getState();
+    state.triggerSoundboardPlaying(state.localPlayerId, Date.now() + Math.max(sound.durationMs, 800));
+  }, []);
+
   const emitSummonRespond = useCallback((requestId: string, accept: boolean) => {
     socketRef.current?.emit(SocketEvents.SUMMON_RESPOND, { requestId, accept });
   }, []);
@@ -964,5 +1008,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay };
 }

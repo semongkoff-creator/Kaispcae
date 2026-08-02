@@ -1,4 +1,4 @@
-import { TeleportLocation, OwnerBookmark, Recording, RoomTemplateId, Channel, ChannelMessage, DirectConversationSummary, WorkspaceRole, LayerData } from '@virtualmeet/shared';
+import { TeleportLocation, OwnerBookmark, Recording, RoomTemplateId, Channel, ChannelMessage, DirectConversationSummary, WorkspaceRole, LayerData, SoundboardSoundData } from '@virtualmeet/shared';
 
 const API_BASE = '/api';
 
@@ -158,6 +158,28 @@ async function uploadRecordingBlob(blob: Blob): Promise<{ url: string }> {
   const roomSlug = localStorage.getItem('vm_last_room_slug');
   if (roomSlug) form.append('roomSlug', roomSlug);
   const res = await fetch(`${API_BASE}/uploads/recording`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError((body as any).error || `Upload failed: ${res.status}`, res.status);
+  }
+  return res.json();
+}
+
+// Soundboard custom upload — its own function (not uploadFile above) because
+// it also needs to send `name`/`durationMs` alongside the file, and posts to
+// a per-room endpoint rather than the generic /uploads one (see
+// routes/rooms.ts's dedicated multer instance + validation).
+async function uploadSoundboardSoundFile(slug: string, file: File, name: string, durationMs: number): Promise<SoundboardSoundData> {
+  const token = localStorage.getItem('vm_token');
+  const form = new FormData();
+  form.append('file', file);
+  form.append('name', name);
+  form.append('durationMs', String(Math.round(durationMs)));
+  const res = await fetch(`${API_BASE}/rooms/${slug}/soundboard`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     body: form,
@@ -467,6 +489,12 @@ export const api = {
   getRecordings: (slug: string) => request<{ recordings: Recording[] }>(`/rooms/${slug}/recordings`),
 
   downloadRecording: (id: string, filename: string) => downloadRecordingBlob(id, filename),
+
+  // Soundboard — GET is a fallback/refresh path; the live list normally
+  // arrives via SOUNDBOARD_LIST right after room:state (see useSocket.ts).
+  getSoundboardSounds: (slug: string) => request<{ sounds: SoundboardSoundData[] }>(`/rooms/${slug}/soundboard`),
+  uploadSoundboardSound: (slug: string, file: File, name: string, durationMs: number) =>
+    uploadSoundboardSoundFile(slug, file, name, durationMs),
 
   // Persisted Channel/DM/Thread chat (see server/src/routes/chat.ts). Message
   // *sending* goes over the socket (channelChatHandler.ts) for live delivery —

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData } from '@virtualmeet/shared';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -38,7 +38,8 @@ export type PanelId =
   | 'attendance'
   | 'larkAttendance'
   | 'messenger'
-  | 'joinQueue';
+  | 'joinQueue'
+  | 'soundboard';
 
 // Keeps the feed skimmable and bounds its memory — old entries just fall
 // off the end rather than needing a separate pruning pass (see
@@ -385,6 +386,20 @@ export interface GameState {
   // brief toast, separate from nudgedBy so the copy can differ.
   slappedBy: string | null;
   setSlappedBy: (name: string | null) => void;
+
+  // Soundboard — this room's custom uploaded sounds (defaults live purely
+  // client-side as SOUNDBOARD_DEFAULT_SOUNDS, no server round trip needed).
+  // Synced from SOUNDBOARD_LIST on join, kept live via SOUNDBOARD_SOUND_ADDED.
+  soundboardSounds: SoundboardSoundData[];
+  setSoundboardSounds: (sounds: SoundboardSoundData[]) => void;
+  addSoundboardSound: (sound: SoundboardSoundData) => void;
+  // Who currently has a sound playing, for the blinking-speaker avatar
+  // indicator — same Map-of-most-recent-expiry shape as momentaryReveals
+  // above. A reactive selector (not a lazy .getState() pull) since GameCanvas
+  // must re-render every frame this is active even while that avatar stands
+  // still.
+  playingSoundboard: Map<string, number>;
+  triggerSoundboardPlaying: (playerId: string, expireAt: number) => void;
 
   // Recent Activity Feed — a lightweight, client-only log of room events
   // (join/leave, media added, notice pinned, recording start/end) built
@@ -912,6 +927,21 @@ export const useGameStore = create<GameState>((set, get) => ({
   setNudgedBy: (name) => set({ nudgedBy: name }),
   slappedBy: null,
   setSlappedBy: (name) => set({ slappedBy: name }),
+
+  soundboardSounds: [],
+  setSoundboardSounds: (sounds) => set({ soundboardSounds: sounds }),
+  addSoundboardSound: (sound) =>
+    set((state) => (state.soundboardSounds.some((s) => s.id === sound.id)
+      ? state
+      : { soundboardSounds: [...state.soundboardSounds, sound] })),
+
+  playingSoundboard: new Map(),
+  triggerSoundboardPlaying: (playerId, expireAt) =>
+    set((state) => {
+      const next = new Map(state.playingSoundboard);
+      next.set(playerId, expireAt);
+      return { playingSoundboard: next };
+    }),
 
   activityEvents: [],
   addActivity: (message) =>

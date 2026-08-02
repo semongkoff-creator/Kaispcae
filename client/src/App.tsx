@@ -36,6 +36,7 @@ import { AddMediaPanel } from './components/ui/AddMediaPanel';
 import { MediaViewerModal } from './components/ui/MediaViewerModal';
 import { InteractiveObjectModal } from './components/ui/InteractiveObjectModal';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
+import { SoundboardPanel } from './components/ui/SoundboardPanel';
 import { ActivityFeed } from './components/ui/ActivityFeed';
 import { PendingRequestToast } from './components/ui/PendingRequestToast';
 import { Sidebar } from './components/ui/Sidebar';
@@ -110,7 +111,7 @@ const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', 
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay } = useSocket(authDisplayName, roomSlug, authUserId);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -1087,6 +1088,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           </div>
           <div className="absolute top-14 left-16 flex items-start gap-2 pointer-events-none">
             <ParticipantPanel remoteStreams={remoteStreams} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} emitKick={emitKick} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
+            <SoundboardPanel roomSlug={roomSlug} emitSoundboardPlay={emitSoundboardPlay} open={activePanel === 'soundboard'} onToggle={() => openPanel('soundboard')} onClose={closePanel} />
             <ActivityFeed />
           </div>
         </>

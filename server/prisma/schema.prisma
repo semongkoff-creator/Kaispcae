@@ -656,6 +656,7 @@ model Room {
   teleportLocations TeleportLocation[]
   ownerBookmarks    OwnerBookmark[]
   mediaObjects      MapMediaObject[]
+  soundboardSounds  SoundboardSound[]
   recordings        Recording[]
   channels          Channel[]
   dmConversations   DirectConversation[]
@@ -774,6 +775,29 @@ model MapMediaObject {
   // job queue in this app to run a real cron against.
   expiresAt     DateTime?
   payload       Json
+
+  @@index([roomId])
+}
+
+// Soundboard — custom short sound clips uploaded by any room member (not
+// admin-gated, unlike the Room Editor's own uploads), visible to and
+// playable by everyone in that room. Room-scoped like MapMediaObject above
+// (no cross-room reuse), permanent (no expiresAt — a soundboard clip isn't
+// ephemeral like a 24h media object). durationMs is validated server-side
+// at upload time (see routes/soundboard.ts) and stored purely so the panel
+// can show it; it is never re-validated at playback time.
+model SoundboardSound {
+  id            String   @id @default(cuid())
+  roomId        String
+  room          Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  name          String
+  url           String
+  durationMs    Int
+  createdBy     String
+  // Same reasoning as MapMediaObject.createdByName — captured once at
+  // upload time from the live socket's display name, not resolved lazily.
+  createdByName String
+  createdAt     DateTime @default(now())
 
   @@index([roomId])
 }

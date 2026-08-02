@@ -224,6 +224,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // re-render GameCanvas — which read as "the jump button does nothing at
   // all" whenever the presser (or anyone visible) wasn't already moving.
   const jumpingPlayers = useGameStore((s) => s.jumpingPlayers);
+  // Soundboard — same reactive-not-lazy reason as jumpingPlayers/nudgedPlayers
+  // above: the blinking speaker indicator must appear even for a sender
+  // standing still.
+  const playingSoundboard = useGameStore((s) => s.playingSoundboard);
   // ZEP-style door password — reactive for the same reason as the others
   // above: solving one must immediately unblock movement/stop re-prompting,
   // which the collision check (running every frame during active movement)
@@ -250,6 +254,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const doorAutoTriggeredRef = useRef(new Set<string>());
   const nudgedPlayersRef = useRef(nudgedPlayers);
   const nudgerPlayersRef = useRef(nudgerPlayers);
+  const playingSoundboardRef = useRef(playingSoundboard);
   const zones = useGameStore((s) => s.zones);
   const zonesRef = useRef(zones);
   // Labeled zones render a DOM banner positioned imperatively (via transform,
@@ -293,6 +298,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     unlockedDoorsRef.current = unlockedDoors;
     nudgedPlayersRef.current = nudgedPlayers;
     nudgerPlayersRef.current = nudgerPlayers;
+    playingSoundboardRef.current = playingSoundboard;
     zonesRef.current = zones;
     furnitureRef.current = furniture;
     mediaObjectsRef.current = mediaObjects;
@@ -1101,6 +1107,20 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         ctx.font = '14px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('👑', sx, sy - AVATAR_RADIUS - 24);
+      }
+
+      // Soundboard — blinking speaker above whoever's sound is currently
+      // playing, so nearby players can tell who the source is. Offset to the
+      // side of the crown spot rather than sharing it, so an admin playing a
+      // sound doesn't lose one icon to the other. Expired entries are simply
+      // ignored here, never pruned (same convention as momentaryReveals).
+      const soundboardExpireAt = playingSoundboardRef.current.get(avatar.id);
+      if (soundboardExpireAt !== undefined && now < soundboardExpireAt) {
+        if (Math.floor(now / 300) % 2 === 0) {
+          ctx.font = '14px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('🔊', sx + 16, sy - AVATAR_RADIUS - 24);
+        }
       }
 
       // (Presence status now shows as ONE unified pill above the avatar — the

@@ -29,7 +29,7 @@ async function resolveRoomFolder(roomSlug: unknown): Promise<string | null> {
 
 const uploads = Router();
 
-const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
+export const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 // §6 — Add Media (Image/File). No S3/cloud storage is configured for this
@@ -61,7 +61,11 @@ const allowedMimeTypes = new Set([
 // actually allowed — still no svg/html/js either way.
 const allowedExtensions = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.zip', '.txt', '.doc', '.docx', '.xlsx', '.mp4', '.webm', '.mov', '.avi']);
 
-const storage = multer.diskStorage({
+// Exported so routes/rooms.ts's Soundboard upload (its own multer instance,
+// with a much smaller size cap + audio-only fileFilter) writes into the SAME
+// disk directory and gets served back by the SAME GET /uploads/:filename
+// route below, instead of duplicating the storage/serving setup.
+export const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname).slice(0, 10);

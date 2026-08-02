@@ -61,3 +61,16 @@ export function playNudgeSound(emphasized = false): void {
 export function playHandRaiseSound(): void {
   playClip(NUDGE_SRC, 0.35);
 }
+
+// Soundboard — unlike the fixed clips above, the src here is dynamic (one of
+// SOUNDBOARD_DEFAULT_SOUNDS or a room's own uploaded sound), so it can't be
+// preloaded up front the same way; a plain Audio() per play is fine since
+// these are short (≤5s) one-shot clips, not something played back-to-back
+// fast enough to need the clone-node overlap trick.
+export function playSoundboardClip(src: string): void {
+  if (!getNotificationSettings().soundOn) return;
+  if (typeof Audio === 'undefined') return;
+  const node = new Audio(src);
+  node.volume = 0.7;
+  node.play().catch(() => {});
+}

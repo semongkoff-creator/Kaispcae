@@ -271,6 +271,24 @@ export enum SocketEvents {
   CHAT_BUBBLE = 'chat:bubble',
   EMOTE_PLAY = 'emote:play',
 
+  // Soundboard — Discord-style short-clip player. SOUNDBOARD_PLAY only ever
+  // carries a soundId (never a URL — the client resolves it locally from
+  // either SOUNDBOARD_DEFAULT_SOUNDS, a static shared list, or its own
+  // soundboardSounds list for a custom upload, so a spoofed id just fails to
+  // resolve and no-ops rather than pointing anyone at an arbitrary URL).
+  // Server-side audience is getNearbyRecipients (proximityBroadcast.ts) —
+  // the SAME zone/proximity rule Bug 14's raise-hand chime uses, reused on
+  // purpose rather than reimplemented. SOUNDBOARD_SOUND_ADDED is a plain
+  // whole-room broadcast (like MEDIA_ADDED) so every client's panel picks up
+  // a fresh custom upload live, without needing to reopen it.
+  SOUNDBOARD_PLAY = 'soundboard:play',
+  SOUNDBOARD_PLAYED = 'soundboard:played',
+  SOUNDBOARD_SOUND_ADDED = 'soundboard:sound_added',
+  // Initial sync of this room's custom sounds, sent once right after
+  // ROOM_STATE on join — same "list arrives right after room:state" shape
+  // as MEDIA_LIST.
+  SOUNDBOARD_LIST = 'soundboard:list',
+
   // Jump — purely cosmetic, fire-and-forget one-shot hop (same broadcast
   // shape as EMOTE_PLAY above), never validated/stored server-side since
   // there's no persistent state to reconcile — a late joiner just never
@@ -1171,6 +1189,57 @@ export const EMOTE_LABELS: Record<EmoteType, string> = {
 };
 
 export const EMOTE_LIST: EmoteType[] = ['wave', 'clap', 'laugh', 'heart', 'party', 'think', 'sleep', 'fire'];
+
+// Soundboard — Discord-style short-clip player (panel: client/src/components/
+// ui/SoundboardPanel.tsx). Two kinds of playable sound share one namespace:
+//  • "default" — a small fixed set shipped with the app, id/name/file only
+//    (no DB row; every room offers the same set for free).
+//  • "custom" — per-room uploads (Prisma SoundboardSound), fetched over REST
+//    on join and kept live via SOUNDBOARD_SOUND_ADDED.
+// SoundboardSoundData is the shape BOTH normalize to client-side so the panel
+// renders one flat grid without caring which kind a given button is.
+export interface SoundboardSoundData {
+  id: string;
+  name: string;
+  url: string;
+  durationMs: number;
+  // Absent for default sounds (nobody "uploaded" them).
+  createdByName?: string;
+}
+
+// NOTE — these .mp3 files do NOT ship with the repo yet. Each entry here is a
+// placeholder pointing at a filename that must be added manually under
+// client/public/assets/sounds/ (short, 1-3s clips) before these buttons make
+// any sound; see SoundboardPanel's own doc comment for the exact list and
+// the fallback behavior when a file is missing.
+export const SOUNDBOARD_DEFAULT_SOUNDS: SoundboardSoundData[] = [
+  { id: 'default-applause', name: 'Applause', url: '/assets/sounds/applause.mp3', durationMs: 2500 },
+  { id: 'default-airhorn', name: 'Airhorn', url: '/assets/sounds/airhorn.mp3', durationMs: 1500 },
+  { id: 'default-drumroll', name: 'Drum Roll', url: '/assets/sounds/drumroll.mp3', durationMs: 2000 },
+  { id: 'default-wow', name: 'Wow', url: '/assets/sounds/wow.mp3', durationMs: 1000 },
+  { id: 'default-boo', name: 'Boo', url: '/assets/sounds/boo.mp3', durationMs: 1500 },
+  { id: 'default-sad-trombone', name: 'Sad Trombone', url: '/assets/sounds/sad-trombone.mp3', durationMs: 2000 },
+  { id: 'default-crickets', name: 'Crickets', url: '/assets/sounds/crickets.mp3', durationMs: 3000 },
+  { id: 'default-tada', name: 'Tada', url: '/assets/sounds/tada.mp3', durationMs: 1500 },
+];
+
+// Custom-upload limits (routes/soundboard.ts enforces both server-side —
+// these are shared purely so the client can reject obviously-too-long/big
+// files before even attempting the upload, for instant feedback).
+export const SOUNDBOARD_MAX_DURATION_MS = 5000;
+export const SOUNDBOARD_MAX_FILE_BYTES = 300 * 1024; // a few hundred KB
+// Per-SENDER cooldown (not per-sound) — same shape as Bug 14's
+// handSoundCooldown, just a shorter window since this is meant to be played
+// with more freely than a raise-hand chime.
+export const SOUNDBOARD_COOLDOWN_MS = 3000;
+
+export interface SoundboardPlayPayload {
+  soundId: string;
+}
+export interface SoundboardPlayedPayload {
+  fromId: string;
+  soundId: string;
+}
 
 // Speech bubble (floating above avatar)
 export interface SpeechBubble {

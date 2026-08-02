@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerWorkMode, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -13,6 +13,7 @@ import { logActivity } from '../lib/larkBase';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { redactInteractiveSecrets, redactDoorPasswords } from '../lib/redactFurniture';
 import { unlockDoor, clearUnlockedDoorsForRoom } from './doorLock';
+import { getNearbyRecipients } from './proximityBroadcast';
 
 const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec per socket
 const canTeleport = socketRateLimit(2); // max 2 teleport requests/sec per socket
@@ -36,6 +37,11 @@ const SLAP_COOLDOWN_MS = 30_000;
 // (the visual badge still toggles freely — this only throttles the sound).
 const handSoundCooldown = new Map<string, number>();
 const HAND_SOUND_COOLDOWN_MS = 5_000;
+
+// Soundboard — per-SENDER cooldown (not per-sound, so spamming button A then
+// button B still gets throttled), keyed by socket id, same shape as
+// handSoundCooldown above.
+const soundboardCooldown = new Map<string, number>();
 
 // §5.1 — Summon now requires the target's consent, so the actual move only
 // happens once they accept. Keyed by TARGET socket id — a new request from
@@ -386,7 +392,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
     // Fetch the saved room once — reused for spawn point lookup below and
     // for the tiles/furniture/zones sent in room:state once player data is ready.
-    let dbRoom: { tilemapData: unknown; furniture: unknown; zones: unknown; theme?: string | null; template?: string | null; layerData?: unknown } | null = null;
+    let dbRoom: { id: string; tilemapData: unknown; furniture: unknown; zones: unknown; theme?: string | null; template?: string | null; layerData?: unknown } | null = null;
     try {
       dbRoom = await getPrisma().room.findUnique({ where: { slug: room } });
     } catch (e) { console.warn('[room] failed to load room from db:', e); }
@@ -534,6 +540,19 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // admin who's in the (separate) Room Editor tab.
         customAssets: (dbRoom?.layerData as unknown as LayerData | undefined)?.customAssets ?? [],
       });
+
+      // Soundboard — this room's custom sounds, sent once right after
+      // ROOM_STATE (same "list arrives right after room:state" shape as
+      // MEDIA_LIST in mediaHandler.ts). Default sounds need no server round
+      // trip at all — SOUNDBOARD_DEFAULT_SOUNDS is a static shared constant
+      // the client already has.
+      if (dbRoom) {
+        getPrisma().soundboardSound.findMany({ where: { roomId: dbRoom.id }, orderBy: { createdAt: 'asc' } })
+          .then((rows) => socket.emit(SocketEvents.SOUNDBOARD_LIST, {
+            sounds: rows.map((r) => ({ id: r.id, name: r.name, url: r.url, durationMs: r.durationMs, createdByName: r.createdByName })),
+          }))
+          .catch((e) => console.error('[room] soundboard list on join error:', e));
+      }
     });
   });
 
@@ -1113,35 +1132,37 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
     // Bug 14 — sound cue only on RAISE, throttled per sender, never blasted to
     // the whole map. Focus/DND is respected on the receiving client (a focused
-    // user still gets the badge, not the sound). Audience:
-    //  • if the raiser is inside a zone → everyone else in that same zone;
-    //  • otherwise (open floor) → other open-floor players within earshot
-    //    (TRANSLUCENT_THRESHOLD tiles), so it still works outside a meeting zone
-    //    without reaching people across the map or those busy in a zone.
+    // user still gets the badge, not the sound). Audience computed by
+    // getNearbyRecipients (proximityBroadcast.ts) — the SAME zone/proximity
+    // rule the Soundboard feature reuses below, so the two never drift apart.
     if (!val) return;
     const now = Date.now();
     if (now - (handSoundCooldown.get(socket.id) ?? 0) < HAND_SOUND_COOLDOWN_MS) return;
     handSoundCooldown.set(socket.id, now);
     const fromName = getPlayerName(socket.id);
-    const zoneId = zoneIdOfSocket(socket.id);
-    let recipients: string[];
-    if (zoneId) {
-      recipients = getSocketIdsInZone(room, zoneId).filter((sid) => sid !== socket.id);
-    } else {
-      const players = await getPlayers(room);
-      const me = players.find((p) => p.id === socket.id);
-      recipients = me
-        ? players
-            .filter((p) =>
-              p.id !== socket.id &&
-              zoneIdOfSocket(p.id) == null && // don't ring people busy inside a zone
-              Math.max(Math.abs(p.x - me.x), Math.abs(p.y - me.y)) / TILE_SIZE <= TRANSLUCENT_THRESHOLD,
-            )
-            .map((p) => p.id)
-        : [];
-    }
+    const recipients = await getNearbyRecipients(room, socket.id);
     for (const sid of recipients) {
       io.to(sid).emit(SocketEvents.HAND_RAISED_ALERT, { fromId: socket.id, fromName });
+    }
+  });
+
+  // Soundboard — cosmetic, fire-and-forget, same trust level as Jump/Nudge:
+  // soundId is never resolved to a URL here (the client resolves it locally
+  // from either the static default list or its own fetched custom-sounds
+  // list — see shared/types' doc comment on SOUNDBOARD_PLAY), so a bogus id
+  // just fails to match anything client-side and no-ops. Audience is the
+  // SAME getNearbyRecipients used by the raise-hand chime above — one scope
+  // rule for both, not two similar-but-separately-maintained copies.
+  socket.on(SocketEvents.SOUNDBOARD_PLAY, async (data: SoundboardPlayPayload) => {
+    const room = currentRoom; if (!room) return;
+    const soundId = data?.soundId;
+    if (typeof soundId !== 'string' || !soundId) return;
+    const now = Date.now();
+    if (now - (soundboardCooldown.get(socket.id) ?? 0) < SOUNDBOARD_COOLDOWN_MS) return;
+    soundboardCooldown.set(socket.id, now);
+    const recipients = await getNearbyRecipients(room, socket.id);
+    for (const sid of recipients) {
+      io.to(sid).emit(SocketEvents.SOUNDBOARD_PLAYED, { fromId: socket.id, soundId });
     }
   });
 
