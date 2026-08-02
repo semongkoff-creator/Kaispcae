@@ -27,7 +27,11 @@ import { isTileBlocked, isDoorTile } from '@/utils/createDefaultRoom';
 // is unchanged.
 import { drawTile, drawFloorTile, drawWallTile, drawFurnitureLayer, TILE_COLORS } from './mapRender';
 
-const AVATAR_RADIUS = 14;
+// Kept proportional to TILE_SIZE (same ratio as AvatarSprite.ts's own copy of
+// this constant) so decorations positioned relative to it — crown, speaker
+// icon, speech bubble, speaking-pulse ring — stay the same relative distance
+// from the avatar as the sprite itself scales with TILE_SIZE (Fitur 4).
+const AVATAR_RADIUS = TILE_SIZE * (14 / 32);
 
 // Follow (§3): where a follower stands relative to their target, based on
 // the target's current facing direction — one tile on the side "behind"

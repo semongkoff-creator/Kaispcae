@@ -1,4 +1,4 @@
-import { MAP_WIDTH, MAP_HEIGHT } from './types/index';
+import { MAP_WIDTH, MAP_HEIGHT, TILE_SIZE } from './types/index';
 import type { RoomTile, Furniture, Zone, TileType, RoomTheme } from './types/index';
 
 // Scans a generated/loaded tile grid for the 'spawn'-type tile and returns
@@ -13,10 +13,10 @@ import type { RoomTile, Furniture, Zone, TileType, RoomTheme } from './types/ind
 export function findSpawnPixel(tiles: RoomTile[][]): { x: number; y: number } {
   for (const row of tiles) {
     for (const tile of row) {
-      if (tile.type === 'spawn') return { x: tile.x * 32 + 16, y: tile.y * 32 + 16 };
+      if (tile.type === 'spawn') return { x: tile.x * TILE_SIZE + TILE_SIZE / 2, y: tile.y * TILE_SIZE + TILE_SIZE / 2 };
     }
   }
-  return { x: 3 * 32 + 16, y: 3 * 32 + 16 };
+  return { x: 3 * TILE_SIZE + TILE_SIZE / 2, y: 3 * TILE_SIZE + TILE_SIZE / 2 };
 }
 
 // Default office layout used to seed a brand-new room's tilemapData/

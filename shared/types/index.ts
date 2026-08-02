@@ -731,8 +731,22 @@ export interface Recording {
   maxDownloads: number;
 }
 
-// Grid and rendering constants — shared so server can also validate bounds
-export const TILE_SIZE = 32;
+// Grid and rendering constants — shared so server can also validate bounds.
+// TILE_SIZE is the LOGICAL/on-screen size of one grid cell in pixels — every
+// position, camera, and collision calculation across client and server is
+// expressed in this unit, so bumping it (32 -> 48, the Fitur 4 sprite/tile
+// upgrade) automatically keeps all of that math consistent with no other
+// changes needed. It is NOT the same thing as the pixel dimensions of the
+// actual source art in the tileset/character PNGs — see SOURCE_TILE_SIZE
+// below for that; conflating the two silently reads the wrong region out of
+// a spritesheet (see mapRender.ts's drawTile/drawFurnitureLayer).
+export const TILE_SIZE = 48;
+// Fixed to the actual pixel grid every tileset/character spritesheet in
+// client/public/assets/{tilesets,characters} is authored at. This must NEVER
+// change unless the source art itself is replaced with art on a different
+// grid — it is independent of TILE_SIZE above, which only controls how large
+// that same source art is drawn (and where things are placed) on screen.
+export const SOURCE_TILE_SIZE = 32;
 // "Main Office" ZEP-inspired layout (see defaultRoomLayout.ts): two meeting
 // rooms, an open main desk zone with 4 team clusters, a dev team room, an
 // external meeting room, a 5-pod focus zone, a lounge, and an entrance/

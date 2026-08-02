@@ -219,7 +219,7 @@ function findSpawnPixel(tilemapData: unknown): { x: number; y: number } | null {
     if (!Array.isArray(row)) continue;
     for (const tile of row) {
       if (tile?.type === 'spawn' && typeof tile.x === 'number' && typeof tile.y === 'number') {
-        return { x: tile.x * 32 + 16, y: tile.y * 32 + 16 };
+        return { x: tile.x * TILE_SIZE + TILE_SIZE / 2, y: tile.y * TILE_SIZE + TILE_SIZE / 2 };
       }
     }
   }
@@ -445,7 +445,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // always reset the player back to spawn regardless of where they'd
     // walked to, which the "Move" spec explicitly calls out as wrong.
     const remembered = getLastKnownPosition(uid, room);
-    let spawn = remembered ?? findSpawnPixel(dbRoom?.tilemapData) ?? { x: 3 * 32 + 16, y: 3 * 32 + 16 };
+    let spawn = remembered ?? findSpawnPixel(dbRoom?.tilemapData) ?? { x: 3 * TILE_SIZE + TILE_SIZE / 2, y: 3 * TILE_SIZE + TILE_SIZE / 2 };
 
     // Bug 8 — the remembered position can be INSIDE a blocked tile: sitting
     // puts the avatar on the chair's own tile (chair is in BLOCKED_TILES),
@@ -936,8 +936,8 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         return;
       }
 
-      const pixelX = target.x * 32 + 16;
-      const pixelY = target.y * 32 + 16;
+      const pixelX = target.x * TILE_SIZE + TILE_SIZE / 2;
+      const pixelY = target.y * TILE_SIZE + TILE_SIZE / 2;
       // Skipped for kind 'seat' — a chair tile is meant to be stood/sat on
       // by design (the ordinary sit flow already puts a player there with
       // no server-side tile-blocked check at all, see PLAYER_SIT's handler

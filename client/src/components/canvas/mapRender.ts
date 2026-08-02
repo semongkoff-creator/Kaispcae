@@ -1,4 +1,4 @@
-import { TILE_SIZE, TileType, RoomTile, Furniture, RoomTheme } from '@virtualmeet/shared';
+import { TILE_SIZE, SOURCE_TILE_SIZE, TileType, RoomTile, Furniture, RoomTheme } from '@virtualmeet/shared';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
 import { PALETTE_BY_ID, THEME_TILE_SPRITES } from '@/data/themeAssets';
 import { ensureLimezuEntry } from '@/data/limezuInteriors';
@@ -27,9 +27,15 @@ export const TILE_COLORS: Record<TileType, string> = {
 // while richer data hasn't loaded), varying by the room's theme.
 export function drawTile(ctx: CanvasRenderingContext2D, type: TileType, screenX: number, screenY: number, theme: RoomTheme) {
   const sprite = THEME_TILE_SPRITES[theme][type];
+  // cellWidth/cellHeight (SOURCE_TILE_SIZE) is how much of the spritesheet to
+  // READ — fixed to the actual art's 32px grid, never TILE_SIZE. dWidth/
+  // dHeight (TILE_SIZE) is how large that crop is drawn on screen. The two
+  // used to be the same constant, which was harmless while TILE_SIZE was
+  // also 32 but silently reads into the next cell over as soon as they
+  // diverge (Fitur 4 upgrade to 48).
   const drew = sprite && drawSpriteFrame(ctx, sprite.src, {
-    srcX: sprite.srcX, srcY: sprite.srcY, cellWidth: TILE_SIZE, cellHeight: TILE_SIZE,
-    dx: screenX, dy: screenY,
+    srcX: sprite.srcX, srcY: sprite.srcY, cellWidth: SOURCE_TILE_SIZE, cellHeight: SOURCE_TILE_SIZE,
+    dx: screenX, dy: screenY, dWidth: TILE_SIZE, dHeight: TILE_SIZE,
   });
   if (!drew) {
     ctx.fillStyle = TILE_COLORS[type] || '#e8d5b0';
@@ -43,8 +49,8 @@ export function drawFloorTile(ctx: CanvasRenderingContext2D, tile: RoomTile, scr
   if (tile.floorPaletteId) {
     const entry = PALETTE_BY_ID[tile.floorPaletteId];
     if (entry && drawSpriteFrame(ctx, entry.src, {
-      srcX: entry.srcX, srcY: entry.srcY, cellWidth: TILE_SIZE, cellHeight: TILE_SIZE,
-      dx: screenX, dy: screenY,
+      srcX: entry.srcX, srcY: entry.srcY, cellWidth: SOURCE_TILE_SIZE, cellHeight: SOURCE_TILE_SIZE,
+      dx: screenX, dy: screenY, dWidth: TILE_SIZE, dHeight: TILE_SIZE,
     })) return;
   }
   drawTile(ctx, 'floor', screenX, screenY, theme);
@@ -58,8 +64,8 @@ export function drawWallTile(ctx: CanvasRenderingContext2D, tile: RoomTile, scre
   if (tile.wallPaletteId) {
     const entry = PALETTE_BY_ID[tile.wallPaletteId];
     if (entry && drawSpriteFrame(ctx, entry.src, {
-      srcX: entry.srcX, srcY: entry.srcY, cellWidth: TILE_SIZE, cellHeight: TILE_SIZE,
-      dx: screenX, dy: screenY,
+      srcX: entry.srcX, srcY: entry.srcY, cellWidth: SOURCE_TILE_SIZE, cellHeight: SOURCE_TILE_SIZE,
+      dx: screenX, dy: screenY, dWidth: TILE_SIZE, dHeight: TILE_SIZE,
     })) return;
   }
   drawTile(ctx, 'wall', screenX, screenY, theme);
@@ -98,29 +104,43 @@ export function drawFurnitureLayer(
   // sprite (same failure mode Avatar sprites are rounded against).
   const screenX = Math.round(item.x * TILE_SIZE - cameraX + (item.offsetPx?.x ?? 0));
   const baseRowScreenY = Math.round(item.y * TILE_SIZE - cameraY + (item.offsetPx?.y ?? 0));
+  // Source (spritesheet crop, fixed to the art's real 32px grid) vs
+  // destination (on-screen draw, TILE_SIZE) width — these were the same
+  // number while TILE_SIZE was also 32; the Fitur 4 upgrade to 48 means
+  // reading `pieceWidthPx` worth of SOURCE pixels would bleed into the next
+  // piece over in the spritesheet, so the read width must stay tied to
+  // SOURCE_TILE_SIZE independent of how large it's then drawn.
+  const pieceSourceWidthPx = entry.tilesW * SOURCE_TILE_SIZE;
   const pieceWidthPx = entry.tilesW * TILE_SIZE;
   const scaleW = (item.sizePercent?.w ?? 100) / 100;
   const scaleH = (item.sizePercent?.h ?? 100) / 100;
   const hasTransform = !!item.rotation || !!item.flipH || !!item.flipV || scaleW !== 1 || scaleH !== 1;
 
-  const drawPiece = (srcY: number, cellHeightPx: number, dy: number) => {
+  const drawPiece = (srcY: number, sourceHeightPx: number, destHeightPx: number, dy: number) => {
     if (!hasTransform) {
-      drawSpriteFrame(ctx, entry.src, { srcX: entry.srcX, srcY, cellWidth: pieceWidthPx, cellHeight: cellHeightPx, dx: screenX, dy });
+      drawSpriteFrame(ctx, entry.src, {
+        srcX: entry.srcX, srcY, cellWidth: pieceSourceWidthPx, cellHeight: sourceHeightPx,
+        dx: screenX, dy, dWidth: pieceWidthPx, dHeight: destHeightPx,
+      });
       return;
     }
-    const cx = screenX + pieceWidthPx / 2, cy = dy + cellHeightPx / 2;
+    const cx = screenX + pieceWidthPx / 2, cy = dy + destHeightPx / 2;
     ctx.save();
     ctx.translate(cx, cy);
     if (item.rotation) ctx.rotate((item.rotation * Math.PI) / 180);
     ctx.scale((item.flipH ? -1 : 1) * scaleW, (item.flipV ? -1 : 1) * scaleH);
-    drawSpriteFrame(ctx, entry.src, { srcX: entry.srcX, srcY, cellWidth: pieceWidthPx, cellHeight: cellHeightPx, dx: -pieceWidthPx / 2, dy: -cellHeightPx / 2 });
+    drawSpriteFrame(ctx, entry.src, {
+      srcX: entry.srcX, srcY, cellWidth: pieceSourceWidthPx, cellHeight: sourceHeightPx,
+      dx: -pieceWidthPx / 2, dy: -destHeightPx / 2, dWidth: pieceWidthPx, dHeight: destHeightPx,
+    });
     ctx.restore();
   };
 
   if (layer === 'object') {
-    drawPiece(entry.srcY + (entry.tilesH - 1) * TILE_SIZE, TILE_SIZE, baseRowScreenY);
+    drawPiece(entry.srcY + (entry.tilesH - 1) * SOURCE_TILE_SIZE, SOURCE_TILE_SIZE, TILE_SIZE, baseRowScreenY);
   } else if (entry.tilesH > 1) {
-    const overheadHeightPx = (entry.tilesH - 1) * TILE_SIZE;
-    drawPiece(entry.srcY, overheadHeightPx, baseRowScreenY - overheadHeightPx);
+    const overheadSourceHeightPx = (entry.tilesH - 1) * SOURCE_TILE_SIZE;
+    const overheadDestHeightPx = (entry.tilesH - 1) * TILE_SIZE;
+    drawPiece(entry.srcY, overheadSourceHeightPx, overheadDestHeightPx, baseRowScreenY - overheadDestHeightPx);
   }
 }

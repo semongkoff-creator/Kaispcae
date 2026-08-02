@@ -1,7 +1,12 @@
 import { Avatar, BodyShape, Accessory, Expression, Direction, TILE_SIZE } from '@virtualmeet/shared';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
 
-const AVATAR_RADIUS = 14;
+// Radius for the shape-fallback avatar (drawn only while no sprite is
+// configured/loaded) AND the local-player glow ring (drawn around whichever
+// one actually renders, sprite included) — kept proportional to TILE_SIZE so
+// the glow doesn't end up a fixed 32px-era size wrapped around a now-larger
+// 48px sprite. 14/32 preserves the original 32px-tile-era ratio exactly.
+const AVATAR_RADIUS = TILE_SIZE * (14 / 32);
 const GLOW_RADIUS = AVATAR_RADIUS + 4;
 
 const DEFAULT_COLOR = '#ff6b6b';
@@ -153,7 +158,12 @@ const FRAME_SIZE = 32;
 const FRAME_VISUAL_HEIGHT = 44;
 const FRAME_ROW_Y_OFFSET = 20;
 const FRAMES_PER_DIRECTION = 6;
-const SPRITE_DISPLAY_SIZE = 32;
+// On-screen size a standing/walking avatar is drawn at — tracks TILE_SIZE
+// (the logical/display grid unit, see its own doc comment) so the character
+// scales up right along with the tile grid; FRAME_SIZE above stays fixed at
+// 32 regardless, since that's the actual source art's pixel grid, not a
+// display size.
+const SPRITE_DISPLAY_SIZE = TILE_SIZE;
 const IDLE_ROW = 3;
 const WALK_ROW = 5;
 const IDLE_FRAME_MS = 400;
