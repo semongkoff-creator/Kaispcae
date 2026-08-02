@@ -4,6 +4,7 @@ import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, rol
 import { PALETTE_BY_ID } from './data/themeAssets';
 import { GameCanvas } from './components/canvas/GameCanvas';
 import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
+import { MapZoomControl } from './components/ui/MapZoomControl';
 import { MobileControls } from './components/hud/MobileControls';
 import { NameModal } from './components/ui/NameModal';
 import { AvatarSetup } from './components/avatar/AvatarSetup';
@@ -1143,7 +1144,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </>
       )}
 
-      <ConnectionIndicator />
+      <div className="absolute top-4 right-4 flex items-center gap-2">
+        <MapZoomControl />
+        <ConnectionIndicator />
+      </div>
 
       {/* On-screen movement/action controls — self-hides on non-touch devices
           (see MobileControls), so it only appears for phone/tablet players. */}

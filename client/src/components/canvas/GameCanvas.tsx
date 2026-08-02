@@ -390,8 +390,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const store = useGameStore.getState();
       if (store.localPlayer.isSitting) return; // stand up first (movement is frozen)
       const rect = canvas.getBoundingClientRect();
-      const worldX = (e.clientX - rect.left) + cameraXRef.current;
-      const worldY = (e.clientY - rect.top) + cameraYRef.current;
+      const zoom = store.mapZoom;
+      const worldX = (e.clientX - rect.left) / zoom + cameraXRef.current;
+      const worldY = (e.clientY - rect.top) / zoom + cameraYRef.current;
       const tileX = Math.floor(worldX / TILE_SIZE);
       const tileY = Math.floor(worldY / TILE_SIZE);
       if (tileX < 0 || tileY < 0) return;
@@ -630,6 +631,17 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     if (!ctx) return;
     disableImageSmoothing(ctx);
 
+    // Map zoom — read fresh via getState() every frame (like every other
+    // fast-changing value in this loop) rather than as a reactive dependency,
+    // so a zoom change takes effect on the very next animation frame with no
+    // extra re-render. Folded into the SAME dpr transform already in use —
+    // every existing screenX/screenY draw call below is written in pre-zoom
+    // "logical" pixels and needs no change; this one setTransform call is
+    // the only thing that actually scales them to the zoomed-in/out size.
+    const dpr = window.devicePixelRatio || 1;
+    const zoom = useGameStore.getState().mapZoom;
+    ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, 0, 0);
+
     if (prevTimeRef.current === 0) prevTimeRef.current = timestamp;
     const rawDt = (timestamp - prevTimeRef.current) / 1000;
     const dt = Math.min(rawDt, 0.05);
@@ -637,6 +649,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
 
     const logicalW = canvas.width / (window.devicePixelRatio || 1);
     const logicalH = canvas.height / (window.devicePixelRatio || 1);
+    // World-space extent actually visible on screen at the current zoom —
+    // MORE world becomes visible when zoomed out (zoom<1), less when zoomed
+    // in (zoom>1). Camera centering, background fill, and tile/avatar
+    // culling all need this (not the raw logical size) once zoom isn't 1.
+    const worldViewW = logicalW / zoom;
+    const worldViewH = logicalH / zoom;
 
     const moveResult = update(dt);
     let effectiveMoveResult = moveResult;
@@ -793,9 +811,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // Rounded to whole CSS pixels — every tile/avatar screen position is
     // `n * TILE_SIZE - camera`, so a fractional camera offset put every draw
     // call at a fractional pixel, which the canvas antialiases into faint
-    // seams between adjacent tiles instead of a clean shared edge.
-    const cameraX = Math.round(playerX - logicalW / 2);
-    const cameraY = Math.round(playerY - logicalH / 2);
+    // seams between adjacent tiles instead of a clean shared edge. Centered
+    // on worldViewW/H (not logicalW/H) so the player stays exactly centered
+    // regardless of zoom — more/less world is visible, but always the same
+    // amount to either side of the player.
+    const cameraX = Math.round(playerX - worldViewW / 2);
+    const cameraY = Math.round(playerY - worldViewH / 2);
 
     cameraXRef.current = cameraX;
     cameraYRef.current = cameraY;
@@ -817,13 +838,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     }
 
     ctx.fillStyle = '#1a1a2e';
-    ctx.fillRect(0, 0, logicalW, logicalH);
+    ctx.fillRect(0, 0, worldViewW, worldViewH);
 
     const tiles = tilesRef.current;
     const startCol = Math.max(0, Math.floor(cameraX / TILE_SIZE));
-    const endCol = Math.min(MAP_WIDTH, Math.ceil((cameraX + logicalW) / TILE_SIZE) + 1);
+    const endCol = Math.min(MAP_WIDTH, Math.ceil((cameraX + worldViewW) / TILE_SIZE) + 1);
     const startRow = Math.max(0, Math.floor(cameraY / TILE_SIZE));
-    const endRow = Math.min(MAP_HEIGHT, Math.ceil((cameraY + logicalH) / TILE_SIZE) + 1);
+    const endRow = Math.min(MAP_HEIGHT, Math.ceil((cameraY + worldViewH) / TILE_SIZE) + 1);
 
     for (let row = startRow; row < endRow; row++) {
       for (let col = startCol; col < endCol; col++) {
@@ -962,18 +983,24 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
 
     // Zone banners (DOM overlay) — position each labeled zone's floating
     // element every frame via transform, matching the canvas camera exactly.
+    // These sit OUTSIDE the canvas's own zoom transform (they're plain DOM,
+    // not canvas-drawn), so both the translate offset AND a `scale(zoom)`
+    // are applied here explicitly — width stays the unscaled tile-width
+    // value, with `scale()` (from the top-left corner, see the `origin-*`
+    // class on these elements) doing the visual resize, same as the canvas
+    // content right underneath it.
     for (const zone of zones) {
       if (!zone.label) continue;
       const el = zoneBannerRefs.current.get(zone.id);
       if (!el) continue;
-      const zx = zone.x * TILE_SIZE - cameraX;
-      const zy = zone.y * TILE_SIZE - cameraY;
+      const zx = (zone.x * TILE_SIZE - cameraX) * zoom;
+      const zy = (zone.y * TILE_SIZE - cameraY) * zoom;
       const zw = zone.width * TILE_SIZE;
       if (zone.type === 'meeting') {
-        el.style.transform = `translate(${zx}px, ${zy}px)`;
+        el.style.transform = `translate(${zx}px, ${zy}px) scale(${zoom})`;
         el.style.width = `${zw}px`;
       } else {
-        el.style.transform = `translate(${zx + 6}px, ${zy - 12}px)`;
+        el.style.transform = `translate(${zx + 6 * zoom}px, ${zy - 12 * zoom}px) scale(${zoom})`;
         el.style.width = 'auto';
       }
       el.style.opacity = isAvatarUnderLabel(zone.x, zone.y, zone.width) ? '0' : '1';
@@ -985,9 +1012,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       if (item.kind !== 'banner') continue;
       const el = bannerRefs.current.get(item.id);
       if (!el) continue;
-      const bx = item.x * TILE_SIZE - cameraX;
-      const by = item.y * TILE_SIZE - cameraY;
-      el.style.transform = `translate(${bx}px, ${by}px)`;
+      const bx = (item.x * TILE_SIZE - cameraX) * zoom;
+      const by = (item.y * TILE_SIZE - cameraY) * zoom;
+      el.style.transform = `translate(${bx}px, ${by}px) scale(${zoom})`;
       el.style.width = `${item.tilesW * TILE_SIZE}px`;
       el.style.opacity = isAvatarUnderLabel(item.x, item.y, item.tilesW) ? '0' : '1';
     }
@@ -1008,9 +1035,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       // the marker JSX) than the small pin whiteboard/file still use, so
       // they need a wider stacking gap to avoid overlapping.
       const stackOffsetPx = media.type === 'image' || media.type === 'youtube' ? 40 : 18;
-      const mx = media.x * TILE_SIZE - cameraX + stackIndex * stackOffsetPx;
-      const my = media.y * TILE_SIZE - cameraY;
-      el.style.transform = `translate(${mx}px, ${my}px)`;
+      const mx = (media.x * TILE_SIZE - cameraX + stackIndex * stackOffsetPx) * zoom;
+      const my = (media.y * TILE_SIZE - cameraY) * zoom;
+      el.style.transform = `translate(${mx}px, ${my}px) scale(${zoom})`;
     }
 
     // Zone draw preview (while dragging out a new zone rectangle)
@@ -1054,8 +1081,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     for (const avatar of allAvatars) {
       const sx = avatar.x - cameraX;
       const sy = avatar.y - cameraY;
-      if (sx < -AVATAR_RADIUS - 30 || sx > logicalW + AVATAR_RADIUS + 30 ||
-          sy < -AVATAR_RADIUS - 40 || sy > logicalH + AVATAR_RADIUS + 30) continue;
+      if (sx < -AVATAR_RADIUS - 30 || sx > worldViewW + AVATAR_RADIUS + 30 ||
+          sy < -AVATAR_RADIUS - 40 || sy > worldViewH + AVATAR_RADIUS + 30) continue;
 
       const isLocal = avatar.id === localPlayerId;
       const bobOffset = isLocal ? walkOffset : avatar.isMoving ? Math.sin(timestamp * 0.008 + (avatar.id.charCodeAt(0) || 0) * 0.1) * 2 : 0;
@@ -1441,8 +1468,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    const mx = clientX - rect.left;
-    const my = clientY - rect.top;
+    const zoom = useGameStore.getState().mapZoom;
+    const mx = (clientX - rect.left) / zoom;
+    const my = (clientY - rect.top) / zoom;
     const tileX = Math.floor((mx + cameraXRef.current) / TILE_SIZE);
     const tileY = Math.floor((my + cameraYRef.current) / TILE_SIZE);
     return { x: tileX, y: tileY };
@@ -1575,7 +1603,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
               if (el) zoneBannerRefs.current.set(zone.id, el);
               else zoneBannerRefs.current.delete(zone.id);
             }}
-            className="absolute top-0 left-0 will-change-transform"
+            className="absolute top-0 left-0 will-change-transform origin-top-left"
           >
             {zone.type === 'meeting' ? (
               <div
@@ -1605,7 +1633,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
               if (el) bannerRefs.current.set(item.id, el);
               else bannerRefs.current.delete(item.id);
             }}
-            className="absolute top-0 left-0 will-change-transform"
+            className="absolute top-0 left-0 will-change-transform origin-top-left"
           >
             {item.imageUrl ? (
               <img src={item.imageUrl} alt={item.text || 'Banner'} className="w-full h-auto shadow-md" />
@@ -1643,7 +1671,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                 if (el) mediaMarkerRefs.current.set(media.id, el);
                 else mediaMarkerRefs.current.delete(media.id);
               }}
-              className="absolute top-0 left-0 will-change-transform pointer-events-auto"
+              className="absolute top-0 left-0 will-change-transform origin-top-left pointer-events-auto"
             >
               {/* Potong 6 — YouTube auto-embeds (muted) when the player is near;
                   website opens a new tab; bgm shows a non-interactive marker. */}

@@ -4,6 +4,10 @@ import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Fur
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
 // per-socket RECORDING_STARTED emit, which simply never reaches anyone else.
+export const MIN_MAP_ZOOM = 0.6;
+export const MAX_MAP_ZOOM = 2;
+const clampMapZoom = (z: number) => Math.max(MIN_MAP_ZOOM, Math.min(MAX_MAP_ZOOM, z));
+
 export interface ActiveRecordingInfo {
   recordingId: string;
   targetUserId: string;
@@ -202,6 +206,14 @@ export interface GameState {
   // sends the full current+queue snapshot, same convention as room:state.
   musicSessionsByZone: Record<string, MusicSessionState>;
   setMusicSessionState: (state: MusicSessionState) => void;
+  // Main game view camera zoom — purely a local rendering preference (how
+  // much of the map is visible on screen), NOT sent to the server and NOT
+  // part of collision/movement math (those stay in world/tile units
+  // regardless of zoom), so it's safe to be per-client with no multiplayer
+  // desync risk — unlike TILE_SIZE, which every client must share.
+  mapZoom: number;
+  setMapZoom: (zoom: number) => void;
+  zoomMapBy: (factor: number) => void;
   speakingPlayers: Set<string>;
   setPlayerSpeaking: (id: string, speaking: boolean) => void;
 
@@ -634,6 +646,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   musicSessionsByZone: {},
   setMusicSessionState: (state) =>
     set((s) => ({ musicSessionsByZone: { ...s.musicSessionsByZone, [state.zoneId]: state } })),
+  mapZoom: 1,
+  setMapZoom: (zoom) => set({ mapZoom: clampMapZoom(zoom) }),
+  zoomMapBy: (factor) => set((s) => ({ mapZoom: clampMapZoom(s.mapZoom * factor) })),
   speakingPlayers: new Set<string>(),
   setPlayerSpeaking: (id, speaking) =>
     set((state) => {
