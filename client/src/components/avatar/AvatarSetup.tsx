@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Tools, LightningFill, PersonSquare, Trash3 } from 'react-bootstrap-icons';
 import { AvatarConfig, SpriteMode } from '@virtualmeet/shared';
 import { drawAvatar } from '@/components/canvas/AvatarSprite';
+import { disableImageSmoothing } from '@/utils/canvasSharpness';
 import { PALETTE } from '@/hooks/useAvatarConfig';
 import { api } from '@/services/api';
 import { processProfilePhoto, PhotoError, ACCEPTED_TYPES } from '@/utils/processProfilePhoto';
@@ -181,7 +182,7 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: Ava
     canvas.style.width = '120px';
     canvas.style.height = '120px';
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.imageSmoothingEnabled = false;
+    disableImageSmoothing(ctx);
 
     let raf: number;
     const loop = (timestamp: number) => {
@@ -228,7 +229,7 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: Ava
 
         {/* Live Preview */}
         <div className="flex justify-center mb-4">
-          <canvas ref={previewRef} className="rounded-xl bg-purple-50 dark:bg-gray-700" />
+          <canvas ref={previewRef} className="rounded-xl bg-purple-50 dark:bg-gray-700" style={{ imageRendering: 'pixelated' }} />
         </div>
 
         {/* Mode tabs */}

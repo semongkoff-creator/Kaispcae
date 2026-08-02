@@ -8,6 +8,7 @@ import { api, ApiError } from '@/services/api';
 import { useEditorStore, EDITOR_LAYERS, EDITOR_TOOLS, EditorLayer, EditorTool } from '@/stores/editorStore';
 import { drawFloorTile, drawWallTile, drawFurnitureLayer } from '@/components/canvas/mapRender';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
+import { disableImageSmoothing } from '@/utils/canvasSharpness';
 import { PALETTE_BY_THEME, PALETTE_BY_ID } from '@/data/themeAssets';
 import { PaletteEntry } from '@/data/tilePaletteManifest';
 import { LIMEZU_CATEGORIES, loadLimezuCategory } from '@/data/limezuInteriors';
@@ -66,17 +67,28 @@ function PieceThumb({ paletteId, size = 40 }: { paletteId: string; size?: number
     const draw = () => {
       const c = ref.current; const ctx = c?.getContext('2d');
       if (!c || !ctx) return;
+      // No dpr scaling here previously — the backing store was `size` physical
+      // px regardless of screen density, so this thumbnail (unlike the main
+      // canvas/palette CSS thumbnails elsewhere in this file) came out
+      // upscaled-and-blurred on Retina/HiDPI displays.
+      const dpr = window.devicePixelRatio || 1;
+      if (c.width !== size * dpr || c.height !== size * dpr) {
+        c.width = size * dpr;
+        c.height = size * dpr;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const wPx = (entry.tilesW || 1) * 32, hPx = (entry.tilesH || 1) * 32;
       const scale = Math.min(size / wPx, size / hPx);
       const dw = wPx * scale, dh = hPx * scale;
-      ctx.clearRect(0, 0, size, size); ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, size, size);
+      disableImageSmoothing(ctx);
       const drew = drawSpriteFrame(ctx, entry.src, { srcX: entry.srcX, srcY: entry.srcY, cellWidth: wPx, cellHeight: hPx, dx: (size - dw) / 2, dy: (size - dh) / 2, dWidth: dw, dHeight: dh });
       if (!drew && n++ < 60) raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
   }, [paletteId, size]);
-  return <canvas ref={ref} width={size} height={size} className="block" />;
+  return <canvas ref={ref} style={{ width: size, height: size, imageRendering: 'pixelated' }} className="block" />;
 }
 
 // Fitur 15B — ZEP-style "Object Settings" panel: shown instead of the
@@ -833,7 +845,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           if (doc && m) {
             const st = useEditorStore.getState();
             const { panX, panY, zoom: z } = st.viewport;
-            ctx.imageSmoothingEnabled = false; ctx.setTransform(z * dpr, 0, 0, z * dpr, panX * dpr, panY * dpr);
+            disableImageSmoothing(ctx); ctx.setTransform(z * dpr, 0, 0, z * dpr, panX * dpr, panY * dpr);
             drawLayer(ctx, doc, m.theme, 'floor'); drawLayer(ctx, doc, m.theme, 'wall');
             drawLayer(ctx, doc, m.theme, 'objects'); drawLayer(ctx, doc, m.theme, 'top'); drawLayer(ctx, doc, m.theme, 'effects');
             if (z >= 0.5) {
@@ -1211,7 +1223,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
 
       <div className="flex-1 min-h-0 flex">
         <div ref={wrapRef} className="flex-1 min-w-0 relative overflow-hidden" style={{ cursor }}>
-          <canvas ref={canvasRef} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={endDrag} onMouseLeave={endDrag} className="block" />
+          <canvas ref={canvasRef} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={endDrag} onMouseLeave={endDrag} className="block" style={{ imageRendering: 'pixelated' }} />
           <div className="absolute bottom-3 left-3 text-[11px] text-white/40 pointer-events-none">
             {activeTool === 'copy' ? (clipboard ? 'Copy (C): klik untuk MENEMPEL blok tersalin · Esc untuk memilih area baru' : 'Copy (C): drag area untuk menyalin SEMUA layer (floor, wall, objek, efek)')
               : isObjLayer ? 'Stamp (Q) taruh · Eraser (W) hapus · Select (V) klik+geser pindah, Delete hapus · Copy (C)'

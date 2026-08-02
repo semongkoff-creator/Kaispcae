@@ -19,6 +19,7 @@ import { useGameStore } from '@/stores/gameStore';
 import { useMovement } from '@/hooks/useMovement';
 import { drawAvatar } from './AvatarSprite';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
+import { disableImageSmoothing } from '@/utils/canvasSharpness';
 import { PALETTE_BY_ID } from '@/data/themeAssets';
 import { isTileBlocked, isDoorTile } from '@/utils/createDefaultRoom';
 // Bug 16-project (Room Editor) — these map-draw helpers were moved verbatim to
@@ -614,7 +615,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       // — must re-set every resize, not just once. Without it the browser's
       // default bilinear smoothing blurs every scaled sprite drawImage() call
       // (avatars drawn at 40px from a 32px source, in particular).
-      ctx.imageSmoothingEnabled = false;
+      disableImageSmoothing(ctx);
     }
   }, []);
 
@@ -623,7 +624,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.imageSmoothingEnabled = false;
+    disableImageSmoothing(ctx);
 
     if (prevTimeRef.current === 0) prevTimeRef.current = timestamp;
     const rawDt = (timestamp - prevTimeRef.current) / 1000;

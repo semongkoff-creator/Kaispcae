@@ -91,8 +91,13 @@ export function drawFurnitureLayer(
   // scale pivot around the piece's own center, applied via a canvas
   // transform around the (otherwise unchanged) drawSpriteFrame call — never
   // touches placement (item.x/y) or collision, purely how it's painted.
-  const screenX = item.x * TILE_SIZE - cameraX + (item.offsetPx?.x ?? 0);
-  const baseRowScreenY = item.y * TILE_SIZE - cameraY + (item.offsetPx?.y ?? 0);
+  // Rounded — item.x/y * TILE_SIZE and cameraX/Y are already whole pixels,
+  // but the Room Editor's Reposition(px) offsetPx is free-form drag input
+  // and can land on a fractional pixel; a sub-pixel drawImage destination
+  // forces uneven nearest-neighbor sampling that reads as a torn/glitched
+  // sprite (same failure mode Avatar sprites are rounded against).
+  const screenX = Math.round(item.x * TILE_SIZE - cameraX + (item.offsetPx?.x ?? 0));
+  const baseRowScreenY = Math.round(item.y * TILE_SIZE - cameraY + (item.offsetPx?.y ?? 0));
   const pieceWidthPx = entry.tilesW * TILE_SIZE;
   const scaleW = (item.sizePercent?.w ?? 100) / 100;
   const scaleH = (item.sizePercent?.h ?? 100) / 100;
