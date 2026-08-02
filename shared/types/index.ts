@@ -1334,7 +1334,7 @@ export interface RoomUpdatePayload {
   zones: Zone[];
 }
 
-export { createDefaultOfficeLayout, findSpawnPixel, createRoomLayoutFromTemplate, ROOM_TEMPLATES } from '../defaultRoomLayout';
+export { createDefaultOfficeLayout, createKaitechOfficeLayout, findSpawnPixel, createRoomLayoutFromTemplate, ROOM_TEMPLATES } from '../defaultRoomLayout';
 export type { RoomTemplateId } from '../defaultRoomLayout';
 export { BLOCKED_TILES, isTileBlocked, isDoorTile, findZoneEntryTile, findAdjacentFreeTile } from '../tileCollision';
 // ZEP Room Editor — Potong 1 layered map format + legacy adaptors.
