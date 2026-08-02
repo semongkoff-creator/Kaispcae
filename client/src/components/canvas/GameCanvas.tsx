@@ -410,6 +410,23 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     return () => canvas.removeEventListener('dblclick', onDblClick);
   }, [isBlocked, setPosition]);
 
+  // Mouse wheel / trackpad zoom — same factor-per-notch convention as the
+  // Room Editor's own wheel handler. preventDefault stops the page itself
+  // from scrolling while the cursor is over the canvas (there's nothing
+  // else here to scroll). No pivot/pan compensation needed here (unlike
+  // the Room Editor) since the main view's camera is always centered on
+  // the player, never freely panned.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      useGameStore.getState().zoomMapBy(e.deltaY < 0 ? 1.1 : 1 / 1.1);
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, []);
+
   // ── Sit-in-chair ─────────────────────────────────────────────────────
   // Updated every frame in draw() below (cheap — furniture lists are small)
   // so both the "press SPACE" indicator and the keydown handler read the
