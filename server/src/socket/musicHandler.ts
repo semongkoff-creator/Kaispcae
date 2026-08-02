@@ -1,4 +1,4 @@
-import { Server } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import { SocketEvents, ChatMessage, MusicTrack, MusicSessionState, MUSIC_BOT_SENDER_ID, MUSIC_BOT_NAME, MUSIC_PLAY_COOLDOWN_MS } from '@virtualmeet/shared';
 import { getSocketIdsInZone } from './zoneHandler';
 import { searchYoutube, getVideoDurationSec } from '../lib/youtubeService';
@@ -73,18 +73,33 @@ function sendBotMessage(io: Server, room: string, zoneId: string, text: string, 
   }
 }
 
-function broadcastState(io: Server, room: string, zoneId: string): void {
-  const s = getSession(room, zoneId);
-  const payload: MusicSessionState = {
+function toPayload(s: Session, zoneId: string): MusicSessionState {
+  return {
     zoneId,
     current: s.current
       ? { track: s.current.track, startedAt: s.current.startedAt, pausedAt: s.current.pausedAt, durationSec: s.current.durationSec }
       : null,
     queue: s.queue,
   };
+}
+
+function broadcastState(io: Server, room: string, zoneId: string): void {
+  const s = getSession(room, zoneId);
+  const payload = toPayload(s, zoneId);
   for (const socketId of getSocketIdsInZone(room, zoneId)) {
     io.to(socketId).emit(SocketEvents.MUSIC_STATE, payload);
   }
+}
+
+// Pushes the zone's current Music Bot state (if any) to a single socket —
+// called from zoneHandler.ts the moment ZONE_ENTER is handled, so a client
+// walking into a zone where a track is already playing gets it immediately
+// (headless MusicPlayerWidget picks it up and starts playing on its own, no
+// click/popup needed) instead of waiting for the next !play/!skip/etc to
+// happen to trigger a broadcast.
+export function sendMusicStateToSocket(socket: Socket, room: string, zoneId: string): void {
+  const s = getSession(room, zoneId);
+  socket.emit(SocketEvents.MUSIC_STATE, toPayload(s, zoneId));
 }
 
 // A track with no resolvable duration (lookup failed/unconfigured) still

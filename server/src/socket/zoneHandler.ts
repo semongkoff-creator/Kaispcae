@@ -1,6 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { SocketEvents } from '@virtualmeet/shared';
 import { mayEnterZone, isZoneLocked, isSealedIn } from './zoneLock';
+import { sendMusicStateToSocket } from './musicHandler';
 
 // Actual A/V zone restriction is computed client-side (see useProximity.ts —
 // every client already knows every player's position and the room's zones,
@@ -55,6 +56,9 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
     }
     socketZone.set(socket.id, { room: currentRoom, zoneId });
     socket.to(currentRoom).emit(SocketEvents.ZONE_ENTER, { playerId: socket.id, zoneId });
+    // Fitur 2 correction — a Music Bot track already playing in this zone
+    // must start for the joining socket right away, with no click/popup.
+    sendMusicStateToSocket(socket, currentRoom, zoneId);
   });
 
   socket.on(SocketEvents.ZONE_EXIT, (zoneId: string) => {

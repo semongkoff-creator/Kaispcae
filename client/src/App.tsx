@@ -354,14 +354,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const pushBackInside = useCallback((zoneId: string) => {
     const z = zones.find((x) => x.id === zoneId);
     if (!z) return;
-    const TILE = 32;
     const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
     const setLocal = useGameStore.getState().setLocalPlayer;
     const p = useGameStore.getState().localPlayer;
     setLocal({
       ...p,
-      x: clamp(p.x, (z.x + 0.5) * TILE, (z.x + z.width - 0.5) * TILE),
-      y: clamp(p.y, (z.y + 0.5) * TILE, (z.y + z.height - 0.5) * TILE),
+      x: clamp(p.x, (z.x + 0.5) * TILE_SIZE, (z.x + z.width - 0.5) * TILE_SIZE),
+      y: clamp(p.y, (z.y + 0.5) * TILE_SIZE, (z.y + z.height - 0.5) * TILE_SIZE),
       isMoving: false,
     });
   }, [zones]);
