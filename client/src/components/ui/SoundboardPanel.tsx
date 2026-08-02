@@ -12,7 +12,7 @@ import {
   SpeakerFill,
   CloudUploadFill,
 } from 'react-bootstrap-icons';
-import { SoundboardSoundData, SOUNDBOARD_DEFAULT_SOUNDS, SOUNDBOARD_MAX_DURATION_MS, SOUNDBOARD_MAX_FILE_BYTES } from '@virtualmeet/shared';
+import { SoundboardSoundData, SOUNDBOARD_DEFAULT_SOUNDS, SOUNDBOARD_MAX_DURATION_MS, SOUNDBOARD_MAX_FILE_BYTES, hasFeatureAccess } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { api, ApiError } from '@/services/api';
 
@@ -68,6 +68,12 @@ interface SoundboardPanelProps {
 export function SoundboardPanel({ roomSlug, emitSoundboardPlay, open, onToggle, onClose }: SoundboardPanelProps) {
   const customSounds = useGameStore((s) => s.soundboardSounds);
   const addSoundboardSound = useGameStore((s) => s.addSoundboardSound);
+  const localRole = useGameStore((s) => s.localRole);
+  // Uploading a new custom sound is admin+ (see shared/permissions.ts's
+  // 'soundboard:upload') — hidden entirely, not disabled, same convention as
+  // ParticipantPanel's onKick/onSummon: a member below admin never sees an
+  // affordance for an action they can't take.
+  const canUpload = hasFeatureAccess(localRole, 'soundboard:upload');
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -173,29 +179,31 @@ export function SoundboardPanel({ roomSlug, emitSoundboardPlay, open, onToggle, 
             </div>
           </div>
 
-          <div className="p-3 border-t border-purple-100 dark:border-gray-700">
-            {error && <p className="text-red-500 text-[11px] mb-2">{error}</p>}
-            <button
-              onClick={() => inputRef.current?.click()}
-              disabled={uploading}
-              className="w-full flex items-center justify-center gap-2 text-xs font-medium text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-gray-800 hover:bg-purple-100 dark:hover:bg-gray-700 rounded-lg py-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <CloudUploadFill size={13} />
-              {uploading ? 'Mengunggah…' : 'Upload Sound'}
-            </button>
-            <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-1.5 text-center">mp3/ogg/wav · maks {SOUNDBOARD_MAX_DURATION_MS / 1000} detik</p>
-            <input
-              ref={inputRef}
-              type="file"
-              accept=".mp3,.ogg,.wav,audio/mpeg,audio/ogg,audio/wav"
-              hidden
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void handleFile(f);
-                e.target.value = '';
-              }}
-            />
-          </div>
+          {canUpload && (
+            <div className="p-3 border-t border-purple-100 dark:border-gray-700">
+              {error && <p className="text-red-500 text-[11px] mb-2">{error}</p>}
+              <button
+                onClick={() => inputRef.current?.click()}
+                disabled={uploading}
+                className="w-full flex items-center justify-center gap-2 text-xs font-medium text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-gray-800 hover:bg-purple-100 dark:hover:bg-gray-700 rounded-lg py-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <CloudUploadFill size={13} />
+                {uploading ? 'Mengunggah…' : 'Upload Sound'}
+              </button>
+              <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-1.5 text-center">mp3/ogg/wav · maks {SOUNDBOARD_MAX_DURATION_MS / 1000} detik</p>
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".mp3,.ogg,.wav,audio/mpeg,audio/ogg,audio/wav"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void handleFile(f);
+                  e.target.value = '';
+                }}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>

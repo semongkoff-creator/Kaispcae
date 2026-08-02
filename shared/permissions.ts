@@ -81,6 +81,11 @@ export const FEATURE_MIN_ROLE = {
   // no new non-admin can enter (people already inside stay). In-memory only
   // (see roomHandler.ts's RoomAdminState.locked), resets on server restart.
   'room:lock': 'admin',
+  // Soundboard — uploading a NEW custom sound is admin+ (keeps the shared
+  // panel from being polluted by anyone who walks in); LISTENING and PLAYING
+  // any sound already in the panel (default or custom) has no gate at all —
+  // every real member can do that, same as sending a chat message.
+  'soundboard:upload': 'admin',
 } as const satisfies Record<string, Role>;
 
 export type FeatureKey = keyof typeof FEATURE_MIN_ROLE;

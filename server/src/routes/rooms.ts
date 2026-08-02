@@ -386,11 +386,13 @@ rooms.delete('/rooms/:slug/editor/media/:id', authenticateToken, async (req: Aut
   } catch (err) { console.error('[rooms] editor media delete error:', err); return res.status(500).json({ error: 'Failed' }); }
 });
 
-// Soundboard — unlike editor/media above, this is NOT admin-gated: any
-// approved member of the room can upload a custom sound (canEnterRoom is the
-// same "may this user even be in this room" check the socket join path
-// uses — resolveRoomRole would wrongly default a total stranger to
-// 'member', it only escalates roles for people already established here).
+// Soundboard — LISTING is open to any approved member (canEnterRoom, same
+// "may this user even be in this room" check the socket join path uses).
+// UPLOADING a new custom sound is admin+ (see shared/permissions.ts's
+// 'soundboard:upload') so the shared panel doesn't get polluted by anyone
+// who merely walked in — playing an EXISTING sound (default or custom) has
+// no gate at all, that's still every member (see roomHandler.ts's
+// SOUNDBOARD_PLAY handler).
 // Reuses uploads.ts's own disk storage (own multer instance here purely for
 // the audio-only fileFilter + much smaller size cap) and its existing
 // GET /uploads/:filename to serve the file back — no new serving route.
@@ -429,6 +431,11 @@ rooms.post('/rooms/:slug/soundboard', authenticateToken, soundboardUpload.single
     if (!(await canEnterRoom(prisma, room, req.userId!))) {
       fs.unlink(req.file.path, () => {});
       return res.status(403).json({ error: 'Not a member of this room' });
+    }
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    if (!hasFeatureAccess(role, 'soundboard:upload')) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(403).json({ error: 'Hanya admin yang bisa menambah suara custom.' });
     }
     // durationMs is reported by the CLIENT (from the browser's own
     // HTMLAudioElement.duration, checked before upload even starts — see
