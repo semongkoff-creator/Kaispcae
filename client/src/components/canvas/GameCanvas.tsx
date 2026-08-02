@@ -98,6 +98,11 @@ interface GameCanvasProps {
   // the Furniture by id (already has the full furniture list) to read its
   // interactiveType/interactiveConfig and show the right modal.
   onInteractiveTrigger: (furnitureId: string) => void;
+  // ZEP-style door password — fires once per approach (same auto-trigger/
+  // re-arm pattern as onInteractiveTrigger's 'automatic' pieces above) when
+  // the local player gets adjacent to a password-protected door they
+  // haven't unlocked yet this session.
+  onDoorPasswordTrigger: (x: number, y: number) => void;
 }
 
 const MEDIA_ICON: Record<string, string> = { image: '🖼️', youtube: '▶️', whiteboard: '📝', file: '📎', website: '🔗', bgm: '🎵' };
@@ -178,7 +183,7 @@ function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: numb
   return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, onMediaOpen, onInteractiveTrigger }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, onMediaOpen, onInteractiveTrigger, onDoorPasswordTrigger }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -191,6 +196,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const emitNudgeRef = useRef(emitNudge); emitNudgeRef.current = emitNudge;
   const onMediaOpenRef = useRef(onMediaOpen); onMediaOpenRef.current = onMediaOpen;
   const onInteractiveTriggerRef = useRef(onInteractiveTrigger); onInteractiveTriggerRef.current = onInteractiveTrigger;
+  const onDoorPasswordTriggerRef = useRef(onDoorPasswordTrigger); onDoorPasswordTriggerRef.current = onDoorPasswordTrigger;
   const emitSitRef = useRef(emitSit); emitSitRef.current = emitSit;
   const emitFollowUnfollowRef = useRef(emitFollowUnfollow); emitFollowUnfollowRef.current = emitFollowUnfollow;
 
@@ -218,6 +224,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // re-render GameCanvas — which read as "the jump button does nothing at
   // all" whenever the presser (or anyone visible) wasn't already moving.
   const jumpingPlayers = useGameStore((s) => s.jumpingPlayers);
+  // ZEP-style door password — reactive for the same reason as the others
+  // above: solving one must immediately unblock movement/stop re-prompting,
+  // which the collision check (running every frame during active movement)
+  // needs read fresh, not stale until an unrelated re-render.
+  const unlockedDoors = useGameStore((s) => s.unlockedDoors);
 
   const tilesRef = useRef(tiles);
   const themeRef = useRef(theme);
@@ -233,6 +244,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const momentaryRevealsRef = useRef(useGameStore.getState().momentaryReveals);
   const emotesRef = useRef(useGameStore.getState().emoteEvents);
   const jumpingPlayersRef = useRef(jumpingPlayers);
+  const unlockedDoorsRef = useRef(unlockedDoors);
+  // Re-arm the auto-trigger on leaving/re-entering range, same as
+  // autoTriggeredIdsRef below for 'automatic' Interactive Objects.
+  const doorAutoTriggeredRef = useRef(new Set<string>());
   const nudgedPlayersRef = useRef(nudgedPlayers);
   const nudgerPlayersRef = useRef(nudgerPlayers);
   const zones = useGameStore((s) => s.zones);
@@ -275,6 +290,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     momentaryRevealsRef.current = useGameStore.getState().momentaryReveals;
     emotesRef.current = useGameStore.getState().emoteEvents;
     jumpingPlayersRef.current = jumpingPlayers;
+    unlockedDoorsRef.current = unlockedDoors;
     nudgedPlayersRef.current = nudgedPlayers;
     nudgerPlayersRef.current = nudgerPlayers;
     zonesRef.current = zones;
@@ -312,7 +328,17 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const isBlocked = useCallback((tileX: number, tileY: number) => {
     const t = tilesRef.current;
     if (t.length === 0) return false; // room state not loaded yet — don't block movement
-    return isTileBlocked(t, tileX, tileY);
+    if (isTileBlocked(t, tileX, tileY)) return true;
+    // ZEP-style door password — client-side prediction only (the server
+    // independently enforces the same thing authoritatively, see
+    // movementHandler.ts's isBlockedForSocket). A door is never in
+    // BLOCKED_TILES itself, so this is the only place that treats an
+    // unsolved one as impassable.
+    const tile = t[tileY]?.[tileX];
+    if (tile?.type === 'door' && tile.doorPasswordEnabled) {
+      return !unlockedDoorsRef.current.has(`${tileX},${tileY}`);
+    }
+    return false;
   }, []);
 
   // Bug 7 — feeds useMovement's door-hitbox leniency (see its wouldCollide).
@@ -720,6 +746,27 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       // Drop ids that fell out of range, so re-entering fires 'automatic' again.
       for (const id of autoTriggeredIdsRef.current) if (!stillInRange.has(id)) autoTriggeredIdsRef.current.delete(id);
       nearbyInteractiveRef.current = bestInteractive;
+
+      // ZEP-style door password — same auto-trigger/re-arm shape as
+      // 'automatic' Interactive Objects above, checked over the 3x3
+      // neighborhood (a door is a single tile, not a scannable list like
+      // furniture) instead of iterating the whole map every frame.
+      const stillNearDoor = new Set<string>();
+      const doorTiles = tilesRef.current;
+      for (let ty = baseTileY - 1; ty <= baseTileY + 1; ty++) {
+        for (let tx = baseTileX - 1; tx <= baseTileX + 1; tx++) {
+          const dt = doorTiles[ty]?.[tx];
+          if (dt?.type !== 'door' || !dt.doorPasswordEnabled) continue;
+          const doorKey = `${tx},${ty}`;
+          if (unlockedDoorsRef.current.has(doorKey)) continue;
+          stillNearDoor.add(doorKey);
+          if (!doorAutoTriggeredRef.current.has(doorKey)) {
+            doorAutoTriggeredRef.current.add(doorKey);
+            onDoorPasswordTriggerRef.current(tx, ty);
+          }
+        }
+      }
+      for (const k of doorAutoTriggeredRef.current) if (!stillNearDoor.has(k)) doorAutoTriggeredRef.current.delete(k);
 
       // Potong 6 — nearest YouTube tile within YT_EMBED_RADIUS auto-embeds its
       // player (muted). Toggled via React state only when it changes, so the

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveChoiceResultPayload } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload } from '@virtualmeet/shared';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -310,6 +310,16 @@ export interface GameState {
   setInteractivePasswordResult: (result: InteractivePasswordResultPayload | null) => void;
   interactiveChoiceResult: InteractiveChoiceResultPayload | null;
   setInteractiveChoiceResult: (result: InteractiveChoiceResultPayload | null) => void;
+  // ZEP-style door password — reply to my own INTERACTIVE_DOOR_PASSWORD_CHECK.
+  interactiveDoorPasswordResult: InteractiveDoorPasswordResultPayload | null;
+  setInteractiveDoorPasswordResult: (result: InteractiveDoorPasswordResultPayload | null) => void;
+  // Doors solved THIS session ("x,y" keys) — a correct password result adds
+  // one here so GameCanvas's local collision prediction stops blocking it
+  // and doesn't re-prompt on the next approach. The server independently
+  // tracks the same thing (doorLock.ts) for authoritative movement
+  // validation; this is purely the client's own UI-responsiveness copy.
+  unlockedDoors: Set<string>;
+  unlockDoorClientSide: (x: number, y: number) => void;
 
   // §6 — Add Media. Full list synced from MEDIA_LIST (on join) then kept
   // live via MEDIA_ADDED/MEDIA_REMOVED; whiteboard strokes are mutated
@@ -829,6 +839,15 @@ export const useGameStore = create<GameState>((set, get) => ({
   setInteractivePasswordResult: (result) => set({ interactivePasswordResult: result }),
   interactiveChoiceResult: null,
   setInteractiveChoiceResult: (result) => set({ interactiveChoiceResult: result }),
+  interactiveDoorPasswordResult: null,
+  setInteractiveDoorPasswordResult: (result) => set({ interactiveDoorPasswordResult: result }),
+  unlockedDoors: new Set(),
+  unlockDoorClientSide: (x, y) =>
+    set((state) => {
+      const next = new Set(state.unlockedDoors);
+      next.add(`${x},${y}`);
+      return { unlockedDoors: next };
+    }),
 
   followerUserIds: [],
   setFollowerUserIds: (ids) => set({ followerUserIds: ids }),

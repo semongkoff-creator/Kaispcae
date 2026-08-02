@@ -50,6 +50,17 @@ export interface TileEffect {
   targetX?: number;
   targetY?: number;
   label?: string;
+  // ZEP-style door password — only meaningful for kind === 'door'. Reuses the
+  // Interactive Object password prompt's field-naming/behavior (see
+  // InteractiveObjectConfig's own password fields) but is stored per-tile
+  // instead of per-furniture, since a door is a TileEffect, not a Furniture
+  // piece. doorPassword must NEVER reach a normal player's client — see
+  // redactDoorPasswords (server/src/lib/redactFurniture.ts), mirroring
+  // redactInteractiveSecrets for furniture passwords.
+  doorPasswordEnabled?: boolean;
+  doorPassword?: string;
+  doorPasswordDescription?: string;
+  doorFailureMessage?: string;
 }
 
 // A rectangular region effect. Legacy zones convert to 'privateArea' (the audio
@@ -129,7 +140,13 @@ export function legacyToLayerData(tiles: RoomTile[][], furniture: Furniture[], z
       wr.push(type === 'wall');
       if (type === 'spawn') tileEffects.push({ x, y, kind: 'startingPoint' });
       else if (type === 'portal') tileEffects.push({ x, y, kind: 'portal', targetSlug: t?.portalTarget, targetX: t?.portalTargetX, targetY: t?.portalTargetY, label: t?.portalLabel });
-      else if (type === 'door') tileEffects.push({ x, y, kind: 'door' });
+      else if (type === 'door') tileEffects.push({
+        x, y, kind: 'door',
+        doorPasswordEnabled: t?.doorPasswordEnabled,
+        doorPassword: t?.doorPassword,
+        doorPasswordDescription: t?.doorPasswordDescription,
+        doorFailureMessage: t?.doorFailureMessage,
+      });
       else if (type === 'desk' || type === 'chair' || type === 'blocked') tileEffects.push({ x, y, kind: 'impassable', tileType: type });
       // 'wall' → wall grid; 'floor' → nothing extra.
     }
@@ -195,6 +212,12 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
         if (portalEff.targetX != null) tile.portalTargetX = portalEff.targetX;
         if (portalEff.targetY != null) tile.portalTargetY = portalEff.targetY;
         if (portalEff.label != null) tile.portalLabel = portalEff.label;
+      }
+      if (eff?.kind === 'door') {
+        if (eff.doorPasswordEnabled != null) tile.doorPasswordEnabled = eff.doorPasswordEnabled;
+        if (eff.doorPassword != null) tile.doorPassword = eff.doorPassword;
+        if (eff.doorPasswordDescription != null) tile.doorPasswordDescription = eff.doorPasswordDescription;
+        if (eff.doorFailureMessage != null) tile.doorFailureMessage = eff.doorFailureMessage;
       }
       row.push(tile);
     }

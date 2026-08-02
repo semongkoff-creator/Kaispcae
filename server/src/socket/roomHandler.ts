@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, InteractivePasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerWorkMode, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -11,7 +11,8 @@ import { getPrisma } from '../lib/prisma';
 import { resolveEntry } from '../lib/roomMembership';
 import { logActivity } from '../lib/larkBase';
 import { socketRateLimit } from '../middleware/rateLimit';
-import { redactInteractiveSecrets } from '../lib/redactFurniture';
+import { redactInteractiveSecrets, redactDoorPasswords } from '../lib/redactFurniture';
+import { unlockDoor, clearUnlockedDoorsForRoom } from './doorLock';
 
 const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec per socket
 const canTeleport = socketRateLimit(2); // max 2 teleport requests/sec per socket
@@ -521,7 +522,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       setCachedTiles(room, tiles);
 
       socket.emit(SocketEvents.ROOM_STATE, {
-        ...state, tiles, furniture: redactInteractiveSecrets(savedFurniture || fallback!.furniture), zones: savedZones || fallback!.zones, players: playersWithMeta,
+        ...state, tiles: redactDoorPasswords(tiles), furniture: redactInteractiveSecrets(savedFurniture || fallback!.furniture), zones: savedZones || fallback!.zones, players: playersWithMeta,
         adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId, staffUserIds: Array.from(rs.staffUserIds), theme, template,
         notice: roomNoticeMap.get(room) ?? null,
         locked: !!rs.locked,
@@ -583,6 +584,35 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       });
     } catch (e) {
       console.warn('[room] password check error:', e);
+    }
+  });
+
+  // ZEP-style door password — same verification approach as the furniture
+  // password check above (re-read the room's own stored layerData fresh,
+  // never trust a client-side compare), keyed by tile (x,y) instead of a
+  // furnitureId since a door is a TileEffect, not a Furniture piece. A
+  // correct attempt unlocks the door for the rest of THIS socket's session
+  // (see doorLock.ts) — movementHandler.ts consults that on every move, so
+  // the actual "can walk through now" enforcement lives there, not here.
+  socket.on(SocketEvents.INTERACTIVE_DOOR_PASSWORD_CHECK, async (data: InteractiveDoorPasswordCheckPayload) => {
+    if (!canCheckInteractive(socket.id)) return;
+    const room = currentRoom; if (!room) return;
+    const x = data?.x, y = data?.y, attempt = data?.attempt;
+    if (!Number.isInteger(x) || !Number.isInteger(y) || typeof attempt !== 'string') return;
+    try {
+      const dbRoom = await getPrisma().room.findUnique({ where: { slug: room }, select: { layerData: true } });
+      if (!dbRoom?.layerData) return;
+      const ld = dbRoom.layerData as unknown as LayerData;
+      const eff = ld.tileEffects.find((e) => e.x === x && e.y === y && e.kind === 'door');
+      if (!eff?.doorPasswordEnabled) return;
+      const correct = (eff.doorPassword ?? '') === attempt;
+      if (correct) unlockDoor(socket.id, room, x, y);
+      socket.emit(SocketEvents.INTERACTIVE_DOOR_PASSWORD_RESULT, {
+        x, y, correct,
+        failureMessage: correct ? undefined : (eff.doorFailureMessage || 'Password salah.'),
+      });
+    } catch (e) {
+      console.warn('[room] door password check error:', e);
     }
   });
 
@@ -686,7 +716,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         await getPrisma().room.update({ where: { id: dbRoom.id }, data: { layerData: ld as unknown as object } });
         const derived = layerDataToLegacy(ld);
         setCachedTiles(room, derived.tiles);
-        io.to(room).emit(SocketEvents.ROOM_UPDATED, { tiles: derived.tiles, furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones });
+        io.to(room).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones });
       }
     } catch (e) {
       console.warn('[room] change object error:', e);
@@ -1161,7 +1191,11 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       socket.emit('admin:error', { message: 'Only admins can edit this room' });
       return;
     }
-    socket.to(room).emit(SocketEvents.ROOM_UPDATED, payload);
+    // Door passwords must never reach a normal player — same redaction as
+    // the Room Editor's own save path (redactDoorPasswords), applied only
+    // to what's BROADCAST; the cache below keeps the real payload so
+    // movementHandler.ts's collision check still has the actual password.
+    socket.to(room).emit(SocketEvents.ROOM_UPDATED, { ...payload, tiles: redactDoorPasswords(payload.tiles) });
     // Keep movementHandler.ts's collision cache in sync with whatever the
     // admin just saved — otherwise a wall added/removed in the Room Editor
     // wouldn't take effect for server-side movement validation until the
@@ -1316,6 +1350,9 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
     const rs = getRoomAdmin(room);
     rs.knockAllowlist?.delete(leavingUid);
   }
+  // Same "revoke the instant they leave" rule as the knock allowlist above —
+  // a password door isn't a permanent pass, it's good for this visit only.
+  clearUnlockedDoorsForRoom(socket.id, room);
 
   removePlayer(room, socket.id);
   io.to(room).emit(SocketEvents.PLAYER_LEFT, socket.id);

@@ -113,6 +113,14 @@ export interface RoomTile {
   portalTargetX?: number;
   portalTargetY?: number;
   portalLabel?: string;
+  // ZEP-style door password — only meaningful when type === 'door'. See
+  // TileEffect's own doc comment (shared/mapLayers.ts) for the persisted
+  // shape and redactDoorPasswords for why doorPassword itself never reaches
+  // a normal player's client.
+  doorPasswordEnabled?: boolean;
+  doorPassword?: string;
+  doorPasswordDescription?: string;
+  doorFailureMessage?: string;
 }
 
 // Valid tile types and their visual/semantic meaning. 'portal' and 'spawn'
@@ -387,6 +395,16 @@ export enum SocketEvents {
   // never trusting a client-cached copy) and replies correct/incorrect.
   INTERACTIVE_PASSWORD_CHECK = 'interactive:password_check',
   INTERACTIVE_PASSWORD_RESULT = 'interactive:password_result',
+  // ZEP-style door password — same request/reply shape and server-side
+  // verification approach as the furniture password pair above (never trust
+  // a client compare, re-read the room's own stored data fresh, redact the
+  // real value from every broadcast), but keyed by tile (x,y) instead of a
+  // furnitureId since a door is a TileEffect, not a Furniture piece. A
+  // correct attempt also unlocks that door for the rest of THIS socket's
+  // session (see server/src/socket/doorLock.ts) — reflected here only as
+  // "movement past that tile now succeeds", not a further event.
+  INTERACTIVE_DOOR_PASSWORD_CHECK = 'interactive:door_password_check',
+  INTERACTIVE_DOOR_PASSWORD_RESULT = 'interactive:door_password_result',
   // Fitur 15B — same request/reply shape as the password pair above, for
   // Multiple choice pop-up's isCorrect flags.
   INTERACTIVE_CHOICE_CHECK = 'interactive:choice_check',
@@ -949,6 +967,18 @@ export interface InteractivePasswordResultPayload {
   correct: boolean;
   // Only one of these is meaningful, matching `correct`.
   correctText?: string;
+  failureMessage?: string;
+}
+
+export interface InteractiveDoorPasswordCheckPayload {
+  x: number;
+  y: number;
+  attempt: string;
+}
+export interface InteractiveDoorPasswordResultPayload {
+  x: number;
+  y: number;
+  correct: boolean;
   failureMessage?: string;
 }
 

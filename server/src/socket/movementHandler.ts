@@ -1,6 +1,7 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, JumpEvent, NudgeEvent } from '@virtualmeet/shared';
+import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, RoomTile, JumpEvent, NudgeEvent } from '@virtualmeet/shared';
 import { updatePlayerPosition, setPlayerStopped, getCachedTiles } from '../store/roomStore';
+import { isDoorUnlocked, clearUnlockedDoors } from './doorLock';
 
 // Rate limiting: max 20 updates per second per player
 const rateLimitMap = new Map<string, number>();
@@ -11,6 +12,22 @@ interface MoveData {
   y: number;
   direction: string;
   isRunning?: boolean;
+}
+
+// ZEP-style door password — server-authoritative half of the gate (the
+// client also predicts this locally for responsive collision, see
+// GameCanvas.tsx's isBlocked). A password-protected door this socket hasn't
+// solved yet is treated exactly like any other blocked tile: the move is
+// silently dropped, same as walking into a wall. Not in BLOCKED_TILES itself
+// since that's a static set keyed only on TileType — this needs per-socket,
+// per-room session state isTileBlocked has no way to see.
+function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string, tileX: number, tileY: number): boolean {
+  if (isTileBlocked(tiles, tileX, tileY)) return true;
+  const tile = tiles[tileY]?.[tileX];
+  if (tile?.type === 'door' && tile.doorPasswordEnabled && tile.doorPassword) {
+    return !isDoorUnlocked(socketId, room, tileX, tileY);
+  }
+  return false;
 }
 
 export function registerMovementHandlers(io: Server, socket: Socket) {
@@ -43,7 +60,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
       if (tiles) {
         const tileX = Math.floor(clampedX / TILE_SIZE);
         const tileY = Math.floor(clampedY / TILE_SIZE);
-        if (isTileBlocked(tiles, tileX, tileY)) return;
+        if (isBlockedForSocket(tiles, gameRoom, socket.id, tileX, tileY)) return;
       }
 
       socket.to(gameRoom).emit(SocketEvents.PLAYER_MOVED, {
@@ -71,7 +88,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     if (tiles) {
       const tileX = Math.floor(clampedX / TILE_SIZE);
       const tileY = Math.floor(clampedY / TILE_SIZE);
-      if (isTileBlocked(tiles, tileX, tileY)) return; // refuse teleport into a wall/desk
+      if (isBlockedForSocket(tiles, gameRoom, socket.id, tileX, tileY)) return; // refuse teleport into a wall/desk/locked door
     }
     const direction = (data.direction as MoveData['direction']) || 'down';
     socket.to(gameRoom).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: clampedX, y: clampedY, direction });
@@ -117,5 +134,6 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
   // Clean up rate limit map on disconnect
   socket.on('disconnect', () => {
     rateLimitMap.delete(socket.id);
+    clearUnlockedDoors(socket.id);
   });
 }

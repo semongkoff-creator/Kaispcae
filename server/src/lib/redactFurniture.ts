@@ -1,4 +1,4 @@
-import { Furniture } from '@virtualmeet/shared';
+import { Furniture, RoomTile } from '@virtualmeet/shared';
 
 // Fitur 15B — two Interactive Object types carry a real "secret" a normal
 // player must never see in their own client's data (both password and
@@ -27,4 +27,21 @@ export function redactInteractiveSecrets(furniture: Furniture[]): Furniture[] {
     }
     return f;
   });
+}
+
+// ZEP-style door password — same reasoning as redactInteractiveSecrets above,
+// applied to RoomTile instead of Furniture: doorPasswordEnabled/description/
+// failureMessage stay visible (the client needs them to know a gate exists
+// and render the prompt), only the real doorPassword is stripped. Every
+// tiles array handed to a normal player (ROOM_STATE, ROOM_UPDATED) must go
+// through this first — verification is INTERACTIVE_DOOR_PASSWORD_CHECK in
+// roomHandler.ts, which re-reads the room's own stored layerData fresh.
+export function redactDoorPasswords(tiles: RoomTile[][]): RoomTile[][] {
+  return tiles.map((row) => row.map((t) => {
+    if (t.type === 'door' && t.doorPassword != null) {
+      const { doorPassword: _drop, ...rest } = t;
+      return rest;
+    }
+    return t;
+  }));
 }

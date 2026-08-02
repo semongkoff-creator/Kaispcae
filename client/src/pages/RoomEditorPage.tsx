@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowCounterclockwise, ArrowClockwise } from 'react-bootstrap-icons';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, RoomTile, Furniture, Zone, RoomTheme,
-  LayerData, legacyToLayerData, CustomAssetEntry, InteractiveObjectType, TriggerMethod,
+  LayerData, TileEffect, legacyToLayerData, CustomAssetEntry, InteractiveObjectType, TriggerMethod,
 } from '@virtualmeet/shared';
 import { api, ApiError } from '@/services/api';
 import { useEditorStore, EDITOR_LAYERS, EDITOR_TOOLS, EditorLayer, EditorTool } from '@/stores/editorStore';
@@ -23,12 +23,13 @@ type LoadError = 'auth' | 'forbidden' | 'notfound' | 'generic';
 const OBJ_CATEGORIES: { key: 'furniture' | 'decor' | 'electronics'; label: string }[] = [
   { key: 'furniture', label: 'Furniture' }, { key: 'decor', label: 'Decor' }, { key: 'electronics', label: 'Electronics' },
 ];
-const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal'; label: string; color: string; hint: string }[] = [
+const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal' | 'door'; label: string; color: string; hint: string }[] = [
   { id: 'startingPoint', label: 'Starting point', color: 'rgba(16,185,129,0.9)', hint: 'Stamp per tile = titik spawn (bisa banyak; pemain muncul di salah satunya).' },
   { id: 'impassable', label: 'Impassable', color: 'rgba(239,68,68,0.85)', hint: 'Stamp per tile = penghalang tak terlihat (memblok gerak, tanpa tekstur).' },
   { id: 'mapLocation', label: 'Map location', color: 'rgba(192,132,252,0.95)', hint: 'Stamp: drag area lalu beri nama → pill label muncul di game. Bisa pilih kedap suara atau tidak (default: tidak, jarak biasa).' },
   { id: 'privateArea', label: 'Private area', color: 'rgba(96,165,250,0.95)', hint: 'Stamp: drag area + Area ID. Area ber-ID sama = satu grup audio (walau terpisah). Bisa pilih kedap suara atau tidak (default: kedap suara).' },
   { id: 'portal', label: 'Portal', color: 'rgba(124,58,237,0.95)', hint: 'Stamp klik tile portal → pilih tujuan room lain, atau klik titik tujuan di room ini. Pemain tekan F untuk pindah.' },
+  { id: 'door', label: 'Door', color: 'rgba(212,160,86,0.9)', hint: 'Stamp per tile = pintu yang bisa dilewati. Pilih tool Select lalu klik pintu untuk atur Password (opsional, mirip ZEP).' },
 ];
 
 interface MediaObj { id: string; type: string; x: number; y: number; payload: { url?: string; videoId?: string; websiteUrl?: string; audioUrl?: string; areaW?: number; areaH?: number; name?: string } }
@@ -481,6 +482,66 @@ function ObjectSettingsPanel({
   );
 }
 
+// ZEP-style door password — shown instead of the Tile Effects list while an
+// existing door tile is selected (Select tool + door effect active), same
+// "settings panel replaces the palette" pattern as ObjectSettingsPanel above.
+function DoorSettingsPanel({
+  tile, doorEffect, onBack,
+}: {
+  tile: { x: number; y: number };
+  doorEffect: TileEffect | null;
+  onBack: () => void;
+}) {
+  if (!doorEffect) return null;
+  const patch = (p: Partial<Pick<TileEffect, 'doorPasswordEnabled' | 'doorPassword' | 'doorPasswordDescription' | 'doorFailureMessage'>>) =>
+    useEditorStore.getState().updateDoorTileEffect(tile.x, tile.y, p);
+  const enabled = !!doorEffect.doorPasswordEnabled;
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <button onClick={onBack} title="Kembali ke daftar efek" className="w-6 h-6 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer text-white/70">←</button>
+        <p className="text-xs uppercase tracking-wider text-white/40">Door Settings</p>
+      </div>
+
+      <label className="flex items-center gap-2 text-xs text-white/70 mb-3 cursor-pointer">
+        <input type="checkbox" checked={enabled} onChange={(e) => patch({ doorPasswordEnabled: e.target.checked })} />
+        Enable password
+      </label>
+
+      {enabled && (
+        <>
+          <p className="text-[11px] text-white/50 mb-1.5">Password Description</p>
+          <input
+            type="text" value={doorEffect.doorPasswordDescription ?? ''}
+            onChange={(e) => patch({ doorPasswordDescription: e.target.value })}
+            placeholder="Ditampilkan di prompt (opsional)"
+            className="w-full mb-1.5 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
+          />
+          <p className="text-[11px] text-white/50 mb-1.5">Password</p>
+          {/* Same guarantee as the furniture password field — this value
+              only ever reaches the Room Editor (admin-gated GET
+              /editor-data); every other client gets it stripped
+              (redactDoorPasswords, server-side). */}
+          <input
+            type="text" value={doorEffect.doorPassword ?? ''}
+            onChange={(e) => patch({ doorPassword: e.target.value })}
+            placeholder="Please enter the password"
+            className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
+          />
+          <p className="text-[11px] text-white/50 mb-1.5">Pesan gagal (opsional)</p>
+          <input
+            type="text" value={doorEffect.doorFailureMessage ?? ''}
+            onChange={(e) => patch({ doorFailureMessage: e.target.value })}
+            placeholder="Password salah."
+            className="w-full mb-1.5 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
 function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomTheme, layer: EditorLayer) {
   if (layer === 'floor') {
     for (let y = 0; y < ld.height; y++) for (let x = 0; x < ld.width; x++)
@@ -620,6 +681,12 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   };
   const [portalHint, setPortalHint] = useState(false); // awaiting internal-portal destination click
   const portalOriginRef = useRef<{ x: number; y: number } | null>(null);
+  // ZEP-style door password — which existing door tile's settings panel is
+  // open (Select tool + door effect, clicked on an existing door). Local
+  // state (not the editor store) since it's pure UI navigation, same as
+  // portalHint above — the actual password fields live in the doc via
+  // updateDoorTileEffect.
+  const [selectedDoorTile, setSelectedDoorTile] = useState<{ x: number; y: number } | null>(null);
   // Bug 14 — a native window.confirm/prompt opened SYNCHRONOUSLY from a
   // mousedown/mouseup handler blocks the main thread, but the OS keeps
   // delivering the physical second click of a double-click gesture straight
@@ -889,6 +956,14 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       if (eff === 'startingPoint' || eff === 'impassable') {
         if (s.activeTool === 'stamp') { s.beginStroke(); s.stampEffectAt(t.x, t.y); dragRef.current = { mode: 'effPaint' }; }
         else if (s.activeTool === 'eraser') { s.beginStroke(); s.eraseEffectAt(t.x, t.y); dragRef.current = { mode: 'effErase' }; }
+      } else if (eff === 'door') {
+        if (s.activeTool === 'stamp') { s.beginStroke(); s.stampEffectAt(t.x, t.y); dragRef.current = { mode: 'effPaint' }; }
+        else if (s.activeTool === 'eraser') {
+          s.beginStroke(); s.eraseEffectAt(t.x, t.y); dragRef.current = { mode: 'effErase' };
+          setSelectedDoorTile((prev) => (prev && prev.x === t.x && prev.y === t.y) ? null : prev);
+        } else if (s.activeTool === 'select') {
+          setSelectedDoorTile(s.doorEffectAt(t.x, t.y) ? { x: t.x, y: t.y } : null);
+        }
       } else if (eff === 'portal') {
         if (s.activeTool === 'eraser') { s.eraseEffectAt(t.x, t.y); return; }
         if (s.activeTool !== 'stamp') return;
@@ -1240,7 +1315,16 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             </>
           )}
 
-          {activeLayer === 'effects' && (
+          {activeLayer === 'effects' && selectedDoorTile && (
+            <DoorSettingsPanel
+              key={`${selectedDoorTile.x},${selectedDoorTile.y}`}
+              tile={selectedDoorTile}
+              doorEffect={useEditorStore.getState().doorEffectAt(selectedDoorTile.x, selectedDoorTile.y)}
+              onBack={() => setSelectedDoorTile(null)}
+            />
+          )}
+
+          {activeLayer === 'effects' && !selectedDoorTile && (
             <>
               <p className="text-xs uppercase tracking-wider text-white/40 mb-2">Tile Effects</p>
               <div className="space-y-1.5">

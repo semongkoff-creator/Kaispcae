@@ -110,7 +110,7 @@ const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', 
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck } = useSocket(authDisplayName, roomSlug, authUserId);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -533,6 +533,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // Fitur 15B — Interactive Object trigger (Press F / automatic). Holds the
   // Furniture id; the modal itself resolves the piece from `furniture` below.
   const [triggeredInteractiveId, setTriggeredInteractiveId] = useState<string | null>(null);
+  // ZEP-style door password — same trigger shape as above, but a door is a
+  // tile (x,y), not a Furniture id.
+  const [doorPasswordTile, setDoorPasswordTile] = useState<{ x: number; y: number } | null>(null);
   const localRole = useGameStore((s) => s.localRole);
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -776,6 +779,43 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const viewingMedia = viewingMediaId ? mediaObjects.find((m) => m.id === viewingMediaId) ?? null : null;
   const canDeleteViewingMedia = !!viewingMedia && (viewingMedia.createdBy === localUserId || isAdmin);
   const triggeredInteractive = triggeredInteractiveId ? furniture.find((f) => f.id === triggeredInteractiveId) ?? null : null;
+  const interactiveDoorPasswordResult = useGameStore((s) => s.interactiveDoorPasswordResult);
+
+  // ZEP-style door password — reuses InteractiveObjectModal's 'password'
+  // branch verbatim by adapting the door tile into the same Furniture shape
+  // the modal already knows how to render (id/name/interactiveType/
+  // interactiveConfig are the only fields it reads). doorPassword itself was
+  // already stripped from `tiles` server-side (redactDoorPasswords) — this
+  // adapter never has the real value to leak.
+  const doorPasswordFurniture = doorPasswordTile
+    ? (() => {
+        const t = tiles[doorPasswordTile.y]?.[doorPasswordTile.x];
+        if (!t || t.type !== 'door') return null;
+        return {
+          id: `door:${doorPasswordTile.x}:${doorPasswordTile.y}`,
+          x: doorPasswordTile.x, y: doorPasswordTile.y, paletteId: '', tilesW: 1, tilesH: 1,
+          name: 'Pintu',
+          interactiveType: 'password' as const,
+          interactiveConfig: {
+            passwordDescription: t.doorPasswordDescription,
+            correctText: 'Password benar — silakan lewat.',
+            failureMessage: t.doorFailureMessage,
+          },
+        };
+      })()
+    : null;
+  // Adapts interactiveDoorPasswordResult (keyed by x,y) into the
+  // furnitureId-keyed shape InteractiveObjectModal expects, so the SAME
+  // modal component works for both without any changes to it.
+  const doorPasswordResultAdapted = (doorPasswordTile && interactiveDoorPasswordResult
+    && interactiveDoorPasswordResult.x === doorPasswordTile.x && interactiveDoorPasswordResult.y === doorPasswordTile.y)
+    ? {
+        furnitureId: `door:${doorPasswordTile.x}:${doorPasswordTile.y}`,
+        correct: interactiveDoorPasswordResult.correct,
+        correctText: doorPasswordFurniture?.interactiveConfig.correctText,
+        failureMessage: interactiveDoorPasswordResult.failureMessage,
+      }
+    : null;
 
   // Fitur 15B — 'website'/'website_tab' and 'api_call' have no modal of
   // their own (ZEP's own behavior for both website types is just opening a
@@ -861,6 +901,21 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
   const interactivePasswordResult = useGameStore((s) => s.interactivePasswordResult);
   const interactiveChoiceResult = useGameStore((s) => s.interactiveChoiceResult);
+
+  // ZEP-style door password — fires once per approach (GameCanvas re-arms on
+  // leaving/re-entering range); ignore a re-trigger for the SAME door while
+  // its modal is already open (e.g. the auto-trigger firing again a frame
+  // later), but do let a genuinely different door replace it.
+  const handleDoorPasswordTrigger = useCallback((x: number, y: number) => {
+    setDoorPasswordTile((prev) => (prev && prev.x === x && prev.y === y) ? prev : { x, y });
+    useGameStore.getState().setInteractiveDoorPasswordResult(null);
+  }, []);
+
+  const handleCheckDoorPassword = useCallback((_furnitureId: string, attempt: string) => {
+    if (!doorPasswordTile) return;
+    useGameStore.getState().setInteractiveDoorPasswordResult(null);
+    emitInteractiveDoorPasswordCheck(doorPasswordTile.x, doorPasswordTile.y, attempt);
+  }, [doorPasswordTile, emitInteractiveDoorPasswordCheck]);
 
   const handleEmoteSelect = useCallback((emote: EmoteType) => {
     const lp = useGameStore.getState().localPlayer;
@@ -996,6 +1051,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         emitTeleportTo={emitTeleportTo}
         onMediaOpen={setViewingMediaId}
         onInteractiveTrigger={handleInteractiveTrigger}
+        onDoorPasswordTrigger={handleDoorPasswordTrigger}
       />
 
       {/* A5 — meeting controls, only while standing inside a meeting-type zone */}
@@ -1337,6 +1393,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           passwordResult={interactivePasswordResult}
           onCheckChoice={handleCheckChoice}
           choiceResult={interactiveChoiceResult}
+        />
+      )}
+
+      {doorPasswordFurniture && (
+        <InteractiveObjectModal
+          furniture={doorPasswordFurniture}
+          onClose={() => { setDoorPasswordTile(null); useGameStore.getState().setInteractiveDoorPasswordResult(null); }}
+          onCheckPassword={handleCheckDoorPassword}
+          passwordResult={doorPasswordResultAdapted}
+          onCheckChoice={() => {}}
+          choiceResult={null}
         />
       )}
 

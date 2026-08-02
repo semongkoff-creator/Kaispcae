@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { LayerData, Furniture, TileEffect, AreaEffect, CustomAssetEntry } from '@virtualmeet/shared';
 
-export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal';
+export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal' | 'door';
 
 // ZEP-style Room Editor state. Potong 0: layers/tools/viewport. Potong 2: floor
 // editing + undo/redo + debounced save. Potong 3: Wall (tile, drives collision),
@@ -134,11 +134,17 @@ interface EditorState {
   // Tile effects (Potong 4).
   selectedEffect: TileEffectKind | null;
   setSelectedEffect: (k: TileEffectKind | null) => void;
-  stampEffectAt: (x: number, y: number) => void; // startingPoint / impassable (per-tile stroke)
+  stampEffectAt: (x: number, y: number) => void; // startingPoint / impassable / door (per-tile stroke)
   eraseEffectAt: (x: number, y: number) => boolean; // removes a per-tile effect; true if one was there
   areaAt: (x: number, y: number) => AreaEffect | null;
   addArea: (effect: 'mapLocation' | 'privateArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean) => void;
   removeAreaAt: (x: number, y: number) => void;
+  // ZEP-style door password — patches the password fields on an EXISTING
+  // door TileEffect (the Door Settings panel, shown while the door effect is
+  // selected and the Select tool clicks an existing door tile). One history
+  // entry per call, same as updateSelectedObject for furniture.
+  doorEffectAt: (x: number, y: number) => TileEffect | null;
+  updateDoorTileEffect: (x: number, y: number, patch: Partial<Pick<TileEffect, 'doorPasswordEnabled' | 'doorPassword' | 'doorPasswordDescription' | 'doorFailureMessage'>>) => void;
 
   // Copy tool (Potong 7). copyRegion captures the selection into the clipboard;
   // pasteAt stamps it with the clicked tile as the top-left corner. Out-of-map
@@ -377,11 +383,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     stampEffectAt: (x, y) => {
       const d = get().doc; const eff = get().selectedEffect;
-      if (!d || (eff !== 'startingPoint' && eff !== 'impassable')) return;
+      if (!d || (eff !== 'startingPoint' && eff !== 'impassable' && eff !== 'door')) return;
       const existing = d.tileEffects.find((e) => e.x === x && e.y === y);
       if (existing && existing.kind === eff) return; // no change
       d.tileEffects = d.tileEffects.filter((e) => !(e.x === x && e.y === y));
-      d.tileEffects.push(eff === 'impassable' ? { x, y, kind: 'impassable' } : { x, y, kind: 'startingPoint' });
+      d.tileEffects.push(
+        eff === 'impassable' ? { x, y, kind: 'impassable' }
+        : eff === 'door' ? { x, y, kind: 'door' }
+        : { x, y, kind: 'startingPoint' },
+      );
       effectsDirty = true; strokeChanged = true;
     },
     eraseEffectAt: (x, y) => {
@@ -389,6 +399,19 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (!d.tileEffects.some((e) => e.x === x && e.y === y)) return false;
       d.tileEffects = d.tileEffects.filter((e) => !(e.x === x && e.y === y));
       effectsDirty = true; strokeChanged = true; return true;
+    },
+    doorEffectAt: (x, y) => {
+      const d = get().doc; if (!d) return null;
+      return d.tileEffects.find((e) => e.x === x && e.y === y && e.kind === 'door') ?? null;
+    },
+    updateDoorTileEffect: (x, y, patch) => {
+      const d = get().doc; if (!d) return;
+      const idx = d.tileEffects.findIndex((e) => e.x === x && e.y === y && e.kind === 'door');
+      if (idx < 0) return;
+      const snap = snapshot();
+      d.tileEffects[idx] = { ...d.tileEffects[idx], ...patch };
+      effectsDirty = true;
+      pushHistory(snap); commit();
     },
     areaAt: (x, y) => {
       const areas = get().doc?.areas; if (!areas) return null;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
@@ -310,6 +310,15 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // Fitur 15B — reply to MY OWN INTERACTIVE_CHOICE_CHECK.
     socket.on(SocketEvents.INTERACTIVE_CHOICE_RESULT, (data: InteractiveChoiceResultPayload) => {
       useGameStore.getState().setInteractiveChoiceResult(data);
+    });
+
+    // ZEP-style door password — reply to MY OWN INTERACTIVE_DOOR_PASSWORD_CHECK.
+    // A correct result also unlocks the door client-side (GameCanvas's local
+    // collision prediction) — the server independently did the same for its
+    // own authoritative check (see doorLock.ts).
+    socket.on(SocketEvents.INTERACTIVE_DOOR_PASSWORD_RESULT, (data: InteractiveDoorPasswordResultPayload) => {
+      useGameStore.getState().setInteractiveDoorPasswordResult(data);
+      if (data.correct) useGameStore.getState().unlockDoorClientSide(data.x, data.y);
     });
 
     // Fitur 15B — reply to MY OWN INTERACTIVE_API_CALL. No modal to feed —
@@ -752,6 +761,13 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.INTERACTIVE_CHOICE_CHECK, { furnitureId, selectedIndex });
   }, []);
 
+  // ZEP-style door password, same shape as the furniture password check
+  // above but keyed by tile (x,y) — the reply lands via
+  // INTERACTIVE_DOOR_PASSWORD_RESULT above.
+  const emitInteractiveDoorPasswordCheck = useCallback((x: number, y: number, attempt: string) => {
+    socketRef.current?.emit(SocketEvents.INTERACTIVE_DOOR_PASSWORD_CHECK, { x, y, attempt });
+  }, []);
+
   // Fitur 15B — API call. No local result state needed (unlike password/
   // choice, this has no modal to feed) — the result listener below just
   // posts straight to the activity feed as a one-off toast.
@@ -948,5 +964,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck };
 }
