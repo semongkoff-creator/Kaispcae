@@ -414,8 +414,8 @@ export function ChatPanel({
 
             {viewingZone
               ? zoneMessages.map((m) => {
-                  const isOwn = m.senderName === localPlayerName;
-                  const isMentioned = m.text.includes(`@${localPlayerName}`);
+                  const isOwn = !m.isBot && m.senderName === localPlayerName;
+                  const isMentioned = !m.isBot && m.text.includes(`@${localPlayerName}`);
                   return (
                     <MessageBubble
                       key={m.id}
@@ -424,11 +424,20 @@ export function ChatPanel({
                       color={m.senderColor || avatarColor(m.senderName)}
                       time={m.timestamp}
                       mentioned={isMentioned}
-                      pinnable={!!(isAdmin && onPinNotice)}
+                      isBot={m.isBot}
+                      pinnable={!m.isBot && !!(isAdmin && onPinNotice)}
                       onPin={() => onPinNotice?.(m)}
                     >
                       {m.isProximity && <span className="opacity-60 mr-1">(nearby)</span>}
-                      <span className="break-words">{m.text}</span>
+                      <span className={`break-words ${m.isBot ? 'whitespace-pre-line' : ''}`}>{m.text}</span>
+                      {m.isBot && m.botThumbnailUrl && (
+                        <img
+                          src={m.botThumbnailUrl}
+                          alt=""
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          className="mt-1.5 w-full max-w-[160px] rounded-lg border border-purple-200 dark:border-purple-800"
+                        />
+                      )}
                     </MessageBubble>
                   );
                 })
@@ -686,6 +695,7 @@ function MessageBubble({
   photoUrl,
   time,
   mentioned,
+  isBot,
   pinnable,
   onPin,
   children,
@@ -697,6 +707,11 @@ function MessageBubble({
   photoUrl?: string;
   time: number | string;
   mentioned?: boolean;
+  // Music Bot's own replies (see musicHandler.ts) — a distinct tint so a bot
+  // reply reads as "system", not as if some player is talking about song
+  // titles. Never combined with isOwn/mentioned in practice (the bot is
+  // never the local player, and its own name never matches @mentions).
+  isBot?: boolean;
   pinnable?: boolean;
   onPin?: () => void;
   children: ReactNode;
@@ -713,7 +728,9 @@ function MessageBubble({
           onContextMenu={pinnable ? (e) => { e.preventDefault(); onPin?.(); } : undefined}
           title={pinnable ? 'Right-click to pin as notice' : undefined}
           className={`rounded-2xl px-2.5 py-1.5 ${isOwn ? 'rounded-br-sm' : 'rounded-bl-sm'} ${pinnable ? 'cursor-context-menu' : ''} ${bodyText} ${
-            mentioned ? 'bg-amber-100 dark:bg-amber-900/40' : isOwn ? 'bg-purple-600' : 'bg-gray-100 dark:bg-gray-700'
+            isBot
+              ? 'bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800'
+              : mentioned ? 'bg-amber-100 dark:bg-amber-900/40' : isOwn ? 'bg-purple-600' : 'bg-gray-100 dark:bg-gray-700'
           }`}
         >
           {!isOwn && <div className="font-semibold text-[11px] mb-0.5 leading-tight" style={{ color }}>{name}</div>}

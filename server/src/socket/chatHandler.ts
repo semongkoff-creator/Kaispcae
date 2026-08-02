@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { SocketEvents, ChatMessage } from '@virtualmeet/shared';
 import { getSocketIdsInZone, isSocketInZone } from './zoneHandler';
 import { socketRateLimit } from '../middleware/rateLimit';
+import { isMusicCommand, handleMusicCommand } from './musicHandler';
 
 let messageId = 0;
 const canSendChat = socketRateLimit(5); // max 5 chat messages/sec per socket
@@ -24,6 +25,18 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
     // private tab once you leave (see ChatPanel.tsx), but a modified
     // client could still emit this directly with a stale/spoofed zoneId.
     if (!zoneId || !(currentRoom && isSocketInZone(currentRoom, socket.id, zoneId))) return;
+
+    // Music Bot — !play/!skip/!pause/!resume/!queue/!stop. Detected here
+    // (server-side, before anything is broadcast) so it can't be spoofed by
+    // a modified client sending the raw command text expecting it to just
+    // render as a normal message. A recognized command is NEVER broadcast
+    // as the sender's own chat message — only the bot's reply is.
+    if (isMusicCommand(text)) {
+      void handleMusicCommand(io, currentRoom, zoneId, socket.id, playerName(), text)
+        .catch((e) => console.error('[musicBot] handleMusicCommand failed:', e));
+      return;
+    }
+
     const msg: ChatMessage = {
       id: `msg-${++messageId}`,
       senderId: socket.id,

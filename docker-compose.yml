@@ -35,6 +35,7 @@ services:
       LARK_REDIRECT_URI: ${LARK_REDIRECT_URI:-}
       LARK_TOKEN_ENC_KEY: ${LARK_TOKEN_ENC_KEY:-}
       LARK_DRIVE_ROOT_FOLDER_TOKEN: ${LARK_DRIVE_ROOT_FOLDER_TOKEN:-}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
     volumes:
       # server/src/routes/uploads.ts writes chat attachments/Add-Media files
       # to ./uploads (process.cwd()/uploads = /app/uploads here) whenever

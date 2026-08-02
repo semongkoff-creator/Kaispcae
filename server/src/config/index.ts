@@ -63,6 +63,11 @@ const envSchema = z
     // 32-byte key. Unset → user tokens are NOT stored and chat always relays via
     // the bot+prefix fallback. Never printed or committed.
     LARK_TOKEN_ENC_KEY: z.string().optional(),
+    // Music Bot (!play chat command) — YouTube Data API v3 search + video
+    // lookup. Optional: unset means the bot replies "belum dikonfigurasi"
+    // instead of crashing (see lib/youtubeService.ts). See
+    // server/.env.example for how to obtain a key.
+    YOUTUBE_API_KEY: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     // The default JWT secret is a well-known literal — anyone can forge valid

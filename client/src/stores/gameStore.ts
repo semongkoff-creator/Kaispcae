@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState } from '@virtualmeet/shared';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -191,6 +191,12 @@ export interface GameState {
   activeMeetings: Record<string, { momRecordId: string; url: string; startedBy: string }>;
   setMeetingStarted: (zoneId: string, info: { momRecordId: string; url: string; startedBy: string }) => void;
   setMeetingEnded: (zoneId: string) => void;
+  // Music Bot — one MusicSessionState per zone that currently has one (see
+  // musicHandler.ts), keyed by zoneId. Replaced wholesale on every
+  // MUSIC_STATE broadcast rather than patched in place — the server always
+  // sends the full current+queue snapshot, same convention as room:state.
+  musicSessionsByZone: Record<string, MusicSessionState>;
+  setMusicSessionState: (state: MusicSessionState) => void;
   speakingPlayers: Set<string>;
   setPlayerSpeaking: (id: string, speaking: boolean) => void;
 
@@ -615,6 +621,9 @@ export const useGameStore = create<GameState>((set, get) => ({
     delete next[zoneId];
     return { activeMeetings: next };
   }),
+  musicSessionsByZone: {},
+  setMusicSessionState: (state) =>
+    set((s) => ({ musicSessionsByZone: { ...s.musicSessionsByZone, [state.zoneId]: state } })),
   speakingPlayers: new Set<string>(),
   setPlayerSpeaking: (id, speaking) =>
     set((state) => {

@@ -289,6 +289,15 @@ export enum SocketEvents {
   // as MEDIA_LIST.
   SOUNDBOARD_LIST = 'soundboard:list',
 
+  // Music Bot (!play/!skip/!pause/!resume/!queue/!stop chat commands, see
+  // server/src/socket/musicHandler.ts) — one snapshot event covers every
+  // state change (a track started, paused, resumed, skipped, queued, or the
+  // whole thing stopped) rather than a separate event per action; the
+  // client just replaces its local per-zone music state with whatever this
+  // carries. Broadcast only to sockets currently in that zone (same
+  // getSocketIdsInZone audience as zone-private chat), never the whole room.
+  MUSIC_STATE = 'music:state',
+
   // Jump — purely cosmetic, fire-and-forget one-shot hop (same broadcast
   // shape as EMOTE_PLAY above), never validated/stored server-side since
   // there's no persistent state to reconcile — a late joiner just never
@@ -1083,7 +1092,50 @@ export interface ChatMessage {
   timestamp: number;
   isProximity?: boolean;
   zoneId?: string;
+  // Music Bot's own replies (see musicHandler.ts) — senderId is the fixed
+  // sentinel MUSIC_BOT_SENDER_ID below, senderName is MUSIC_BOT_NAME; this
+  // flag is what actually drives the distinct bubble styling client-side
+  // (senderId/senderName alone are spoofable-looking but never actually
+  // reach the client from anywhere except this one server-side sender).
+  isBot?: boolean;
+  // Optional small thumbnail shown under a bot reply (e.g. "Now playing" /
+  // "Added to queue") — never present on a real user's message.
+  botThumbnailUrl?: string;
 }
+
+// Music Bot — a chat-command-driven (!play/!skip/...) YouTube "listen
+// together" queue, one independent MusicSession per zone (see
+// musicHandler.ts). Deliberately NOT the same mechanism as the existing
+// 'bgm' MapMediaObject (an ambient looped area effect placed by an admin in
+// the Room Editor) — that one still exists unchanged as a manual-upload
+// fallback; this is the interactive, chat-driven, YouTube-backed one.
+export interface MusicTrack {
+  videoId: string;
+  title: string;
+  thumbnail: string;
+  requestedBy: string; // display name, not a userId — purely for the chat reply/queue list
+}
+
+export interface MusicSessionState {
+  zoneId: string;
+  // null = nothing playing (idle, or queue just ran dry).
+  current: {
+    track: MusicTrack;
+    // Epoch ms this track effectively "started" — elapsed playback is
+    // `Date.now() - startedAt`. On resume, startedAt is shifted FORWARD by
+    // however long the pause lasted, so elapsed playback (and therefore the
+    // auto-advance timer) stays correct instead of resetting to 0.
+    startedAt: number;
+    // Epoch ms the pause began, or null while actively playing.
+    pausedAt: number | null;
+    durationSec: number;
+  } | null;
+  queue: MusicTrack[];
+}
+
+export const MUSIC_BOT_SENDER_ID = 'music-bot';
+export const MUSIC_BOT_NAME = '🎵 Music Bot';
+export const MUSIC_PLAY_COOLDOWN_MS = 10_000;
 
 // Persisted Channel/DM/Thread chat — distinct from ChatMessage above (which
 // stays ephemeral, in-memory only, for zone-private/proximity-bubble chat).
