@@ -185,6 +185,11 @@ export interface GameState {
   // and re-applies the moment they leave the zone.
   manualStatus: 'available' | 'lunch' | 'away';
   setManualStatus: (status: 'available' | 'lunch' | 'away') => void;
+  // Fitur 3B — reason picked from the Away popup, alongside manualStatus
+  // 'away'. null when away has no specific reason (prompt timed out) or when
+  // manualStatus isn't 'away' at all.
+  awayReason: string | null;
+  setAwayReason: (reason: string | null) => void;
   // A5 — active recorded meetings, keyed by zoneId. Set/cleared by the
   // MEETING_STARTED/ENDED socket broadcasts so everyone in the room sees the
   // "join via Lark" banner.
@@ -614,6 +619,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   })),
   manualStatus: 'available',
   setManualStatus: (status) => set({ manualStatus: status }),
+  awayReason: null,
+  setAwayReason: (reason) => set((s) => ({
+    awayReason: reason,
+    localPlayer: { ...s.localPlayer, awayReason: reason ?? undefined },
+  })),
   activeMeetings: {},
   setMeetingStarted: (zoneId, info) => set((s) => ({ activeMeetings: { ...s.activeMeetings, [zoneId]: info } })),
   setMeetingEnded: (zoneId) => set((s) => {

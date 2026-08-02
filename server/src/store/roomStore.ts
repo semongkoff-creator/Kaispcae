@@ -190,16 +190,21 @@ export async function updatePlayerStatus(
 }
 
 // A3 — persist Focus/Public so it survives in room:state for late joiners.
+// Fitur 3B — awayReason travels alongside workMode (only meaningful when
+// workMode === 'away'); always cleared otherwise so a stale reason never
+// survives into a later, unrelated 'away'.
 export async function updatePlayerWorkMode(
   roomId: string,
   playerId: string,
   workMode: WorkMode,
+  awayReason?: string,
 ): Promise<void> {
   const players = await getPlayers(roomId);
   const player = players.find((p) => p.id === playerId);
   if (player) {
     // 'available' is the default → store undefined (no badge); keep any other.
     player.workMode = workMode === 'available' ? undefined : workMode;
+    player.awayReason = workMode === 'away' ? awayReason : undefined;
     await setPlayers(roomId, players);
   }
 }

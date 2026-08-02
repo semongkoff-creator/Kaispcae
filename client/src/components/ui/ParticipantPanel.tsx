@@ -130,6 +130,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
               status={localPlayer.status}
               handRaised={localPlayer.handRaised}
               workMode={localPlayer.workMode}
+              awayReason={localPlayer.awayReason}
               speaking={localSpeaking}
               role={localRole}
               isLocal
@@ -144,6 +145,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
                 status={p.status}
                 handRaised={p.handRaised}
                 workMode={p.workMode}
+                awayReason={p.awayReason}
                 speaking={speakingPlayers.has(p.id)}
                 role={roleOf(p.userId)}
                 isLocal={false}
@@ -170,6 +172,7 @@ function ParticipantRow({
   status,
   handRaised,
   workMode,
+  awayReason,
   speaking,
   role,
   isLocal,
@@ -193,6 +196,10 @@ function ParticipantRow({
   // A11 — presence status badge by the name (focus=🎧 DND, in_meeting=🎥,
   // lunch=🍽️, away=🌙). Undefined/available shows none.
   workMode?: WorkMode;
+  // Fitur 3B — reason picked from the Away popup, shown as small subtext
+  // under the name ("Away · External Meeting") only alongside workMode
+  // === 'away'; undefined for every other status (never shown otherwise).
+  awayReason?: string;
   speaking?: boolean;
   // Live room role (see gameStore roleOf) — renders a 👑 owner / 🛡️ admin
   // badge by the name; 'staff'/'member' show none.
@@ -282,6 +289,9 @@ function ParticipantRow({
             <span className="truncate">{name}</span>
           </span>
           {status && <span className="text-gray-400 dark:text-gray-500 text-[10px] truncate block">{status}</span>}
+          {workMode === 'away' && awayReason && (
+            <span className="text-gray-400 dark:text-gray-500 text-[10px] truncate block">Away · {awayReason}</span>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">

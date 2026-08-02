@@ -213,11 +213,15 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
     // A3 — another player's Focus/Public change; update their record so their
     // badge + proximity DND (useProximity) reflect it here.
-    socket.on(SocketEvents.WORK_MODE_CHANGED, (data: { id: string; workMode: WorkMode }) => {
+    socket.on(SocketEvents.WORK_MODE_CHANGED, (data: { id: string; workMode: WorkMode; reason?: string }) => {
       const state = useGameStore.getState();
       if (data.id === state.localPlayerId) return;
       // 'available' → no badge (undefined); any other status keeps its value.
-      upsertPlayer({ id: data.id, workMode: data.workMode === 'available' ? undefined : data.workMode } as Avatar);
+      upsertPlayer({
+        id: data.id,
+        workMode: data.workMode === 'available' ? undefined : data.workMode,
+        awayReason: data.workMode === 'away' ? data.reason : undefined,
+      } as Avatar);
     });
 
     // A5 — an official meeting started/ended in a zone; drives the join banner.
@@ -760,8 +764,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.PLAYER_STATUS_UPDATE, status);
   }, []);
 
-  const emitWorkMode = useCallback((mode: WorkMode, zoneId?: string) => {
-    socketRef.current?.emit(SocketEvents.WORK_MODE_CHANGE, { mode, zoneId });
+  const emitWorkMode = useCallback((mode: WorkMode, zoneId?: string, reason?: string) => {
+    socketRef.current?.emit(SocketEvents.WORK_MODE_CHANGE, { mode, zoneId, reason });
   }, []);
 
   // A4 — free double-click teleport. Server validates + re-broadcasts as

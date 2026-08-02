@@ -83,6 +83,11 @@ export interface Avatar {
   // status/handRaised, so it's in room:state for late joiners.
   // Absent/undefined is treated as 'available' (no badge).
   workMode?: WorkMode;
+  // Short reason picked from the Away popup ("External Meeting", "Makan", or
+  // free text) when workMode is 'away' — only meaningful alongside
+  // workMode === 'away'; cleared whenever workMode changes to anything else.
+  // Never set for the auto 'in_meeting'/'focus' zone-driven states.
+  awayReason?: string;
 }
 
 // A11 — presence status. 'in_meeting' + 'focus' are AUTO from the zone the
@@ -90,6 +95,13 @@ export interface Avatar {
 // manual choices. Only 'focus' triggers DND behaviour (see useProximity /
 // Summon / Slap / Follow) — the rest are display-only labels.
 export type WorkMode = 'available' | 'in_meeting' | 'focus' | 'lunch' | 'away';
+
+// Away-reason popup (idle-AFK or manual "Away" pick, see App.tsx) — how long
+// to wait for the user to pick a reason before defaulting to a plain 'away'
+// with no reason (they're genuinely not there to answer), and the max length
+// a free-text "Lainnya" reason is trimmed to.
+export const AWAY_REASON_PROMPT_TIMEOUT_MS = 30_000;
+export const AWAY_REASON_MAX_LENGTH = 60;
 
 // A single tile on the room grid. `type` stays authoritative for collision
 // (BLOCKED_TILES) so old saved rooms keep working unchanged. `floorPaletteId`

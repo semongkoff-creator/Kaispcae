@@ -38,6 +38,7 @@ import { InteractiveObjectModal } from './components/ui/InteractiveObjectModal';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
 import { SoundboardPanel } from './components/ui/SoundboardPanel';
 import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
+import { AwayReasonModal } from './components/ui/AwayReasonModal';
 import { ActivityFeed } from './components/ui/ActivityFeed';
 import { PendingRequestToast } from './components/ui/PendingRequestToast';
 import { Sidebar } from './components/ui/Sidebar';
@@ -102,9 +103,8 @@ function releaseMovementKeys() {
   }
 }
 
-// Idle window before a player is auto-marked away, and the status text used.
+// Idle window before a player is auto-prompted for an Away reason (Fitur 3B).
 const AFK_IDLE_MS = 120000; // 2 minutes
-const AFK_STATUS = '💤 Away';
 
 // Fitur 15B — 'show_word_balloon' Interactive Object's "Random" style pool,
 // picked once per trigger (see handleInteractiveTrigger below).
@@ -239,14 +239,54 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const workMode = useGameStore((s) => s.workMode);
   const setWorkMode = useGameStore((s) => s.setWorkMode);
   const manualStatus = useGameStore((s) => s.manualStatus);
+  const setManualStatus = useGameStore((s) => s.setManualStatus);
+  const awayReason = useGameStore((s) => s.awayReason);
+  const setAwayReason = useGameStore((s) => s.setAwayReason);
   useEffect(() => {
     const focusZone = findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'focus'));
     const effective: WorkMode = meetingZone ? 'in_meeting' : focusZone ? 'focus' : manualStatus;
     if (effective !== workMode) {
       setWorkMode(effective);
-      emitWorkMode(effective, meetingZone?.id ?? focusZone?.id);
+      emitWorkMode(effective, meetingZone?.id ?? focusZone?.id, effective === 'away' ? awayReason ?? undefined : undefined);
     }
-  }, [localPlayer.x, localPlayer.y, zones, meetingZone, manualStatus, workMode, setWorkMode, emitWorkMode]);
+  }, [localPlayer.x, localPlayer.y, zones, meetingZone, manualStatus, workMode, setWorkMode, emitWorkMode, awayReason]);
+
+  // Fitur 3B — Away-reason popup. Fires either from the idle-AFK timer below
+  // or a manual "Away" pick (PresenceButton) — never applies 'away' directly;
+  // both paths go through this same prompt-then-apply flow.
+  const [awayPromptOpen, setAwayPromptOpen] = useState(false);
+  // True only while the CURRENT away state was entered via the idle timer —
+  // gates whether the next activity event silently restores 'available'.
+  // A manually-picked Away must NOT auto-revert on the next mouse jiggle.
+  const autoAwayRef = useRef(false);
+  const prevManualStatusRef = useRef<'available' | 'lunch' | 'away'>('available');
+  // Separate from autoAwayRef: true only while the PROMPT ITSELF is open AND
+  // was opened by the idle timer — lets markActive cancel an idle-triggered
+  // prompt outright (never apply 'away' at all) instead of applying it and
+  // immediately reverting. A manually-opened prompt never sets this, so
+  // moving the mouse while deciding on a manual "Away" click doesn't make
+  // the popup vanish out from under them.
+  const awayPromptOpenRef = useRef(false);
+
+  const resolveAwayPrompt = useCallback((reason?: string) => {
+    awayPromptOpenRef.current = false;
+    setAwayPromptOpen(false);
+    setManualStatus('away');
+    setAwayReason(reason ?? null);
+  }, [setManualStatus, setAwayReason]);
+
+  // Manual pick from PresenceButton — 'away' opens the SAME reason prompt
+  // (poin 8b: "user klik tombol Away/Leave manual"); Available/Lunch apply
+  // immediately, no reason needed for those.
+  const handlePresencePick = useCallback((status: 'available' | 'lunch' | 'away') => {
+    autoAwayRef.current = false; // a deliberate pick is never auto-reverted
+    if (status === 'away') {
+      setAwayPromptOpen(true);
+      return;
+    }
+    setManualStatus(status);
+    setAwayReason(null);
+  }, [setManualStatus, setAwayReason]);
 
   // Mini Mode has to be opened directly inside a real click handler (see
   // openMiniModeWindow's own doc comment for why it can't live in a mount
@@ -688,17 +728,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   }, [emitAvatarUpdate, localUserId]);
 
   // ─── AFK auto-away (ZEP/Gather-style) ────────────────────────────────
-  // After AFK_IDLE_MS with no keyboard/pointer/touch input, the player's
-  // status auto-flips to "💤 Away" so others can see who's actually present;
-  // any activity flips it straight back. Deliberately never overrides a
-  // status the user set themselves — it only kicks in when they have none.
-  const autoAwayRef = useRef(false);
-  const prevStatusRef = useRef<string | undefined>(undefined);
+  // Fitur 3B — after AFK_IDLE_MS with no keyboard/pointer/touch input, show
+  // the Away-reason prompt (same one PresenceButton's manual "Away" pick
+  // uses) instead of silently flipping a status; any activity before it's
+  // answered cancels it, and any activity AFTER an idle-triggered away
+  // restores 'available' straight away. Consolidated onto workMode/
+  // manualStatus (see resolveAwayPrompt/handlePresencePick above) — this
+  // used to drive the separate free-text `status` field instead, which read
+  // as two disconnected presence signals rather than one source of truth.
   const lastActivityRef = useRef(Date.now());
 
   const handleStatusSave = useCallback((status: string) => {
-    // A manual status takes over — stop any pending auto-away restore.
-    autoAwayRef.current = false;
     useGameStore.getState().setLocalPlayer({ status: status || undefined });
     emitPlayerStatus(status);
   }, [emitPlayerStatus]);
@@ -706,32 +746,40 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   useEffect(() => {
     const markActive = () => {
       lastActivityRef.current = Date.now();
+      if (awayPromptOpenRef.current) {
+        // Idle was detected and the prompt is showing, but the user is
+        // clearly back now — cancel it silently, never apply 'away' at all.
+        awayPromptOpenRef.current = false;
+        setAwayPromptOpen(false);
+        return;
+      }
       if (autoAwayRef.current) {
         autoAwayRef.current = false;
-        const restore = prevStatusRef.current;
-        useGameStore.getState().setLocalPlayer({ status: restore || undefined });
-        emitPlayerStatus(restore || '');
+        setManualStatus(prevManualStatusRef.current);
+        setAwayReason(null);
       }
     };
     const events: (keyof WindowEventMap)[] = ['keydown', 'pointerdown', 'pointermove', 'touchstart', 'wheel'];
     events.forEach((e) => window.addEventListener(e, markActive, { passive: true }));
 
     const iv = setInterval(() => {
-      if (autoAwayRef.current) return;
+      if (autoAwayRef.current || awayPromptOpenRef.current) return;
       if (Date.now() - lastActivityRef.current < AFK_IDLE_MS) return;
-      const cur = useGameStore.getState().localPlayer.status;
-      if (cur && cur !== AFK_STATUS) return; // respect a manually-set status
-      prevStatusRef.current = cur;
+      // Only idle-prompt from the fully open/default state — don't interrupt
+      // a zone-driven in_meeting/focus, or a status the user already picked
+      // themselves (lunch/away).
+      if (useGameStore.getState().manualStatus !== 'available' || useGameStore.getState().workMode !== 'available') return;
+      prevManualStatusRef.current = 'available';
       autoAwayRef.current = true;
-      useGameStore.getState().setLocalPlayer({ status: AFK_STATUS });
-      emitPlayerStatus(AFK_STATUS);
+      awayPromptOpenRef.current = true;
+      setAwayPromptOpen(true);
     }, 5000);
 
     return () => {
       events.forEach((e) => window.removeEventListener(e, markActive));
       clearInterval(iv);
     };
-  }, [emitPlayerStatus]);
+  }, [setManualStatus, setAwayReason]);
 
   // loadAvatarConfig()'s default `name` is the placeholder 'You' used for
   // the editor's own live preview. Seed it with the real account name so
@@ -1200,6 +1248,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         )}
       </div>
 
+      <AwayReasonModal open={awayPromptOpen} onResolve={resolveAwayPrompt} />
+
       {/* ZEP-style left icon rail — every room-level feature button used to
           be its own absolutely-positioned floating pill scattered around
           the screen edges (Meeting View/Simplify/Mini Mode top-right,
@@ -1215,6 +1265,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onEditAvatar={() => setShowEditor(true)}
         status={localPlayer.status || ''}
         onSaveStatus={handleStatusSave}
+        manualStatus={manualStatus}
+        onPickPresence={handlePresencePick}
         isAdmin={isAdmin}
         onOpenRoomEditor={() => window.open(`/?roomEditor=${encodeURIComponent(roomSlug)}`, '_blank', 'noopener')}
         canTeleport={roleAtLeast(localRole, 'member')}

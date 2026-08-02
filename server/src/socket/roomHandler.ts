@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerWorkMode, updatePlayerSitting,
   setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -1168,12 +1168,18 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
   // A3 — Focus/Public work mode. Broadcast + persist like status/hand so other
   // clients update the badge and room:state carries it for late joiners.
-  socket.on(SocketEvents.WORK_MODE_CHANGE, (data: { mode: WorkMode; zoneId?: string }) => {
+  socket.on(SocketEvents.WORK_MODE_CHANGE, (data: { mode: WorkMode; zoneId?: string; reason?: string }) => {
     const room = currentRoom; if (!room) return;
     const VALID: WorkMode[] = ['available', 'in_meeting', 'focus', 'lunch', 'away'];
     const mode: WorkMode = VALID.includes(data?.mode) ? data.mode : 'available';
-    socket.to(room).emit(SocketEvents.WORK_MODE_CHANGED, { id: socket.id, workMode: mode });
-    updatePlayerWorkMode(room, socket.id, mode);
+    // Fitur 3B — a reason only ever makes sense alongside 'away' (the popup
+    // that produces it only ever fires for that transition); never trust the
+    // client to keep it short/clean either.
+    const reason = mode === 'away' && typeof data?.reason === 'string'
+      ? data.reason.trim().slice(0, AWAY_REASON_MAX_LENGTH) || undefined
+      : undefined;
+    socket.to(room).emit(SocketEvents.WORK_MODE_CHANGED, { id: socket.id, workMode: mode, reason });
+    updatePlayerWorkMode(room, socket.id, mode, reason);
     // A11 — log presence changes to Lark Base. Guarded no-op until the
     // table/scope are set up, so a logging failure never affects the live
     // change above.
@@ -1182,7 +1188,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       eventType: 'presence_change',
       userId: uid,
       room,
-      detail: { to: mode, zoneId: data?.zoneId },
+      detail: { to: mode, zoneId: data?.zoneId, reason },
     });
   });
 

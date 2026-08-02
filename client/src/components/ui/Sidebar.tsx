@@ -2,9 +2,11 @@ import { ReactNode, useState } from 'react';
 import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { StatusButton } from '../avatar/StatusButton';
+import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { Theme } from '@/hooks/useTheme';
+import { ManualStatus } from '@/data/presence';
 
 // A2 — the MeetKai-native attendance UI is retired in favour of automatic Lark
 // Attendance check-in (see server lib/larkAttendance.ts). Flip to true only to
@@ -16,6 +18,11 @@ interface SidebarProps {
   onEditAvatar: () => void;
   status: string;
   onSaveStatus: (status: string) => void;
+  // Fitur 3B — manual presence picker (Available/Lunch/Away). 'away' opens
+  // the Away-reason popup upstream (see App.tsx's handlePresencePick) rather
+  // than applying immediately, unlike the other two.
+  manualStatus: ManualStatus;
+  onPickPresence: (status: ManualStatus) => void;
 
   isAdmin: boolean;
   // ZEP Room Editor — opens the full-page editor in a new tab. The old overlay
@@ -139,6 +146,8 @@ export function Sidebar({
   onEditAvatar,
   status,
   onSaveStatus,
+  manualStatus,
+  onPickPresence,
   isAdmin,
   onOpenRoomEditor,
   canTeleport,
@@ -363,6 +372,7 @@ export function Sidebar({
 
       <AvatarEditorButton onClick={onEditAvatar} variant="sidebar" />
       <StatusButton status={status} onSave={onSaveStatus} variant="sidebar" />
+      <PresenceButton manualStatus={manualStatus} onPick={onPickPresence} variant="sidebar" />
 
       <SidebarIcon
         title="Back to room list"
