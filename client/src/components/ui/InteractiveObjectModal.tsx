@@ -1,6 +1,41 @@
 import { useState } from 'react';
-import { X } from 'react-bootstrap-icons';
+import { X, ExclamationTriangleFill } from 'react-bootstrap-icons';
 import { Furniture, InteractivePasswordResultPayload, InteractiveChoiceResultPayload } from '@virtualmeet/shared';
+
+// Bug — image_popup's <img> had no onLoad/onError handling at all, so a slow
+// or failed load (wrong URL, revoked auth, a Lark Drive outage/misconfig,
+// plain network hiccup) rendered as a silent blank white box — visually
+// identical to "still loading" and to "success", with nothing to tell an
+// admin which one they were looking at. `key={src}` on the call site resets
+// this back to 'loading' whenever the image changes (a different object
+// triggered, or the URL edited), so a re-render never carries over a stale
+// loaded/error status from a previous image.
+function PopupImage({ src }: { src: string }) {
+  const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+  return (
+    <div className="w-full">
+      {status === 'loading' && (
+        <div className="w-full h-40 rounded-lg bg-gray-100 dark:bg-gray-900 animate-pulse flex items-center justify-center">
+          <p className="text-gray-400 dark:text-gray-500 text-xs">Memuat gambar…</p>
+        </div>
+      )}
+      {status === 'error' && (
+        <div className="w-full rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 p-4 text-center">
+          <ExclamationTriangleFill className="mx-auto mb-1.5 text-red-500 dark:text-red-400" size={20} />
+          <p className="text-red-600 dark:text-red-400 text-sm font-medium mb-1">Gagal memuat gambar</p>
+          <p className="text-red-500/70 dark:text-red-400/60 text-[11px] break-all">{src}</p>
+        </div>
+      )}
+      <img
+        src={src}
+        alt=""
+        onLoad={() => setStatus('loaded')}
+        onError={() => setStatus('error')}
+        className={`w-full max-h-[70vh] object-contain rounded-lg ${status === 'loaded' ? '' : 'hidden'}`}
+      />
+    </div>
+  );
+}
 
 interface InteractiveObjectModalProps {
   furniture: Furniture;
@@ -57,7 +92,7 @@ export function InteractiveObjectModal({ furniture, onClose, onCheckPassword, pa
         )}
 
         {isImage && furniture.interactiveConfig?.imageUrl && (
-          <img src={furniture.interactiveConfig.imageUrl} alt="" className="w-full max-h-[70vh] object-contain rounded-lg" />
+          <PopupImage key={furniture.interactiveConfig.imageUrl} src={furniture.interactiveConfig.imageUrl} />
         )}
 
         {isPassword && (

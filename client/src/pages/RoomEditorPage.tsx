@@ -269,7 +269,18 @@ function ObjectSettingsPanel({
           {imgErr && <p className="text-red-400 text-[11px] mb-1.5">{imgErr}</p>}
           {furniture.interactiveConfig?.imageUrl && (
             <div className="mb-3 rounded border border-white/10 overflow-hidden bg-black/20">
-              <img src={furniture.interactiveConfig.imageUrl} alt="" className="w-full max-h-32 object-contain" />
+              <img
+                key={furniture.interactiveConfig.imageUrl}
+                src={furniture.interactiveConfig.imageUrl}
+                alt=""
+                className="w-full max-h-32 object-contain"
+                // Same diagnosability gap as the in-game popup (see
+                // InteractiveObjectModal's PopupImage) — a saved imageUrl that
+                // fails to load silently showed nothing here either, so the
+                // admin had no signal something was wrong before a player
+                // ever hit the same broken URL in-game.
+                onError={() => setImgErr('URL gambar tersimpan tidak bisa dimuat (cek koneksi/storage).')}
+              />
             </div>
           )}
         </>
