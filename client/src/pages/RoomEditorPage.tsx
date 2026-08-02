@@ -577,6 +577,23 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
   } else if (layer === 'top') {
     for (const item of ld.topObjects) { drawFurnitureLayer(ctx, item, 0, 0, 'object'); drawFurnitureLayer(ctx, item, 0, 0, 'overhead'); }
   } else if (layer === 'effects') {
+    // Every legacy 'desk'/'chair'/'blocked' tile round-trips into an
+    // 'impassable' tileEffect (see shared/mapLayers.ts's legacyToLayerData) —
+    // that conversion is load-bearing for collision (layerDataToLegacy
+    // reads it back to restore the tile's blocking type), so it can't just
+    // be stopped. But visually, drawing the same red "impassable" X on top
+    // of a chair/desk that's ALREADY obviously blocking (it's furniture,
+    // you can see it) is pure clutter — every piece of furniture in every
+    // legacy-built room ends up crossed out, which reads as "something's
+    // broken/cut off" rather than useful information. The X is only
+    // actually informative on a tile with NO furniture drawn on it (a truly
+    // invisible barrier, the effect's real intended use — see its own hint
+    // text). Skip the X wherever a furniture piece's own footprint already
+    // covers this tile.
+    const furnitureCovered = new Set<string>();
+    for (const item of [...ld.objects, ...ld.topObjects]) {
+      for (let dx = 0; dx < item.tilesW; dx++) furnitureCovered.add(`${item.x + dx},${item.y}`);
+    }
     for (const a of ld.areas) {
       const zx = a.x * TILE_SIZE, zy = a.y * TILE_SIZE, zw = a.width * TILE_SIZE, zh = a.height * TILE_SIZE;
       const isPriv = a.effect === 'privateArea';
@@ -593,7 +610,7 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
     for (const e of ld.tileEffects) {
       const sx = e.x * TILE_SIZE, sy = e.y * TILE_SIZE, c = TILE_SIZE / 2;
       if (e.kind === 'startingPoint') { ctx.fillStyle = 'rgba(16,185,129,0.85)'; ctx.beginPath(); ctx.arc(sx + c, sy + c, c - 3, 0, Math.PI * 2); ctx.fill(); }
-      else if (e.kind === 'impassable') { ctx.strokeStyle = 'rgba(239,68,68,0.7)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sx + 4, sy + 4); ctx.lineTo(sx + TILE_SIZE - 4, sy + TILE_SIZE - 4); ctx.moveTo(sx + TILE_SIZE - 4, sy + 4); ctx.lineTo(sx + 4, sy + TILE_SIZE - 4); ctx.stroke(); }
+      else if (e.kind === 'impassable' && !furnitureCovered.has(`${e.x},${e.y}`)) { ctx.strokeStyle = 'rgba(239,68,68,0.7)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sx + 4, sy + 4); ctx.lineTo(sx + TILE_SIZE - 4, sy + TILE_SIZE - 4); ctx.moveTo(sx + TILE_SIZE - 4, sy + 4); ctx.lineTo(sx + 4, sy + TILE_SIZE - 4); ctx.stroke(); }
       else if (e.kind === 'portal') {
         ctx.strokeStyle = 'rgba(124,58,237,0.95)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(sx + c, sy + c, c - 3, 0, Math.PI * 2); ctx.stroke();
         if (e.targetX != null && e.targetY != null) {
