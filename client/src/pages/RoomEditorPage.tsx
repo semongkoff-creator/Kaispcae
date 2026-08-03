@@ -1530,7 +1530,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           <p className="text-white font-semibold mb-2 text-sm">Reference Image</p>
           {!referenceImage ? (
             <>
-              <p className="text-white/50 text-xs mb-3">Upload foto/gambar denah untuk digambar ulang manual di atasnya (wall/floor/furniture tetap pakai tool biasa) — gambar ini TIDAK pernah muncul di game, cuma di editor.</p>
+              <p className="text-white/50 text-xs mb-3">Upload foto/gambar denah. Bisa dipakai cuma sebagai panduan trace di editor, atau diaktifkan biar gambarnya beneran jadi background map di game (tinggal atur collision-nya pakai tile effect &quot;Impassable&quot;).</p>
               {refErr && <p className="text-red-400 text-xs mb-2">{refErr}</p>}
               <button onClick={uploadReferenceImage} disabled={refBusy} className="w-full py-1.5 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium cursor-pointer">{refBusy ? 'Mengupload…' : 'Upload Denah'}</button>
             </>
@@ -1555,6 +1555,10 @@ export function RoomEditorPage({ slug }: { slug: string }) {
                   <input type="number" min={1} value={Math.round(referenceImage.height)} onChange={(e) => useEditorStore.getState().updateReferenceImage({ height: Math.max(1, Number(e.target.value)) })} className="mt-1 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-sm text-white" />
                 </label>
               </div>
+              <label className="flex items-center gap-2 mb-3 text-xs text-white/60 cursor-pointer">
+                <input type="checkbox" checked={!!referenceImage.showInGame} onChange={(e) => useEditorStore.getState().updateReferenceImage({ showInGame: e.target.checked })} className="cursor-pointer" />
+                Tampilkan di game (jadi background map untuk semua pemain)
+              </label>
               <div className="flex gap-2">
                 <button onClick={() => useEditorStore.getState().updateReferenceImage({ visible: !referenceImage.visible })} className="flex-1 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white/80 text-xs font-medium cursor-pointer">{referenceImage.visible ? 'Sembunyikan' : 'Tampilkan'}</button>
                 <button onClick={() => useEditorStore.getState().setReferenceImage(null)} className="flex-1 py-1.5 rounded bg-red-600/80 hover:bg-red-600 text-white text-xs font-medium cursor-pointer">Hapus</button>

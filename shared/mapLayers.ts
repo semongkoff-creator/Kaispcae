@@ -36,11 +36,15 @@ export interface CustomAssetEntry {
 }
 
 // A floor-plan photo/reference image the admin uploads to trace over while
-// building out a room by hand — a semi-transparent underlay drawn BENEATH
-// the floor layer (see RoomEditorPage.tsx's draw loop), never sent to the
-// live game (GameCanvas.tsx never reads LayerData directly, only the
-// layerDataToLegacy-derived tiles/furniture/zones, which this deliberately
-// has no adaptor entry in). x/y/width/height are world PIXELS (not tile
+// building out a room by hand — a translucent overlay drawn ON TOP of every
+// other layer (see RoomEditorPage.tsx's draw loop; floor tiles are fully
+// opaque and cover every tile, so drawing this underneath would always be
+// hidden). By default it's editor-only — GameCanvas.tsx never reads
+// LayerData directly, only the layerDataToLegacy-derived tiles/furniture/
+// zones — but when showInGame is true, roomHandler.ts also forwards it to
+// every live player via ROOM_STATE, so the photo itself becomes the visible
+// map background (with collision handled separately via 'impassable' tile
+// effects stamped on top). x/y/width/height are world PIXELS (not tile
 // units), so it can be freely positioned/scaled independent of the grid —
 // a real photographed floor plan rarely lines up with any tile size.
 export interface ReferenceImageData {
@@ -51,6 +55,7 @@ export interface ReferenceImageData {
   height: number;
   opacity: number; // 0-1
   visible: boolean;
+  showInGame?: boolean; // when true, also rendered in GameCanvas.tsx for every player
 }
 
 // Per-coordinate effect (sparse). 'impassable' carries the original blocked

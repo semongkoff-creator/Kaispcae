@@ -539,6 +539,15 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // can resolve any custom paletteId they reference — not just the
         // admin who's in the (separate) Room Editor tab.
         customAssets: (dbRoom?.layerData as unknown as LayerData | undefined)?.customAssets ?? [],
+        // Floor-plan reference image — editor-only unless the admin opted
+        // into showInGame (see mapLayers.ts), in which case the photo itself
+        // becomes part of the visible map for every joining player, same as
+        // customAssets above. Only forwarded when the flag is on, so a
+        // toggled-off image never leaks to game clients even if present.
+        referenceImage: (() => {
+          const ri = (dbRoom?.layerData as unknown as LayerData | undefined)?.referenceImage;
+          return ri?.showInGame ? ri : null;
+        })(),
       });
 
       // Soundboard — this room's custom sounds, sent once right after

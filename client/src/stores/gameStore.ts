@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData } from '@virtualmeet/shared';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -102,6 +102,11 @@ export interface GameState {
   // Lets RoomEditor.tsx's "Reset to Default" rebuild the room's OWN
   // template instead of always reverting to Main Office.
   roomTemplate: RoomTemplateId | undefined;
+
+  // Floor-plan reference image, set from room:state's `referenceImage` only
+  // when the admin opted into showInGame (see RoomState's doc comment) —
+  // null otherwise. GameCanvas.tsx renders this for every player when set.
+  liveReferenceImage: ReferenceImageData | null;
 
   // Connection
   isConnected: boolean;
@@ -583,6 +588,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   roomName: 'Default Room',
   theme: 'scifi-office',
   roomTemplate: undefined,
+  liveReferenceImage: null,
 
   isConnected: false,
   setConnected: (connected) => set({ isConnected: connected }),
@@ -1158,6 +1164,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       masterAdminUserId: roomState.masterAdminUserId ?? prev.masterAdminUserId,
       notice: roomState.notice !== undefined ? roomState.notice : prev.notice,
       roomLocked: roomState.locked ?? false,
+      liveReferenceImage: roomState.referenceImage ?? null,
     }));
 
     console.log('[store] setRoomState — adminPlayerIds:', Array.from(adminIds), 'masterAdminUserId:', roomState.masterAdminUserId, 'localIsAdmin:', localIsAdmin);

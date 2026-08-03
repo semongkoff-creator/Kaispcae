@@ -1,5 +1,6 @@
 import type { Role } from '../permissions';
 import type { RoomTemplateId } from '../defaultRoomLayout';
+import type { ReferenceImageData } from '../mapLayers';
 
 // Direction the avatar is facing or moving
 export type Direction = 'up' | 'down' | 'left' | 'right';
@@ -193,6 +194,11 @@ export interface RoomState {
   // broadcast, so a client always gets its own current tier without
   // re-deriving it from adminUserIds/masterAdminUserId/staffUserIds itself.
   role?: Role;
+  // Floor-plan reference image, forwarded ONLY when the admin opted into
+  // ReferenceImageData.showInGame (see roomHandler.ts's ROOM_STATE emit and
+  // mapLayers.ts) — null whenever the room has none, or has one that's
+  // editor-only. When present, GameCanvas.tsx renders it for every player.
+  referenceImage?: ReferenceImageData | null;
 }
 
 // All socket event names used between client and server

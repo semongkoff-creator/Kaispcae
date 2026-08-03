@@ -14,11 +14,12 @@ import {
   JUMP_HEIGHT_PX,
   NUDGE_DURATION_MS,
   NUDGE_SHAKE_PX,
+  ReferenceImageData,
 } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useMovement } from '@/hooks/useMovement';
 import { drawAvatar } from './AvatarSprite';
-import { drawSpriteFrame } from '@/utils/spriteLoader';
+import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
 import { PALETTE_BY_ID } from '@/data/themeAssets';
 import { isTileBlocked, isDoorTile } from '@/utils/createDefaultRoom';
@@ -32,6 +33,24 @@ import { drawTile, drawFloorTile, drawWallTile, drawFurnitureLayer, TILE_COLORS 
 // icon, speech bubble, speaking-pulse ring — stay the same relative distance
 // from the avatar as the sprite itself scales with TILE_SIZE (Fitur 4).
 const AVATAR_RADIUS = TILE_SIZE * (14 / 32);
+
+// Floor-plan reference image (see gameStore.ts's liveReferenceImage) — only
+// ever set when the admin opted into showInGame, so the photo itself is
+// meant to BE the visible map, not a translucent trace guide like in the
+// editor. Drawn on top of the floor/wall tiles (which are fully opaque and
+// would otherwise hide it) but BELOW furniture/avatars, so any real
+// interactive objects or players placed on top stay visible. Camera-offset
+// manually since GameCanvas never uses ctx.translate for panning (unlike
+// RoomEditorPage.tsx's version of this same helper).
+function drawLiveReferenceImage(ctx: CanvasRenderingContext2D, ref: ReferenceImageData | null, cameraX: number, cameraY: number) {
+  if (!ref || !ref.visible) return;
+  const img = getSpriteImage(ref.url);
+  if (!img) return;
+  ctx.save();
+  ctx.globalAlpha = ref.opacity;
+  ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, ref.x - cameraX, ref.y - cameraY, ref.width, ref.height);
+  ctx.restore();
+}
 
 // Follow (§3): where a follower stands relative to their target, based on
 // the target's current facing direction — one tile on the side "behind"
@@ -273,6 +292,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const bannerRefs = useRef(new Map<string, HTMLDivElement>());
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const mediaObjectsRef = useRef(mediaObjects);
+  // Floor-plan reference image (see gameStore.ts) — only ever non-null when
+  // the admin opted into showInGame; drawn as an overlay, see the draw loop.
+  const liveReferenceImage = useGameStore((s) => s.liveReferenceImage);
+  const liveReferenceImageRef = useRef(liveReferenceImage);
   // Potong 6 — which YouTube tile is close enough to auto-embed (proximity).
   const [ytEmbedId, setYtEmbedId] = useState<string | null>(null);
   const ytEmbedRef = useRef<string | null>(null);
@@ -307,6 +330,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     zonesRef.current = zones;
     furnitureRef.current = furniture;
     mediaObjectsRef.current = mediaObjects;
+    liveReferenceImageRef.current = liveReferenceImage;
   });
 
   const proximityRef = useRef(proximityData); proximityRef.current = proximityData;
@@ -900,6 +924,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         }
       }
     }
+
+    drawLiveReferenceImage(ctx, liveReferenceImageRef.current, cameraX, cameraY);
 
     // Furniture — object layer (base row, drawn before avatars). Banners
     // are DOM overlays (see bannerRefs below), not tileset sprites.
