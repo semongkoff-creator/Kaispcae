@@ -146,6 +146,24 @@ export function registerZoneLockHandlers(io: Server, socket: Socket): void {
     currentRoom = roomId || 'main-office';
     // Late joiner catches up on which zones are shut.
     socket.emit(SocketEvents.ZONE_LOCK_UPDATED, { zones: zoneLockStates(currentRoom) });
+
+    // Item #2 — re-sync "you're already admitted" on (re)join. allowedUserIds
+    // itself was ALREADY correctly persistent (keyed by userId, survives a
+    // walk-out/reconnect, cleared only by unlock-then-relock) — the actual
+    // gap was that this was never told to a client joining fresh, whose own
+    // admittedZoneIds (useZoneLock.ts) starts empty every mount and has no
+    // other way to learn it. Reuses ZONE_KNOCK_DECIDED as-is (no new event,
+    // no client changes) — the same admitted:true a knock-approval sends.
+    // Skipped for the keyholder themselves: isKeyholder() already covers
+    // their case independently, this would just be a redundant no-op signal.
+    const uid = userId();
+    if (uid) {
+      for (const [zoneId, lock] of roomLocks(currentRoom)) {
+        if (lock.lockedByUserId !== uid && lock.allowedUserIds.has(uid)) {
+          socket.emit(SocketEvents.ZONE_KNOCK_DECIDED, { zoneId, admitted: true, byName: lock.lockedByName });
+        }
+      }
+    }
   });
 
   socket.on(SocketEvents.ZONE_LOCK_SET, (data: { zoneId: string; locked: boolean; zoneName?: string }) => {
