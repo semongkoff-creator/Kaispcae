@@ -8,6 +8,7 @@ import { playNudgeSound, playHandRaiseSound, playSoundboardClip } from '@/servic
 import { SERVER_URL } from '@/services/serverUrl';
 import { registerCustomAssets } from '@/data/customAssets';
 import { setProfileName } from '@/hooks/useProfiles';
+import { textMentionsUser } from '@/utils/mentions';
 
 // Bump a chat target's unread count unless the user is actively looking at
 // it right now (panel open AND that exact target selected) — in which case
@@ -492,7 +493,27 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       }
       if (msg.senderId !== state.localUserId) {
         // A3 — Focus/DND mutes the popup but STILL marks unread (message kept).
-        if (state.workMode !== 'focus') notifyNewMessage(msg.senderName, msg.text);
+        if (state.workMode !== 'focus') {
+          // Potongan C2 Bagian 3 — a mention gets a distinctly more
+          // prominent title (reuses the exact same notifyNewMessage/browser-
+          // notification plumbing as every other chat notification, not a
+          // second system) and, uniquely, a click jumps straight to the
+          // channel it happened in. senderId !== localUserId above already
+          // means you never get this for mentioning yourself.
+          if (textMentionsUser(msg.text, state.localUserId)) {
+            const channelName = state.channels.find((c) => c.id === msg.channelId)?.name;
+            notifyNewMessage(
+              `${msg.senderName} menyebut kamu${channelName ? ` di #${channelName}` : ''}`,
+              msg.text,
+              () => {
+                useGameStore.getState().setActiveChatTarget({ type: 'channel', id: msg.channelId! });
+                useGameStore.getState().setChatPanelOpen(true);
+              },
+            );
+          } else {
+            notifyNewMessage(msg.senderName, msg.text);
+          }
+        }
         markUnreadIfHidden(`channel:${msg.channelId}`);
       }
     });

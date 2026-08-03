@@ -84,13 +84,20 @@ export function playNotificationSound(): void {
 
 // Called on every incoming chat message (see useSocket.ts) — the spec's own
 // rule: only actually show anything while the tab is in the background,
-// never while the user is already looking at it.
-export function notifyNewMessage(senderName: string, text: string): void {
+// never while the user is already looking at it. `title` is the notification
+// heading — plain senderName for an ordinary message, or a "so-and-so
+// mentioned you in #channel" string (see Potongan C2's mention notify call)
+// so a mention reads as distinctly more important than regular chat noise.
+// `onClick`, if given, runs when the notification itself is clicked (in
+// addition to always focusing the tab) — the mention call site uses this to
+// jump straight to the channel that was mentioned in.
+export function notifyNewMessage(title: string, text: string, onClick?: () => void): void {
   if (document.visibilityState === 'visible') return;
   const settings = getNotificationSettings();
   if (!settings.browserNotifOn || !isNotificationSupported() || Notification.permission !== 'granted') return;
 
-  new Notification(senderName, { body: text, tag: 'meetkai-chat' });
+  const n = new Notification(title, { body: text, tag: 'meetkai-chat' });
+  n.onclick = () => { window.focus(); onClick?.(); };
   if (settings.soundOn) playNotificationSound();
 }
 
