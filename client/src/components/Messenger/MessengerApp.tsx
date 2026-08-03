@@ -7,6 +7,7 @@ import { GroupMembers } from './GroupMembers';
 import { useProfiles } from '@/hooks/useProfiles';
 import { AttachmentLightbox, type LightboxTarget } from '@/components/ui/AttachmentLightbox';
 import { AttachmentMenuButton } from '@/components/ui/AttachmentMenuButton';
+import { renderWithMentions } from '@/utils/mentions';
 
 // §Messenger — the full-screen chat surface, in the same "module panel over
 // the room" shape Docs/Base/Calendar/Attendance already use (see App.tsx).
@@ -513,7 +514,7 @@ export function MessengerApp({
                               }`}
                             >
                               {m.attachmentUrl && <MessageAttachment url={m.attachmentUrl} name={m.attachmentName} own={own} onOpen={setLightbox} />}
-                              {m.text}
+                              {renderWithMentions(m.text, localUserId)}
                             </div>
                           )}
                           {/* Bug 6 — this bubble is the sender's own optimistic

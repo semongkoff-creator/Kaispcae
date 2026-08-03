@@ -7,6 +7,7 @@ import { ChatAvatar, avatarColor } from './ChatAvatar';
 import { AttachmentLightbox, type LightboxTarget } from './AttachmentLightbox';
 import { AttachmentMenuButton } from './AttachmentMenuButton';
 import { useProfiles } from '@/hooks/useProfiles';
+import { textMentionsUser, renderWithMentions } from '@/utils/mentions';
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024; // matches server/src/routes/uploads.ts's multer limit
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
@@ -496,7 +497,7 @@ export function ChatPanel({
                 })
               : messages.map((m) => {
                   const isOwn = m.senderId === localUserId;
-                  const isMentioned = m.text.includes(`@${localPlayerName}`);
+                  const isMentioned = textMentionsUser(m.text, localUserId);
                   return (
                     <div key={m.id}>
                       <MessageBubble
@@ -551,7 +552,7 @@ export function ChatPanel({
                         ) : (
                           m.text && (
                             <span className="break-words">
-                              {m.text}
+                              {renderWithMentions(m.text, localUserId)}
                               {m.edited && <span className="ml-1 text-[9px] opacity-60">(diedit)</span>}
                             </span>
                           )
@@ -602,7 +603,7 @@ export function ChatPanel({
                                   />
                                 ) : (
                                   <span className="text-gray-800 dark:text-gray-200 break-words">
-                                    {r.text}
+                                    {renderWithMentions(r.text, localUserId)}
                                     {r.edited && <span className="ml-1 text-[9px] text-gray-400 dark:text-gray-500">(diedit)</span>}
                                   </span>
                                 )}
