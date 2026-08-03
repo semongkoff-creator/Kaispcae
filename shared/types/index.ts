@@ -878,10 +878,25 @@ export interface Furniture {
   bgColor?: string;
   imageUrl?: string;
   // True for chair-like pieces a player can sit in (see Avatar.isSitting).
-  // Set automatically by the client when placing a chair palette entry —
-  // not exposed as a Room Editor toggle, since "which pieces are chairs" is
-  // a property of the art (tilePaletteManifest.ts), not an admin choice.
+  // Set automatically by the client when placing a built-in chair palette
+  // entry (tilePaletteManifest.ts's `sittable`) — but ALSO now a manual
+  // Room Editor toggle in ObjectSettingsPanel ("Sittable"), so any placed
+  // piece can become sittable, custom-uploaded objects included (which have
+  // no palette-level `sittable` of their own to inherit from).
   isInteractable?: boolean;
+  // Which way the avatar faces once seated on THIS piece, combined with its
+  // current rotation/flipH (see GameCanvas.tsx's computeSitFacingDirection)
+  // — 'front' faces the direction the object's art faces at its current
+  // rotation, 'back' is the opposite, 'side' is perpendicular (flipH picks
+  // which of the two perpendicular sides). Only meaningful when
+  // isInteractable is true; absent/undefined on every isInteractable piece
+  // placed before this existed (all built-in chairs) preserves their
+  // original behavior EXACTLY — direction still derives from the player's
+  // own approach direction, not the object's orientation, since there's no
+  // stored sitFacing to compute from. Only pieces where an admin explicitly
+  // sets this (via the new toggle, which defaults it to 'front') opt into
+  // orientation-aware seating.
+  sitFacing?: 'front' | 'side' | 'back';
   // Groups chairs into a "table": chairs sharing a tableId form one private
   // audio/video group whenever 2+ of their occupants are seated, exactly like
   // a private zone (see useProximity's table branch). Set by admins in the

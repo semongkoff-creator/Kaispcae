@@ -487,6 +487,30 @@ function ObjectSettingsPanel({
         <button onClick={() => patch({ flipV: !furniture.flipV })} title="Flip vertical" className={`flex-1 py-1.5 rounded text-xs cursor-pointer ${furniture.flipV ? 'bg-purple-600 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'}`}>Flip V</button>
       </div>
 
+      <label className="flex items-center gap-2 text-[11px] text-white/60 mb-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={!!furniture.isInteractable}
+          onChange={(e) => patch(e.target.checked
+            ? { isInteractable: true, sitFacing: furniture.sitFacing ?? 'front' }
+            : { isInteractable: false, sitFacing: undefined })}
+        />
+        Sittable
+      </label>
+      {furniture.isInteractable && (
+        <div className="flex gap-1.5 mb-3">
+          {([['front', 'Depan'], ['side', 'Samping'], ['back', 'Belakang']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => patch({ sitFacing: id })}
+              className={`flex-1 py-1.5 rounded text-xs cursor-pointer ${(furniture.sitFacing ?? 'front') === id ? 'bg-purple-600 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <p className="text-[11px] text-white/50 mb-1.5">Size(%)</p>
       <div className="flex items-center gap-2 mb-3">
         <label className="flex-1 text-[10px] text-white/40">W<input type="number" value={sizeW} onChange={(e) => patch({ sizePercent: { w: Number(e.target.value) || 100, h: sizeH } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>

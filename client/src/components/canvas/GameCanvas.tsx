@@ -34,6 +34,41 @@ import { drawTile, drawFloorTile, drawWallTile, drawFurnitureLayer, TILE_COLORS 
 // from the avatar as the sprite itself scales with TILE_SIZE (Fitur 4).
 const AVATAR_RADIUS = TILE_SIZE * (14 / 32);
 
+// Shared by both the legacy (approach-direction) and orientation-aware
+// (sitFacing) sit-direction paths in performSit below — one lookup, not two.
+const OPPOSITE_DIRECTION: Record<Direction, Direction> = { up: 'down', down: 'up', left: 'right', right: 'left' };
+
+// Which Direction a piece's "front" faces at each Rotate&Flip rotation value
+// (mapRender.ts's drawFurnitureLayer applies `ctx.rotate(rotation * PI/180)`,
+// which is a CLOCKWISE visual rotation for a positive angle in canvas's
+// Y-down coordinate system). 0° art conventionally faces the viewer, i.e.
+// 'down' on screen; each +90° of rotation turns that clockwise: down → left
+// → up → right → back to down.
+const ROTATION_FRONT: Record<0 | 90 | 180 | 270, Direction> = { 0: 'down', 90: 'left', 180: 'up', 270: 'right' };
+
+// Orientation-aware sit direction for a piece with an explicit sitFacing
+// (see Furniture.sitFacing's doc comment — pieces without one keep the
+// legacy player-approach-direction behavior in performSit instead of calling
+// this). Combines the object's CURRENT rotation with sitFacing to get the
+// real avatar Direction:
+//  - 'front'/'back' read straight off ROTATION_FRONT (back = opposite).
+//  - 'side' is perpendicular to the front/back axis — two candidates exist
+//    (e.g. front=down → sides are left/right); flipH picks between them.
+//    There's no inherent "true" left/right for an arbitrary uploaded image,
+//    so the +90°-vs-270°-offset convention below is arbitrary but
+//    deterministic, and — the actual requirement — DOES swap which side is
+//    used when the object is flipped horizontally.
+function computeSitFacingDirection(chair: Furniture): Direction {
+  const rotation = (chair.rotation ?? 0) as 0 | 90 | 180 | 270;
+  const front = ROTATION_FRONT[rotation];
+  if (chair.sitFacing === 'back') return OPPOSITE_DIRECTION[front];
+  if (chair.sitFacing === 'side') {
+    const sideRotation = ((rotation + (chair.flipH ? 270 : 90)) % 360) as 0 | 90 | 180 | 270;
+    return ROTATION_FRONT[sideRotation];
+  }
+  return front; // 'front' (also the default if sitFacing is somehow unset when this is called)
+}
+
 // Floor-plan reference image (see gameStore.ts's liveReferenceImage) — only
 // ever set when the admin opted into showInGame, so the photo itself is
 // meant to BE the visible map, not a translucent trace guide like in the
@@ -503,10 +538,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // remember where they were so standing up can put them back.
     state.setSitReturnPos({ x: player.x, y: player.y });
     state.setSittingFurnitureId(chair.id);
-    const OPPOSITE: Record<Direction, Direction> = { up: 'down', down: 'up', left: 'right', right: 'left' };
-    // Face away from the chair — outward into the room, like someone
-    // sitting down rather than facing into the seat back.
-    const sitDirection = OPPOSITE[player.direction];
+    // A piece with an explicit sitFacing (see its doc comment) faces however
+    // that + its current rotation/flipH resolve to; everything else (every
+    // built-in chair placed before this existed) keeps the original
+    // behavior — face away from the chair, outward into the room, like
+    // someone sitting down rather than facing into the seat back.
+    const sitDirection = chair.sitFacing ? computeSitFacingDirection(chair) : OPPOSITE_DIRECTION[player.direction];
     state.setLocalPlayer({ x: chairCenterX, y: chairCenterY, direction: sitDirection, isMoving: false, isSitting: true, seatFurnitureId: chair.id });
     emitSitRef.current(true, chairCenterX, chairCenterY, sitDirection, chair.id);
   }, []);
