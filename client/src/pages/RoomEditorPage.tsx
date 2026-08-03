@@ -25,13 +25,14 @@ type LoadError = 'auth' | 'forbidden' | 'notfound' | 'generic';
 const OBJ_CATEGORIES: { key: 'furniture' | 'decor' | 'electronics'; label: string }[] = [
   { key: 'furniture', label: 'Furniture' }, { key: 'decor', label: 'Decor' }, { key: 'electronics', label: 'Electronics' },
 ];
-const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal' | 'door'; label: string; color: string; hint: string }[] = [
+const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal' | 'door' | 'sittable'; label: string; color: string; hint: string }[] = [
   { id: 'startingPoint', label: 'Starting point', color: 'rgba(16,185,129,0.9)', hint: 'Stamp per tile = titik spawn (bisa banyak; pemain muncul di salah satunya).' },
   { id: 'impassable', label: 'Impassable', color: 'rgba(239,68,68,0.85)', hint: 'Stamp per tile = penghalang tak terlihat (memblok gerak, tanpa tekstur).' },
   { id: 'mapLocation', label: 'Map location', color: 'rgba(192,132,252,0.95)', hint: 'Stamp: drag area lalu beri nama → pill label muncul di game. Bisa pilih kedap suara atau tidak (default: tidak, jarak biasa).' },
   { id: 'privateArea', label: 'Private area', color: 'rgba(96,165,250,0.95)', hint: 'Stamp: drag area + Area ID. Area ber-ID sama = satu grup audio (walau terpisah). Bisa pilih kedap suara atau tidak (default: kedap suara).' },
   { id: 'portal', label: 'Portal', color: 'rgba(124,58,237,0.95)', hint: 'Stamp klik tile portal → pilih tujuan room lain, atau klik titik tujuan di room ini. Pemain tekan F untuk pindah.' },
   { id: 'door', label: 'Door', color: 'rgba(212,160,86,0.9)', hint: 'Stamp per tile = pintu yang bisa dilewati. Pilih tool Select lalu klik pintu untuk atur Password (opsional, mirip ZEP).' },
+  { id: 'sittable', label: 'Sittable', color: 'rgba(56,189,248,0.9)', hint: 'Stamp per tile = kursi tanpa objek (mis. kursi yang cuma gambar di reference image). Pilih tool Select lalu klik tile untuk atur arah hadap.' },
 ];
 
 interface MediaObj { id: string; type: string; x: number; y: number; payload: { url?: string; videoId?: string; websiteUrl?: string; audioUrl?: string; areaW?: number; areaH?: number; name?: string } }
@@ -593,6 +594,44 @@ function DoorSettingsPanel({
   );
 }
 
+// Sittable tile — a seat with no Furniture piece at all (see TileEffect's
+// doc comment), same "settings panel for an existing stamped tile" pattern
+// as DoorSettingsPanel above. Direction is picked directly (Bawah/Atas/Kiri/
+// Kanan) rather than front/side/back — there's no object rotation to
+// combine with on a bare tile.
+function SittableSettingsPanel({
+  tile, sittableEffect, onBack,
+}: {
+  tile: { x: number; y: number };
+  sittableEffect: TileEffect | null;
+  onBack: () => void;
+}) {
+  if (!sittableEffect) return null;
+  const direction = sittableEffect.sitDirection ?? 'down';
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <button onClick={onBack} title="Kembali ke daftar efek" className="w-6 h-6 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer text-white/70">←</button>
+        <p className="text-xs uppercase tracking-wider text-white/40">Sittable Settings</p>
+      </div>
+
+      <p className="text-[11px] text-white/50 mb-1.5">Arah hadap saat duduk</p>
+      <div className="grid grid-cols-2 gap-1.5">
+        {([['down', 'Bawah'], ['up', 'Atas'], ['left', 'Kiri'], ['right', 'Kanan']] as const).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => useEditorStore.getState().updateSittableTileEffect(tile.x, tile.y, id)}
+            className={`py-1.5 rounded text-xs cursor-pointer ${direction === id ? 'bg-purple-600 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Floor-plan reference guide — drawn as a translucent overlay ON TOP of
 // every other layer (see the call site: floor tiles are fully opaque and
 // cover every tile, so drawing this underneath would just always be hidden).
@@ -665,6 +704,19 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
         ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(plabel, sx + c, sy - 2); ctx.textAlign = 'left';
       }
       else if (e.kind === 'door') { ctx.fillStyle = 'rgba(212,160,86,0.8)'; ctx.fillRect(sx + 3, sy + 3, TILE_SIZE - 6, TILE_SIZE - 6); }
+      else if (e.kind === 'sittable') {
+        ctx.strokeStyle = 'rgba(56,189,248,0.85)'; ctx.lineWidth = 2; ctx.strokeRect(sx + 3, sy + 3, TILE_SIZE - 6, TILE_SIZE - 6);
+        ctx.font = '16px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('🪑', sx + c, sy + c + 6);
+        // Small arrow toward the facing direction, so the admin can see at a
+        // glance which way the avatar will sit without opening the panel.
+        const dir = e.sitDirection ?? 'down';
+        const ang = dir === 'down' ? Math.PI / 2 : dir === 'up' ? -Math.PI / 2 : dir === 'left' ? Math.PI : 0;
+        ctx.save(); ctx.translate(sx + c, sy + c); ctx.rotate(ang);
+        ctx.fillStyle = 'rgba(56,189,248,0.95)';
+        ctx.beginPath(); ctx.moveTo(c - 6, 0); ctx.lineTo(c - 12, -5); ctx.lineTo(c - 12, 5); ctx.closePath(); ctx.fill();
+        ctx.restore();
+        ctx.textAlign = 'left';
+      }
     }
   }
 }
@@ -806,6 +858,8 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   // portalHint above — the actual password fields live in the doc via
   // updateDoorTileEffect.
   const [selectedDoorTile, setSelectedDoorTile] = useState<{ x: number; y: number } | null>(null);
+  // Same pattern as selectedDoorTile above, for the Sittable Settings panel.
+  const [selectedSittableTile, setSelectedSittableTile] = useState<{ x: number; y: number } | null>(null);
   // Bug 14 — a native window.confirm/prompt opened SYNCHRONOUSLY from a
   // mousedown/mouseup handler blocks the main thread, but the OS keeps
   // delivering the physical second click of a double-click gesture straight
@@ -1090,6 +1144,14 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           setSelectedDoorTile((prev) => (prev && prev.x === t.x && prev.y === t.y) ? null : prev);
         } else if (s.activeTool === 'select') {
           setSelectedDoorTile(s.doorEffectAt(t.x, t.y) ? { x: t.x, y: t.y } : null);
+        }
+      } else if (eff === 'sittable') {
+        if (s.activeTool === 'stamp') { s.beginStroke(); s.stampEffectAt(t.x, t.y); dragRef.current = { mode: 'effPaint' }; }
+        else if (s.activeTool === 'eraser') {
+          s.beginStroke(); s.eraseEffectAt(t.x, t.y); dragRef.current = { mode: 'effErase' };
+          setSelectedSittableTile((prev) => (prev && prev.x === t.x && prev.y === t.y) ? null : prev);
+        } else if (s.activeTool === 'select') {
+          setSelectedSittableTile(s.sittableEffectAt(t.x, t.y) ? { x: t.x, y: t.y } : null);
         }
       } else if (eff === 'portal') {
         if (s.activeTool === 'eraser') { s.eraseEffectAt(t.x, t.y); return; }
@@ -1453,7 +1515,16 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             />
           )}
 
-          {activeLayer === 'effects' && !selectedDoorTile && (
+          {activeLayer === 'effects' && selectedSittableTile && (
+            <SittableSettingsPanel
+              key={`${selectedSittableTile.x},${selectedSittableTile.y}`}
+              tile={selectedSittableTile}
+              sittableEffect={useEditorStore.getState().sittableEffectAt(selectedSittableTile.x, selectedSittableTile.y)}
+              onBack={() => setSelectedSittableTile(null)}
+            />
+          )}
+
+          {activeLayer === 'effects' && !selectedDoorTile && !selectedSittableTile && (
             <>
               <p className="text-xs uppercase tracking-wider text-white/40 mb-2">Tile Effects</p>
               <div className="space-y-1.5">

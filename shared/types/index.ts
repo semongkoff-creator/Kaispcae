@@ -134,6 +134,13 @@ export interface RoomTile {
   doorPassword?: string;
   doorPasswordDescription?: string;
   doorFailureMessage?: string;
+  // Sittable tile effect (see mapLayers.ts's TileEffect) — a seat with no
+  // Furniture piece at all, for rooms traced entirely over a reference-image
+  // photo. GameCanvas.tsx's sit-trigger scan treats this the same as an
+  // isInteractable Furniture piece; sitDirection is used directly (absolute,
+  // no rotation to combine with — unlike Furniture.sitFacing).
+  isSittable?: boolean;
+  sitDirection?: Direction;
 }
 
 // Valid tile types and their visual/semantic meaning. 'portal' and 'spawn'

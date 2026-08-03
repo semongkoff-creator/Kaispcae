@@ -1,4 +1,4 @@
-import type { Furniture, RoomTile, Zone, TileType } from './types/index';
+import type { Furniture, RoomTile, Zone, TileType, Direction } from './types/index';
 
 // ZEP-style Room Editor — Potong 1 data model. `LayerData` is the NEW per-room
 // map format (5 layers). It lives BESIDE the legacy tilemapData/furniture/zones
@@ -61,12 +61,25 @@ export interface ReferenceImageData {
 // Per-coordinate effect (sparse). 'impassable' carries the original blocked
 // tile type so collision + rendering reconstruct exactly; 'portal' carries its
 // destination room slug. 'startingPoint' = spawn; 'door' = the walkable door
-// tile type (kept distinct so it round-trips).
+// tile type (kept distinct so it round-trips). 'sittable' lets a bare tile
+// (no Furniture piece at all) become a seat — for rooms traced entirely over
+// a reference-image photo, where "the chair" is just pixels in the picture,
+// not a placed object with its own rotation to combine with (see
+// Furniture.sitFacing for the object-based equivalent). Unlike every other
+// kind here, it does NOT touch RoomTile.type — a sittable tile stays
+// 'floor' (walkable) unless separately ALSO stamped 'impassable', which this
+// map's one-effect-per-tile model doesn't allow combining; admins wanting a
+// sit-only blocked tile can't have both today.
 export interface TileEffect {
   x: number;
   y: number;
-  kind: 'startingPoint' | 'impassable' | 'portal' | 'door';
+  kind: 'startingPoint' | 'impassable' | 'portal' | 'door' | 'sittable';
   tileType?: TileType; // for 'impassable' — original type ('desk' | 'chair' | …)
+  // For 'sittable' — the absolute Direction the avatar faces once seated
+  // here. No rotation to combine with (there's no object), so this is
+  // picked directly rather than as front/side/back — see Furniture.sitFacing
+  // for why objects use a different (relative) scheme.
+  sitDirection?: Direction;
   // Portal destination: targetSlug = another room (cross-room), or targetX/Y =
   // a tile in THIS room (internal). label = optional portal name.
   targetSlug?: string;
@@ -260,6 +273,13 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
         if (eff.doorPassword != null) tile.doorPassword = eff.doorPassword;
         if (eff.doorPasswordDescription != null) tile.doorPasswordDescription = eff.doorPasswordDescription;
         if (eff.doorFailureMessage != null) tile.doorFailureMessage = eff.doorFailureMessage;
+      }
+      // 'sittable' doesn't touch `type` (see TileEffect's doc comment) — just
+      // tags the tile so GameCanvas.tsx's sit-trigger scan can find it
+      // alongside Furniture.isInteractable pieces.
+      if (eff?.kind === 'sittable') {
+        tile.isSittable = true;
+        if (eff.sitDirection != null) tile.sitDirection = eff.sitDirection;
       }
       row.push(tile);
     }

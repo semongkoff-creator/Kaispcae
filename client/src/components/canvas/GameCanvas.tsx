@@ -6,6 +6,7 @@ import {
   Avatar,
   TileType,
   Furniture,
+  RoomTile,
   Direction,
   ProximityPlayer,
   PROXIMITY_THRESHOLD_PX,
@@ -494,8 +495,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // ── Sit-in-chair ─────────────────────────────────────────────────────
   // Updated every frame in draw() below (cheap — furniture lists are small)
   // so both the "press SPACE" indicator and the keydown handler read the
-  // same up-to-date value without recomputing it twice.
-  const nearbyChairRef = useRef<{ furniture: Furniture; tileX: number; tileY: number } | null>(null);
+  // same up-to-date value without recomputing it twice. Two seat sources
+  // share this: an isInteractable Furniture piece, or a bare 'sittable'
+  // TileEffect-tagged tile (RoomTile.isSittable — no Furniture piece at
+  // all, for rooms traced entirely over a reference-image photo). Both
+  // funnel into the same performSit below.
+  type NearbySeat =
+    | { kind: 'furniture'; furniture: Furniture; tileX: number; tileY: number }
+    | { kind: 'tile'; tile: RoomTile; tileX: number; tileY: number };
+  const nearbyChairRef = useRef<NearbySeat | null>(null);
   // Gather-style "press X to interact" — the nearest placed media object
   // (image/youtube/whiteboard/file) within one tile of the player, if any.
   // Recomputed each frame in the draw loop (same pattern as nearbyChairRef).
@@ -511,18 +519,21 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // plain-English meaning.
   const autoTriggeredIdsRef = useRef<Set<string>>(new Set());
 
-  const performSit = useCallback((chair: Furniture, tileX: number, tileY: number) => {
+  const performSit = useCallback((seat: NearbySeat, tileX: number, tileY: number) => {
     // Seat at the exact tile faced, not always the furniture's anchor tile —
     // a multi-tile sofa is one seat spanning several tiles, so sitting from
     // its right half shouldn't visually snap the player over to its left end.
     const chairCenterX = tileX * TILE_SIZE + TILE_SIZE / 2;
     const chairCenterY = tileY * TILE_SIZE + TILE_SIZE / 2;
+    // A bare sittable tile has no Furniture id to key occupancy/rendering
+    // off of — synthesize one from its coordinate, stable across re-scans.
+    const seatId = seat.kind === 'furniture' ? seat.furniture.id : `tile:${tileX},${tileY}`;
 
     // Refuse if another player is already seated on this exact tile —
     // without this check, two players could both sit at the same spot and
     // their avatars would render fully overlapping each other.
     const occupied = Object.values(playerRecordsRef.current).some(
-      (p) => p.isSitting && (p.seatFurnitureId === chair.id || (p.x === chairCenterX && p.y === chairCenterY)),
+      (p) => p.isSitting && (p.seatFurnitureId === seatId || (p.x === chairCenterX && p.y === chairCenterY)),
     );
     if (occupied) {
       // Was a silent no-op before — say why, so a taken seat doesn't read as
@@ -537,15 +548,19 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // player there on stand-up would strand them inside a wall-like tile —
     // remember where they were so standing up can put them back.
     state.setSitReturnPos({ x: player.x, y: player.y });
-    state.setSittingFurnitureId(chair.id);
-    // A piece with an explicit sitFacing (see its doc comment) faces however
-    // that + its current rotation/flipH resolve to; everything else (every
-    // built-in chair placed before this existed) keeps the original
-    // behavior — face away from the chair, outward into the room, like
-    // someone sitting down rather than facing into the seat back.
-    const sitDirection = chair.sitFacing ? computeSitFacingDirection(chair) : OPPOSITE_DIRECTION[player.direction];
-    state.setLocalPlayer({ x: chairCenterX, y: chairCenterY, direction: sitDirection, isMoving: false, isSitting: true, seatFurnitureId: chair.id });
-    emitSitRef.current(true, chairCenterX, chairCenterY, sitDirection, chair.id);
+    state.setSittingFurnitureId(seatId);
+    // Furniture with an explicit sitFacing (see its doc comment) faces
+    // however that + its current rotation/flipH resolve to; a sittable tile
+    // uses its own absolute sitDirection directly (no rotation to combine
+    // with — there's no object). Everything else (every built-in chair
+    // placed before sitFacing existed) keeps the original behavior — face
+    // away from the chair, outward into the room, like someone sitting down
+    // rather than facing into the seat back.
+    const sitDirection = seat.kind === 'furniture'
+      ? (seat.furniture.sitFacing ? computeSitFacingDirection(seat.furniture) : OPPOSITE_DIRECTION[player.direction])
+      : (seat.tile.sitDirection ?? OPPOSITE_DIRECTION[player.direction]);
+    state.setLocalPlayer({ x: chairCenterX, y: chairCenterY, direction: sitDirection, isMoving: false, isSitting: true, seatFurnitureId: seatId });
+    emitSitRef.current(true, chairCenterX, chairCenterY, sitDirection, seatId);
   }, []);
 
   // Nudge ("senggol", Z key) — finds whoever's closest to the local player
@@ -618,8 +633,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         if (state.localPlayer.isSitting) {
           performStandUp();
         } else if (nearbyChairRef.current) {
-          const { furniture, tileX, tileY } = nearbyChairRef.current;
-          performSit(furniture, tileX, tileY);
+          const seat = nearbyChairRef.current;
+          performSit(seat, seat.tileX, seat.tileY);
         } else {
           // Jump — cosmetic only, no chair nearby and not already sitting.
           state.triggerJump(localPlayerIdRef.current, Date.now());
@@ -800,7 +815,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         // so facing disambiguates ties without being required. Snapping later
         // uses this nearest seat tile, which is always on the piece, so the
         // avatar still lands ON the chair (never on an empty gap tile).
-        let best: { furniture: Furniture; tileX: number; tileY: number } | null = null;
+        let best: NearbySeat | null = null;
         let bestScore = Infinity;
         for (const f of furnitureRef.current) {
           if (!f.isInteractable) continue;
@@ -813,7 +828,22 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           if (nearDist > SIT_TILE_RADIUS) continue;
           const faced = f.y === facingTileY && nearFx === facingTileX ? 0 : 0.5;
           const score = nearDist + faced;
-          if (score < bestScore) { bestScore = score; best = { furniture: f, tileX: nearFx, tileY: f.y }; }
+          if (score < bestScore) { bestScore = score; best = { kind: 'furniture', furniture: f, tileX: nearFx, tileY: f.y }; }
+        }
+        // Bare sittable tiles (RoomTile.isSittable, no Furniture piece at
+        // all — see the ref's own doc comment) — same scoring, scanned over
+        // the small SIT_TILE_RADIUS window around the player rather than
+        // every piece on the map, since there's no pre-filtered list to
+        // iterate like furnitureRef.
+        for (let ty = baseTileY - SIT_TILE_RADIUS; ty <= baseTileY + SIT_TILE_RADIUS; ty++) {
+          for (let tx = baseTileX - SIT_TILE_RADIUS; tx <= baseTileX + SIT_TILE_RADIUS; tx++) {
+            const tile = tilesRef.current[ty]?.[tx];
+            if (!tile?.isSittable) continue;
+            const dist = Math.max(Math.abs(tx - baseTileX), Math.abs(ty - baseTileY));
+            const faced = ty === facingTileY && tx === facingTileX ? 0 : 0.5;
+            const score = dist + faced;
+            if (score < bestScore) { bestScore = score; best = { kind: 'tile', tile, tileX: tx, tileY: ty }; }
+          }
         }
         nearbyChairRef.current = best;
       }
