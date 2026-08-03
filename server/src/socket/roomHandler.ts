@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { isUserInLockedZone } from './zoneLock';
+import { isUserInLockedZone, zoneKeyholderOf, admitUserToZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH } from '@virtualmeet/shared';
@@ -1063,6 +1063,27 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       : { x: tileX, y: tileY + 1 };
     const landX = spot.x * TILE_SIZE + TILE_SIZE / 2;
     const landY = spot.y * TILE_SIZE + TILE_SIZE / 2;
+
+    // Potongan A1 — keyholder-summon bypasses the lock. Only when the summon
+    // really did come from whoever currently holds the key on the zone the
+    // requester is standing in (verified HERE, server-side, via
+    // zoneKeyholderOf — never taken on the client's word: a modified client
+    // claiming "I was summoned" can't forge this, since it depends on the
+    // REQUESTER's own tracked zone and that zone's real lock record).
+    // Admits the target into that zone's allowedUserIds — the exact
+    // mechanism ZONE_KNOCK_DECIDE already uses for a granted knock — then
+    // tells the target's own client BEFORE the teleport below, so its
+    // zone-entry effect (App.tsx) already sees them as admitted and doesn't
+    // bounce them back out the instant they land. Summons into an unlocked
+    // zone, or from anyone other than that zone's keyholder, are unaffected
+    // — mayEnterZone/the client bounce still apply exactly as before.
+    const requesterUid = findUserIdBySocket(pending.fromSocketId);
+    const targetUid = findUserIdBySocket(socket.id);
+    const requesterZoneId = zoneIdOfSocket(pending.fromSocketId);
+    if (requesterZoneId && requesterUid && targetUid && zoneKeyholderOf(room, requesterZoneId) === requesterUid) {
+      admitUserToZone(room, requesterZoneId, targetUid);
+      socket.emit(SocketEvents.ZONE_KNOCK_DECIDED, { zoneId: requesterZoneId, admitted: true, byName: stillRequester.name });
+    }
 
     updatePlayerPosition(room, socket.id, landX, landY, stillRequester.direction);
     io.to(room).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: landX, y: landY, direction: stillRequester.direction });

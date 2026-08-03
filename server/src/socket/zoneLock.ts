@@ -48,6 +48,24 @@ export function mayEnterZone(room: string, zoneId: string, userId: string | unde
   return lock.lockedByUserId === userId || lock.allowedUserIds.has(userId);
 }
 
+// Who currently holds this zone's key, if any — used by summon (roomHandler.ts's
+// SUMMON_RESPOND) to verify server-side that a summon claiming to come "from
+// the keyholder" really does, before letting it bypass the lock. Never trust
+// a client's own claim of who summoned whom; this is the same lockedByUserId
+// mayEnterZone already checks, just exposed for a caller outside this file.
+export function zoneKeyholderOf(room: string, zoneId: string): string | undefined {
+  return roomLocks(room).get(zoneId)?.lockedByUserId;
+}
+
+// Admits a user into a locked zone without them having knocked — the
+// keyholder-summon path's equivalent of ZONE_KNOCK_DECIDE's admit branch.
+// Same allowedUserIds list, same effect (mayEnterZone + the client's own
+// isAdmitted mirror both start passing for this user), just a different
+// trigger. No-ops if the zone isn't actually locked (nothing to admit into).
+export function admitUserToZone(room: string, zoneId: string, userId: string): void {
+  roomLocks(room).get(zoneId)?.allowedUserIds.add(userId);
+}
+
 function stateOf(room: string, zoneId: string): ZoneLockState {
   const lock = roomLocks(room).get(zoneId);
   return lock
