@@ -1535,6 +1535,16 @@ export function RoomEditorPage({ slug }: { slug: string }) {
                   </button>
                 ))}
               </div>
+              <button
+                onClick={() => {
+                  if (window.confirm('Hapus SEMUA tile effect di room ini (impassable, door, sittable, portal, starting point, dll)? Aksi ini bisa di-undo (Ctrl+Z).')) {
+                    useEditorStore.getState().resetAllTileEffects();
+                  }
+                }}
+                className="w-full mt-2 py-1.5 rounded bg-red-600/20 hover:bg-red-600/30 border border-red-500/40 text-red-300 text-xs font-medium cursor-pointer"
+              >
+                ↺ Reset semua Tile Effects
+              </button>
 
               <p className="text-xs uppercase tracking-wider text-white/40 mt-4 mb-2">Media</p>
               <div className="space-y-1.5">

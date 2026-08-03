@@ -149,6 +149,10 @@ interface EditorState {
   setSelectedEffect: (k: TileEffectKind | null) => void;
   stampEffectAt: (x: number, y: number) => void; // startingPoint / impassable / door (per-tile stroke)
   eraseEffectAt: (x: number, y: number) => boolean; // removes a per-tile effect; true if one was there
+  // Clears EVERY stamped tile effect in the room at once — impassable,
+  // door, portal, sittable, startingPoint, all of it — back to none. One
+  // history entry (undoable), same as any other mutating action here.
+  resetAllTileEffects: () => void;
   areaAt: (x: number, y: number) => AreaEffect | null;
   addArea: (effect: 'mapLocation' | 'privateArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean) => void;
   removeAreaAt: (x: number, y: number) => void;
@@ -440,6 +444,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (!d.tileEffects.some((e) => e.x === x && e.y === y)) return false;
       d.tileEffects = d.tileEffects.filter((e) => !(e.x === x && e.y === y));
       effectsDirty = true; strokeChanged = true; return true;
+    },
+    resetAllTileEffects: () => {
+      const d = get().doc; if (!d || d.tileEffects.length === 0) return;
+      const snap = snapshot();
+      d.tileEffects = [];
+      effectsDirty = true; pushHistory(snap); commit();
     },
     doorEffectAt: (x, y) => {
       const d = get().doc; if (!d) return null;
