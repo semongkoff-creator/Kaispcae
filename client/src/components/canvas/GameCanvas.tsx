@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import {
   TILE_SIZE,
   MAP_WIDTH,
@@ -152,6 +152,11 @@ interface GameCanvasProps {
   emitFollowUnfollow: () => void;
   // A4 — free double-click teleport.
   emitTeleportTo: (x: number, y: number, direction: Direction) => void;
+  // Claimable-seat markers (Room Editor's 'claimableSeat' tile effect) —
+  // click an empty one to claim it, click your own to teleport there
+  // (reusing emitTeleportTo above, not a second teleport path).
+  emitClaimSeat: (seatId: string) => void;
+  emitReleaseSeat: (seatId: string) => void;
   onMediaOpen: (mediaId: string) => void;
   // Fitur 15B — fires when the local player triggers an Interactive Object
   // (Press F in range, or automatic on entering range). The parent looks up
@@ -243,7 +248,7 @@ function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: numb
   return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, onMediaOpen, onInteractiveTrigger, onDoorPasswordTrigger }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onInteractiveTrigger, onDoorPasswordTrigger }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -328,6 +333,27 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const bannerRefs = useRef(new Map<string, HTMLDivElement>());
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const mediaObjectsRef = useRef(mediaObjects);
+  // Claimable-seat markers (Room Editor's 'claimableSeat' tile effect) —
+  // same DOM-overlay pattern as media markers above. Derived from `tiles`
+  // (RoomTile.claimableSeatId, set by mapLayers.ts's layerDataToLegacy)
+  // rather than a separate fetch: the marker's existence/position is just
+  // "a tile has this id", already delivered over the normal tiles channel.
+  const claimableSeats = useMemo(() => {
+    const seats: { id: string; x: number; y: number }[] = [];
+    for (let y = 0; y < tiles.length; y++) {
+      for (let x = 0; x < (tiles[y]?.length ?? 0); x++) {
+        const id = tiles[y][x]?.claimableSeatId;
+        if (id) seats.push({ id, x, y });
+      }
+    }
+    return seats;
+  }, [tiles]);
+  const claimableSeatsRef = useRef(claimableSeats);
+  const claimSeatMarkerRefs = useRef(new Map<string, HTMLDivElement>());
+  // Live ownership — reactive (not just .getState()) so a marker's label/
+  // click-behavior updates the instant someone else claims or releases it.
+  const seatClaims = useGameStore((s) => s.seatClaims);
+  const localUserId = useGameStore((s) => s.localUserId);
   // Floor-plan reference image (see gameStore.ts) — only ever non-null when
   // the admin opted into showInGame; drawn as an overlay, see the draw loop.
   const liveReferenceImage = useGameStore((s) => s.liveReferenceImage);
@@ -370,6 +396,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     zonesRef.current = zones;
     furnitureRef.current = furniture;
     mediaObjectsRef.current = mediaObjects;
+    claimableSeatsRef.current = claimableSeats;
     liveReferenceImageRef.current = liveReferenceImage;
     avatarScaleRef.current = avatarScale;
   });
@@ -1155,6 +1182,16 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       el.style.transform = `translate(${mx}px, ${my}px) scale(${zoom})`;
     }
 
+    // Claimable-seat markers (DOM overlay), same imperative positioning,
+    // centered on the marker's tile.
+    for (const seat of claimableSeatsRef.current) {
+      const el = claimSeatMarkerRefs.current.get(seat.id);
+      if (!el) continue;
+      const sx = (seat.x * TILE_SIZE + TILE_SIZE / 2 - cameraX) * zoom;
+      const sy = (seat.y * TILE_SIZE + TILE_SIZE / 2 - cameraY) * zoom;
+      el.style.transform = `translate(${sx}px, ${sy}px) scale(${zoom})`;
+    }
+
     // Zone draw preview (while dragging out a new zone rectangle)
     if (zoneDragStartRef.current && zoneDragCurrentRef.current) {
       const a = zoneDragStartRef.current;
@@ -1862,6 +1899,76 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                   ) : (
                     MEDIA_ICON[media.type] ?? '📌'
                   )}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {/* Claimable-seat markers (Room Editor's 'claimableSeat' tile effect) —
+          same DOM-overlay pattern as media markers above. Unclaimed → click
+          to claim (server validates + broadcasts SEAT_CLAIMS_UPDATED, or
+          denies via SEAT_CLAIM_DENIED if someone beat you to it). Yours →
+          click teleports there (reuses emitTeleportTo, the same primitive
+          the existing double-click-to-move feature uses — no second
+          teleport path), plus a small ✕ to release manually. Someone
+          else's → shown with their name, click attempts to claim anyway and
+          lets the server deny it (single source of truth, no client-side
+          "is this taken" guess to keep in sync). */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {claimableSeats.map((seat) => {
+          const owner = seatClaims[seat.id];
+          const isMine = !!owner && owner.userId === localUserId;
+          return (
+            <div
+              key={seat.id}
+              ref={(el) => {
+                if (el) claimSeatMarkerRefs.current.set(seat.id, el);
+                else claimSeatMarkerRefs.current.delete(seat.id);
+              }}
+              className="absolute top-0 left-0 will-change-transform origin-top-left pointer-events-auto flex flex-col items-center -mt-3.5 -ml-3.5"
+            >
+              <button
+                data-seat-id={seat.id}
+                onClick={() => {
+                  if (isMine) {
+                    // Same "move the source-of-truth locally, then tell the
+                    // server so everyone else snaps" pattern as the existing
+                    // double-click teleport above — emitTeleportTo alone
+                    // only reaches OTHER clients (socket.to excludes the
+                    // sender), so skipping this would leave the clicker's
+                    // own avatar stuck in place.
+                    const cx = seat.x * TILE_SIZE + TILE_SIZE / 2;
+                    const cy = seat.y * TILE_SIZE + TILE_SIZE / 2;
+                    const store = useGameStore.getState();
+                    const from = store.localPlayer;
+                    setPosition(cx, cy);
+                    store.setLocalPlayer({ x: cx, y: cy, isMoving: false });
+                    emitTeleportTo(cx, cy, from.direction);
+                  } else {
+                    emitClaimSeat(seat.id);
+                  }
+                }}
+                title={owner ? (isMine ? 'Kursimu — klik untuk pindah ke sini' : `Diklaim ${owner.name}`) : 'Klaim kursi ini'}
+                className={`w-7 h-7 flex items-center justify-center text-base rounded-full shadow-md border-2 transition-transform cursor-pointer hover:scale-110 ${
+                  isMine ? 'bg-emerald-400/90 border-emerald-600' : owner ? 'bg-amber-300/90 border-amber-600' : 'bg-white/90 border-gray-300'
+                }`}
+              >
+                🪑
+              </button>
+              {owner && (
+                <span className={`mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold text-white shadow whitespace-nowrap ${isMine ? 'bg-emerald-600/90' : 'bg-amber-600/90'}`}>
+                  {isMine ? 'Kamu' : owner.name}
+                </span>
+              )}
+              {isMine && (
+                <button
+                  data-release-seat-id={seat.id}
+                  onClick={(e) => { e.stopPropagation(); emitReleaseSeat(seat.id); }}
+                  title="Lepas kursi"
+                  className="mt-0.5 w-4 h-4 flex items-center justify-center text-[9px] rounded-full bg-black/50 hover:bg-black/70 text-white cursor-pointer"
+                >
+                  ✕
                 </button>
               )}
             </div>

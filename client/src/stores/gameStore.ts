@@ -144,6 +144,12 @@ export interface GameState {
   sitNotice: string | null;
   setSitNotice: (notice: string | null) => void;
 
+  // Live ownership of claimable-seat markers (see mapLayers.ts's TileEffect
+  // 'claimableSeat'), keyed by seatId. Server-authoritative, in-memory only
+  // — refreshed wholesale on every SEAT_CLAIMS_UPDATED broadcast.
+  seatClaims: Record<string, { userId: string; name: string }>;
+  setSeatClaims: (claims: { seatId: string; userId: string; name: string }[]) => void;
+
   // Set when an admin removes us from the room via Kick (see
   // shared/permissions.ts's 'room:kick') — mirrors roomDeletedNotice's
   // "show a notice, then navigate back to the Lobby" pattern in App.tsx.
@@ -605,6 +611,10 @@ export const useGameStore = create<GameState>((set, get) => ({
   setRoomDeletedNotice: (notice) => set({ roomDeletedNotice: notice }),
   sitNotice: null,
   setSitNotice: (notice) => set({ sitNotice: notice }),
+  seatClaims: {},
+  setSeatClaims: (claims) => set({
+    seatClaims: Object.fromEntries(claims.map((c) => [c.seatId, { userId: c.userId, name: c.name }])),
+  }),
 
   kickedNotice: null,
   setKickedNotice: (notice) => set({ kickedNotice: notice }),

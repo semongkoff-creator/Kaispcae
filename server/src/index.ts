@@ -12,6 +12,7 @@ import { registerChannelChatHandlers } from './socket/channelChatHandler';
 import { registerEmoteHandlers } from './socket/emoteHandler';
 import { registerZoneHandlers } from './socket/zoneHandler';
 import { registerZoneLockHandlers } from './socket/zoneLock';
+import { registerSeatClaimHandlers } from './socket/seatClaim';
 import { registerFurnitureHandlers } from './socket/furnitureHandler';
 import { registerFollowHandlers } from './socket/followHandler';
 import { registerMediaHandlers, startMediaExpirySweep } from './socket/mediaHandler';
@@ -178,6 +179,7 @@ async function start() {
     registerEmoteHandlers(io, socket);
     registerZoneHandlers(io, socket);
     registerZoneLockHandlers(io, socket);
+  registerSeatClaimHandlers(io, socket);
     registerFurnitureHandlers(io, socket);
     registerFollowHandlers(io, socket);
     registerMediaHandlers(io, socket);

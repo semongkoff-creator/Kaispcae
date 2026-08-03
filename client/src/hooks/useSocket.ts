@@ -424,6 +424,16 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().setFurnitureAssignment(data.furnitureId, undefined, undefined);
     });
 
+    // Claimable-seat markers (Room Editor's 'claimableSeat' tile effect) —
+    // server broadcasts the full claim list on every change, same
+    // wholesale-refresh shape as zone locks.
+    socket.on(SocketEvents.SEAT_CLAIMS_UPDATED, (data: { claims: { seatId: string; userId: string; name: string }[] }) => {
+      useGameStore.getState().setSeatClaims(data?.claims ?? []);
+    });
+    socket.on(SocketEvents.SEAT_CLAIM_DENIED, (data: { seatId: string; byName?: string }) => {
+      useGameStore.getState().setSitNotice(`Kursi ini sudah diklaim ${data.byName ?? 'orang lain'}.`);
+    });
+
     // Zone-private chat only now — the old whole-room broadcast case is
     // superseded by CHANNEL_MESSAGE_NEW/the room's default "general" channel
     // (see chatHandler.ts, which no longer emits this without a zoneId).
@@ -790,6 +800,14 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.FURNITURE_UNASSIGN, { furnitureId });
   }, []);
 
+  const emitClaimSeat = useCallback((seatId: string) => {
+    socketRef.current?.emit(SocketEvents.CLAIM_SEAT, { seatId });
+  }, []);
+
+  const emitReleaseSeat = useCallback((seatId: string) => {
+    socketRef.current?.emit(SocketEvents.RELEASE_SEAT, { seatId });
+  }, []);
+
   // Fitur 15B — Password prompt. The attempt travels to the server for
   // comparison; the reply lands via INTERACTIVE_PASSWORD_RESULT below.
   const emitInteractivePasswordCheck = useCallback((furnitureId: string, attempt: string) => {
@@ -1019,5 +1037,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay };
+  return { emitMove, emitStop, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay };
 }

@@ -360,6 +360,15 @@ export enum SocketEvents {
   ZONE_KNOCK_DECIDE = 'zone:knock_decide',
   ZONE_KNOCK_DECIDED = 'zone:knock_decided',
 
+  // Claimable seat markers (Room Editor's 'claimableSeat' tile effect —
+  // mapLayers.ts). Ownership is in-memory only (server/src/socket/
+  // seatClaim.ts), exactly like the zone lock above: "right now, in this
+  // session", never persisted, released automatically on disconnect.
+  CLAIM_SEAT = 'seat:claim',
+  RELEASE_SEAT = 'seat:release',
+  SEAT_CLAIMS_UPDATED = 'seat:claims_updated',
+  SEAT_CLAIM_DENIED = 'seat:claim_denied',
+
   ROOM_UPDATE = 'room:update',
   ROOM_UPDATED = 'room:updated',
 
@@ -1110,6 +1119,17 @@ export interface ZoneLockState {
   locked: boolean;
   lockedByUserId?: string;
   lockedByName?: string;
+}
+
+// Live claim state of one claimable-seat marker (see mapLayers.ts's
+// TileEffect 'claimableSeat'), broadcast to the whole room on every change
+// so every client sees the owner's name in real time. In-memory only on the
+// server (server/src/socket/seatClaim.ts) — never persisted, never
+// survives a restart, same posture as ZoneLockState above.
+export interface SeatClaimState {
+  seatId: string;
+  userId: string;
+  name: string;
 }
 
 export interface ZoneKnockRequest {
