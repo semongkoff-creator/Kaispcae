@@ -445,8 +445,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   }, [localPlayer.x, localPlayer.y, zones, emitZoneEnter, emitZoneExit]);
 
   const zoneChatHistory = useGameStore((s) => s.zoneChatHistory);
-  const handleSendZoneChat = useCallback((text: string, zoneId: string) => {
-    emitChat(text, false, zoneId);
+  const handleSendZoneChat = useCallback((text: string, zoneId: string, attachmentUrl?: string, attachmentName?: string) => {
+    emitChat(text, false, zoneId, attachmentUrl, attachmentName);
   }, [emitChat]);
 
   // Media toggles — single call, track is toggled directly in the hook
@@ -1730,6 +1730,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         currentZone={currentZone}
         zoneMessages={currentZone ? zoneChatHistory[currentZone.id] ?? [] : []}
         onSendZone={handleSendZoneChat}
+        roomSlug={roomSlug}
         isAdmin={isAdmin}
         onPinNotice={handlePinNotice}
         open={channelChat.chatPanelOpen}

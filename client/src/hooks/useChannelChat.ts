@@ -214,7 +214,11 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
       });
 
       try {
-        const { url, fileName } = await api.uploadMedia(file);
+        // Potongan C3 — roomSlug is what makes this actually land in Lark
+        // Drive (see routes/uploads.ts's resolveRoomFolder): without it the
+        // upload silently fell back to local disk every time, even with
+        // Drive fully configured and working everywhere else.
+        const { url, fileName } = await api.uploadMedia(file, roomSlug);
         // The File itself is only ever needed to RETRY the upload step —
         // once it succeeds, every future retry (if the send confirmation
         // itself later times out) only needs to re-emit the already-known
@@ -252,7 +256,7 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
       if (file) {
         useGameStore.getState().markMessagePending(key, clientId);
         try {
-          const { url, fileName } = await api.uploadMedia(file);
+          const { url, fileName } = await api.uploadMedia(file, roomSlug);
           pendingFilesRef.current.delete(clientId);
           if (activeChatTarget.type === 'channel') emitters.emitChannelMessageSend(activeChatTarget.id, '', undefined, url, fileName, clientId);
           else emitters.emitDmMessageSend(activeChatTarget.id, '', undefined, url, fileName, clientId);

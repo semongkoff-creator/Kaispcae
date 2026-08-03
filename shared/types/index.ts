@@ -1182,6 +1182,15 @@ export interface ChatMessage {
   timestamp: number;
   isProximity?: boolean;
   zoneId?: string;
+  // Potongan C3 — zone-private chat has no attachment field until now.
+  // Unlike ChannelMessage's attachmentUrl/attachmentName (persisted, part of
+  // the ChatMessage Prisma model), this zone chat is NEVER persisted at all
+  // (see server/src/socket/chatHandler.ts) — purely a live relay to whoever
+  // is currently in the zone. The FILE itself still lands permanently in
+  // Lark Drive same as any other chat attachment; only the message pointing
+  // to it disappears once the zone empties out / a client reloads.
+  attachmentUrl?: string;
+  attachmentName?: string;
   // Music Bot's own replies (see musicHandler.ts) — senderId is the fixed
   // sentinel MUSIC_BOT_SENDER_ID below, senderName is MUSIC_BOT_NAME; this
   // flag is what actually drives the distinct bubble styling client-side

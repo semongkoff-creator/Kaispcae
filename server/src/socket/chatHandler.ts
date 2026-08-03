@@ -18,7 +18,7 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
   // is superseded by the room's persisted default Channel (see
   // channelChatHandler.ts's CHANNEL_MESSAGE_SEND); this event now only
   // fires for the "Private" zone tab in ChatPanel.tsx.
-  socket.on(SocketEvents.CHAT_MESSAGE, (text: string, isProximity?: boolean, zoneId?: string) => {
+  socket.on(SocketEvents.CHAT_MESSAGE, (text: string, isProximity?: boolean, zoneId?: string, attachmentUrl?: string, attachmentName?: string) => {
     if (!canSendChat(socket.id)) return;
     // Reject a claimed zone chat from a sender not actually tracked as
     // being inside that zone — the client-side UI already hides the
@@ -30,8 +30,9 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
     // (server-side, before anything is broadcast) so it can't be spoofed by
     // a modified client sending the raw command text expecting it to just
     // render as a normal message. A recognized command is NEVER broadcast
-    // as the sender's own chat message — only the bot's reply is.
-    if (isMusicCommand(text)) {
+    // as the sender's own chat message — only the bot's reply is. Skipped
+    // entirely for a file share (empty text) — nothing to parse as a command.
+    if (text && isMusicCommand(text)) {
       void handleMusicCommand(io, currentRoom, zoneId, socket.id, playerName(), text)
         .catch((e) => console.error('[musicBot] handleMusicCommand failed:', e));
       return;
@@ -42,10 +43,18 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
       senderId: socket.id,
       senderName: playerName(),
       senderColor: playerColor(),
-      text: text.slice(0, 200),
+      text: (text || '').slice(0, 200),
       timestamp: Date.now(),
       isProximity: !!isProximity,
       zoneId,
+      // Potongan C3 — the upload itself already happened over REST (same
+      // Lark-Drive-backed /api/uploads used by #general/DM); this only
+      // carries the resulting locator through the live relay. Trusted as
+      // given (same trust level as `text`) — this event already requires a
+      // real zone membership check above, and the URL only ever resolves to
+      // whatever routes/uploads.ts itself created.
+      attachmentUrl: attachmentUrl || undefined,
+      attachmentName: attachmentName || undefined,
     };
 
     // Zone-private messages only go to sockets currently tracked as inside

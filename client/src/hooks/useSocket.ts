@@ -862,8 +862,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.INTERACTIVE_CHANGE_OBJECT, { furnitureId });
   }, []);
 
-  const emitChat = useCallback((text: string, isProximity?: boolean, zoneId?: string) => {
-    socketRef.current?.emit(SocketEvents.CHAT_MESSAGE, text, isProximity, zoneId);
+  const emitChat = useCallback((text: string, isProximity?: boolean, zoneId?: string, attachmentUrl?: string, attachmentName?: string) => {
+    socketRef.current?.emit(SocketEvents.CHAT_MESSAGE, text, isProximity, zoneId, attachmentUrl, attachmentName);
   }, []);
 
   const emitChannelJoin = useCallback((channelId: string) => {

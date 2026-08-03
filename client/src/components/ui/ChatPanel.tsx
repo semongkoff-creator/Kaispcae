@@ -33,7 +33,14 @@ interface ChatPanelProps {
   // disappears once they leave (falling back to the last channel/DM).
   currentZone?: { id: string; name: string } | null;
   zoneMessages?: ChatMessage[];
-  onSendZone?: (text: string, zoneId: string) => void;
+  // Potongan C3 — attachmentUrl/attachmentName are set for a file share
+  // (text is '' in that case, same convention as the persisted onSend below).
+  onSendZone?: (text: string, zoneId: string, attachmentUrl?: string, attachmentName?: string) => void;
+  // Needed here (not just in useChannelChat) because zone-chat file uploads
+  // are done directly in this component — see handleAttachFile — rather
+  // than through a hook, matching how zone chat's send path already lives
+  // in App.tsx rather than useChannelChat.ts.
+  roomSlug: string;
   // Only admins can pin a message as the room's Notice banner — the
   // server re-checks this independently (see roomHandler.ts's NOTICE_PIN
   // handler), this just decides whether the option is offered at all.
@@ -74,6 +81,7 @@ export function ChatPanel({
   currentZone,
   zoneMessages = [],
   onSendZone,
+  roomSlug,
   isAdmin,
   onPinNotice,
   open,
@@ -187,6 +195,10 @@ export function ChatPanel({
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [attachError, setAttachError] = useState('');
+  // Potongan C3 — zone-chat file upload has no message bubble to show a
+  // pending state on (see handleAttachFile), so this is the ONLY signal the
+  // user gets that something's happening.
+  const [zoneFileUploading, setZoneFileUploading] = useState(false);
   // Scroll container (not an anchor element): we drive scrollTop directly,
   // which is steadier under React re-renders than scrollIntoView (that can
   // yank the whole page and fights the smooth-scroll mid-render).
@@ -292,9 +304,28 @@ export function ChatPanel({
         setAttachError(`File is too large — max ${Math.round(MAX_ATTACHMENT_BYTES / (1024 * 1024))}MB.`);
         return;
       }
+      // Potongan C3 — zone (Private) chat has no persisted message / pending-
+      // bubble concept to hang an optimistic upload off of (see chatHandler.ts
+      // — it's a pure live relay, never saved), so unlike onSendFile's
+      // instant-bubble-then-upload-in-background pattern, this uploads FIRST
+      // and only calls onSendZone once there's a real URL to send. The
+      // "Mengunggah…" state below covers the gap so it never looks stuck.
+      if (viewingZone && currentZone && onSendZone) {
+        setZoneFileUploading(true);
+        api.uploadMedia(file, roomSlug)
+          .then(({ url, fileName }) => {
+            onSendZone('', currentZone.id, url, fileName);
+          })
+          .catch((e) => {
+            console.error('[chat] zone file upload failed:', e);
+            setAttachError('Upload gagal — coba lagi.');
+          })
+          .finally(() => setZoneFileUploading(false));
+        return;
+      }
       onSendFile?.(file);
     },
-    [onSendFile]
+    [onSendFile, viewingZone, currentZone, onSendZone, roomSlug]
   );
 
   const handleLoadOlder = useCallback(async () => {
@@ -483,7 +514,13 @@ export function ChatPanel({
                       onPin={() => onPinNotice?.(m)}
                     >
                       {m.isProximity && <span className="opacity-60 mr-1">(nearby)</span>}
-                      <span className={`break-words ${m.isBot ? 'whitespace-pre-line' : ''}`}>{m.text}</span>
+                      {m.text && <span className={`break-words ${m.isBot ? 'whitespace-pre-line' : ''}`}>{m.text}</span>}
+                      {/* Potongan C3 — same attachment UI (icon by type, name,
+                          click to open/download) as persisted chat, reused
+                          as-is rather than a second render path. */}
+                      {m.attachmentUrl && (
+                        <ChatAttachment url={m.attachmentUrl} fileName={m.attachmentName} isOwn={isOwn} onOpen={setLightbox} />
+                      )}
                       {m.isBot && m.botThumbnailUrl && (
                         <img
                           src={m.botThumbnailUrl}
@@ -673,6 +710,9 @@ export function ChatPanel({
           {attachError && (
             <p className="px-3 pb-1 text-[10px] text-red-500">{attachError}</p>
           )}
+          {zoneFileUploading && (
+            <p className="px-3 pb-1 text-[10px] text-gray-400 dark:text-gray-500 italic">Mengunggah…</p>
+          )}
           {(() => {
             if (viewingZone || !activeChatTarget) return null;
             const key = `${activeChatTarget.type}:${activeChatTarget.id}`;
@@ -698,13 +738,16 @@ export function ChatPanel({
           })()}
           <div className="p-3 border-t border-purple-100 dark:border-gray-700 flex gap-2 items-center">
             <button onClick={() => setShowEmoji(!showEmoji)} className="text-purple-600 dark:text-purple-400 cursor-pointer"><EmojiSmile size={16} /></button>
-            {/* File attachments only make sense for persisted Channel/DM
-                messages — zone/bubble chat (ChatMessage) has no attachment
-                field, so the button is hidden rather than silently failing. */}
-            {!viewingZone && !proximityMode && (
+            {/* Potongan C3 — file attachments now work for zone (Private)
+                chat too, not just persisted Channel/DM. Still hidden for
+                proximityMode ("Say nearby") — that's a floating speech
+                bubble over the avatar, not a real chat log to attach
+                anything to. */}
+            {!proximityMode && (
               <AttachmentMenuButton
                 onFile={handleAttachFile}
                 title="Lampirkan"
+                disabled={zoneFileUploading}
                 buttonClassName="text-purple-600 dark:text-purple-400 disabled:opacity-40 cursor-pointer"
               />
             )}
