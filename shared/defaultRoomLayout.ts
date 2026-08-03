@@ -727,53 +727,44 @@ export function createLoungeLayout(theme: RoomTheme = 'scifi-office'): { tiles: 
 }
 
 /**
- * "Kaitech" template — a specific real office floor plan (not a generic
- * archetype like the 3 above), built from a client-supplied reference layout
- * scaled proportionally down to this engine's fixed MAP_WIDTH x MAP_HEIGHT
- * (50x36) — the brief's own 60x40 reference grid doesn't fit the shared
- * canvas size every other template (and every renderer/collision bound)
- * assumes, and the brief itself says coordinates are "a proportional guide",
- * the floor plan image the visual source of truth. Left wing = Kaitech's own
- * teams stacked vertically (Meeting Room, AI Team, Odoo Team, an ERP promo
- * corner, a focus-zone workstation row); center-top = a public meeting room
- * + 2 small consulting rooms; center-middle = an open dev/desk-pod zone
- * (deliberately left WITHOUT wall tiles — a "glass partition" is meant to be
- * see-through, and a solid wall substitute would misrepresent that more than
- * just leaving it open); bottom-center = entrance/reception + spawn;
- * right wing (tinted floor, closest available approximation to the brief's
- * "blue tile" — no literal blue/teal floor swatch exists in this asset set)
- * = an open auditorium/stage + a lounge.
+ * "Kaitech" template — v2, rebuilt against an actual reference floor-plan
+ * IMAGE (the first version was built from a text description alone, before
+ * the image was available — see git history for that version's own notes on
+ * substitutions, still mostly true here too). Three building clusters:
+ * left = the main Kaitech building (CEO office, AI Team + Odoo Team open-plan
+ * areas, ground-floor entrance plaza); right = a Consulting building (4
+ * separate small consulting rooms around a central glass hallway) with a
+ * Lounge below it (bar counter + dining); bottom = a small annex building
+ * with 3 breakout meeting rooms (AI Team's own, a general one, Odoo Team's
+ * own) — the image reuses the team names here for a SEPARATE small meeting
+ * room each, distinct from their open-plan desk area upstairs, not a
+ * duplicate of it.
  *
- * Several requested furniture roles have no matching asset anywhere in this
- * codebase's registered palettes (glass partition, a distinct reception
- * desk, a waiting/wood chair, a wall-mounted dashboard screen distinct from
- * a TV, a water cooler, a vending machine, a round/coffee table distinct
- * from the rectangular meeting table, and an L-shaped corner sofa) — see
- * this template's own inline comments for the specific substitution made at
- * each spot, and the room-creation report for the full list. NPCs (a
- * receptionist "WELCOME" figure, named WFH desk avatars) also have no
- * engine support at all (no placeable-non-player-character concept exists
- * anywhere in Furniture/GameCanvas) — those are represented as small banner
- * nameplates instead of an actual character sprite.
+ *   ┌──────────────────────────┐  ┌────────────────────────┐
+ *   │ CEO  │                   │  │ CONSULT │ CONSULT       │
+ *   │(1,1) │   ODOO TEAM       │  │   TL    │   TR          │
+ *   │12x9  │   (14,1) 13x24    │  ├─────glass hallway───────┤
+ *   ├──────┤   (open, desk     │  │ CONSULT │ CONSULT       │
+ *   │AI    │    islands)       │  │   BL    │   BR          │
+ *   │TEAM  │                   │  ├────────────────────────┤
+ *   │(1,10)│                   │  │       LOUNGE            │
+ *   │13x15 │                   │  │  (29,19) 20x12          │
+ *   ├──────┴───────────────────┤  └────────────────────────┘
+ *   │   ENTRANCE PLAZA (spawn)  │
+ *   ├──────────┬────────┬───────┤
+ *   │ AI TEAM  │MEETING │ ODOO  │
+ *   │ (meeting)│ ROOM   │ TEAM  │
+ *   │ (1,27)   │(10,27) │(meet.)│
+ *   └──────────┴────────┴───────┘
+ *          ^ corridor cols 27-28 connects left building, right building,
+ *            and the annex vertically/horizontally
  *
- *   ┌────────────┬┬───────────────────┬┬──────────────────┐
- *   │ MEETING RM │││ PUBLIC MEETING  ││  AUDITORIUM       │
- *   │ KAITECH    │││ ROOM + 2         ││  (open, tinted    │
- *   │ (1,1)14x10 │││ CONSULTING       ││  floor)           │
- *   ├────────────┤││ (17,1) 1-11      ││  (41,1) 8x15      │
- *   │ AI TEAM    │││                  │├───────────────────┤
- *   │(1,11)14x7  │││                  ││ LOUNGE TRANSITION │
- *   ├────────────┤││ DESK ZONE /      ││ (41,16) 8x4       │
- *   │ODOO TEAM   │││ DEV TEAM (open,  │├───────────────────┤
- *   │(1,18)14x7  │││ no walls)        ││                    │
- *   ├────────────┤││ (17,12) 22x18    ││   LOUNGE           │
- *   │ERP PROMO   │││                  ││   (41,20) 8x15    │
- *   │(1,25)14x5  │││                  ││                    │
- *   ├────────────┤│├──────────────────┤│                    │
- *   │FOCUS ZONE  │││ ENTRANCE/RECEPT. ││                    │
- *   │(1,30)14x5  │││ (17,30) 22x5     ││                    │
- *   └────────────┴┴───────────────────┴┴──────────────────┘
- *          ^ corridor cols 15-16              ^ corridor cols 39-40
+ * Asset substitutions unchanged from v1 (no new assets became available —
+ * see the room-creation report for the full list): reception/bar counter →
+ * desk-basic, bookshelf/shelving → wardrobe, round/coffee table → reused
+ * meeting-table, wall-mounted screen → tv-monitor, water cooler and vending
+ * machines → omitted (no matching asset at all), glass hallway → left
+ * un-walled entirely rather than a solid-wall stand-in.
  */
 export function createKaitechOfficeLayout(theme: RoomTheme = 'modern-interiors'): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
   const tiles: RoomTile[][] = [];
@@ -789,248 +780,220 @@ export function createKaitechOfficeLayout(theme: RoomTheme = 'modern-interiors')
   const furniture: Furniture[] = [];
   const zones: Zone[] = [];
 
-  // ══ LEFT WING (x:1-14) — Kaitech's own teams, stacked ══════════════════
+  // ══ LEFT BUILDING (x:1-26) ══════════════════════════════════════════════
 
-  // ── Meeting Room Kaitech — (1,1) 14x10, door on the right (corridor) ────
-  wallRect(tiles, 1, 1, 14, 10);
-  setTile(tiles, 14, 5, 'door');
-  setFloor(tiles, 2, 2, 13, 9, 'floor-maroon-carpet', theme);
-  setFloor(tiles, 13, 5, 13, 5, 'floor-tile-gray', theme); // door threshold accent
-  placeFurniture(tiles, furniture, 'meeting-table', 6, 4, theme);
-  placeFurniture(tiles, furniture, 'meeting-table', 8, 4, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 6, 3, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 7, 3, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 9, 3, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 6, 7, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 7, 7, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 9, 7, theme);
-  placeFurniture(tiles, furniture, 'plant-potted', 2, 2, theme);
-  // WALL_SCREEN substitute — no distinct "dashboard/graph screen" asset
-  // exists separate from the generic TV/Monitor entry (see this file's
-  // header comment) — used here for the "Kaitech" logo backdrop the brief
-  // asks for on this room's back wall.
-  placeFurniture(tiles, furniture, 'tv-monitor', 11, 2, theme);
+  // ── CEO office — (1,1) 12x9, door on the bottom (into AI Team) ──────────
+  wallRect(tiles, 1, 1, 12, 9);
+  setTile(tiles, 6, 9, 'door');
+  setFloor(tiles, 2, 2, 11, 8, 'floor-maroon-carpet', theme);
+  placeFurniture(tiles, furniture, 'desk-computer-a', 4, 4, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 4, 6, theme);
+  // Bookshelf substitute — no distinct shelving asset exists (see this
+  // template's own header comment).
+  placeFurniture(tiles, furniture, 'wardrobe', 2, 4, theme);
+  placeFurniture(tiles, furniture, 'sofa-set', 9, 4, theme);
+  // Coffee table — meeting-table reused, same convention used throughout
+  // this file for every round/coffee table.
+  placeFurniture(tiles, furniture, 'meeting-table', 9, 7, theme);
+  placeFurniture(tiles, furniture, 'plant-potted', 11, 2, theme);
   zones.push({
-    id: 'meeting-room-kaitech', name: 'Meeting Room Kaitech',
-    x: 1, y: 1, width: 14, height: 10,
-    label: 'MEETING ROOM', color: '#6B2FBF', type: 'meeting',
+    id: 'ceo-office', name: 'CEO Office',
+    x: 1, y: 1, width: 12, height: 9,
+    label: 'CEO', color: '#1e293b', type: 'desk',
   });
 
-  // ── AI Team — (1,11) 14x7, door on the right ────────────────────────────
-  wallRect(tiles, 1, 11, 14, 17);
-  setTile(tiles, 14, 14, 'door');
-  setFloor(tiles, 2, 12, 13, 16, 'floor-tile-gray', theme);
-  // DESK_POD — desk-cluster-l/-b (2x2, desk+monitor cluster) is a much
-  // closer visual match for an open-plan "pod" than a single 1x2 desk role.
-  placeFurniture(tiles, furniture, 'desk-cluster-l', 4, 14, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 4, 16, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 5, 16, theme);
-  placeFurniture(tiles, furniture, 'desk-cluster-b', 9, 14, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 9, 16, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 10, 16, theme);
-  placeFurniture(tiles, furniture, 'tv-monitor', 6, 13, theme);
-  addBanner(furniture, 5, 12, 4, 'AI TEAM', '#0ea5e9');
+  // ── AI Team — (1,10) 13x15, open-plan desk area ─────────────────────────
+  setFloor(tiles, 1, 10, 13, 24, 'floor-tile-gray', theme);
+  placeDeskIsland(tiles, furniture, 3, 13, theme, ['desk-computer-a', 'desk-basic', 'desk-basic', 'desk-computer-b']);
+  placeDeskIsland(tiles, furniture, 8, 13, theme, ['desk-computer-c', 'desk-computer-a', 'desk-basic', 'desk-computer-b']);
+  placeDeskIsland(tiles, furniture, 3, 19, theme, ['desk-basic', 'desk-computer-b', 'desk-computer-a', 'desk-computer-c']);
+  addBanner(furniture, 2, 11, 5, 'AI TEAM', '#0ea5e9');
+  placeFurniture(tiles, furniture, 'plant-tall', 1, 10, theme);
   zones.push({
     id: 'ai-team', name: 'AI Team',
-    x: 1, y: 11, width: 14, height: 7,
+    x: 1, y: 10, width: 13, height: 15,
     label: 'AI TEAM', color: '#0ea5e9', type: 'desk',
   });
 
-  // ── Odoo Team — (1,18) 14x7, door on the right ──────────────────────────
-  wallRect(tiles, 1, 18, 14, 24);
-  setTile(tiles, 14, 21, 'door');
-  setFloor(tiles, 2, 19, 13, 23, 'floor-tile-gray', theme);
-  placeFurniture(tiles, furniture, 'desk-cluster-l', 4, 21, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 4, 23, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 5, 23, theme);
-  placeFurniture(tiles, furniture, 'desk-cluster-b', 9, 21, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 9, 23, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 10, 23, theme);
-  placeFurniture(tiles, furniture, 'tv-monitor', 6, 20, theme);
-  addBanner(furniture, 5, 19, 4, 'ODOO TEAM', '#8b5cf6');
+  // ── Odoo Team — (14,1) 13x24, open-plan desk area (bigger, matches the ──
+  // reference image's larger team) ────────────────────────────────────────
+  setFloor(tiles, 14, 1, 26, 24, 'floor-lavender', theme);
+  placeDeskIsland(tiles, furniture, 16, 4, theme, ['desk-computer-b', 'desk-basic', 'desk-computer-a', 'desk-computer-c']);
+  placeDeskIsland(tiles, furniture, 21, 4, theme, ['desk-computer-a', 'desk-computer-c', 'desk-basic', 'desk-computer-b']);
+  placeDeskIsland(tiles, furniture, 16, 11, theme, ['desk-computer-c', 'desk-basic', 'desk-computer-b', 'desk-computer-a']);
+  placeDeskIsland(tiles, furniture, 21, 11, theme, ['desk-basic', 'desk-computer-a', 'desk-computer-c', 'desk-basic']);
+  placeDeskIsland(tiles, furniture, 16, 18, theme, ['desk-computer-a', 'desk-computer-b', 'desk-basic', 'desk-computer-c']);
+  placeDeskIsland(tiles, furniture, 21, 18, theme, ['desk-computer-b', 'desk-basic', 'desk-computer-c', 'desk-computer-a']);
+  addBanner(furniture, 15, 1, 6, 'ODOO TEAM', '#8b5cf6');
+  placeFurniture(tiles, furniture, 'plant-tall', 26, 1, theme);
+  placeFurniture(tiles, furniture, 'pinboard', 14, 23, theme);
   zones.push({
     id: 'odoo-team', name: 'Odoo Team',
-    x: 1, y: 18, width: 14, height: 7,
+    x: 14, y: 1, width: 13, height: 24,
     label: 'ODOO TEAM', color: '#8b5cf6', type: 'desk',
   });
 
-  // ── ERP Promo Desk — (1,25) 14x5, open (no walls) ───────────────────────
-  setFloor(tiles, 1, 25, 14, 29, 'floor-tile-gray', theme);
-  placeFurniture(tiles, furniture, 'tv-monitor', 3, 26, theme);
-  // RECEPTION_DESK substitute — no distinct "counter" asset exists; a plain
-  // desk reads reasonably as a small promo/info counter at this scale.
-  placeFurniture(tiles, furniture, 'desk-basic', 8, 28, theme);
-  placeFurniture(tiles, furniture, 'plant-small', 12, 28, theme);
-  addBanner(furniture, 2, 25, 11, 'Empowering Your Business With Smarter ERP', '#059669');
+  // ── Entrance plaza — (1,25) 26x2, spans the bottom of the left building ─
+  setFloor(tiles, 1, 25, 26, 26, 'floor-tile-gray', theme);
+  setTile(tiles, 13, 25, 'spawn');
+  addBanner(furniture, 4, 25, 4, 'KAITECH', '#1e3a8a');
+  addBanner(furniture, 19, 25, 4, 'KAITECH', '#1e3a8a');
+  placeFurniture(tiles, furniture, 'meeting-table', 8, 26, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 7, 26, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 10, 26, theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 17, 26, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 16, 26, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 19, 26, theme);
 
-  // ── Workstation Row / Focus Zone — (1,30) 14x5, open ────────────────────
-  setFloor(tiles, 1, 30, 14, 34, 'floor-tile-gray', theme);
-  placeDeskRow(tiles, furniture, 3, 31, 34, 4, theme);
-  addBanner(furniture, 2, 30, 6, 'FOCUS ZONE', '#f59e0b');
-
-  // ══ Corridor 1 — cols 15-16, left wing ↔ center ═════════════════════════
-  setFloor(tiles, 15, 1, 16, 34, 'floor-tile-gray', theme);
-
-  // ══ CENTER-TOP (x:17-38, y:1-11) — Public Meeting + 2 Consulting ═══════
-
-  // ── Public Meeting Room — (17,1) 11x11, door on the right ───────────────
-  wallRect(tiles, 17, 1, 27, 11);
-  setTile(tiles, 27, 6, 'door');
-  setFloor(tiles, 18, 2, 26, 10, 'floor-maroon-carpet', theme);
-  placeFurniture(tiles, furniture, 'meeting-table', 21, 5, theme);
-  placeFurniture(tiles, furniture, 'meeting-table', 23, 5, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 21, 3, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 22, 3, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 24, 3, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 21, 7, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 22, 7, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 24, 7, theme);
-  placeFurniture(tiles, furniture, 'plant-potted', 18, 2, theme);
-  placeFurniture(tiles, furniture, 'wall-frame-b', 26, 2, theme);
+  // ── Annex building (bottom, x:1-26, y:27-34) — 3 breakout meeting rooms,
+  // each with a door on its own top wall opening onto the plaza above ─────
+  wallRect(tiles, 1, 27, 9, 34);
+  setTile(tiles, 5, 27, 'door');
+  setFloor(tiles, 2, 28, 8, 33, 'floor-tile-gray', theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 4, 30, theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 6, 30, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 4, 28, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 6, 28, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 4, 32, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 6, 32, theme);
   zones.push({
-    id: 'public-meeting-room', name: 'Public Meeting Room',
-    x: 17, y: 1, width: 11, height: 11,
-    label: 'PUBLIC MEETING ROOM', color: '#7c3aed', type: 'meeting',
+    id: 'ai-team-meeting', name: 'AI Team Meeting Room',
+    x: 1, y: 27, width: 9, height: 8,
+    label: 'AI TEAM', color: '#0ea5e9', type: 'meeting',
   });
 
-  // ── Consulting 1 — (29,1) 5x6, door on the bottom ───────────────────────
-  wallRect(tiles, 29, 1, 33, 6);
-  setTile(tiles, 31, 6, 'door');
-  setFloor(tiles, 30, 2, 32, 5, 'floor-tile-gray', theme);
-  // CONSULT_DESK substitute — desk-computer-a (desk + monitor) is the
-  // closest existing role to a "consult desk w/ dual monitor + facing chair".
-  placeFurniture(tiles, furniture, 'desk-computer-a', 31, 4, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 31, 2, theme);
+  wallRect(tiles, 10, 27, 17, 34);
+  setTile(tiles, 13, 27, 'door');
+  setFloor(tiles, 11, 28, 16, 33, 'floor-maroon-carpet', theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 12, 30, theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 14, 30, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 12, 28, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 14, 28, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 12, 32, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 14, 32, theme);
+  placeFurniture(tiles, furniture, 'plant-potted', 11, 28, theme);
   zones.push({
-    id: 'consulting-1', name: 'Consulting 1',
-    x: 29, y: 1, width: 5, height: 6,
-    label: 'CONSULTING 1', color: '#0891b2', type: 'desk',
+    id: 'meeting-room', name: 'Meeting Room',
+    x: 10, y: 27, width: 8, height: 8,
+    label: 'MEETING ROOM', color: '#6B2FBF', type: 'meeting',
   });
 
-  // ── Consulting 2 — (34,1) 5x6, door on the bottom ───────────────────────
-  wallRect(tiles, 34, 1, 38, 6);
-  setTile(tiles, 36, 6, 'door');
-  setFloor(tiles, 35, 2, 37, 5, 'floor-tile-gray', theme);
-  placeFurniture(tiles, furniture, 'desk-computer-b', 36, 4, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 36, 2, theme);
+  wallRect(tiles, 18, 27, 26, 34);
+  setTile(tiles, 22, 27, 'door');
+  setFloor(tiles, 19, 28, 25, 33, 'floor-tile-gray', theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 20, 30, theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 22, 30, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 20, 28, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 22, 28, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 20, 32, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 22, 32, theme);
   zones.push({
-    id: 'consulting-2', name: 'Consulting 2',
-    x: 34, y: 1, width: 5, height: 6,
-    label: 'CONSULTING 2', color: '#0891b2', type: 'desk',
+    id: 'odoo-team-meeting', name: 'Odoo Team Meeting Room',
+    x: 18, y: 27, width: 9, height: 8,
+    label: 'ODOO TEAM', color: '#8b5cf6', type: 'meeting',
   });
 
-  // Walkway connecting Public Meeting Room's door + both Consulting rooms'
-  // doors down into the open Desk Zone/Dev Team area below.
-  setFloor(tiles, 28, 1, 28, 29, 'floor-tile-gray', theme);
-  setFloor(tiles, 29, 7, 38, 11, 'floor-tile-gray', theme);
+  // ══ Corridor — cols 27-28, connects left building, right building, and ══
+  // the annex vertically/horizontally. ════════════════════════════════════
+  setFloor(tiles, 27, 1, 28, 34, 'floor-tile-gray', theme);
 
-  // ══ CENTER-MIDDLE (x:17-38, y:12-29) — Desk Zone / Dev Team open-plan ══
-  // Deliberately no wallRect anywhere in this block — see this function's
-  // header comment on the "glass partition" substitution.
-  setFloor(tiles, 17, 12, 38, 29, 'floor-tile-gray', theme);
+  // ══ RIGHT BUILDING (x:29-48) — 4 Consulting rooms + Lounge ══════════════
 
-  setFloor(tiles, 19, 14, 26, 20, 'floor-olive-carpet', theme);
-  placeDeskIsland(tiles, furniture, 20, 14, theme, ['desk-computer-a', 'desk-basic', 'desk-basic', 'desk-computer-b']);
-  placeDeskIsland(tiles, furniture, 24, 14, theme, ['desk-computer-c', 'desk-computer-a', 'desk-basic', 'desk-computer-b']);
-  addBanner(furniture, 19, 13, 6, 'DESK ZONE', '#64748b');
-  placeFurniture(tiles, furniture, 'plant-tall', 17, 12, theme);
-
-  setFloor(tiles, 30, 14, 37, 20, 'floor-lavender', theme);
-  placeDeskIsland(tiles, furniture, 31, 14, theme, ['desk-computer-b', 'desk-basic', 'desk-computer-a', 'desk-computer-c']);
-  placeDeskIsland(tiles, furniture, 35, 14, theme, ['desk-basic', 'desk-computer-c', 'desk-computer-b', 'desk-computer-a']);
-  addBanner(furniture, 31, 13, 4, 'DEV TEAM', '#4c1d95');
-  // SERVER_RACK substitute — 'wardrobe' (tall 2x3 cabinet) is this
-  // codebase's own established stand-in for a server rack (the scifi-office
-  // theme's ROLE_TO_PALETTE_ID already reuses this exact role name for its
-  // literal sf-server asset), reused here for the same reason.
-  placeFurniture(tiles, furniture, 'wardrobe', 37, 12, theme);
-  placeFurniture(tiles, furniture, 'tv-monitor', 33, 12, theme);
-  placeFurniture(tiles, furniture, 'plant-potted', 38, 29, theme);
-
-  // NPC substitutes — this engine has no placeable-character concept at all
-  // (see header comment); a small banner nameplate is the closest existing
-  // primitive to "a named person standing at this desk".
-  addBanner(furniture, 20, 23, 4, '🙋 Gusti (WFH)', '#f97316');
-  addBanner(furniture, 32, 25, 4, '🙋 Barren (WFH)', '#f97316');
-
+  // ── Consulting TL — (29,1) 10x8, door on the bottom (into the hallway) ──
+  wallRect(tiles, 29, 1, 38, 8);
+  setTile(tiles, 33, 8, 'door');
+  setFloor(tiles, 30, 2, 37, 7, 'floor-tile-gray', theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 33, 5, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 32, 3, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 34, 3, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 32, 7, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 34, 7, theme);
+  placeFurniture(tiles, furniture, 'tv-monitor', 30, 2, theme);
   zones.push({
-    id: 'desk-zone', name: 'Desk Zone',
-    x: 17, y: 12, width: 12, height: 18,
-    label: 'DESK ZONE', color: '#64748b', type: 'desk',
-  });
-  zones.push({
-    id: 'dev-team', name: 'Dev Team',
-    x: 29, y: 12, width: 10, height: 18,
-    label: 'DEV TEAM', color: '#4c1d95', type: 'desk',
+    id: 'consulting-tl', name: 'Consulting (TL)',
+    x: 29, y: 1, width: 10, height: 8,
+    label: 'CONSULTING', color: '#0891b2', type: 'desk',
   });
 
-  // ── Entrance / Reception — (17,30) 22x5, spans the bottom of center ─────
-  setFloor(tiles, 17, 30, 38, 34, 'floor-tile-gray', theme);
-  setTile(tiles, 27, 32, 'spawn');
-  placeFurniture(tiles, furniture, 'desk-basic', 24, 31, theme);
-  placeFurniture(tiles, furniture, 'tv-monitor', 30, 31, theme);
-  placeFurniture(tiles, furniture, 'plant-tall', 18, 33, theme);
-  placeFurniture(tiles, furniture, 'plant-small', 37, 33, theme);
-  addBanner(furniture, 19, 30, 10, 'INTRODUCTION', '#6B2FBF');
-  addBanner(furniture, 24, 33, 4, '🙋 WELCOME', '#059669');
-
-  // ══ Corridor 2 — cols 39-40, center ↔ right wing ════════════════════════
-  // floor-lavender doubles here as the closest transition tint toward the
-  // brief's "blue floor" right wing (see header comment — no blue/teal
-  // floor swatch exists in this asset set).
-  setFloor(tiles, 39, 1, 40, 34, 'floor-lavender', theme);
-
-  // ══ RIGHT WING (x:41-48) — Auditorium + Lounge ══════════════════════════
-  // FLOOR_BLUE substitute for this whole wing — floor-lavender throughout
-  // (see corridor comment above).
-
-  // ── Auditorium / Stage — (41,1) 8x15, open (no walls) ───────────────────
-  setFloor(tiles, 41, 1, 48, 15, 'floor-lavender', theme);
-  placeFurniture(tiles, furniture, 'tv-monitor', 42, 2, theme);
-  placeFurniture(tiles, furniture, 'tv-monitor', 44, 2, theme);
+  // ── Consulting TR — (39,1) 10x8, door on the bottom ──────────────────────
+  wallRect(tiles, 39, 1, 48, 8);
+  setTile(tiles, 43, 8, 'door');
+  setFloor(tiles, 40, 2, 47, 7, 'floor-tile-gray', theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 43, 5, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 42, 3, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 44, 3, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 42, 7, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 44, 7, theme);
   placeFurniture(tiles, furniture, 'tv-monitor', 46, 2, theme);
-  addBanner(furniture, 43, 1, 4, 'Kaitech', '#1e3a8a');
-  for (const row of [8, 10, 12]) {
-    for (const col of [42, 43, 44, 45, 46, 47]) {
-      placeFurniture(tiles, furniture, 'chair-office', col, row, theme);
-    }
-  }
   zones.push({
-    id: 'auditorium', name: 'Auditorium',
-    x: 41, y: 1, width: 8, height: 15,
-    label: 'AUDITORIUM', color: '#1e3a8a', type: 'meeting',
+    id: 'consulting-tr', name: 'Consulting (TR)',
+    x: 39, y: 1, width: 10, height: 8,
+    label: 'CONSULTING', color: '#0891b2', type: 'desk',
   });
 
-  // ── Lounge transition — (41,16) 8x4, open ───────────────────────────────
-  setFloor(tiles, 41, 16, 48, 19, 'floor-lavender', theme);
-  // ROUND_TABLE substitute — meeting-table reused (same convention already
-  // used by createDefaultOfficeLayout's own Lounge, see "Round dining
-  // table" below) since no distinct round/coffee-table asset exists.
-  placeFurniture(tiles, furniture, 'meeting-table', 44, 17, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 43, 17, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 46, 17, theme);
-  placeFurniture(tiles, furniture, 'plant-tall', 41, 16, theme);
+  // ── Glass hallway — (29,9) 20x2, deliberately un-walled (see header) ────
+  setFloor(tiles, 29, 9, 48, 10, 'floor-lavender', theme);
 
-  // ── Lounge — (41,20) 8x15, open ──────────────────────────────────────────
-  setFloor(tiles, 41, 20, 48, 34, 'floor-brown-weave', theme);
-  setFloor(tiles, 42, 22, 47, 26, 'floor-maroon-carpet', theme);
-  // SOFA (L-shaped corner) substitute — sofa-set (2x3, the largest sofa
-  // piece available) is the closest existing approximation; no true
-  // L-shaped/corner sofa asset exists in this codebase's palettes.
-  placeFurniture(tiles, furniture, 'sofa-set', 42, 23, theme);
-  placeFurniture(tiles, furniture, 'sofa-blue', 46, 24, theme);
-  // Round dining table + 4 chairs (same meeting-table reuse as above).
-  placeFurniture(tiles, furniture, 'meeting-table', 43, 29, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 42, 27, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 45, 27, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 42, 31, theme);
-  placeFurniture(tiles, furniture, 'chair-office', 45, 31, theme);
-  placeFurniture(tiles, furniture, 'plant-tall', 41, 33, theme);
-  placeFurniture(tiles, furniture, 'plant-potted', 47, 33, theme);
-  addBanner(furniture, 43, 33, 5, 'LOUNGE', '#7c3aed');
+  // ── Consulting BL — (29,11) 10x8, door on the top (into the hallway) ────
+  wallRect(tiles, 29, 11, 38, 18);
+  setTile(tiles, 33, 11, 'door');
+  setFloor(tiles, 30, 12, 37, 17, 'floor-tile-gray', theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 33, 15, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 32, 13, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 34, 13, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 32, 17, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 34, 17, theme);
+  placeFurniture(tiles, furniture, 'tv-monitor', 30, 17, theme);
+  zones.push({
+    id: 'consulting-bl', name: 'Consulting (BL)',
+    x: 29, y: 11, width: 10, height: 8,
+    label: 'CONSULTING', color: '#0891b2', type: 'desk',
+  });
+
+  // ── Consulting BR — (39,11) 10x8, door on the top ───────────────────────
+  wallRect(tiles, 39, 11, 48, 18);
+  setTile(tiles, 43, 11, 'door');
+  setFloor(tiles, 40, 12, 47, 17, 'floor-tile-gray', theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 43, 15, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 42, 13, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 44, 13, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 42, 17, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 44, 17, theme);
+  placeFurniture(tiles, furniture, 'tv-monitor', 46, 17, theme);
+  zones.push({
+    id: 'consulting-br', name: 'Consulting (BR)',
+    x: 39, y: 11, width: 10, height: 8,
+    label: 'CONSULTING', color: '#0891b2', type: 'desk',
+  });
+
+  // ── Lounge — (29,19) 20x12, open (bar counter + dining) ─────────────────
+  setFloor(tiles, 29, 19, 48, 30, 'floor-brown-weave', theme);
+  // Bar counter substitute — no distinct counter asset exists (see header);
+  // a row of plain desks against the back wall reads reasonably as one.
+  placeFurniture(tiles, furniture, 'desk-basic', 30, 21, theme);
+  placeFurniture(tiles, furniture, 'desk-basic', 31, 21, theme);
+  placeFurniture(tiles, furniture, 'desk-basic', 32, 21, theme);
+  placeFurniture(tiles, furniture, 'wardrobe', 34, 21, theme);
+  setFloor(tiles, 36, 22, 47, 29, 'floor-maroon-carpet', theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 38, 24, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 37, 24, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 39, 24, theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 43, 24, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 42, 24, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 44, 24, theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 38, 28, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 37, 28, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 39, 28, theme);
+  placeFurniture(tiles, furniture, 'meeting-table', 43, 28, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 42, 28, theme);
+  placeFurniture(tiles, furniture, 'chair-office', 44, 28, theme);
+  placeFurniture(tiles, furniture, 'plant-tall', 29, 19, theme);
+  placeFurniture(tiles, furniture, 'plant-potted', 47, 29, theme);
+  addBanner(furniture, 36, 19, 5, 'LOUNGE', '#7c3aed');
 
   return { tiles, furniture, zones };
 }
+
 
 // §2 — Office Templates. Picked once at room-creation time (see Lobby.tsx);
 // unlike RoomTheme (a reskin applied to whichever layout is already there),
@@ -1042,7 +1005,7 @@ export const ROOM_TEMPLATES: { id: RoomTemplateId; name: string; description: st
   { id: 'main-office', name: 'Main Office', description: '8 zones, 4 team clusters — a full multi-team office' },
   { id: 'small-team', name: 'Small Team', description: 'One meeting room, 2 desk clusters, and a lounge corner' },
   { id: 'open-lounge', name: 'Open Lounge', description: 'Mostly social space, a small desk nook, one meeting room' },
-  { id: 'kaitech-office', name: 'Kaitech Office', description: 'Kaitech\'s real floor plan — AI/Odoo teams, consulting rooms, dev zone, auditorium, lounge' },
+  { id: 'kaitech-office', name: 'Kaitech Office', description: 'Kaitech\'s real floor plan — CEO office, AI/Odoo teams, 4 consulting rooms, lounge, breakout meeting rooms' },
 ];
 
 export function createRoomLayoutFromTemplate(

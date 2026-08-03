@@ -61,9 +61,19 @@ async function main() {
         tilemapData: layout.tiles as any,
         furniture: layout.furniture as any,
         zones: layout.zones as any,
+        // Once a room has been opened in the ZEP Room Editor even once, it
+        // gets lazily converted to layerData (see convertLegacyRoom.ts) —
+        // and roomHandler.ts's JOIN_ROOM ALWAYS prefers layerData over the
+        // legacy columns above once it exists (correct in general: layerData
+        // is the one true source post-conversion), which means updating
+        // tilemapData/furniture/zones here would otherwise be silently
+        // ignored by both the live game and the Room Editor. Clearing it
+        // forces a fresh reconversion from the columns just written above
+        // the next time either is opened.
+        layerData: null,
       },
     });
-    console.log(`[seedKaitechRoom] Updated existing room '${SLUG}' (id=${existing.id}) in place — layout replaced, membership/channels/teleport locations untouched.`);
+    console.log(`[seedKaitechRoom] Updated existing room '${SLUG}' (id=${existing.id}) in place — layout replaced (including a stale layerData conversion, if any), membership/channels/teleport locations untouched.`);
     await prisma.$disconnect();
     return;
   }
