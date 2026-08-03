@@ -141,6 +141,11 @@ export interface RoomTile {
   // no rotation to combine with — unlike Furniture.sitFacing).
   isSittable?: boolean;
   sitDirection?: Direction;
+  // Claimable-seat marker (see mapLayers.ts's TileEffect 'claimableSeat') —
+  // stable id of the marker at this tile, if any. Purely descriptive
+  // ("a marker exists here"); live ownership (who's claimed it) is tracked
+  // entirely server-side, in-memory, never on this field.
+  claimableSeatId?: string;
 }
 
 // Valid tile types and their visual/semantic meaning. 'portal' and 'spawn'

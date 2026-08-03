@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { LayerData, Furniture, TileEffect, AreaEffect, CustomAssetEntry, ReferenceImageData, Direction } from '@virtualmeet/shared';
 import { AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@virtualmeet/shared';
 
-export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal' | 'door' | 'sittable';
+export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat';
 
 // ZEP-style Room Editor state. Potong 0: layers/tools/viewport. Potong 2: floor
 // editing + undo/redo + debounced save. Potong 3: Wall (tile, drives collision),
@@ -427,7 +427,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     stampEffectAt: (x, y) => {
       const d = get().doc; const eff = get().selectedEffect;
-      if (!d || (eff !== 'startingPoint' && eff !== 'impassable' && eff !== 'door' && eff !== 'sittable')) return;
+      if (!d || (eff !== 'startingPoint' && eff !== 'impassable' && eff !== 'door' && eff !== 'sittable' && eff !== 'claimableSeat')) return;
       const existing = d.tileEffects.find((e) => e.x === x && e.y === y);
       if (existing && existing.kind === eff) return; // no change
       d.tileEffects = d.tileEffects.filter((e) => !(e.x === x && e.y === y));
@@ -435,6 +435,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
         eff === 'impassable' ? { x, y, kind: 'impassable' }
         : eff === 'door' ? { x, y, kind: 'door' }
         : eff === 'sittable' ? { x, y, kind: 'sittable', sitDirection: 'down' }
+        // A fresh id every stamp — even re-stamping the exact same tile is
+        // treated as a brand-new marker (matches "erase then re-stamp = a
+        // new marker" being this editor's only way to move one).
+        : eff === 'claimableSeat' ? { x, y, kind: 'claimableSeat', id: crypto.randomUUID() }
         : { x, y, kind: 'startingPoint' },
       );
       effectsDirty = true; strokeChanged = true;

@@ -70,16 +70,27 @@ export interface ReferenceImageData {
 // 'floor' (walkable) unless separately ALSO stamped 'impassable', which this
 // map's one-effect-per-tile model doesn't allow combining; admins wanting a
 // sit-only blocked tile can't have both today.
+//
+// 'claimableSeat' — an admin-placed marker a player can later CLAIM at
+// runtime (see the claim feature's server-side handler, added separately —
+// this type only describes WHERE markers exist, never who owns one). Also
+// doesn't touch RoomTile.type, same reasoning as 'sittable'. Carries its own
+// stable `id` (not derived from x/y) so an admin repositioning a marker
+// (erase old + stamp new, same as any other tile effect — there's no
+// drag-to-move in this editor) doesn't silently orphan whatever live claim
+// state referenced the old coordinate.
 export interface TileEffect {
   x: number;
   y: number;
-  kind: 'startingPoint' | 'impassable' | 'portal' | 'door' | 'sittable';
+  kind: 'startingPoint' | 'impassable' | 'portal' | 'door' | 'sittable' | 'claimableSeat';
   tileType?: TileType; // for 'impassable' — original type ('desk' | 'chair' | …)
   // For 'sittable' — the absolute Direction the avatar faces once seated
   // here. No rotation to combine with (there's no object), so this is
   // picked directly rather than as front/side/back — see Furniture.sitFacing
   // for why objects use a different (relative) scheme.
   sitDirection?: Direction;
+  // For 'claimableSeat' — stable identity, see the kind's own doc comment above.
+  id?: string;
   // Portal destination: targetSlug = another room (cross-room), or targetX/Y =
   // a tile in THIS room (internal). label = optional portal name.
   targetSlug?: string;
@@ -280,6 +291,14 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
       if (eff?.kind === 'sittable') {
         tile.isSittable = true;
         if (eff.sitDirection != null) tile.sitDirection = eff.sitDirection;
+      }
+      // 'claimableSeat' — same non-type-touching pattern as 'sittable' above;
+      // just exposes the marker's stable id to the live client via the
+      // normal tiles channel. Live ownership is tracked entirely separately
+      // (server-side, in-memory) — this id is only ever "a marker exists
+      // here", never "who owns it".
+      if (eff?.kind === 'claimableSeat' && eff.id != null) {
+        tile.claimableSeatId = eff.id;
       }
       row.push(tile);
     }
