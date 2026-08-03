@@ -36,6 +36,42 @@ function roomLocks(room: string): Map<string, ZoneLock> {
   return m;
 }
 
+// Potongan A2 — one pending knock per requester (a new knock from the same
+// socket replaces whatever it was already waiting on, same "clear before
+// set" convention roomHandler.ts's pendingSummons already uses). Tracked
+// server-side — not just relayed and forgotten — so a requester can Cancel,
+// and so a disconnect/unlock on either side resolves it instead of leaving
+// a phantom "waiting for approval" screen with no way to close it.
+interface PendingKnock {
+  zoneId: string;
+  zoneName: string;
+  keyholderSocketId: string;
+  requesterUserId: string;
+}
+
+// room slug → requester's socket id → pending knock
+const pendingKnocks = new Map<string, Map<string, PendingKnock>>();
+
+function roomKnocks(room: string): Map<string, PendingKnock> {
+  let m = pendingKnocks.get(room);
+  if (!m) { m = new Map(); pendingKnocks.set(room, m); }
+  return m;
+}
+
+// Every pending knock on this zone is moot — the keyholder decided (handled
+// by its own caller), the zone unlocked, or its keyholder disconnected.
+// Drops the bookkeeping and tells each pending requester's keyholder-side
+// card to disappear (reusing ZONE_KNOCK_CANCELLED — same UI effect as an
+// explicit Cancel from the client's point of view).
+function clearPendingKnocksForZone(io: Server, room: string, zoneId: string): void {
+  const m = roomKnocks(room);
+  for (const [requesterSocketId, k] of m) {
+    if (k.zoneId !== zoneId) continue;
+    m.delete(requesterSocketId);
+    io.to(k.keyholderSocketId).emit(SocketEvents.ZONE_KNOCK_CANCELLED, { zoneId, userId: k.requesterUserId });
+  }
+}
+
 export function isZoneLocked(room: string, zoneId: string): boolean {
   return roomLocks(room).has(zoneId);
 }
@@ -141,6 +177,11 @@ export function registerZoneLockHandlers(io: Server, socket: Socket): void {
         return;
       }
       m.delete(data.zoneId);
+      // A2 — unlocking resolves any knock still waiting on this zone: there's
+      // nothing left to approve/reject, so the keyholder's own card(s) for
+      // it should disappear rather than linger pointed at a door that's now
+      // wide open.
+      clearPendingKnocksForZone(io, currentRoom, data.zoneId);
     }
     io.to(currentRoom).emit(SocketEvents.ZONE_LOCK_UPDATED, { zones: zoneLockStates(currentRoom) });
   });
@@ -153,6 +194,18 @@ export function registerZoneLockHandlers(io: Server, socket: Socket): void {
     const uid = userId();
     if (!uid) return;
     if (mayEnterZone(currentRoom, data.zoneId, uid)) return; // already allowed
+
+    // Tracked (not just relayed) so it can later be resolved from three
+    // different directions: the keyholder decides, this requester cancels,
+    // or either side disconnects/the zone unlocks first. One pending knock
+    // per requester — a fresh knock replaces whatever they were already
+    // waiting on, same convention as roomHandler.ts's pendingSummons.
+    roomKnocks(currentRoom).set(socket.id, {
+      zoneId: data.zoneId,
+      zoneName: data.zoneName ?? data.zoneId,
+      keyholderSocketId: lock.lockedBySocketId,
+      requesterUserId: uid,
+    });
 
     // The knock goes to the KEYHOLDER only — not to every admin, and not to
     // everyone in the zone.
@@ -174,11 +227,27 @@ export function registerZoneLockHandlers(io: Server, socket: Socket): void {
     if (lock.lockedByUserId !== userId()) return;
 
     if (data.admit) lock.allowedUserIds.add(data.userId);
+    // Resolved — no longer pending (a stale Cancel arriving after this would
+    // otherwise still find an entry and misfire a cancellation to the
+    // keyholder for a knock that was already decided).
+    roomKnocks(currentRoom).delete(data.playerId);
     io.to(data.playerId).emit(SocketEvents.ZONE_KNOCK_DECIDED, {
       zoneId: data.zoneId,
       admitted: !!data.admit,
       byName: lock.lockedByName,
     });
+  });
+
+  // A2 — the requester backs out before the keyholder ever decides. Only
+  // their OWN pending knock, matched by this socket's id — nobody can cancel
+  // someone else's.
+  socket.on(SocketEvents.ZONE_KNOCK_CANCEL, (data: { zoneId: string }) => {
+    if (!currentRoom || typeof data?.zoneId !== 'string') return;
+    const m = roomKnocks(currentRoom);
+    const pending = m.get(socket.id);
+    if (!pending || pending.zoneId !== data.zoneId) return;
+    m.delete(socket.id);
+    io.to(pending.keyholderSocketId).emit(SocketEvents.ZONE_KNOCK_CANCELLED, { zoneId: pending.zoneId, userId: pending.requesterUserId });
   });
 
   socket.on(SocketEvents.DISCONNECT, () => {
@@ -189,8 +258,23 @@ export function registerZoneLockHandlers(io: Server, socket: Socket): void {
     const m = roomLocks(currentRoom);
     let changed = false;
     for (const [zoneId, lock] of m) {
-      if (lock.lockedBySocketId === socket.id) { m.delete(zoneId); changed = true; }
+      if (lock.lockedBySocketId === socket.id) {
+        m.delete(zoneId);
+        changed = true;
+        // A2 — same reasoning as the explicit-unlock branch above: nothing
+        // left to approve for this zone now that it's open again.
+        clearPendingKnocksForZone(io, currentRoom, zoneId);
+      }
     }
     if (changed) io.to(currentRoom).emit(SocketEvents.ZONE_LOCK_UPDATED, { zones: zoneLockStates(currentRoom) });
+
+    // A2 — this socket's OWN pending knock (as requester, not keyholder) is
+    // now moot too — tell the keyholder to drop that card.
+    const km = roomKnocks(currentRoom);
+    const myPending = km.get(socket.id);
+    if (myPending) {
+      km.delete(socket.id);
+      io.to(myPending.keyholderSocketId).emit(SocketEvents.ZONE_KNOCK_CANCELLED, { zoneId: myPending.zoneId, userId: myPending.requesterUserId });
+    }
   });
 }

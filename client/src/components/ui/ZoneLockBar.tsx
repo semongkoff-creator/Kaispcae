@@ -5,8 +5,8 @@ import { ZoneKnockRequest, ZoneLockState } from '@virtualmeet/shared';
 // with the room's own controls (the floating Chat button already taught us
 // what that looks like).
 export function ZoneLockBar({
-  currentZone, lock, isKeyholder, knocks, deniedZoneId, deniedZoneName, toast,
-  onKnock, onDecide,
+  currentZone, lock, isKeyholder, knocks, deniedZoneId, deniedZoneName, pendingKnock, toast,
+  onKnock, onCancelKnock, onDecide,
 }: {
   currentZone: { id: string; name: string } | null;
   lock: ZoneLockState | undefined;
@@ -14,8 +14,11 @@ export function ZoneLockBar({
   knocks: ZoneKnockRequest[];
   deniedZoneId: string | null;
   deniedZoneName: string | null;
+  // Potongan A2 — set the moment we've knocked and not yet resolved.
+  pendingKnock: { zoneId: string; zoneName: string } | null;
   toast: string | null;
   onKnock: () => void;
+  onCancelKnock: () => void;
   onDecide: (k: ZoneKnockRequest, admit: boolean) => void;
 }) {
   return (
@@ -38,8 +41,22 @@ export function ZoneLockBar({
         </div>
       )}
 
-      {/* Bounced off a locked zone → offer to knock. */}
-      {deniedZoneId && (
+      {/* Potongan A2 — already knocked, waiting on the keyholder's decision.
+          Takes priority over the "bounced, offer to knock" card below: once
+          you've knocked there's nothing left to offer, just a wait + a way
+          out of it. Stays up regardless of exactly where you're standing —
+          the point is you're still waiting, not that you haven't moved. */}
+      {pendingKnock ? (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-purple-200 dark:border-gray-700 p-3">
+          <p className="text-xs text-gray-800 dark:text-gray-100 inline-flex items-center gap-1.5">
+            <HandIndexThumbFill size={11} className="text-purple-600" /> Menunggu persetujuan masuk <span className="font-semibold">{pendingKnock.zoneName}</span>...
+          </p>
+          <p className="text-[10px] text-gray-400 mb-2">Kamu tetap di luar sampai pengunci memutuskan.</p>
+          <button onClick={onCancelKnock} className="w-full py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium cursor-pointer">
+            Cancel
+          </button>
+        </div>
+      ) : deniedZoneId && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-amber-200 dark:border-gray-700 p-3">
           <p className="text-xs text-gray-800 dark:text-gray-100 inline-flex items-center gap-1.5">
             <LockFill size={11} className="text-amber-600" /> <span className="font-semibold">{deniedZoneName ?? 'Zona ini'}</span> sedang dikunci

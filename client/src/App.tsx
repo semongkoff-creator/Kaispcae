@@ -1709,8 +1709,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           knocks={zoneLock.knocks}
           deniedZoneId={zoneLock.deniedZoneId}
           deniedZoneName={zones.find((z) => z.id === zoneLock.deniedZoneId)?.name ?? null}
+          pendingKnock={zoneLock.pendingKnock}
           toast={zoneLock.toast}
           onKnock={() => zoneLock.deniedZoneId && zoneLock.knock(zoneLock.deniedZoneId, zones.find((z) => z.id === zoneLock.deniedZoneId)?.name)}
+          onCancelKnock={zoneLock.cancelKnock}
           onDecide={zoneLock.decide}
         />
       )}

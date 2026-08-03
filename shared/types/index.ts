@@ -359,6 +359,14 @@ export enum SocketEvents {
   ZONE_KNOCK_REQUEST = 'zone:knock_request',
   ZONE_KNOCK_DECIDE = 'zone:knock_decide',
   ZONE_KNOCK_DECIDED = 'zone:knock_decided',
+  // Potongan A2 — the requester's own way out of a pending knock (before the
+  // keyholder ever decides), and the keyholder-side signal that a pending
+  // knock is moot for any reason other than their own decision: the
+  // requester cancelled it, disconnected, or the zone unlocked/its keyholder
+  // left while it was still pending. Either way the keyholder's card for it
+  // should just disappear — same UI effect, three different triggers.
+  ZONE_KNOCK_CANCEL = 'zone:knock_cancel',
+  ZONE_KNOCK_CANCELLED = 'zone:knock_cancelled',
 
   // Claimable seat markers (Room Editor's 'claimableSeat' tile effect —
   // mapLayers.ts). Ownership is in-memory only (server/src/socket/
