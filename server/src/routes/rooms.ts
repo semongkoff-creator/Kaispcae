@@ -304,6 +304,24 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
       });
     }
 
+    // Floor-plan reference image underlay — editor-only, same validation
+    // posture as customAssets above (same-origin upload URL only). `null`
+    // explicitly clears it (the admin removed the image); omitted from the
+    // body entirely leaves whatever's already stored untouched.
+    if ('referenceImage' in body) {
+      const ri = body.referenceImage;
+      if (ri === null) {
+        layerData.referenceImage = null;
+      } else if (ri && typeof ri === 'object' && isUploadUrl((ri as { url?: unknown }).url)
+          && Number.isFinite((ri as { x?: unknown }).x) && Number.isFinite((ri as { y?: unknown }).y)
+          && Number.isFinite((ri as { width?: unknown }).width) && (ri as { width: number }).width > 0
+          && Number.isFinite((ri as { height?: unknown }).height) && (ri as { height: number }).height > 0) {
+        const r = ri as { url: string; x: number; y: number; width: number; height: number; opacity?: unknown; visible?: unknown };
+        const opacity = Number.isFinite(r.opacity) ? Math.max(0, Math.min(1, r.opacity as number)) : 0.5;
+        layerData.referenceImage = { url: r.url, x: r.x, y: r.y, width: r.width, height: r.height, opacity, visible: !!r.visible };
+      }
+    }
+
     await prisma.room.update({ where: { id: room.id }, data: { layerData: layerData as unknown as object } });
 
     const derived = layerDataToLegacy(layerData);

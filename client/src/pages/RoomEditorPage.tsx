@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowCounterclockwise, ArrowClockwise } from 'react-bootstrap-icons';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, RoomTile, Furniture, Zone, RoomTheme,
-  LayerData, TileEffect, legacyToLayerData, CustomAssetEntry, InteractiveObjectType, TriggerMethod,
+  LayerData, TileEffect, legacyToLayerData, CustomAssetEntry, ReferenceImageData, InteractiveObjectType, TriggerMethod,
 } from '@virtualmeet/shared';
 import { api, ApiError } from '@/services/api';
 import { useEditorStore, EDITOR_LAYERS, EDITOR_TOOLS, EditorLayer, EditorTool } from '@/stores/editorStore';
 import { drawFloorTile, drawWallTile, drawFurnitureLayer } from '@/components/canvas/mapRender';
-import { drawSpriteFrame } from '@/utils/spriteLoader';
+import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
 import { PALETTE_BY_THEME, PALETTE_BY_ID } from '@/data/themeAssets';
 import { PaletteEntry } from '@/data/tilePaletteManifest';
@@ -44,7 +44,10 @@ function pickFile(accept: string): Promise<File | null> {
 
 type SavePayload = ReturnType<ReturnType<typeof useEditorStore.getState>['takePending']>;
 function hasChanges(p: SavePayload): boolean {
-  return !!(p.floorChanges?.length || p.wallChanges?.length || p.objects || p.topObjects || p.tileEffects || p.areas || p.customAssets || p.width != null);
+  // referenceImage can legitimately be `null` (an explicit clear) — a plain
+  // truthy check would miss that and silently drop the save, same class of
+  // bug a naive `|| p.referenceImage` would have here.
+  return !!(p.floorChanges?.length || p.wallChanges?.length || p.objects || p.topObjects || p.tileEffects || p.areas || p.customAssets || p.width != null || 'referenceImage' in p);
 }
 
 function normalizeTiles(tilemapData: unknown[][] | null): RoomTile[][] {
@@ -565,6 +568,21 @@ function DoorSettingsPanel({
   );
 }
 
+// Floor-plan reference guide — drawn as a translucent overlay ON TOP of
+// every other layer (see the call site: floor tiles are fully opaque and
+// cover every tile, so drawing this underneath would just always be hidden).
+// Silently no-ops (same convention as drawSpriteFrame) if the image hasn't
+// finished loading yet or has been hidden.
+function drawReferenceImage(ctx: CanvasRenderingContext2D, ref: ReferenceImageData | null | undefined) {
+  if (!ref || !ref.visible) return;
+  const img = getSpriteImage(ref.url);
+  if (!img) return;
+  ctx.save();
+  ctx.globalAlpha = ref.opacity;
+  ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, ref.x, ref.y, ref.width, ref.height);
+  ctx.restore();
+}
+
 function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomTheme, layer: EditorLayer) {
   if (layer === 'floor') {
     for (let y = 0; y < ld.height; y++) for (let x = 0; x < ld.width; x++)
@@ -719,6 +737,37 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       setImportBusy(false);
     }
   };
+
+  // Floor-plan reference image underlay — upload a denah photo to trace over
+  // by hand (walls/floors/furniture still placed with the normal tools; this
+  // is purely a visual guide, never sent to the live game). Panel toggled
+  // from the toolbar; unlike Import Image's one-shot modal, this stays open
+  // so opacity/position can be tweaked while looking at the traced result.
+  const [refPanelOpen, setRefPanelOpen] = useState(false);
+  const [refBusy, setRefBusy] = useState(false);
+  const [refErr, setRefErr] = useState('');
+  const referenceImage = useEditorStore((s) => s.doc?.referenceImage);
+  const uploadReferenceImage = async () => {
+    const f = await pickFile('image/png,image/jpeg');
+    if (!f) return;
+    if (!['image/png', 'image/jpeg'].includes(f.type)) { window.alert('Hanya file PNG atau JPG yang diperbolehkan.'); return; }
+    if (f.size > MAX_IMPORT_BYTES) { window.alert(`Ukuran file maksimal 5MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
+    setRefBusy(true); setRefErr('');
+    try {
+      const { url } = await api.uploadMedia(f, slug);
+      const doc = useEditorStore.getState().doc;
+      const mapW = (doc?.width ?? MAP_WIDTH) * TILE_SIZE, mapH = (doc?.height ?? MAP_HEIGHT) * TILE_SIZE;
+      // Default: cover the whole current map, half-transparent, visible —
+      // an admin adjusts x/y/width/height from there to match their photo's
+      // actual proportions against the grid.
+      useEditorStore.getState().setReferenceImage({ url, x: 0, y: 0, width: mapW, height: mapH, opacity: 0.5, visible: true });
+    } catch {
+      setRefErr('Gagal upload gambar. Coba lagi.');
+    } finally {
+      setRefBusy(false);
+    }
+  };
+
   const [portalHint, setPortalHint] = useState(false); // awaiting internal-portal destination click
   const portalOriginRef = useRef<{ x: number; y: number } | null>(null);
   // ZEP-style door password — which existing door tile's settings panel is
@@ -865,6 +914,14 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             disableImageSmoothing(ctx); ctx.setTransform(z * dpr, 0, 0, z * dpr, panX * dpr, panY * dpr);
             drawLayer(ctx, doc, m.theme, 'floor'); drawLayer(ctx, doc, m.theme, 'wall');
             drawLayer(ctx, doc, m.theme, 'objects'); drawLayer(ctx, doc, m.theme, 'top'); drawLayer(ctx, doc, m.theme, 'effects');
+            // Drawn LAST (on top of floor/wall/objects), not underneath — the
+            // floor layer above fills every single tile with an opaque
+            // texture, so an underlay here would just always be fully
+            // covered and never actually visible. A translucent overlay (its
+            // own adjustable opacity is exactly what makes this work) lets
+            // the admin see their in-progress trace AND the reference photo
+            // at once, same as a real tracing-paper-over-a-photo workflow.
+            drawReferenceImage(ctx, doc.referenceImage);
             if (z >= 0.5) {
               ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1 / z; ctx.beginPath();
               for (let x = 0; x <= doc.width; x++) { ctx.moveTo(x * TILE_SIZE, 0); ctx.lineTo(x * TILE_SIZE, doc.height * TILE_SIZE); }
@@ -1231,6 +1288,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         </span>
         <button onClick={openResize} title="Resize map" className="px-2.5 py-1 rounded text-xs font-medium text-white/70 bg-white/10 hover:bg-white/20 cursor-pointer">Resize</button>
         <button onClick={openImportPicker} title="Upload gambar sendiri sebagai Floor/Wall/Object" className="px-2.5 py-1 rounded text-xs font-medium text-white/70 bg-white/10 hover:bg-white/20 cursor-pointer">Import Image</button>
+        <button onClick={() => setRefPanelOpen((v) => !v)} title="Upload denah sebagai referensi untuk digambar ulang manual" className={`px-2.5 py-1 rounded text-xs font-medium cursor-pointer ${refPanelOpen ? 'bg-purple-600 text-white' : 'text-white/70 bg-white/10 hover:bg-white/20'}`}>Reference Image</button>
         <div className="ml-auto flex items-center gap-1">
           <button onClick={() => zoomBy(1 / 1.2)} className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 cursor-pointer">−</button>
           <span className="text-xs text-white/60 w-12 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
@@ -1461,6 +1519,48 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               <button onClick={() => setImportOpen(false)} disabled={importBusy} className="px-3 py-1.5 rounded bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white/80 text-sm cursor-pointer">Batal</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Reference Image — floating, non-blocking panel (no backdrop) so the
+          canvas stays interactive while opacity/position are being tuned
+          against the traced result underneath. */}
+      {refPanelOpen && (
+        <div className="absolute top-14 right-4 z-10 bg-gray-800 border border-white/10 rounded-xl p-4 w-72 shadow-2xl">
+          <p className="text-white font-semibold mb-2 text-sm">Reference Image</p>
+          {!referenceImage ? (
+            <>
+              <p className="text-white/50 text-xs mb-3">Upload foto/gambar denah untuk digambar ulang manual di atasnya (wall/floor/furniture tetap pakai tool biasa) — gambar ini TIDAK pernah muncul di game, cuma di editor.</p>
+              {refErr && <p className="text-red-400 text-xs mb-2">{refErr}</p>}
+              <button onClick={uploadReferenceImage} disabled={refBusy} className="w-full py-1.5 rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium cursor-pointer">{refBusy ? 'Mengupload…' : 'Upload Denah'}</button>
+            </>
+          ) : (
+            <>
+              <label className="text-xs text-white/60 flex items-center justify-between mb-2">
+                Opacity
+                <input type="range" min={0} max={100} value={Math.round(referenceImage.opacity * 100)} onChange={(e) => useEditorStore.getState().updateReferenceImage({ opacity: Number(e.target.value) / 100 })} className="ml-2 flex-1 cursor-pointer" />
+                <span className="ml-2 w-9 text-right tabular-nums">{Math.round(referenceImage.opacity * 100)}%</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <label className="text-xs text-white/60">X (px)
+                  <input type="number" value={Math.round(referenceImage.x)} onChange={(e) => useEditorStore.getState().updateReferenceImage({ x: Number(e.target.value) })} className="mt-1 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-sm text-white" />
+                </label>
+                <label className="text-xs text-white/60">Y (px)
+                  <input type="number" value={Math.round(referenceImage.y)} onChange={(e) => useEditorStore.getState().updateReferenceImage({ y: Number(e.target.value) })} className="mt-1 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-sm text-white" />
+                </label>
+                <label className="text-xs text-white/60">Lebar (px)
+                  <input type="number" min={1} value={Math.round(referenceImage.width)} onChange={(e) => useEditorStore.getState().updateReferenceImage({ width: Math.max(1, Number(e.target.value)) })} className="mt-1 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-sm text-white" />
+                </label>
+                <label className="text-xs text-white/60">Tinggi (px)
+                  <input type="number" min={1} value={Math.round(referenceImage.height)} onChange={(e) => useEditorStore.getState().updateReferenceImage({ height: Math.max(1, Number(e.target.value)) })} className="mt-1 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-sm text-white" />
+                </label>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => useEditorStore.getState().updateReferenceImage({ visible: !referenceImage.visible })} className="flex-1 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white/80 text-xs font-medium cursor-pointer">{referenceImage.visible ? 'Sembunyikan' : 'Tampilkan'}</button>
+                <button onClick={() => useEditorStore.getState().setReferenceImage(null)} className="flex-1 py-1.5 rounded bg-red-600/80 hover:bg-red-600 text-white text-xs font-medium cursor-pointer">Hapus</button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

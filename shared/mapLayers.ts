@@ -35,6 +35,24 @@ export interface CustomAssetEntry {
   createdAt: number;
 }
 
+// A floor-plan photo/reference image the admin uploads to trace over while
+// building out a room by hand — a semi-transparent underlay drawn BENEATH
+// the floor layer (see RoomEditorPage.tsx's draw loop), never sent to the
+// live game (GameCanvas.tsx never reads LayerData directly, only the
+// layerDataToLegacy-derived tiles/furniture/zones, which this deliberately
+// has no adaptor entry in). x/y/width/height are world PIXELS (not tile
+// units), so it can be freely positioned/scaled independent of the grid —
+// a real photographed floor plan rarely lines up with any tile size.
+export interface ReferenceImageData {
+  url: string; // must be a same-origin /api/uploads or /api/files URL
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  opacity: number; // 0-1
+  visible: boolean;
+}
+
 // Per-coordinate effect (sparse). 'impassable' carries the original blocked
 // tile type so collision + rendering reconstruct exactly; 'portal' carries its
 // destination room slug. 'startingPoint' = spawn; 'door' = the walkable door
@@ -119,6 +137,10 @@ export interface LayerData {
   // every room converted before this field existed — treated as `[]`
   // everywhere it's read, never populated retroactively.
   customAssets?: CustomAssetEntry[];
+  // Floor-plan reference image underlay (see ReferenceImageData above).
+  // Absent/null = none set. Editor-only, like customAssets — no legacy
+  // equivalent, never touched by legacyToLayerData/layerDataToLegacy.
+  referenceImage?: ReferenceImageData | null;
 }
 
 // Convert the legacy runtime shape (already-normalized RoomTile[][], furniture,

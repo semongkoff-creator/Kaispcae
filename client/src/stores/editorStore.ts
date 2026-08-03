@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { LayerData, Furniture, TileEffect, AreaEffect, CustomAssetEntry } from '@virtualmeet/shared';
+import type { LayerData, Furniture, TileEffect, AreaEffect, CustomAssetEntry, ReferenceImageData } from '@virtualmeet/shared';
 
 export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal' | 'door';
 
@@ -100,6 +100,13 @@ interface EditorState {
   // exists for this room" registration (removing one is out of scope here).
   addCustomAsset: (entry: CustomAssetEntry) => void;
 
+  // Floor-plan reference image underlay — same "one-way registration, not
+  // undo/redo-tracked" posture as addCustomAsset above (adjusting opacity/
+  // position while tracing isn't a paint stroke to step back through).
+  // `null` clears it entirely (removes the image).
+  setReferenceImage: (data: ReferenceImageData | null) => void;
+  updateReferenceImage: (patch: Partial<ReferenceImageData>) => void;
+
   selection: Selection | null;
   setSelection: (sel: Selection | null) => void;
   selectedObjectId: string | null;
@@ -183,6 +190,7 @@ interface SavePayload {
   tileEffects?: TileEffect[];
   areas?: AreaEffect[];
   customAssets?: CustomAssetEntry[];
+  referenceImage?: ReferenceImageData | null;
 }
 
 const INITIAL_VIEWPORT: EditorViewport = { panX: 0, panY: 0, zoom: 1 };
@@ -197,6 +205,7 @@ let topDirty = false;
 let effectsDirty = false;
 let areasDirty = false;
 let customAssetsDirty = false; // Fitur 15 — a custom asset was registered this session
+let referenceImageDirty = false;
 let resizedDirty = false; // dims/grids changed → save full floor+wall+dims
 let strokeSnap: Snapshot | null = null;
 let strokeChanged = false;
@@ -285,7 +294,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     doc: null,
     setDoc: (doc) => {
       undoStack.length = 0; redoStack.length = 0; floorPending.clear(); wallPending.clear();
-      objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; customAssetsDirty = false; resizedDirty = false; strokeSnap = null; strokeChanged = false;
+      objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; customAssetsDirty = false; referenceImageDirty = false; resizedDirty = false; strokeSnap = null; strokeChanged = false;
       set({ doc, revision: 0, undoDepth: 0, redoDepth: 0, selection: null, selectedObjectId: null, clipboard: null });
     },
 
@@ -299,6 +308,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const d = get().doc; if (!d) return;
       d.customAssets = [...(d.customAssets ?? []), entry];
       customAssetsDirty = true;
+      commit();
+    },
+    setReferenceImage: (data) => {
+      const d = get().doc; if (!d) return;
+      d.referenceImage = data;
+      referenceImageDirty = true;
+      commit();
+    },
+    updateReferenceImage: (patch) => {
+      const d = get().doc; if (!d || !d.referenceImage) return;
+      d.referenceImage = { ...d.referenceImage, ...patch };
+      referenceImageDirty = true;
       commit();
     },
     selectedEffect: null,
@@ -563,6 +584,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         tileEffects: effectsDirty && d ? cloneEffects(d.tileEffects) : undefined,
         areas: areasDirty && d ? cloneAreas(d.areas) : undefined,
         customAssets: customAssetsDirty && d ? [...(d.customAssets ?? [])] : undefined,
+        referenceImage: referenceImageDirty && d ? (d.referenceImage ?? null) : undefined,
       };
       if (resizedDirty && d) {
         // A resize replaces the whole grid + dims; per-tile diffs don't apply.
@@ -573,7 +595,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         out.floorChanges = Array.from(floorPending.values());
         out.wallChanges = Array.from(wallPending.values());
       }
-      floorPending.clear(); wallPending.clear(); objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; customAssetsDirty = false; resizedDirty = false;
+      floorPending.clear(); wallPending.clear(); objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; customAssetsDirty = false; referenceImageDirty = false; resizedDirty = false;
       return out;
     },
     requeuePending: (p) => {
@@ -585,6 +607,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (p.tileEffects) effectsDirty = true;
       if (p.areas) areasDirty = true;
       if (p.customAssets) customAssetsDirty = true;
+      if ('referenceImage' in p) referenceImageDirty = true;
       set((s) => ({ revision: s.revision + 1 }));
     },
   };
