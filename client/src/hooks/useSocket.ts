@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
@@ -696,6 +696,23 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
     socket.on(SocketEvents.ROOM_KNOCK_REQUEST, (payload: { userId: string; name: string }) => {
       useGameStore.getState().setIncomingKnock(payload);
+    });
+
+    // Item #5 — a room-join request, popped up for every admin currently
+    // connected to that room (server already filtered by role — see
+    // roomMembers.ts's getConnectedAdminSocketIds — so anything arriving here
+    // is safe to show without a client-side admin check).
+    socket.on(SocketEvents.JOIN_REQUESTED, (payload: JoinRequestPopupPayload) => {
+      useGameStore.getState().addIncomingJoinRequest(payload);
+    });
+
+    // A decision was made — via the manual queue panel, or another admin's
+    // popup — so this popup (if still showing) is stale. userId + roomSlug
+    // scoped: other pending requests for this room must stay untouched.
+    socket.on(SocketEvents.JOIN_QUEUE_CHANGED, (payload: { roomId: string; userId?: string; roomSlug?: string }) => {
+      if (payload.userId && payload.roomSlug) {
+        useGameStore.getState().removeIncomingJoinRequest(payload.userId, payload.roomSlug);
+      }
     });
 
     // The knocker cancelled before we responded — but only clear OUR toast if

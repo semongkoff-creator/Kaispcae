@@ -7,6 +7,7 @@ import { resolveRoomRole } from '../lib/roles';
 import { resolveEntry } from '../lib/roomMembership';
 import { groupConversationId } from '../lib/conversations';
 import { requireWorkspace } from '../lib/workspace';
+import { getConnectedAdminSocketIds } from '../socket/roomHandler';
 
 const roomMembers = Router();
 
@@ -65,10 +66,21 @@ roomMembers.post('/rooms/:slug/join-request', authenticateToken, async (req: Aut
       update: { status: 'pending', requestedAt: new Date(), decidedById: null, decidedAt: null },
     });
 
-    // Nudge whoever is currently in the room — an approval queue nobody knows
-    // about is the same as no queue at all. Room-wide rather than targeted:
-    // only admins get the panel that reacts to it (see the client's gating).
-    if (ioRef) ioRef.to(room.slug).emit(SocketEvents.JOIN_REQUESTED, { roomId: room.id, userId: req.userId });
+    // Item #5 — pop this up on every admin's screen right now, instead of
+    // relying on the manual queue (or the 20s badge poll) to ever be opened.
+    // Targeted at exactly the admin sockets currently connected to this room
+    // (same fan-out as ROOM_KNOCK_REQUEST) rather than a room-wide broadcast:
+    // a non-admin bystander must never receive this. An admin who isn't
+    // connected right now just gets nothing here — their request is still
+    // safe in the queue for whenever they do open it.
+    if (ioRef) {
+      const adminSocketIds = getConnectedAdminSocketIds(room.slug);
+      if (adminSocketIds.length > 0) {
+        const requester = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
+        const payload = { userId: req.userId!, name: requester?.displayName || 'Seseorang', roomSlug: room.slug, roomName: room.name };
+        for (const sid of adminSocketIds) ioRef.to(sid).emit(SocketEvents.JOIN_REQUESTED, payload);
+      }
+    }
 
     return res.status(202).json({ status: 'pending' });
   } catch (err) {
@@ -144,7 +156,10 @@ roomMembers.post('/rooms/:slug/join-requests/:userId', authenticateToken, async 
           s.emit(SocketEvents.JOIN_DECISION, { roomSlug: room!.slug, status: updated.status });
         }
       }
-      ioRef.to(room!.slug).emit(SocketEvents.JOIN_QUEUE_CHANGED, { roomId: room!.id });
+      // userId included so a still-open popup for this exact request (see
+      // Item #5) can remove just that one card — a decision on one request
+      // must not dismiss other, unrelated pending requests for the same room.
+      ioRef.to(room!.slug).emit(SocketEvents.JOIN_QUEUE_CHANGED, { roomId: room!.id, userId: req.params.userId, roomSlug: room!.slug });
     }
 
     return res.json({ status: updated.status });

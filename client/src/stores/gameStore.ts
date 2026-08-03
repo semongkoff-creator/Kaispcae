@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData } from '@virtualmeet/shared';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -341,6 +341,13 @@ export interface GameState {
   // A locked-room "knock" shown to admins (see shared KnockRequestPayload).
   incomingKnock: KnockRequestPayload | null;
   setIncomingKnock: (req: KnockRequestPayload | null) => void;
+  // Item #5 — room-join requests popped up for admins (see
+  // JoinRequestPopupPayload). An array, not a single slot like the others
+  // above: several people can request to join at once and every one of them
+  // needs to stay actionable, not just the latest.
+  incomingJoinRequests: JoinRequestPopupPayload[];
+  addIncomingJoinRequest: (req: JoinRequestPopupPayload) => void;
+  removeIncomingJoinRequest: (userId: string, roomSlug: string) => void;
   summonResult: SummonResultPayload | null;
   setSummonResult: (result: SummonResultPayload | null) => void;
   // Fitur 15B — reply to MY OWN INTERACTIVE_PASSWORD_CHECK, same
@@ -903,6 +910,17 @@ export const useGameStore = create<GameState>((set, get) => ({
   setIncomingSummonRequest: (req) => set({ incomingSummonRequest: req }),
   incomingKnock: null,
   setIncomingKnock: (req) => set({ incomingKnock: req }),
+  incomingJoinRequests: [],
+  addIncomingJoinRequest: (req) => set((s) => ({
+    // Re-posting while pending is idempotent server-side (see roomMembers.ts),
+    // so guard the same way here rather than letting a duplicate card stack.
+    incomingJoinRequests: s.incomingJoinRequests.some((r) => r.userId === req.userId && r.roomSlug === req.roomSlug)
+      ? s.incomingJoinRequests
+      : [...s.incomingJoinRequests, req],
+  })),
+  removeIncomingJoinRequest: (userId, roomSlug) => set((s) => ({
+    incomingJoinRequests: s.incomingJoinRequests.filter((r) => !(r.userId === userId && r.roomSlug === roomSlug)),
+  })),
   summonResult: null,
   setSummonResult: (result) => set({ summonResult: result }),
   interactivePasswordResult: null,

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill } from 'react-bootstrap-icons';
+import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill, PersonPlusFill } from 'react-bootstrap-icons';
 import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -571,6 +571,20 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     const timer = setTimeout(() => useGameStore.getState().setIncomingKnock(null), CONSENT_REQUEST_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, [incomingKnock]);
+
+  // Item #5 — room-join requests popped up for admins. No auto-clear timer
+  // like the knock/summon/follow toasts above: those have a matching
+  // server-side auto-decline (CONSENT_REQUEST_TIMEOUT_MS), but a join request
+  // has none — it just waits in the queue — so there's nothing for a client
+  // timeout to stay in sync with. The card only goes away on an explicit
+  // decision (here or from the manual queue panel, via JOIN_QUEUE_CHANGED).
+  const incomingJoinRequests = useGameStore((s) => s.incomingJoinRequests);
+  const decideIncomingJoinRequest = useCallback((req: { userId: string; roomSlug: string }, decision: 'approve' | 'reject') => {
+    useGameStore.getState().removeIncomingJoinRequest(req.userId, req.roomSlug);
+    api.decideJoinRequest(req.roomSlug, req.userId, decision).catch((e) => {
+      console.error('[join-request] decide from popup failed:', e);
+    });
+  }, []);
 
   const followResult = useGameStore((s) => s.followResult);
   useEffect(() => {
@@ -1252,6 +1266,24 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             onAccept={() => { emitKnockAdmit(incomingKnock.userId); useGameStore.getState().setIncomingKnock(null); }}
             onDecline={() => { useGameStore.getState().setIncomingKnock(null); }}
           />
+        )}
+        {/* Item #5 — stacked join-request popups. Capped at 3 visible cards
+            (a "+N lainnya" pill for the rest) so several simultaneous
+            requests can't fill the whole screen; isAdmin is defense-in-depth
+            only — the server already never sends this to a non-admin. */}
+        {isAdmin && incomingJoinRequests.slice(0, 3).map((req) => (
+          <PendingRequestToast
+            key={`${req.roomSlug}:${req.userId}`}
+            icon={<PersonPlusFill size={13} className="text-emerald-500" />}
+            message={<><span className="font-medium">{req.name}</span> minta bergabung ke <span className="font-medium">{req.roomName}</span></>}
+            onAccept={() => decideIncomingJoinRequest(req, 'approve')}
+            onDecline={() => decideIncomingJoinRequest(req, 'reject')}
+          />
+        ))}
+        {isAdmin && incomingJoinRequests.length > 3 && (
+          <div className="bg-slate-800/90 text-white text-xs font-medium px-3 py-1.5 rounded-full shadow pointer-events-none">
+            +{incomingJoinRequests.length - 3} permintaan bergabung lainnya
+          </div>
         )}
         {summonResult && (
           <div className="bg-purple-600/90 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-1.5">

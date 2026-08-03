@@ -538,6 +538,11 @@ export enum SocketEvents {
 
   // Room join approval (see server/src/lib/roomMembership.ts).
   JOIN_DENIED = 'room:join_denied',
+  // Item #5 — JOIN_REQUESTED used to be a room-wide broadcast nobody actually
+  // listened for (the badge in App.tsx polled instead). It's now targeted
+  // directly at each admin socket currently connected to the room (mirrors
+  // ROOM_KNOCK_REQUEST's fan-out in roomHandler.ts) and carries enough to
+  // render a popup without a follow-up fetch — see JoinRequestPopupPayload.
   JOIN_REQUESTED = 'room:join_requested',
   JOIN_DECISION = 'room:join_decision',
   JOIN_QUEUE_CHANGED = 'room:join_queue_changed',
@@ -660,6 +665,18 @@ export interface SummonRequestPayload {
 export interface KnockRequestPayload {
   userId: string;
   name: string;
+}
+
+// Item #5 — a room-join request, shown to every currently-connected admin of
+// that room with Terima/Tolak (see SocketEvents.JOIN_REQUESTED). Deciding
+// either way goes through the same REST route the manual queue panel already
+// uses (POST /rooms/:slug/join-requests/:userId) — this is a notification +
+// shortcut, not a second approval path.
+export interface JoinRequestPopupPayload {
+  userId: string;
+  name: string;
+  roomSlug: string;
+  roomName: string;
 }
 
 export interface SummonRespondPayload {

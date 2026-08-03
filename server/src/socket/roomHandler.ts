@@ -255,6 +255,24 @@ export function isRoomLocked(slug: string): boolean {
   return roomAdminMap.get(slug)?.locked === true;
 }
 
+// Item #5 — live admin sockets currently connected to a room, so a REST route
+// (roomMembers.ts's join-request handler, which has no socket of its own) can
+// fan a popup out directly to them exactly like ROOM_KNOCK_REQUEST does,
+// instead of broadcasting to the whole room and relying on client-side
+// gating. Read-only, same convention as isRoomLocked above: never creates a
+// roomAdminMap entry for a room nobody has joined this server lifetime — no
+// admin has ever connected there, so there's nothing to notify.
+export function getConnectedAdminSocketIds(roomSlug: string): string[] {
+  const rs = roomAdminMap.get(roomSlug);
+  if (!rs) return [];
+  const ids: string[] = [];
+  for (const uid of rs.adminUserIds) {
+    const sid = userSocketMap.get(uid);
+    if (sid) ids.push(sid);
+  }
+  return ids;
+}
+
 export function registerRoomHandlers(io: Server, socket: Socket) {
   let currentRoom: string | null = null;
 
