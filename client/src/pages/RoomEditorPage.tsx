@@ -1770,6 +1770,24 @@ export function RoomEditorPage({ slug }: { slug: string }) {
                   <input type="number" min={1} value={Math.round(referenceImage.height)} onChange={(e) => useEditorStore.getState().updateReferenceImage({ height: Math.max(1, Number(e.target.value)) })} className="mt-1 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-sm text-white" />
                 </label>
               </div>
+              <button
+                onClick={() => {
+                  const doc = useEditorStore.getState().doc; if (!doc) return;
+                  // Grid misalignment fix — reset the reference image's own
+                  // pixel rectangle back to exactly cover the room's tile
+                  // grid (this is also the default set on first upload, see
+                  // uploadReferenceImage). A dragged/resized image drifting
+                  // out of sync with the grid is a data problem, not a
+                  // render bug (grid lines, tile-effect placement, and this
+                  // image all already share the same pan/zoom transform) —
+                  // this button just gets the numbers back in sync.
+                  useEditorStore.getState().updateReferenceImage({ x: 0, y: 0, width: doc.width * TILE_SIZE, height: doc.height * TILE_SIZE });
+                }}
+                title="Kembalikan gambar supaya PAS membentang ke seluruh grid map — pakai ini kalau garis grid kelihatan meleset dari gambar"
+                className="w-full mb-2 py-1.5 rounded bg-white/10 hover:bg-white/20 text-white/80 text-xs font-medium cursor-pointer"
+              >
+                Fit ke Grid
+              </button>
               <label className="flex items-center gap-2 mb-3 text-xs text-white/60 cursor-pointer">
                 <input type="checkbox" checked={!!referenceImage.showInGame} onChange={(e) => useEditorStore.getState().updateReferenceImage({ showInGame: e.target.checked })} className="cursor-pointer" />
                 Tampilkan di game (jadi background map untuk semua pemain)
