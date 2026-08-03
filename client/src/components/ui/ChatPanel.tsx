@@ -118,6 +118,57 @@ export function ChatPanel({
   }, [open]);
 
   const [text, setText] = useState('');
+  const messageInputRef = useRef<HTMLInputElement>(null);
+  // Potongan C2 — @mention autocomplete (Bagian 1). null = closed. When open,
+  // `query` is whatever's typed after the triggering "@" (before the cursor,
+  // no whitespace yet), `start` is that "@"'s index in `text` so a selection
+  // knows exactly what span to replace. #general only for now, per spec.
+  const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
+  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
+  const mentionCandidates = (() => {
+    if (!mention) return [];
+    const q = mention.query.toLowerCase();
+    const seen = new Set<string>();
+    const others = Object.values(playerRecords)
+      .filter((p): p is typeof p & { userId: string } => !!p.userId)
+      .map((p) => ({ userId: p.userId, name: p.name }));
+    const all = [{ userId: localUserId, name: localPlayerName }, ...others];
+    const out: { userId: string; name: string }[] = [];
+    for (const c of all) {
+      if (seen.has(c.userId)) continue;
+      if (q && !c.name.toLowerCase().includes(q)) continue;
+      seen.add(c.userId);
+      out.push(c);
+      if (out.length >= 8) break;
+    }
+    return out;
+  })();
+  // Re-derive the active "@query" from the input's actual caret position
+  // (not just the trailing end of the string) so editing mid-message works
+  // too, not only typing at the end. Runs on every keystroke.
+  const updateMentionState = useCallback((value: string, caret: number) => {
+    const uptoCaret = value.slice(0, caret);
+    const m = uptoCaret.match(/(?:^|\s)@([^\s@]*)$/);
+    if (m) {
+      setMention({ query: m[1], start: uptoCaret.length - m[1].length - 1 });
+      setMentionActiveIndex(0);
+    } else {
+      setMention(null);
+    }
+  }, []);
+  const insertMention = useCallback((candidate: { userId: string; name: string }) => {
+    if (!mention) return;
+    const input = messageInputRef.current;
+    const caret = input?.selectionStart ?? text.length;
+    const token = `@[${candidate.name}](${candidate.userId}) `;
+    const next = text.slice(0, mention.start) + token + text.slice(caret);
+    setText(next);
+    setMention(null);
+    // Put the caret right after the inserted token, next tick (after the
+    // controlled value has actually updated the DOM).
+    const pos = mention.start + token.length;
+    requestAnimationFrame(() => { input?.focus(); input?.setSelectionRange(pos, pos); });
+  }, [mention, text]);
   const [proximityMode, setProximityMode] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [viewingZone, setViewingZone] = useState(false);
@@ -202,6 +253,7 @@ export function ChatPanel({
   useEffect(() => {
     setExpandedThreadId(null);
     setHasMoreOlder(true);
+    setMention(null);
   }, [activeChatTarget?.type, activeChatTarget?.id]);
 
   const handleSend = useCallback(() => {
@@ -216,6 +268,7 @@ export function ChatPanel({
     }
     setText('');
     setShowEmoji(false);
+    setMention(null);
   }, [text, proximityMode, onSend, onBubble, viewingZone, currentZone, onSendZone]);
 
   const insertEmoji = (emoji: string) => {
@@ -654,19 +707,52 @@ export function ChatPanel({
                 buttonClassName="text-purple-600 dark:text-purple-400 disabled:opacity-40 cursor-pointer"
               />
             )}
-            <input
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value);
-                // Only the persisted channel/DM path has a typing indicator —
-                // zone/bubble chat is a different, ephemeral concept.
-                if (e.target.value && !viewingZone && !proximityMode) onTyping?.();
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              placeholder={viewingZone ? `Message ${currentZone?.name}...` : proximityMode ? 'Say nearby...' : 'Type a message...'}
-              maxLength={200}
-              className="flex-1 bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 disabled:opacity-60"
-            />
+            <div className="relative flex-1">
+              {/* Potongan C2 — @mention candidates, #general (persisted
+                  channel/DM) only: zone/bubble chat has no real userId-backed
+                  participant list to mention from. */}
+              {mention && !viewingZone && !proximityMode && (
+                <div className="absolute bottom-full left-0 mb-1 w-56 max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-purple-200 dark:border-gray-600 rounded-lg shadow-lg z-10">
+                  {mentionCandidates.length === 0 ? (
+                    <p className="px-2.5 py-1.5 text-[11px] text-gray-400">Tidak ada yang cocok</p>
+                  ) : mentionCandidates.map((c, i) => (
+                    <button
+                      key={c.userId}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()} // keep the input focused — a blur here would close this before the click registers
+                      onClick={() => insertMention(c)}
+                      className={`w-full text-left px-2.5 py-1.5 text-xs cursor-pointer ${i === mentionActiveIndex ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-900 dark:text-purple-200' : 'text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'}`}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <input
+                ref={messageInputRef}
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  updateMentionState(e.target.value, e.target.selectionStart ?? e.target.value.length);
+                  // Only the persisted channel/DM path has a typing indicator —
+                  // zone/bubble chat is a different, ephemeral concept.
+                  if (e.target.value && !viewingZone && !proximityMode) onTyping?.();
+                }}
+                onKeyDown={(e) => {
+                  if (mention && mentionCandidates.length > 0) {
+                    if (e.key === 'ArrowDown') { e.preventDefault(); setMentionActiveIndex((i) => (i + 1) % mentionCandidates.length); return; }
+                    if (e.key === 'ArrowUp') { e.preventDefault(); setMentionActiveIndex((i) => (i - 1 + mentionCandidates.length) % mentionCandidates.length); return; }
+                    if (e.key === 'Enter') { e.preventDefault(); insertMention(mentionCandidates[mentionActiveIndex]); return; }
+                    if (e.key === 'Escape') { e.preventDefault(); setMention(null); return; }
+                  }
+                  if (e.key === 'Enter') handleSend();
+                }}
+                onBlur={() => setMention(null)}
+                placeholder={viewingZone ? `Message ${currentZone?.name}...` : proximityMode ? 'Say nearby...' : 'Type a message...'}
+                maxLength={200}
+                className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 disabled:opacity-60"
+              />
+            </div>
             <button
               onClick={handleSend}
               disabled={!text.trim()}
