@@ -146,7 +146,22 @@ export interface LayerData {
   // Absent/null = none set. Editor-only, like customAssets — no legacy
   // equivalent, never touched by legacyToLayerData/layerDataToLegacy.
   referenceImage?: ReferenceImageData | null;
+  // Room-wide avatar sprite scale multiplier — lets an admin make every
+  // player's character bigger or smaller in THIS room (e.g. a tighter room
+  // may want smaller avatars, a showcase room bigger ones). Absent/undefined
+  // = 1 (unchanged size). Purely cosmetic: collision/hitboxes are unaffected,
+  // only the rendered sprite (see AvatarSprite.ts's `scale` param). Forwarded
+  // to every player via ROOM_STATE (no opt-in gate needed, unlike
+  // referenceImage.showInGame — this has no privacy/content-review concern).
+  avatarScale?: number;
 }
+
+// Sane bounds for LayerData.avatarScale — small enough that a character
+// doesn't shrink to an unreadable dot, large enough it doesn't dwarf the
+// tile grid. Enforced server-side (rooms.ts) and clamped by the editor's
+// slider (RoomEditorPage.tsx).
+export const AVATAR_SCALE_MIN = 0.5;
+export const AVATAR_SCALE_MAX = 2;
 
 // Convert the legacy runtime shape (already-normalized RoomTile[][], furniture,
 // zones) into LayerData. Pure and deterministic.

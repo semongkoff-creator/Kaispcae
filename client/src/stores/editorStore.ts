@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { LayerData, Furniture, TileEffect, AreaEffect, CustomAssetEntry, ReferenceImageData } from '@virtualmeet/shared';
+import { AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@virtualmeet/shared';
 
 export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal' | 'door';
 
@@ -107,6 +108,11 @@ interface EditorState {
   setReferenceImage: (data: ReferenceImageData | null) => void;
   updateReferenceImage: (patch: Partial<ReferenceImageData>) => void;
 
+  // Room-wide avatar sprite scale (see mapLayers.ts's LayerData.avatarScale)
+  // — same "one-way registration, not undo/redo-tracked" posture as
+  // setReferenceImage above; a slider drag isn't a paint stroke.
+  setAvatarScale: (scale: number) => void;
+
   selection: Selection | null;
   setSelection: (sel: Selection | null) => void;
   selectedObjectId: string | null;
@@ -191,6 +197,7 @@ interface SavePayload {
   areas?: AreaEffect[];
   customAssets?: CustomAssetEntry[];
   referenceImage?: ReferenceImageData | null;
+  avatarScale?: number;
 }
 
 const INITIAL_VIEWPORT: EditorViewport = { panX: 0, panY: 0, zoom: 1 };
@@ -206,6 +213,7 @@ let effectsDirty = false;
 let areasDirty = false;
 let customAssetsDirty = false; // Fitur 15 — a custom asset was registered this session
 let referenceImageDirty = false;
+let avatarScaleDirty = false;
 let resizedDirty = false; // dims/grids changed → save full floor+wall+dims
 let strokeSnap: Snapshot | null = null;
 let strokeChanged = false;
@@ -294,7 +302,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     doc: null,
     setDoc: (doc) => {
       undoStack.length = 0; redoStack.length = 0; floorPending.clear(); wallPending.clear();
-      objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; customAssetsDirty = false; referenceImageDirty = false; resizedDirty = false; strokeSnap = null; strokeChanged = false;
+      objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; customAssetsDirty = false; referenceImageDirty = false; avatarScaleDirty = false; resizedDirty = false; strokeSnap = null; strokeChanged = false;
       set({ doc, revision: 0, undoDepth: 0, redoDepth: 0, selection: null, selectedObjectId: null, clipboard: null });
     },
 
@@ -320,6 +328,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const d = get().doc; if (!d || !d.referenceImage) return;
       d.referenceImage = { ...d.referenceImage, ...patch };
       referenceImageDirty = true;
+      commit();
+    },
+    setAvatarScale: (scale) => {
+      const d = get().doc; if (!d) return;
+      d.avatarScale = Math.max(AVATAR_SCALE_MIN, Math.min(AVATAR_SCALE_MAX, scale));
+      avatarScaleDirty = true;
       commit();
     },
     selectedEffect: null,
@@ -585,6 +599,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         areas: areasDirty && d ? cloneAreas(d.areas) : undefined,
         customAssets: customAssetsDirty && d ? [...(d.customAssets ?? [])] : undefined,
         referenceImage: referenceImageDirty && d ? (d.referenceImage ?? null) : undefined,
+        avatarScale: avatarScaleDirty && d ? d.avatarScale : undefined,
       };
       if (resizedDirty && d) {
         // A resize replaces the whole grid + dims; per-tile diffs don't apply.
@@ -595,7 +610,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         out.floorChanges = Array.from(floorPending.values());
         out.wallChanges = Array.from(wallPending.values());
       }
-      floorPending.clear(); wallPending.clear(); objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; customAssetsDirty = false; referenceImageDirty = false; resizedDirty = false;
+      floorPending.clear(); wallPending.clear(); objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; customAssetsDirty = false; referenceImageDirty = false; avatarScaleDirty = false; resizedDirty = false;
       return out;
     },
     requeuePending: (p) => {
@@ -608,6 +623,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (p.areas) areasDirty = true;
       if (p.customAssets) customAssetsDirty = true;
       if ('referenceImage' in p) referenceImageDirty = true;
+      if (p.avatarScale != null) avatarScaleDirty = true;
       set((s) => ({ revision: s.revision + 1 }));
     },
   };

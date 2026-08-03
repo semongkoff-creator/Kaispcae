@@ -7,7 +7,6 @@ import { drawSpriteFrame } from '@/utils/spriteLoader';
 // the glow doesn't end up a fixed 32px-era size wrapped around a now-larger
 // 48px sprite. 14/32 preserves the original 32px-tile-era ratio exactly.
 const AVATAR_RADIUS = TILE_SIZE * (14 / 32);
-const GLOW_RADIUS = AVATAR_RADIUS + 4;
 
 const DEFAULT_COLOR = '#ff6b6b';
 
@@ -20,13 +19,19 @@ interface DrawAvatarOptions {
   // Raw rAF timestamp, used to drive sprite frame cycling. Optional so
   // existing call sites (e.g. the avatar editor preview) keep working.
   timestamp?: number;
+  // Room-wide size multiplier (see gameStore.ts's avatarScale) — defaults to
+  // 1 so every existing call site (avatar editor preview, etc.) is
+  // unaffected. Scales both the shape-fallback body/glow AND the pixel-art
+  // sprite; badges/labels above the head are positioned relative to `r`
+  // below, so they naturally follow the character outward as it grows.
+  scale?: number;
 }
 
 export function drawAvatar(
   ctx: CanvasRenderingContext2D,
   options: DrawAvatarOptions,
 ) {
-  const { avatar, x, y, isLocal, walkAnimOffset, timestamp = 0 } = options;
+  const { avatar, x, y, isLocal, walkAnimOffset, timestamp = 0, scale = 1 } = options;
   const config = avatar.avatarConfig;
   const color = config?.color || avatar.color || DEFAULT_COLOR;
   const accessory = config?.accessory || 'none';
@@ -35,19 +40,19 @@ export function drawAvatar(
 
   const cx = x;
   const cy = y + walkAnimOffset;
-  const r = AVATAR_RADIUS;
+  const r = AVATAR_RADIUS * scale;
 
   ctx.save();
 
   // ─── Glow ring for local player ──────────────────────────────
   if (isLocal) {
     ctx.beginPath();
-    ctx.arc(cx, cy, GLOW_RADIUS, 0, Math.PI * 2);
+    ctx.arc(cx, cy, r + 4, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
     ctx.fill();
 
     ctx.beginPath();
-    ctx.arc(cx, cy, GLOW_RADIUS, 0, Math.PI * 2);
+    ctx.arc(cx, cy, r + 4, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
     ctx.lineWidth = 2;
     ctx.stroke();
@@ -55,7 +60,7 @@ export function drawAvatar(
 
   // ─── Pixel-art sprite (falls back to shape below if the sprite images
   // haven't finished loading yet, or none is configured) ──────────────
-  const spriteSize = avatar.isSitting ? TILE_SIZE : SPRITE_DISPLAY_SIZE;
+  const spriteSize = (avatar.isSitting ? TILE_SIZE : SPRITE_DISPLAY_SIZE) * scale;
 
   let renderedSprite = false;
   if (config?.spriteMode === 'premade' && config.premadeId) {

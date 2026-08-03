@@ -548,6 +548,10 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
           const ri = (dbRoom?.layerData as unknown as LayerData | undefined)?.referenceImage;
           return ri?.showInGame ? ri : null;
         })(),
+        // Room-wide avatar sprite scale (see mapLayers.ts) — always forwarded,
+        // no opt-in gate (purely cosmetic, no privacy/content concern like
+        // referenceImage above). Undefined in layerData means 1 (unchanged).
+        avatarScale: (dbRoom?.layerData as unknown as LayerData | undefined)?.avatarScale,
       });
 
       // Soundboard — this room's custom sounds, sent once right after

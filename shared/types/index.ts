@@ -199,6 +199,9 @@ export interface RoomState {
   // mapLayers.ts) — null whenever the room has none, or has one that's
   // editor-only. When present, GameCanvas.tsx renders it for every player.
   referenceImage?: ReferenceImageData | null;
+  // Room-wide avatar sprite scale (see LayerData.avatarScale) — undefined
+  // means 1 (unchanged size). Always forwarded, no opt-in gate.
+  avatarScale?: number;
 }
 
 // All socket event names used between client and server
@@ -1344,7 +1347,7 @@ export { createDefaultOfficeLayout, createKaitechOfficeLayout, findSpawnPixel, c
 export type { RoomTemplateId } from '../defaultRoomLayout';
 export { BLOCKED_TILES, isTileBlocked, isDoorTile, findZoneEntryTile, findAdjacentFreeTile } from '../tileCollision';
 // ZEP Room Editor — Potong 1 layered map format + legacy adaptors.
-export { MAP_FORMAT_VERSION, legacyToLayerData, layerDataToLegacy } from '../mapLayers';
+export { MAP_FORMAT_VERSION, legacyToLayerData, layerDataToLegacy, AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '../mapLayers';
 export type { LayerData, TileEffect, AreaEffect, CustomAssetEntry, ReferenceImageData } from '../mapLayers';
 export type { Role, FeatureKey } from '../permissions';
 export { roleAtLeast, hasFeatureAccess, FEATURE_MIN_ROLE } from '../permissions';

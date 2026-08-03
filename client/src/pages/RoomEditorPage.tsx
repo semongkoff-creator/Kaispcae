@@ -3,6 +3,7 @@ import { ArrowCounterclockwise, ArrowClockwise } from 'react-bootstrap-icons';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, RoomTile, Furniture, Zone, RoomTheme,
   LayerData, TileEffect, legacyToLayerData, CustomAssetEntry, ReferenceImageData, InteractiveObjectType, TriggerMethod,
+  AVATAR_SCALE_MIN, AVATAR_SCALE_MAX,
 } from '@virtualmeet/shared';
 import { api, ApiError } from '@/services/api';
 import { useEditorStore, EDITOR_LAYERS, EDITOR_TOOLS, EditorLayer, EditorTool } from '@/stores/editorStore';
@@ -747,6 +748,11 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const [refBusy, setRefBusy] = useState(false);
   const [refErr, setRefErr] = useState('');
   const referenceImage = useEditorStore((s) => s.doc?.referenceImage);
+
+  // Room-wide avatar size — a simple room setting (not tied to any layer/
+  // tool), panel toggled from the toolbar same as Reference Image.
+  const [scalePanelOpen, setScalePanelOpen] = useState(false);
+  const avatarScale = useEditorStore((s) => s.doc?.avatarScale) ?? 1;
   const uploadReferenceImage = async () => {
     const f = await pickFile('image/png,image/jpeg');
     if (!f) return;
@@ -1289,6 +1295,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         <button onClick={openResize} title="Resize map" className="px-2.5 py-1 rounded text-xs font-medium text-white/70 bg-white/10 hover:bg-white/20 cursor-pointer">Resize</button>
         <button onClick={openImportPicker} title="Upload gambar sendiri sebagai Floor/Wall/Object" className="px-2.5 py-1 rounded text-xs font-medium text-white/70 bg-white/10 hover:bg-white/20 cursor-pointer">Import Image</button>
         <button onClick={() => setRefPanelOpen((v) => !v)} title="Upload denah sebagai referensi untuk digambar ulang manual" className={`px-2.5 py-1 rounded text-xs font-medium cursor-pointer ${refPanelOpen ? 'bg-purple-600 text-white' : 'text-white/70 bg-white/10 hover:bg-white/20'}`}>Reference Image</button>
+        <button onClick={() => setScalePanelOpen((v) => !v)} title="Atur ukuran karakter untuk semua pemain di room ini" className={`px-2.5 py-1 rounded text-xs font-medium cursor-pointer ${scalePanelOpen ? 'bg-purple-600 text-white' : 'text-white/70 bg-white/10 hover:bg-white/20'}`}>Ukuran Karakter</button>
         <div className="ml-auto flex items-center gap-1">
           <button onClick={() => zoomBy(1 / 1.2)} className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 cursor-pointer">−</button>
           <span className="text-xs text-white/60 w-12 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
@@ -1564,6 +1571,30 @@ export function RoomEditorPage({ slug }: { slug: string }) {
                 <button onClick={() => useEditorStore.getState().setReferenceImage(null)} className="flex-1 py-1.5 rounded bg-red-600/80 hover:bg-red-600 text-white text-xs font-medium cursor-pointer">Hapus</button>
               </div>
             </>
+          )}
+        </div>
+      )}
+
+      {/* Ukuran Karakter — floating panel, anchored left so it never overlaps
+          the Reference Image panel (anchored right) if both are open. */}
+      {scalePanelOpen && (
+        <div className="absolute top-14 left-4 z-10 bg-gray-800 border border-white/10 rounded-xl p-4 w-72 shadow-2xl">
+          <p className="text-white font-semibold mb-2 text-sm">Ukuran Karakter</p>
+          <p className="text-white/50 text-xs mb-3">Atur besar/kecil avatar untuk SEMUA pemain di room ini. Cuma tampilan, tidak mengubah collision/hitbox.</p>
+          <label className="text-xs text-white/60 flex items-center justify-between">
+            Skala
+            <input
+              type="range"
+              min={Math.round(AVATAR_SCALE_MIN * 100)}
+              max={Math.round(AVATAR_SCALE_MAX * 100)}
+              value={Math.round(avatarScale * 100)}
+              onChange={(e) => useEditorStore.getState().setAvatarScale(Number(e.target.value) / 100)}
+              className="ml-2 flex-1 cursor-pointer"
+            />
+            <span className="ml-2 w-11 text-right tabular-nums">{Math.round(avatarScale * 100)}%</span>
+          </label>
+          {avatarScale !== 1 && (
+            <button onClick={() => useEditorStore.getState().setAvatarScale(1)} className="mt-3 w-full py-1.5 rounded bg-white/10 hover:bg-white/20 text-white/80 text-xs font-medium cursor-pointer">Reset ke 100%</button>
           )}
         </div>
       )}

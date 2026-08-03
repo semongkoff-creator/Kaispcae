@@ -3,7 +3,7 @@ import { Server } from 'socket.io';
 import multer from 'multer';
 import fs from 'fs';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess, LayerData, layerDataToLegacy, findSpawnPixel, TILE_SIZE, MediaType, MediaPayload, SoundboardSoundData, SOUNDBOARD_MAX_DURATION_MS, SOUNDBOARD_MAX_FILE_BYTES } from '@virtualmeet/shared';
+import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess, LayerData, layerDataToLegacy, findSpawnPixel, TILE_SIZE, MediaType, MediaPayload, SoundboardSoundData, SOUNDBOARD_MAX_DURATION_MS, SOUNDBOARD_MAX_FILE_BYTES, AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
 import { canEnterRoom } from '../lib/roomMembership';
@@ -322,6 +322,15 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
         const opacity = Number.isFinite(r.opacity) ? Math.max(0, Math.min(1, r.opacity as number)) : 0.5;
         layerData.referenceImage = { url: r.url, x: r.x, y: r.y, width: r.width, height: r.height, opacity, visible: !!r.visible, showInGame: !!r.showInGame };
       }
+    }
+
+    // Room-wide avatar size — clamp to sane bounds rather than rejecting an
+    // out-of-range value outright, since it only ever comes from the
+    // editor's own slider (which already clamps) — a stray value is more
+    // likely a stale client than an attack.
+    if ('avatarScale' in body) {
+      const sc = body.avatarScale;
+      if (Number.isFinite(sc)) layerData.avatarScale = Math.max(AVATAR_SCALE_MIN, Math.min(AVATAR_SCALE_MAX, sc as number));
     }
 
     await prisma.room.update({ where: { id: room.id }, data: { layerData: layerData as unknown as object } });

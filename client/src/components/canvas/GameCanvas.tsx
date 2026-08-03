@@ -296,6 +296,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // the admin opted into showInGame; drawn as an overlay, see the draw loop.
   const liveReferenceImage = useGameStore((s) => s.liveReferenceImage);
   const liveReferenceImageRef = useRef(liveReferenceImage);
+  // Room-wide avatar size (see gameStore.ts) — read via ref, same pattern as
+  // every other per-frame draw-loop value on this page.
+  const avatarScale = useGameStore((s) => s.avatarScale);
+  const avatarScaleRef = useRef(avatarScale);
   // Potong 6 — which YouTube tile is close enough to auto-embed (proximity).
   const [ytEmbedId, setYtEmbedId] = useState<string | null>(null);
   const ytEmbedRef = useRef<string | null>(null);
@@ -331,6 +335,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     furnitureRef.current = furniture;
     mediaObjectsRef.current = mediaObjects;
     liveReferenceImageRef.current = liveReferenceImage;
+    avatarScaleRef.current = avatarScale;
   });
 
   const proximityRef = useRef(proximityData); proximityRef.current = proximityData;
@@ -1134,6 +1139,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const nudgeOffset = getNudgeShakeOffset(nudgeStart, now);
       drawAvatar(ctx, { avatar, x: sx + nudgeOffset, y: sy, isLocal, timestamp,
         walkAnimOffset: bobOffset + jumpOffset,
+        scale: avatarScaleRef.current,
       });
 
       // Nudge ("senggol") impact effect — a burst of small orange sparks

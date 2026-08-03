@@ -107,6 +107,10 @@ export interface GameState {
   // when the admin opted into showInGame (see RoomState's doc comment) —
   // null otherwise. GameCanvas.tsx renders this for every player when set.
   liveReferenceImage: ReferenceImageData | null;
+  // Room-wide avatar sprite scale (see RoomState.avatarScale) — 1 = unchanged
+  // size. AvatarSprite.ts multiplies every rendered avatar's dimensions by
+  // this.
+  avatarScale: number;
 
   // Connection
   isConnected: boolean;
@@ -589,6 +593,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   theme: 'scifi-office',
   roomTemplate: undefined,
   liveReferenceImage: null,
+  avatarScale: 1,
 
   isConnected: false,
   setConnected: (connected) => set({ isConnected: connected }),
@@ -1165,6 +1170,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       notice: roomState.notice !== undefined ? roomState.notice : prev.notice,
       roomLocked: roomState.locked ?? false,
       liveReferenceImage: roomState.referenceImage ?? null,
+      avatarScale: roomState.avatarScale ?? 1,
     }));
 
     console.log('[store] setRoomState — adminPlayerIds:', Array.from(adminIds), 'masterAdminUserId:', roomState.masterAdminUserId, 'localIsAdmin:', localIsAdmin);
