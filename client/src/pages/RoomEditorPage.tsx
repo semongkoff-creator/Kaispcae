@@ -895,8 +895,11 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const setActiveLayer = useEditorStore((s) => s.setActiveLayer);
   const activeTool = useEditorStore((s) => s.activeTool);
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
-  const brushSize = useEditorStore((s) => s.brushSize);
+  const brushW = useEditorStore((s) => s.brushW);
+  const brushH = useEditorStore((s) => s.brushH);
   const setBrushSize = useEditorStore((s) => s.setBrushSize);
+  const stampMode = useEditorStore((s) => s.stampMode);
+  const setStampMode = useEditorStore((s) => s.setStampMode);
   const zoomBy = useEditorStore((s) => s.zoomBy);
   const setZoom = useEditorStore((s) => s.setZoom);
   const setViewportPan = useEditorStore((s) => s.setPan);
@@ -922,7 +925,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const metaRef = useRef<{ name: string; theme: RoomTheme } | null>(null);
   const spaceHeldRef = useRef(false);
-  const dragRef = useRef<{ mode: string; last?: { x: number; y: number }; anchor?: { x: number; y: number } } | null>(null);
+  const dragRef = useRef<{ mode: string; last?: { x: number; y: number }; anchor?: { x: number; y: number }; fillMode?: 'stamp' | 'erase' } | null>(null);
   const hoverTileRef = useRef<{ x: number; y: number } | null>(null); // paste ghost anchor
 
   useEffect(() => { metaRef.current = meta; }, [meta]);
@@ -1103,17 +1106,19 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   }, []);
 
   // Brush size (Toolbar's Brush control) — applies the given per-tile action
-  // to every tile in an NxN square centered on (cx, cy), clamped to the map's
-  // bounds. Shared by Floor/Wall paint+erase and the position-only Tile
-  // Effects; Objects/Portal/mapLocation-privateArea don't use this (see
-  // editorStore.ts's brushSize doc comment for why).
+  // to every tile in a brushW×brushH area centered on (cx, cy), clamped to
+  // the map's bounds. Only used in stampMode 'click'. Shared by Floor/Wall
+  // paint+erase and the position-only Tile Effects; Objects/Portal/
+  // mapLocation-privateArea don't use this (see editorStore.ts's brushW/H
+  // doc comment for why).
   const forEachBrushTile = useCallback((cx: number, cy: number, fn: (x: number, y: number) => void) => {
     const s = useEditorStore.getState();
     const doc = s.doc; if (!doc) return;
-    const r = Math.floor(s.brushSize / 2);
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        const x = cx + dx, y = cy + dy;
+    const rw = Math.floor((s.brushW - 1) / 2);
+    const rh = Math.floor((s.brushH - 1) / 2);
+    for (let dy = 0; dy < s.brushH; dy++) {
+      for (let dx = 0; dx < s.brushW; dx++) {
+        const x = cx - rw + dx, y = cy - rh + dy;
         if (x < 0 || y < 0 || x >= doc.width || y >= doc.height) continue;
         fn(x, y);
       }
@@ -1143,7 +1148,11 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     }
     const layer = s.activeLayer;
     if (layer === 'floor' || layer === 'wall') {
-      if (s.activeTool === 'stamp') { s.beginStroke(); forEachBrushTile(t.x, t.y, layer === 'floor' ? s.paintFloorAt : s.stampWallAt); dragRef.current = { mode: layer === 'floor' ? 'floorPaint' : 'wallPaint' }; }
+      if (s.stampMode === 'block' && (s.activeTool === 'stamp' || s.activeTool === 'eraser')) {
+        s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 });
+        dragRef.current = { mode: 'blockRect', anchor: { x: t.x, y: t.y }, fillMode: s.activeTool === 'stamp' ? 'stamp' : 'erase' };
+      }
+      else if (s.activeTool === 'stamp') { s.beginStroke(); forEachBrushTile(t.x, t.y, layer === 'floor' ? s.paintFloorAt : s.stampWallAt); dragRef.current = { mode: layer === 'floor' ? 'floorPaint' : 'wallPaint' }; }
       else if (s.activeTool === 'eraser') { s.beginStroke(); forEachBrushTile(t.x, t.y, layer === 'floor' ? s.eraseFloorAt : s.eraseWallAt); dragRef.current = { mode: layer === 'floor' ? 'floorErase' : 'wallErase' }; }
       else if (s.activeTool === 'select') { s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 }); dragRef.current = { mode: 'selectRect', anchor: { x: t.x, y: t.y } }; }
     } else if (layer === 'objects' || layer === 'top') {
@@ -1161,6 +1170,12 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         return;
       }
       const eff = s.selectedEffect; if (!eff) return;
+      const isPointEffect = eff === 'startingPoint' || eff === 'impassable' || eff === 'door' || eff === 'sittable' || eff === 'claimableSeat';
+      if (isPointEffect && s.stampMode === 'block' && (s.activeTool === 'stamp' || s.activeTool === 'eraser')) {
+        s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 });
+        dragRef.current = { mode: 'blockRect', anchor: { x: t.x, y: t.y }, fillMode: s.activeTool === 'stamp' ? 'stamp' : 'erase' };
+        return;
+      }
       if (eff === 'startingPoint' || eff === 'impassable') {
         if (s.activeTool === 'stamp') { s.beginStroke(); forEachBrushTile(t.x, t.y, s.stampEffectAt); dragRef.current = { mode: 'effPaint' }; }
         else if (s.activeTool === 'eraser') { s.beginStroke(); forEachBrushTile(t.x, t.y, s.eraseEffectAt); dragRef.current = { mode: 'effErase' }; }
@@ -1238,7 +1253,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     else if (d.mode === 'objMove') s.moveSelectedTo(t.x, t.y, s.activeLayer === 'top' ? 'top' : 'objects');
     else if (d.mode === 'effPaint') forEachBrushTile(t.x, t.y, s.stampEffectAt);
     else if (d.mode === 'effErase') forEachBrushTile(t.x, t.y, s.eraseEffectAt);
-    else if ((d.mode === 'selectRect' || d.mode === 'areaRect' || d.mode === 'copyRect') && d.anchor) s.setSelection({ x: Math.min(d.anchor.x, t.x), y: Math.min(d.anchor.y, t.y), w: Math.abs(t.x - d.anchor.x) + 1, h: Math.abs(t.y - d.anchor.y) + 1 });
+    else if ((d.mode === 'selectRect' || d.mode === 'areaRect' || d.mode === 'copyRect' || d.mode === 'blockRect') && d.anchor) s.setSelection({ x: Math.min(d.anchor.x, t.x), y: Math.min(d.anchor.y, t.y), w: Math.abs(t.x - d.anchor.x) + 1, h: Math.abs(t.y - d.anchor.y) + 1 });
   }, [tileAt, forEachBrushTile]);
 
   const endDrag = useCallback(() => {
@@ -1247,6 +1262,16 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     if (d && d.mode === 'copyRect') {
       const s = useEditorStore.getState();
       if (s.selection) s.copyRegion(s.selection);
+      s.setSelection(null);
+    }
+    if (d && d.mode === 'blockRect') {
+      // "Blok" mode (Toolbar toggle) — the whole dragged rectangle gets the
+      // current stamp/eraser applied in one shot on release, reusing
+      // fillSelection (same action the Select tool's Enter/Delete shortcut
+      // already used for floor/wall, now extended to cover the effects
+      // layer too — see editorStore.ts).
+      const s = useEditorStore.getState();
+      if (s.selection && d.fillMode) s.fillSelection(d.fillMode);
       s.setSelection(null);
     }
     if (d && d.mode === 'areaRect') {
@@ -1414,15 +1439,39 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         {brushApplicable && (
           <>
             <div className="w-px h-6 bg-white/10" />
-            <div className="flex items-center gap-1" title="Ukuran kuas — berlaku untuk Stamp & Eraser">
-              <span className="text-[11px] text-white/50">Kuas</span>
-              {[1, 3, 5].map((n) => (
-                <button key={n} onClick={() => setBrushSize(n)}
-                  className={`w-7 h-7 rounded text-xs font-medium cursor-pointer ${brushSize === n ? 'bg-purple-600 text-white' : 'text-white/60 hover:bg-white/10'}`}>
-                  {n}×{n}
+            <div className="flex items-center gap-1" title="Klik: kuas per klik/drag · Blok: drag area lalu lepas untuk menerapkan sekaligus">
+              {(['click', 'block'] as const).map((m) => (
+                <button key={m} onClick={() => setStampMode(m)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium cursor-pointer ${stampMode === m ? 'bg-purple-600 text-white' : 'text-white/60 hover:bg-white/10'}`}>
+                  {m === 'click' ? 'Klik' : 'Blok'}
                 </button>
               ))}
             </div>
+            {stampMode === 'click' ? (
+              <>
+                <div className="w-px h-6 bg-white/10" />
+                <div className="flex items-center gap-1" title="Ukuran kuas (kotak) — berlaku untuk Stamp & Eraser">
+                  <span className="text-[11px] text-white/50">Kuas</span>
+                  {[1, 3, 5].map((n) => (
+                    <button key={n} onClick={() => setBrushSize(n, n)}
+                      className={`w-7 h-7 rounded text-xs font-medium cursor-pointer ${brushW === n && brushH === n ? 'bg-purple-600 text-white' : 'text-white/60 hover:bg-white/10'}`}>
+                      {n}×{n}
+                    </button>
+                  ))}
+                  <input type="number" min={1} max={30} value={brushW}
+                    onChange={(e) => setBrushSize(Number(e.target.value) || 1, brushH)}
+                    title="Lebar kuas (kotak)"
+                    className="w-11 h-7 rounded bg-white/10 text-white text-xs text-center outline-none focus:ring-1 focus:ring-purple-400" />
+                  <span className="text-white/40 text-xs">×</span>
+                  <input type="number" min={1} max={30} value={brushH}
+                    onChange={(e) => setBrushSize(brushW, Number(e.target.value) || 1)}
+                    title="Tinggi kuas (kotak)"
+                    className="w-11 h-7 rounded bg-white/10 text-white text-xs text-center outline-none focus:ring-1 focus:ring-purple-400" />
+                </div>
+              </>
+            ) : (
+              <span className="text-[11px] text-white/50">Drag di kanvas untuk memilih area, lepas untuk menerapkan</span>
+            )}
           </>
         )}
         <div className="w-px h-6 bg-white/10" />

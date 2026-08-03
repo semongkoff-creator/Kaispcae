@@ -76,13 +76,22 @@ interface EditorState {
   setActiveLayer: (layer: EditorLayer) => void;
   activeTool: EditorTool;
   setActiveTool: (tool: EditorTool) => void;
-  // Stamp/eraser brush size (in tiles, always odd — centered on the clicked
-  // tile) for Floor, Wall, and the position-only Tile Effects (startingPoint,
-  // impassable, door, sittable, claimableSeat). Doesn't apply to Objects/Top
-  // (each already has its own tilesW/tilesH), Portal (two-click dialog flow),
-  // or mapLocation/privateArea (their "size" is the dragged rectangle).
-  brushSize: number;
-  setBrushSize: (size: number) => void;
+  // Stamp/eraser brush size (in tiles, width × height — centered on the
+  // clicked tile, need not be square) for Floor, Wall, and the position-only
+  // Tile Effects (startingPoint, impassable, door, sittable, claimableSeat).
+  // Only used in stampMode 'click'; doesn't apply to Objects/Top (each
+  // already has its own tilesW/tilesH), Portal (two-click dialog flow), or
+  // mapLocation/privateArea (their "size" is the dragged rectangle).
+  brushW: number;
+  brushH: number;
+  setBrushSize: (w: number, h: number) => void;
+  // Two ways to apply Floor/Wall/point-effect stamps: 'click' paints a
+  // brushW×brushH area per click (or per tile while dragging); 'block' drags
+  // out an arbitrary rectangle (reusing the Select tool's own rubber-band —
+  // see `selection`) and applies the current stamp/eraser to the WHOLE
+  // rectangle only once the mouse is released (see fillSelection below).
+  stampMode: 'click' | 'block';
+  setStampMode: (mode: 'click' | 'block') => void;
 
   viewport: EditorViewport;
   setPan: (panX: number, panY: number) => void;
@@ -300,8 +309,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setActiveLayer: (activeLayer) => set({ activeLayer, selection: null, selectedObjectId: null }),
     activeTool: 'hand',
     setActiveTool: (activeTool) => set({ activeTool }),
-    brushSize: 1,
-    setBrushSize: (size) => set({ brushSize: Math.max(1, Math.min(9, size % 2 === 0 ? size + 1 : size)) }),
+    brushW: 1,
+    brushH: 1,
+    setBrushSize: (w, h) => set({ brushW: Math.max(1, Math.min(30, Math.round(w))), brushH: Math.max(1, Math.min(30, Math.round(h))) }),
+    stampMode: 'click',
+    setStampMode: (stampMode) => set({ stampMode, selection: null }),
 
     viewport: INITIAL_VIEWPORT,
     setPan: (panX, panY) => set((s) => ({ viewport: { ...s.viewport, panX, panY } })),
@@ -372,8 +384,42 @@ export const useEditorStore = create<EditorState>((set, get) => {
     eraseWallAt: (x, y) => { if (applyWallCell(x, y, false)) strokeChanged = true; },
 
     fillSelection: (mode) => {
-      const { doc, selection, selectedFloorPaletteId, selectedWallPaletteId, activeLayer } = get();
-      if (!doc || !selection || (activeLayer !== 'floor' && activeLayer !== 'wall')) return;
+      const { doc, selection, selectedFloorPaletteId, selectedWallPaletteId, activeLayer, selectedEffect } = get();
+      if (!doc || !selection || (activeLayer !== 'floor' && activeLayer !== 'wall' && activeLayer !== 'effects')) return;
+      // Block-drag apply (stampMode 'block', see RoomEditorPage's endDrag) —
+      // the click-brush's stampEffectAt/eraseEffectAt aren't reused here since
+      // those rely on the caller's own beginStroke/endStroke for undo
+      // batching; this is a single self-contained action with its own
+      // snapshot, same shape as the floor/wall branches below already had.
+      if (activeLayer === 'effects') {
+        const eff = selectedEffect;
+        if (!eff || (eff !== 'startingPoint' && eff !== 'impassable' && eff !== 'door' && eff !== 'sittable' && eff !== 'claimableSeat')) return;
+        const snap = snapshot();
+        let changed = false;
+        for (let y = selection.y; y < selection.y + selection.h; y++) {
+          for (let x = selection.x; x < selection.x + selection.w; x++) {
+            if (mode === 'erase') {
+              if (!doc.tileEffects.some((e) => e.x === x && e.y === y)) continue;
+              doc.tileEffects = doc.tileEffects.filter((e) => !(e.x === x && e.y === y));
+              changed = true;
+            } else {
+              const existing = doc.tileEffects.find((e) => e.x === x && e.y === y);
+              if (existing && existing.kind === eff) continue;
+              doc.tileEffects = doc.tileEffects.filter((e) => !(e.x === x && e.y === y));
+              doc.tileEffects.push(
+                eff === 'impassable' ? { x, y, kind: 'impassable' }
+                : eff === 'door' ? { x, y, kind: 'door' }
+                : eff === 'sittable' ? { x, y, kind: 'sittable', sitDirection: 'down' }
+                : eff === 'claimableSeat' ? { x, y, kind: 'claimableSeat', id: crypto.randomUUID() }
+                : { x, y, kind: 'startingPoint' },
+              );
+              changed = true;
+            }
+          }
+        }
+        if (changed) { effectsDirty = true; pushHistory(snap); commit(); }
+        return;
+      }
       const snap = snapshot();
       let changed = false;
       for (let y = selection.y; y < selection.y + selection.h; y++) {
