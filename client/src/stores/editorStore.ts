@@ -76,6 +76,13 @@ interface EditorState {
   setActiveLayer: (layer: EditorLayer) => void;
   activeTool: EditorTool;
   setActiveTool: (tool: EditorTool) => void;
+  // Stamp/eraser brush size (in tiles, always odd — centered on the clicked
+  // tile) for Floor, Wall, and the position-only Tile Effects (startingPoint,
+  // impassable, door, sittable, claimableSeat). Doesn't apply to Objects/Top
+  // (each already has its own tilesW/tilesH), Portal (two-click dialog flow),
+  // or mapLocation/privateArea (their "size" is the dragged rectangle).
+  brushSize: number;
+  setBrushSize: (size: number) => void;
 
   viewport: EditorViewport;
   setPan: (panX: number, panY: number) => void;
@@ -293,6 +300,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setActiveLayer: (activeLayer) => set({ activeLayer, selection: null, selectedObjectId: null }),
     activeTool: 'hand',
     setActiveTool: (activeTool) => set({ activeTool }),
+    brushSize: 1,
+    setBrushSize: (size) => set({ brushSize: Math.max(1, Math.min(9, size % 2 === 0 ? size + 1 : size)) }),
 
     viewport: INITIAL_VIEWPORT,
     setPan: (panX, panY) => set((s) => ({ viewport: { ...s.viewport, panX, panY } })),
