@@ -121,6 +121,19 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
   // decided who's standing on the tile it's facing, this just relays it.
   // Worst case of a spoofed targetId is someone's avatar shaking with no
   // real trigger — purely cosmetic, nothing persisted.
+  //
+  // Potongan B — scoped to exactly the target + the sender (mirrors
+  // roomHandler.ts's Slap/SLAPPED/SLAP_SENT, which already got this right):
+  // a bystander must not receive this event at all, or useSocket.ts's
+  // handler would play them an "ambient" sound and trigger the target's
+  // shake animation on their screen too. Previously broadcast to the whole
+  // room on purpose ("everyone hears an ambient blip") — that was the bug
+  // being reported, not an oversight, so this is a deliberate behavior
+  // change, not a targeting mistake. The client needs NO changes: it
+  // already branches on `event.targetId === localPlayerId` to play the
+  // target's stronger sound/toast vs. the sender's quieter one — with only
+  // these two sockets ever receiving the event now, that existing branch
+  // does exactly the right thing for both.
   socket.on(SocketEvents.PLAYER_NUDGE, (data: { targetId?: string }) => {
     const targetId = data?.targetId;
     if (!targetId || targetId === socket.id) return;
@@ -128,7 +141,8 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     const gameRoom = rooms.find((r) => r !== socket.id);
     if (!gameRoom) return;
     const event: NudgeEvent = { fromId: socket.id, targetId, timestamp: Date.now() };
-    io.to(gameRoom).emit(SocketEvents.PLAYER_NUDGE, event);
+    io.to(targetId).emit(SocketEvents.PLAYER_NUDGE, event);
+    socket.emit(SocketEvents.PLAYER_NUDGE, event);
   });
 
   // Clean up rate limit map on disconnect
