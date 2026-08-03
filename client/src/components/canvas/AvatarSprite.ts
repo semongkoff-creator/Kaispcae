@@ -64,9 +64,9 @@ export function drawAvatar(
 
   let renderedSprite = false;
   if (config?.spriteMode === 'premade' && config.premadeId) {
-    renderedSprite = drawPremadeAvatar(ctx, cx, cy, config.premadeId, avatar.direction, avatar.isMoving, timestamp, !!avatar.isRunning, spriteSize);
+    renderedSprite = drawPremadeAvatar(ctx, cx, cy, config.premadeId, avatar.direction, avatar.isMoving, timestamp, !!avatar.isRunning, spriteSize, !!avatar.isSitting);
   } else if (config?.spriteMode === 'layered' && config.bodyId) {
-    renderedSprite = drawLayeredAvatar(ctx, cx, cy, config, avatar.direction, avatar.isMoving, timestamp, !!avatar.isRunning, spriteSize);
+    renderedSprite = drawLayeredAvatar(ctx, cx, cy, config, avatar.direction, avatar.isMoving, timestamp, !!avatar.isRunning, spriteSize, !!avatar.isSitting);
   }
 
   if (!renderedSprite) {
@@ -171,6 +171,17 @@ const FRAMES_PER_DIRECTION = 6;
 const SPRITE_DISPLAY_SIZE = TILE_SIZE;
 const IDLE_ROW = 3;
 const WALK_ROW = 5;
+// "Sit" pose (see the pack's own Spritesheet_animations_GUIDE.png) — a real
+// bent-knee seated pose, distinct from idle, used so a seated avatar
+// (Avatar.isSitting) doesn't just look like it's standing at the chair.
+// Only drawn for the 'right' and 'up' facing columns in this asset pack —
+// 'left'/'down' are blank frames there. 'left' is approximated by
+// horizontally mirroring 'right' (idle/walk frames in this same pack are
+// already left-right symmetric, so the mirror reads correctly — see
+// spriteFrameCoords' flipX). 'down' has no equivalent art at all and falls
+// back to the ordinary idle pose: a real but partial improvement over every
+// direction silently reusing idle, which was the previous behavior.
+const SIT_ROW = 9;
 const IDLE_FRAME_MS = 400;
 const WALK_FRAME_MS = 110;
 // Run reuses the walk row (no dedicated run frames in this asset pack — see
@@ -188,13 +199,21 @@ const LAYER_CATEGORIES: Array<[string, keyof NonNullable<Avatar['avatarConfig']>
   ['Accessories', 'spriteAccessoryId'],
 ];
 
-function spriteFrameCoords(direction: Direction, isMoving: boolean, timestamp: number, isRunning: boolean) {
+function spriteFrameCoords(direction: Direction, isMoving: boolean, timestamp: number, isRunning: boolean, isSitting: boolean) {
+  if (isSitting && direction !== 'down') {
+    // 'left' borrows 'right''s frames, mirrored (flipX) — see SIT_ROW's doc comment.
+    const sitDirection = direction === 'left' ? 'right' : direction;
+    const dirIndex = DIRECTION_COLUMN_ORDER.indexOf(sitDirection);
+    const frameInCycle = Math.floor(timestamp / IDLE_FRAME_MS) % FRAMES_PER_DIRECTION;
+    const col = dirIndex * FRAMES_PER_DIRECTION + frameInCycle;
+    return { col, row: SIT_ROW, flipX: direction === 'left' };
+  }
   const dirIndex = Math.max(0, DIRECTION_COLUMN_ORDER.indexOf(direction));
   const row = isMoving ? WALK_ROW : IDLE_ROW;
   const frameMs = isMoving ? (isRunning ? RUN_FRAME_MS : WALK_FRAME_MS) : IDLE_FRAME_MS;
   const frameInCycle = Math.floor(timestamp / frameMs) % FRAMES_PER_DIRECTION;
   const col = dirIndex * FRAMES_PER_DIRECTION + frameInCycle;
-  return { col, row };
+  return { col, row, flipX: false };
 }
 
 function drawLayeredAvatar(
@@ -207,8 +226,9 @@ function drawLayeredAvatar(
   timestamp: number,
   isRunning: boolean,
   displaySize: number = SPRITE_DISPLAY_SIZE,
+  isSitting: boolean = false,
 ): boolean {
-  const { col, row } = spriteFrameCoords(direction, isMoving, timestamp, isRunning);
+  const { col, row, flipX } = spriteFrameCoords(direction, isMoving, timestamp, isRunning, isSitting);
   const displayHeight = displaySize * (FRAME_VISUAL_HEIGHT / FRAME_SIZE);
   // Round to a whole pixel — the player's world position moves in
   // continuous float steps (PLAYER_SPEED * dt), so cx/cy are almost never
@@ -226,6 +246,11 @@ function drawLayeredAvatar(
   const srcX = col * FRAME_SIZE;
   const srcY = (row - 1) * FRAME_SIZE + FRAME_ROW_Y_OFFSET;
 
+  // 'left'-facing sit mirrors the 'right' pose (see SIT_ROW's doc comment) —
+  // flip around the sprite's own horizontal center (cx), not the canvas
+  // origin, so the mirrored frame lands in the exact same screen spot.
+  if (flipX) { ctx.save(); ctx.translate(cx, 0); ctx.scale(-1, 1); ctx.translate(-cx, 0); }
+
   let drewAny = false;
   for (const [category, field] of LAYER_CATEGORIES) {
     const fileName = config[field] as string | undefined;
@@ -236,6 +261,7 @@ function drawLayeredAvatar(
     });
     drewAny = drewAny || drew;
   }
+  if (flipX) ctx.restore();
   return drewAny;
 }
 
@@ -249,18 +275,22 @@ function drawPremadeAvatar(
   timestamp: number,
   isRunning: boolean,
   displaySize: number = SPRITE_DISPLAY_SIZE,
+  isSitting: boolean = false,
 ): boolean {
-  const { col, row } = spriteFrameCoords(direction, isMoving, timestamp, isRunning);
+  const { col, row, flipX } = spriteFrameCoords(direction, isMoving, timestamp, isRunning, isSitting);
   const displayHeight = displaySize * (FRAME_VISUAL_HEIGHT / FRAME_SIZE);
   const dx = Math.round(cx - displaySize / 2);
   const dy = Math.round(cy + displaySize / 2 - displayHeight);
   const srcX = col * FRAME_SIZE;
   const srcY = (row - 1) * FRAME_SIZE + FRAME_ROW_Y_OFFSET;
 
-  return drawSpriteFrame(ctx, `${PREMADE_BASE}/${premadeId}`, {
+  if (flipX) { ctx.save(); ctx.translate(cx, 0); ctx.scale(-1, 1); ctx.translate(-cx, 0); }
+  const drew = drawSpriteFrame(ctx, `${PREMADE_BASE}/${premadeId}`, {
     srcX, srcY, cellWidth: FRAME_SIZE, cellHeight: FRAME_VISUAL_HEIGHT,
     dx, dy, dWidth: displaySize, dHeight: displayHeight,
   });
+  if (flipX) ctx.restore();
+  return drew;
 }
 
 // ─── Body shapes ──────────────────────────────────────────────────
