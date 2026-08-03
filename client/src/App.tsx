@@ -201,11 +201,41 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // If more than one piece is ever assigned to the same user (nothing stops
   // that today), the server picks whichever it finds first — same
   // simplification as here, not worth a seat picker for an edge case.
-  const hasMySeat = furniture.some((f) => f.assignedToUserId === localUserId);
+  //
+  // Tahap 3 — claimable-seat markers (seatClaims) are a second, independent
+  // source of "my seat": in-memory only, not in Room.furniture, so they
+  // don't go through the DB-backed TELEPORT_REQUEST 'seat' lookup below.
+  // Furniture takes priority if somehow both exist for the same user (an
+  // edge case, same "not worth a picker" call as above).
+  const seatClaims = useGameStore((s) => s.seatClaims);
+  const tiles = useGameStore((s) => s.tiles);
+  const myClaimedSeatId = Object.keys(seatClaims).find((id) => seatClaims[id].userId === localUserId);
+  const hasMySeat = furniture.some((f) => f.assignedToUserId === localUserId) || !!myClaimedSeatId;
   const handleMySeat = useCallback(() => {
     releaseMovementKeys();
+    if (!furniture.some((f) => f.assignedToUserId === localUserId) && myClaimedSeatId) {
+      // Resolve the marker's tile from the live tiles grid (its position only
+      // ever lives there, see mapLayers.ts's TileEffect 'claimableSeat') and
+      // teleport there directly — same primitive (PLAYER_TELEPORT_TO) the
+      // marker's own click handler in GameCanvas.tsx uses, not a second
+      // teleport system. socket.to() there excludes the sender, so the local
+      // position is set here too; GameCanvas's existing effect that keeps its
+      // movement source-of-truth in sync with localPlayer.x/y picks this up.
+      for (let y = 0; y < tiles.length; y++) {
+        const row = tiles[y];
+        const x = row?.findIndex((t) => t?.claimableSeatId === myClaimedSeatId) ?? -1;
+        if (x >= 0) {
+          const cx = x * TILE_SIZE + TILE_SIZE / 2;
+          const cy = y * TILE_SIZE + TILE_SIZE / 2;
+          const store = useGameStore.getState();
+          store.setLocalPlayer({ x: cx, y: cy, isMoving: false });
+          emitTeleportTo(cx, cy, store.localPlayer.direction);
+          return;
+        }
+      }
+    }
     emitTeleportRequest({ kind: 'seat' });
-  }, [emitTeleportRequest]);
+  }, [emitTeleportRequest, emitTeleportTo, furniture, localUserId, myClaimedSeatId, tiles]);
 
   const nearby = useProximity(
     { x: localPlayer.x, y: localPlayer.y, id: localPlayerId, isSitting: localPlayer.isSitting, seatFurnitureId: localPlayer.seatFurnitureId, workMode: localPlayer.workMode },
@@ -560,7 +590,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const bannerPlaceMode = useGameStore((s) => s.bannerPlaceMode);
   const pushTileHistory = useGameStore((s) => s.pushTileHistory);
   const setTiles = useGameStore((s) => s.setTiles);
-  const tiles = useGameStore((s) => s.tiles);
   // Bug 12 — "one panel at a time": every main panel derives its open state
   // from a single store field. Opening one closes the rest (and chat / room
   // editor); see gameStore openPanel/closePanel. Names are kept identical to
