@@ -1,16 +1,17 @@
 import { useMemo, useRef, useState } from 'react';
 import {
+  Icon,
   X,
-  HandThumbsUpFill,
   MegaphoneFill,
-  MusicNoteBeamed,
-  EmojiSurpriseFill,
   EmojiFrownFill,
-  EmojiDizzyFill,
-  VolumeMuteFill,
-  StarFill,
   SpeakerFill,
   CloudUploadFill,
+  EmojiLaughingFill,
+  BriefcaseFill,
+  Wind,
+  QuestionCircleFill,
+  BellFill,
+  TrophyFill,
 } from 'react-bootstrap-icons';
 import { SoundboardSoundData, SOUNDBOARD_DEFAULT_SOUNDS, SOUNDBOARD_MAX_DURATION_MS, SOUNDBOARD_MAX_FILE_BYTES, hasFeatureAccess } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
@@ -19,15 +20,15 @@ import { api, ApiError } from '@/services/api';
 // One icon per default sound id — purely decorative, picked to match each
 // clip's name. Custom uploaded sounds (no fixed id) all get the same generic
 // speaker icon below instead of trying to guess one from a user-typed name.
-const DEFAULT_SOUND_ICONS: Record<string, typeof HandThumbsUpFill> = {
-  'default-applause': HandThumbsUpFill,
-  'default-airhorn': MegaphoneFill,
-  'default-drumroll': MusicNoteBeamed,
-  'default-wow': EmojiSurpriseFill,
-  'default-boo': EmojiFrownFill,
-  'default-sad-trombone': EmojiDizzyFill,
-  'default-crickets': VolumeMuteFill,
-  'default-tada': StarFill,
+const DEFAULT_SOUND_ICONS: Record<string, Icon> = {
+  'default-cat-laugh': EmojiLaughingFill,
+  'default-fahhh-pump': MegaphoneFill,
+  'default-kerja-kerja-kerja': BriefcaseFill,
+  'default-fart': Wind,
+  'default-kak-gem-paham': QuestionCircleFill,
+  'default-aa-kasian-aa': EmojiFrownFill,
+  'default-boxing-bell': BellFill,
+  'default-ronaldo-siuu': TrophyFill,
 };
 
 const ACCEPTED_EXT = ['.mp3', '.ogg', '.wav'];

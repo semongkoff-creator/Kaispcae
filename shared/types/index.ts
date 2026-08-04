@@ -1417,20 +1417,19 @@ export interface SoundboardSoundData {
   createdByName?: string;
 }
 
-// NOTE — these .mp3 files do NOT ship with the repo yet. Each entry here is a
-// placeholder pointing at a filename that must be added manually under
-// client/public/assets/sounds/ (short, 1-3s clips) before these buttons make
-// any sound; see SoundboardPanel's own doc comment for the exact list and
-// the fallback behavior when a file is missing.
+// Meme clips picked by the room admin (from myinstants.com), downloaded and
+// committed under client/public/assets/sounds/ — actual files, not
+// placeholders. durationMs is each file's real measured length (ffprobe),
+// used to size the "now playing" indicator (see useSocket.ts).
 export const SOUNDBOARD_DEFAULT_SOUNDS: SoundboardSoundData[] = [
-  { id: 'default-applause', name: 'Applause', url: '/assets/sounds/applause.mp3', durationMs: 2500 },
-  { id: 'default-airhorn', name: 'Airhorn', url: '/assets/sounds/airhorn.mp3', durationMs: 1500 },
-  { id: 'default-drumroll', name: 'Drum Roll', url: '/assets/sounds/drumroll.mp3', durationMs: 2000 },
-  { id: 'default-wow', name: 'Wow', url: '/assets/sounds/wow.mp3', durationMs: 1000 },
-  { id: 'default-boo', name: 'Boo', url: '/assets/sounds/boo.mp3', durationMs: 1500 },
-  { id: 'default-sad-trombone', name: 'Sad Trombone', url: '/assets/sounds/sad-trombone.mp3', durationMs: 2000 },
-  { id: 'default-crickets', name: 'Crickets', url: '/assets/sounds/crickets.mp3', durationMs: 3000 },
-  { id: 'default-tada', name: 'Tada', url: '/assets/sounds/tada.mp3', durationMs: 1500 },
+  { id: 'default-cat-laugh', name: 'Cat Laugh', url: '/assets/sounds/cat-laugh-meme-1.mp3', durationMs: 3631 },
+  { id: 'default-fahhh-pump', name: 'Fahhh', url: '/assets/sounds/fahhh-pump-sound.mp3', durationMs: 2124 },
+  { id: 'default-kerja-kerja-kerja', name: 'Kerja Kerja Kerja', url: '/assets/sounds/kerja-kerja-kerja.mp3', durationMs: 14832 },
+  { id: 'default-fart', name: 'Fart', url: '/assets/sounds/perfect-fart.mp3', durationMs: 336 },
+  { id: 'default-kak-gem-paham', name: 'Kak, Gem, Paham?', url: '/assets/sounds/kak-gem-paham.mp3', durationMs: 975 },
+  { id: 'default-aa-kasian-aa', name: 'Aa Kasian Aa', url: '/assets/sounds/aa-kasian-aa.mp3', durationMs: 8385 },
+  { id: 'default-boxing-bell', name: 'Boxing Bell', url: '/assets/sounds/boxing-bell.mp3', durationMs: 8249 },
+  { id: 'default-ronaldo-siuu', name: 'Siuuu', url: '/assets/sounds/ronaldo-siuuuu.mp3', durationMs: 6618 },
 ];
 
 // Custom-upload limits (routes/soundboard.ts enforces both server-side —
