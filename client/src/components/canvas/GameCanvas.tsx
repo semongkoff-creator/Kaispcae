@@ -479,19 +479,30 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     setPosition(localPlayer.x, localPlayer.y);
   }, [localPlayer.x, localPlayer.y, setPosition]);
 
-  // A4 — double-click a non-blocked tile to teleport there instantly. Refs so
-  // the once-attached listener always reads current values without re-binding.
+  // A4 — double-click a non-blocked tile. Refs so the once-attached listener
+  // always reads current values without re-binding.
   const emitTeleportToRef = useRef(emitTeleportTo); emitTeleportToRef.current = emitTeleportTo;
   const setPositionRef = useRef(setPosition); setPositionRef.current = setPosition;
   // Transient fade rings at teleport source + destination (performance.now()
-  // timestamps), drawn + expired in the render loop.
+  // timestamps), drawn + expired in the render loop. Only used by the
+  // GENUINELY instant teleports left (Portal via F, clicking your claimed
+  // seat) — double-click-to-move below no longer pushes to this, since it's
+  // walking there now, not blinking.
   const teleportFlashRef = useRef<{ x: number; y: number; start: number }[]>([]);
+  // Follow-up — double-click now WALKS to the tile (reusing useMovement's
+  // updateFollow/tryMoveToward, the exact primitive Follow already uses to
+  // approach an arbitrary point) instead of teleporting there instantly.
+  // Read/driven every frame in the animation loop below, same pattern as
+  // followInfoRef. Cleared on arrival, on getting stuck (tryMoveToward stops
+  // reporting movement either way), or the instant a REAL movement key is
+  // pressed — same "manual input always wins" rule Follow already uses.
+  const walkTargetRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const onDblClick = (e: MouseEvent) => {
-      if (editorModeRef.current) return; // never teleport while editing the room
+      if (editorModeRef.current) return; // never move while editing the room
       const store = useGameStore.getState();
       if (store.localPlayer.isSitting) return; // stand up first (movement is frozen)
       const rect = canvas.getBoundingClientRect();
@@ -501,19 +512,14 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const tileX = Math.floor(worldX / TILE_SIZE);
       const tileY = Math.floor(worldY / TILE_SIZE);
       if (tileX < 0 || tileY < 0) return;
-      if (isBlocked(tileX, tileY)) return; // can't land inside a wall/desk
+      if (isBlocked(tileX, tileY)) return; // can't walk onto a wall/desk
       const cx = tileX * TILE_SIZE + TILE_SIZE / 2;
       const cy = tileY * TILE_SIZE + TILE_SIZE / 2;
-      const from = store.localPlayer;
-      const now = performance.now();
-      teleportFlashRef.current.push({ x: from.x, y: from.y, start: now }, { x: cx, y: cy, start: now });
-      setPosition(cx, cy); // move the movement source-of-truth immediately — no snap-back
-      store.setLocalPlayer({ x: cx, y: cy, isMoving: false });
-      emitTeleportToRef.current(cx, cy, from.direction); // others snap via PLAYER_TELEPORTED
+      walkTargetRef.current = { x: cx, y: cy };
     };
     canvas.addEventListener('dblclick', onDblClick);
     return () => canvas.removeEventListener('dblclick', onDblClick);
-  }, [isBlocked, setPosition]);
+  }, [isBlocked]);
 
   // Mouse wheel / trackpad zoom — same factor-per-notch convention as the
   // Room Editor's own wheel handler. preventDefault stops the page itself
@@ -816,6 +822,29 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           const desiredX = targetPlayer.x + offset.dx * TILE_SIZE;
           const desiredY = targetPlayer.y + offset.dy * TILE_SIZE;
           effectiveMoveResult = updateFollow(desiredX, desiredY, dt);
+        }
+      }
+    }
+
+    // Follow-up — double-click-to-walk, reusing the exact same "approach an
+    // arbitrary point" primitive as Follow above (tryMoveToward/updateFollow):
+    // straight-line with the normal per-axis collision slide, not real
+    // pathfinding — getting fully blocked just stops it, same as walking into
+    // a wall manually would. A real key press ALWAYS wins and cancels it
+    // outright (checked against the RAW keyboard result, not
+    // effectiveMoveResult, so this can't be left half-cancelled by Follow
+    // happening to be active too). Skipped for a frame Follow is already
+    // driving, rather than fighting it for control of effectiveMoveResult.
+    if (walkTargetRef.current) {
+      if (moveResult.isMoving) {
+        walkTargetRef.current = null;
+      } else if (!activeFollow || !effectiveMoveResult.isMoving) {
+        const wt = walkTargetRef.current;
+        const walkResult = updateFollow(wt.x, wt.y, dt);
+        if (walkResult.isMoving) {
+          effectiveMoveResult = walkResult;
+        } else {
+          walkTargetRef.current = null; // arrived, or stuck — either way, done
         }
       }
     }
