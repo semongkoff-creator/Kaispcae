@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowCounterclockwise, ArrowClockwise } from 'react-bootstrap-icons';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, RoomTile, Furniture, Zone, RoomTheme,
-  LayerData, TileEffect, legacyToLayerData, CustomAssetEntry, ReferenceImageData, InteractiveObjectType, TriggerMethod,
+  LayerData, TileEffect, AreaEffect, legacyToLayerData, CustomAssetEntry, ReferenceImageData, InteractiveObjectType, TriggerMethod,
   AVATAR_SCALE_MIN, AVATAR_SCALE_MAX,
 } from '@virtualmeet/shared';
 import { api, ApiError } from '@/services/api';
@@ -25,9 +25,10 @@ type LoadError = 'auth' | 'forbidden' | 'notfound' | 'generic';
 const OBJ_CATEGORIES: { key: 'furniture' | 'decor' | 'electronics'; label: string }[] = [
   { key: 'furniture', label: 'Furniture' }, { key: 'decor', label: 'Decor' }, { key: 'electronics', label: 'Electronics' },
 ];
-const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat'; label: string; color: string; hint: string }[] = [
+const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat'; label: string; color: string; hint: string }[] = [
   { id: 'startingPoint', label: 'Starting point', color: 'rgba(16,185,129,0.9)', hint: 'Stamp per tile = titik spawn (bisa banyak; pemain muncul di salah satunya).' },
   { id: 'impassable', label: 'Impassable', color: 'rgba(239,68,68,0.85)', hint: 'Stamp per tile = penghalang tak terlihat (memblok gerak, tanpa tekstur).' },
+  { id: 'impassableArea', label: 'Impassable Area', color: 'rgba(220,38,38,0.6)', hint: 'Drag di area kosong = buat area kotak baru. Klik area yang sudah ada = pilih (muncul handle) — drag badan untuk pindah, tarik pojok/sisi untuk resize, Delete untuk hapus. Semua snap ke grid, invisible saat main (sama seperti Impassable per-tile).' },
   { id: 'mapLocation', label: 'Map location', color: 'rgba(192,132,252,0.95)', hint: 'Stamp: drag area lalu beri nama → pill label muncul di game. Bisa pilih kedap suara atau tidak (default: tidak, jarak biasa).' },
   { id: 'privateArea', label: 'Private area', color: 'rgba(96,165,250,0.95)', hint: 'Stamp: drag area + Area ID. Area ber-ID sama = satu grup audio (walau terpisah). Bisa pilih kedap suara atau tidak (default: kedap suara).' },
   { id: 'portal', label: 'Portal', color: 'rgba(124,58,237,0.95)', hint: 'Stamp klik tile portal → pilih tujuan room lain, atau klik titik tujuan di room ini. Pemain tekan F untuk pindah.' },
@@ -648,6 +649,33 @@ function drawReferenceImage(ctx: CanvasRenderingContext2D, ref: ReferenceImageDa
   ctx.restore();
 }
 
+// Item #9 — Impassable Area drag/resize. A handle sits on one of the
+// rectangle's 4 corners or 4 edge midpoints; hit-testing works in WORLD
+// (unzoomed tile-pixel) space with a tolerance converted FROM screen pixels
+// (÷ zoom) so the clickable area stays a constant size on screen regardless
+// of how zoomed in/out the canvas is — a fixed world-space tolerance would
+// make handles nearly unclickable when zoomed out, and huge when zoomed in.
+type AreaHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+const AREA_HANDLE_HIT_SCREEN_PX = 10;
+function areaHandlePoints(a: { x: number; y: number; width: number; height: number }): [AreaHandle, number, number][] {
+  const left = a.x * TILE_SIZE, top = a.y * TILE_SIZE, right = (a.x + a.width) * TILE_SIZE, bottom = (a.y + a.height) * TILE_SIZE;
+  const midX = (left + right) / 2, midY = (top + bottom) / 2;
+  return [['nw', left, top], ['n', midX, top], ['ne', right, top], ['e', right, midY], ['se', right, bottom], ['s', midX, bottom], ['sw', left, bottom], ['w', left, midY]];
+}
+function hitTestAreaHandle(a: { x: number; y: number; width: number; height: number }, worldX: number, worldY: number, zoom: number): AreaHandle | null {
+  const tol = AREA_HANDLE_HIT_SCREEN_PX / zoom;
+  for (const [h, hx, hy] of areaHandlePoints(a)) if (Math.abs(worldX - hx) <= tol && Math.abs(worldY - hy) <= tol) return h;
+  return null;
+}
+function drawAreaHandles(ctx: CanvasRenderingContext2D, a: { x: number; y: number; width: number; height: number }, zoom: number) {
+  const left = a.x * TILE_SIZE, top = a.y * TILE_SIZE, right = (a.x + a.width) * TILE_SIZE, bottom = (a.y + a.height) * TILE_SIZE;
+  ctx.strokeStyle = 'rgba(248,113,113,0.95)'; ctx.lineWidth = 2 / zoom; ctx.setLineDash([]);
+  ctx.strokeRect(left, top, right - left, bottom - top);
+  const hs = 8 / zoom;
+  ctx.fillStyle = 'rgba(248,113,113,0.95)';
+  for (const [, hx, hy] of areaHandlePoints(a)) ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
+}
+
 function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomTheme, layer: EditorLayer) {
   if (layer === 'floor') {
     for (let y = 0; y < ld.height; y++) for (let x = 0; x < ld.width; x++)
@@ -679,6 +707,12 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
     }
     for (const a of ld.areas) {
       const zx = a.x * TILE_SIZE, zy = a.y * TILE_SIZE, zw = a.width * TILE_SIZE, zh = a.height * TILE_SIZE;
+      if (a.effect === 'impassable') {
+        ctx.fillStyle = 'rgba(239,68,68,0.22)'; ctx.fillRect(zx, zy, zw, zh);
+        ctx.strokeStyle = 'rgba(239,68,68,0.85)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(zx, zy, zw, zh); ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = '11px sans-serif'; ctx.fillText('🚧 Impassable', zx + 4, zy + 14);
+        continue;
+      }
       const isPriv = a.effect === 'privateArea';
       ctx.fillStyle = isPriv ? 'rgba(59,130,246,0.16)' : 'rgba(168,85,247,0.16)'; // blue=private, purple=map location
       ctx.fillRect(zx, zy, zw, zh);
@@ -914,6 +948,11 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const customAssets = useEditorStore((s) => s.doc?.customAssets ?? []);
   const selectedEffect = useEditorStore((s) => s.selectedEffect);
   const setSelectedEffect = useEditorStore((s) => s.setSelectedEffect);
+  // Item #9 — switching away from the Impassable Area tool drops the current
+  // selection so its handles don't linger on screen while some other tool is
+  // active (they'd be unreachable/unclickable anyway once selectedEffect
+  // no longer gates the mousedown branch that hit-tests them).
+  useEffect(() => { if (selectedEffect !== 'impassableArea') useEditorStore.getState().clearSelectedArea(); }, [selectedEffect]);
   const selection = useEditorStore((s) => s.selection);
   const selectedObjectId = useEditorStore((s) => s.selectedObjectId);
   const clipboard = useEditorStore((s) => s.clipboard);
@@ -925,7 +964,11 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const metaRef = useRef<{ name: string; theme: RoomTheme } | null>(null);
   const spaceHeldRef = useRef(false);
-  const dragRef = useRef<{ mode: string; last?: { x: number; y: number }; anchor?: { x: number; y: number }; fillMode?: 'stamp' | 'erase' } | null>(null);
+  const dragRef = useRef<{
+    mode: string; last?: { x: number; y: number }; anchor?: { x: number; y: number }; fillMode?: 'stamp' | 'erase';
+    // Item #9 — Impassable Area move ('areaMove') / resize ('areaResize').
+    areaId?: string; handle?: AreaHandle; orig?: { x: number; y: number; w: number; h: number };
+  } | null>(null);
   const hoverTileRef = useRef<{ x: number; y: number } | null>(null); // paste ghost anchor
 
   useEffect(() => { metaRef.current = meta; }, [meta]);
@@ -1026,6 +1069,11 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             }
             const sel = st.selection;
             if (sel) { ctx.fillStyle = 'rgba(124,58,237,0.18)'; ctx.fillRect(sel.x * TILE_SIZE, sel.y * TILE_SIZE, sel.w * TILE_SIZE, sel.h * TILE_SIZE); ctx.strokeStyle = 'rgba(167,139,250,0.95)'; ctx.lineWidth = 2 / z; ctx.setLineDash([6 / z, 4 / z]); ctx.strokeRect(sel.x * TILE_SIZE, sel.y * TILE_SIZE, sel.w * TILE_SIZE, sel.h * TILE_SIZE); ctx.setLineDash([]); }
+            // Item #9 — drag/resize handles for the selected Impassable Area.
+            if (st.activeLayer === 'effects' && st.selectedEffect === 'impassableArea' && st.selectedAreaId) {
+              const selArea = doc.areas.find((a) => a.id === st.selectedAreaId && a.effect === 'impassable');
+              if (selArea) drawAreaHandles(ctx, selArea, z);
+            }
             // Paste ghost: the clipboard's footprint follows the cursor so the
             // admin sees exactly where the block will land (green = paste).
             const hov = hoverTileRef.current;
@@ -1084,6 +1132,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       else if (e.key === 'Delete' || e.key === 'Backspace') {
         if ((s.activeLayer === 'floor' || s.activeLayer === 'wall') && s.selection) { e.preventDefault(); s.fillSelection('erase'); }
         else if ((s.activeLayer === 'objects' || s.activeLayer === 'top') && s.selectedObjectId) { e.preventDefault(); s.deleteSelected(s.activeLayer === 'top' ? 'top' : 'objects'); }
+        else if (s.activeLayer === 'effects' && s.selectedEffect === 'impassableArea' && s.selectedAreaId) { e.preventDefault(); s.removeArea(s.selectedAreaId); }
       } else if (e.key === 'Enter' && (s.activeLayer === 'floor' || s.activeLayer === 'wall') && s.selection) { e.preventDefault(); s.fillSelection('stamp'); }
     };
     const onUp = (e: KeyboardEvent) => { if (e.code === 'Space') spaceHeldRef.current = false; };
@@ -1103,6 +1152,16 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     const r = canvas.getBoundingClientRect();
     const { panX, panY, zoom: z } = useEditorStore.getState().viewport;
     return { x: Math.floor(((clientX - r.left) - panX) / (z * TILE_SIZE)), y: Math.floor(((clientY - r.top) - panY) / (z * TILE_SIZE)) };
+  }, []);
+
+  // Item #9 — same conversion as tileAt, but WITHOUT flooring to a tile index
+  // — needed to hit-test the small resize handles at sub-tile precision (see
+  // hitTestAreaHandle above). Returns world (unzoomed tile-pixel) coordinates.
+  const worldPointAt = useCallback((clientX: number, clientY: number) => {
+    const canvas = canvasRef.current; if (!canvas) return { x: 0, y: 0 };
+    const r = canvas.getBoundingClientRect();
+    const { panX, panY, zoom: z } = useEditorStore.getState().viewport;
+    return { x: ((clientX - r.left) - panX) / z, y: ((clientY - r.top) - panY) / z };
   }, []);
 
   // Brush size (Toolbar's Brush control) — applies the given per-tile action
@@ -1233,12 +1292,42 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             portalOriginRef.current = { x: t.x, y: t.y }; setPortalHint(true);
           }
         }, DIALOG_DEFER_MS);
+      } else if (eff === 'impassableArea') {
+        // Item #9 — select/move/resize/create, in that priority order (a
+        // handle on the currently-selected area always wins over starting a
+        // new rectangle or re-selecting something else underneath it).
+        if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y, 'impassable'); return; }
+        const selected = s.selectedAreaId ? (s.doc?.areas.find((a) => a.id === s.selectedAreaId && a.effect === 'impassable') ?? null) : null;
+        if (selected) {
+          const wp = worldPointAt(e.clientX, e.clientY);
+          const handle = hitTestAreaHandle(selected, wp.x, wp.y, s.viewport.zoom);
+          if (handle) {
+            s.beginStroke();
+            dragRef.current = { mode: 'areaResize', areaId: selected.id, handle, orig: { x: selected.x, y: selected.y, w: selected.width, h: selected.height } };
+            return;
+          }
+          if (t.x >= selected.x && t.x < selected.x + selected.width && t.y >= selected.y && t.y < selected.y + selected.height) {
+            s.beginStroke();
+            dragRef.current = { mode: 'areaMove', areaId: selected.id, anchor: { x: t.x, y: t.y } };
+            return;
+          }
+        }
+        const hit = s.areaAt(t.x, t.y, 'impassable');
+        if (hit) {
+          s.selectAreaAt(t.x, t.y, 'impassable');
+          s.beginStroke();
+          dragRef.current = { mode: 'areaMove', areaId: hit.id, anchor: { x: t.x, y: t.y } };
+          return;
+        }
+        s.clearSelectedArea();
+        s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 });
+        dragRef.current = { mode: 'impassableAreaRect', anchor: { x: t.x, y: t.y } };
       } else { // mapLocation | privateArea — rectangular
-        if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y); }
+        if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y, eff as 'mapLocation' | 'privateArea'); }
         else { s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 }); dragRef.current = { mode: 'areaRect', anchor: { x: t.x, y: t.y } }; }
       }
     }
-  }, [tileAt, forEachBrushTile]);
+  }, [tileAt, worldPointAt, forEachBrushTile]);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     hoverTileRef.current = tileAt(e.clientX, e.clientY); // paste-ghost anchor
@@ -1253,12 +1342,31 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     else if (d.mode === 'objMove') s.moveSelectedTo(t.x, t.y, s.activeLayer === 'top' ? 'top' : 'objects');
     else if (d.mode === 'effPaint') forEachBrushTile(t.x, t.y, s.stampEffectAt);
     else if (d.mode === 'effErase') forEachBrushTile(t.x, t.y, s.eraseEffectAt);
-    else if ((d.mode === 'selectRect' || d.mode === 'areaRect' || d.mode === 'copyRect' || d.mode === 'blockRect') && d.anchor) s.setSelection({ x: Math.min(d.anchor.x, t.x), y: Math.min(d.anchor.y, t.y), w: Math.abs(t.x - d.anchor.x) + 1, h: Math.abs(t.y - d.anchor.y) + 1 });
-  }, [tileAt, forEachBrushTile]);
+    else if (d.mode === 'areaMove' && d.areaId && d.anchor) {
+      const dx = t.x - d.anchor.x, dy = t.y - d.anchor.y;
+      if (dx !== 0 || dy !== 0) { s.moveAreaBy(d.areaId, dx, dy); d.anchor = t; }
+    }
+    else if (d.mode === 'areaResize' && d.areaId && d.handle && d.orig) {
+      const wp = worldPointAt(e.clientX, e.clientY);
+      // Round the fractional tile position to the nearest GRID LINE (not tile
+      // index) — handles sit on tile boundaries/corners, so this is what
+      // makes a resize snap to the grid, same as every other rectangle here
+      // being built directly from integer tileAt() results.
+      const rx = Math.round(wp.x / TILE_SIZE), ry = Math.round(wp.y / TILE_SIZE);
+      let { x, y, w, h } = d.orig;
+      const x2 = x + w, y2 = y + h;
+      if (d.handle.includes('w')) { x = Math.min(rx, x2 - 1); w = x2 - x; }
+      if (d.handle.includes('e')) { const nx2 = Math.max(rx, x + 1); w = nx2 - x; }
+      if (d.handle.includes('n')) { y = Math.min(ry, y2 - 1); h = y2 - y; }
+      if (d.handle.includes('s')) { const ny2 = Math.max(ry, y + 1); h = ny2 - y; }
+      s.resizeArea(d.areaId, { x: Math.max(0, x), y: Math.max(0, y), w, h });
+    }
+    else if ((d.mode === 'selectRect' || d.mode === 'areaRect' || d.mode === 'impassableAreaRect' || d.mode === 'copyRect' || d.mode === 'blockRect') && d.anchor) s.setSelection({ x: Math.min(d.anchor.x, t.x), y: Math.min(d.anchor.y, t.y), w: Math.abs(t.x - d.anchor.x) + 1, h: Math.abs(t.y - d.anchor.y) + 1 });
+  }, [tileAt, worldPointAt, forEachBrushTile]);
 
   const endDrag = useCallback(() => {
     const d = dragRef.current;
-    if (d && ['floorPaint', 'floorErase', 'wallPaint', 'wallErase', 'objMove', 'effPaint', 'effErase'].includes(d.mode)) useEditorStore.getState().endStroke();
+    if (d && ['floorPaint', 'floorErase', 'wallPaint', 'wallErase', 'objMove', 'effPaint', 'effErase', 'areaMove', 'areaResize'].includes(d.mode)) useEditorStore.getState().endStroke();
     if (d && d.mode === 'copyRect') {
       const s = useEditorStore.getState();
       if (s.selection) s.copyRegion(s.selection);
@@ -1305,6 +1413,19 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           }
           dialogPendingRef.current = false;
         }, DIALOG_DEFER_MS);
+      }
+    }
+    if (d && d.mode === 'impassableAreaRect') {
+      // Item #9 — unlike areaRect above, no naming dialog: an impassable
+      // area has nothing to name (excluded from the zones list entirely, see
+      // mapLayers.ts). Auto-selected right after creation so its resize
+      // handles are visible immediately, matching "buat lalu langsung bisa
+      // di-adjust" rather than requiring a second click to select it.
+      const s = useEditorStore.getState();
+      const sel = s.selection; s.setSelection(null);
+      if (sel) {
+        s.addArea('impassable', sel, 'Impassable Area');
+        s.selectAreaAt(sel.x, sel.y, 'impassable');
       }
     }
     dragRef.current = null;
@@ -1402,7 +1523,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   // Effects — not Objects (their size is the palette entry's own tilesW/H),
   // Portal (two-click dialog), or mapLocation/privateArea (rectangle drag).
   const brushApplicable = activeLayer === 'floor' || activeLayer === 'wall'
-    || (activeLayer === 'effects' && !mediaMode && !!selectedEffect && selectedEffect !== 'portal' && selectedEffect !== 'mapLocation' && selectedEffect !== 'privateArea');
+    || (activeLayer === 'effects' && !mediaMode && !!selectedEffect && selectedEffect !== 'portal' && selectedEffect !== 'mapLocation' && selectedEffect !== 'privateArea' && selectedEffect !== 'impassableArea');
 
   if (error) {
     const msg = error === 'auth' ? 'Kamu harus login dulu untuk membuka editor.' : error === 'forbidden' ? 'Akses ditolak — hanya admin room ini yang boleh membuka editor.' : error === 'notfound' ? 'Room tidak ditemukan.' : 'Gagal memuat editor.';

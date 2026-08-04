@@ -113,9 +113,18 @@ export interface TileEffect {
 // A rectangular region effect. Legacy zones convert to 'privateArea' (the audio
 // grouping they actually drive); 'mapLocation' is reserved for named teleport
 // spots authored in a later potong. Stores every Zone field so zones round-trip.
+// Item #9 — 'impassable' is a THIRD kind, added later: a draggable/resizable
+// collision rectangle (see RoomEditorPage.tsx's "Impassable Area" tool). It
+// deliberately reuses this same array/type instead of a new one — x/y/width/
+// height already are exactly what it needs, and the existing 500-item cap
+// (rooms.ts) costs it ONE entry no matter how large the rectangle is, unlike
+// the per-tile TileEffect approach. It is EXCLUDED from the zones list in
+// layerDataToLegacy (see below) — it must never become a chat/audio zone —
+// and rasterized into blocked tiles there instead, alongside (never
+// replacing) the older per-tile 'impassable' TileEffect stamps.
 export interface AreaEffect {
   id: string;
-  effect: 'privateArea' | 'mapLocation';
+  effect: 'privateArea' | 'mapLocation' | 'impassable';
   name: string;
   x: number;
   y: number;
@@ -305,6 +314,23 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     tiles.push(row);
   }
 
+  // Item #9 — impassable AREAS (rectangles), overlaid on top of the per-tile
+  // grid built above. Only touches tiles still at the default 'floor' type,
+  // so a rectangle dragged over a spawn/portal/door/wall/desk/chair/already-
+  // impassable tile can never silently swallow it — same non-destructive
+  // posture as every per-tile effect above. Existing per-tile 'impassable'
+  // TileEffects (the only representation before this feature existed) are
+  // completely untouched by this loop; this is a strictly additive second
+  // source of blocked tiles, not a replacement.
+  for (const a of ld.areas) {
+    if (a.effect !== 'impassable') continue;
+    for (let y = Math.max(0, a.y); y < Math.min(height, a.y + a.height); y++) {
+      for (let x = Math.max(0, a.x); x < Math.min(width, a.x + a.width); x++) {
+        if (tiles[y][x].type === 'floor') tiles[y][x].type = 'blocked';
+      }
+    }
+  }
+
   // Tag top-layer pieces so the game renders them above the avatar. objects
   // stay untagged. (For a freshly-converted room topObjects is empty, so this
   // reproduces the original furniture list exactly — the round-trip guard in
@@ -314,7 +340,13 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     ...ld.topObjects.map((o) => ({ ...o, topLayer: true as const })),
   ];
 
-  const zones: Zone[] = ld.areas.map((a) => {
+  // Item #9 — 'impassable' areas are a collision-only rectangle, never a
+  // chat/audio zone; excluding them here is what keeps them invisible to
+  // every player (ROOM_STATE/ROOM_UPDATED only ever forward this derived
+  // `zones` list, never the raw `areas`, and GameCanvas.tsx has no other way
+  // to see them — see RoomEditorPage.tsx's "Overlay ini hanya tampil di
+  // editor" for the same posture on every other effect drawn there).
+  const zones: Zone[] = ld.areas.filter((a) => a.effect !== 'impassable').map((a) => {
     // ZEP areaId → shared zone.id so same-areaId private areas are ONE audio
     // group (useProximity compares zone.id). Converted areas have no areaId, so
     // their id is unchanged — the Potong-1 round-trip stays byte-identical.

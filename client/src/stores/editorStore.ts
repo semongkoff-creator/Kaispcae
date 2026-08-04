@@ -2,7 +2,11 @@ import { create } from 'zustand';
 import type { LayerData, Furniture, TileEffect, AreaEffect, CustomAssetEntry, ReferenceImageData, Direction } from '@virtualmeet/shared';
 import { AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@virtualmeet/shared';
 
-export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat';
+// 'impassableArea' — Item #9's draggable/resizable collision RECTANGLE tool,
+// distinct from the older per-tile 'impassable' above (same distinction as
+// 'mapLocation'/'privateArea' being rectangles vs. e.g. 'door' being a point).
+// Maps to AreaEffect.effect: 'impassable' (see mapLayers.ts).
+export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat';
 
 // ZEP-style Room Editor state. Potong 0: layers/tools/viewport. Potong 2: floor
 // editing + undo/redo + debounced save. Potong 3: Wall (tile, drives collision),
@@ -132,6 +136,10 @@ interface EditorState {
   selection: Selection | null;
   setSelection: (sel: Selection | null) => void;
   selectedObjectId: string | null;
+  // Item #9 — the currently-selected Impassable Area (see areaAt/selectAreaAt
+  // below), for showing its drag/resize handles. Same "local selection, not
+  // undo/redo tracked itself" posture as selectedObjectId.
+  selectedAreaId: string | null;
 
   revision: number;
   undoDepth: number;
@@ -169,9 +177,26 @@ interface EditorState {
   // door, portal, sittable, startingPoint, all of it — back to none. One
   // history entry (undoable), same as any other mutating action here.
   resetAllTileEffects: () => void;
-  areaAt: (x: number, y: number) => AreaEffect | null;
-  addArea: (effect: 'mapLocation' | 'privateArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean) => void;
-  removeAreaAt: (x: number, y: number) => void;
+  // `effect` filter (Item #9) — without it, an Impassable Area rectangle
+  // overlapping a zone would make hit-testing ambiguous (topmost-by-array-
+  // order could resolve to either kind); every call site now scopes to the
+  // effect it actually means, same principle as zones already not being
+  // hit-testable by the point-effect tools.
+  areaAt: (x: number, y: number, effect?: AreaEffect['effect']) => AreaEffect | null;
+  addArea: (effect: 'mapLocation' | 'privateArea' | 'impassable', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean) => string;
+  removeAreaAt: (x: number, y: number, effect?: AreaEffect['effect']) => void;
+  // Item #9 — select/move/resize/delete an EXISTING Impassable Area rectangle
+  // (RoomEditorPage.tsx's drag-body / drag-handle / Delete-key interactions).
+  // Mirrors the objects layer's selectedObjectId/moveSelectedTo/removeObject
+  // trio, but for areas: moveAreaBy/resizeArea are called every mousemove
+  // while dragging (like moveSelectedTo) and rely on the caller's own
+  // beginStroke/endStroke to batch the whole drag into ONE undo step —
+  // neither pushes history itself.
+  selectAreaAt: (x: number, y: number, effect?: AreaEffect['effect']) => void;
+  clearSelectedArea: () => void;
+  moveAreaBy: (id: string, dx: number, dy: number) => void;
+  resizeArea: (id: string, rect: Selection) => void;
+  removeArea: (id: string) => void;
   // ZEP-style door password — patches the password fields on an EXISTING
   // door TileEffect (the Door Settings panel, shown while the door effect is
   // selected and the Select tool clicks an existing door tile). One history
@@ -306,7 +331,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   return {
     activeLayer: 'floor',
-    setActiveLayer: (activeLayer) => set({ activeLayer, selection: null, selectedObjectId: null }),
+    setActiveLayer: (activeLayer) => set({ activeLayer, selection: null, selectedObjectId: null, selectedAreaId: null }),
     activeTool: 'hand',
     setActiveTool: (activeTool) => set({ activeTool }),
     brushW: 1,
@@ -333,7 +358,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     setDoc: (doc) => {
       undoStack.length = 0; redoStack.length = 0; floorPending.clear(); wallPending.clear();
       objectsDirty = false; topDirty = false; effectsDirty = false; areasDirty = false; customAssetsDirty = false; referenceImageDirty = false; avatarScaleDirty = false; resizedDirty = false; strokeSnap = null; strokeChanged = false;
-      set({ doc, revision: 0, undoDepth: 0, redoDepth: 0, selection: null, selectedObjectId: null, clipboard: null });
+      set({ doc, revision: 0, undoDepth: 0, redoDepth: 0, selection: null, selectedObjectId: null, selectedAreaId: null, clipboard: null });
     },
 
     selectedFloorPaletteId: null,
@@ -372,6 +397,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     selection: null,
     setSelection: (selection) => set({ selection }),
     selectedObjectId: null,
+    selectedAreaId: null,
 
     revision: 0, undoDepth: 0, redoDepth: 0,
 
@@ -536,13 +562,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
       effectsDirty = true;
       pushHistory(snap); commit();
     },
-    areaAt: (x, y) => {
+    areaAt: (x, y, effect) => {
       const areas = get().doc?.areas; if (!areas) return null;
-      for (let i = areas.length - 1; i >= 0; i--) { const a = areas[i]; if (x >= a.x && x < a.x + a.width && y >= a.y && y < a.y + a.height) return a; }
+      for (let i = areas.length - 1; i >= 0; i--) {
+        const a = areas[i];
+        if (effect && a.effect !== effect) continue;
+        if (x >= a.x && x < a.x + a.width && y >= a.y && y < a.y + a.height) return a;
+      }
       return null;
     },
     addArea: (effect, rect, name, areaId, audioIsolated) => {
-      const d = get().doc; if (!d) return;
+      const d = get().doc; if (!d) return '';
       const snap = snapshot();
       // zoneType 'desk' → the game shows a name PILL and (when audioIsolated)
       // groups/isolates audio, WITHOUT the side effects of 'meeting' (mounts
@@ -550,15 +580,54 @@ export const useEditorStore = create<EditorState>((set, get) => {
       // which would break private audio). label=name so the pill actually
       // renders (game keys the pill off zone.label). audioIsolated left
       // unset defaults to isolating for privateArea and NOT isolating for
-      // mapLocation — see layerDataToLegacy's inferred default.
-      d.areas.push({ id: crypto.randomUUID(), effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, zoneType: 'desk', areaId, audioIsolated });
+      // mapLocation — see layerDataToLegacy's inferred default. Irrelevant
+      // for 'impassable' (Item #9) — it's excluded from the zones list
+      // entirely, so zoneType/label/audioIsolated are never read for it.
+      const id = crypto.randomUUID();
+      d.areas.push({ id, effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, zoneType: 'desk', areaId, audioIsolated });
       areasDirty = true; pushHistory(snap); commit();
+      return id;
     },
-    removeAreaAt: (x, y) => {
-      const d = get().doc; const a = get().areaAt(x, y); if (!d || !a) return;
+    removeAreaAt: (x, y, effect) => {
+      const d = get().doc; const a = get().areaAt(x, y, effect); if (!d || !a) return;
       const snap = snapshot();
       d.areas = d.areas.filter((z) => z.id !== a.id);
-      areasDirty = true; pushHistory(snap); commit();
+      areasDirty = true;
+      if (get().selectedAreaId === a.id) set({ selectedAreaId: null });
+      pushHistory(snap); commit();
+    },
+    selectAreaAt: (x, y, effect) => set({ selectedAreaId: get().areaAt(x, y, effect)?.id ?? null }),
+    clearSelectedArea: () => set({ selectedAreaId: null }),
+    moveAreaBy: (id, dx, dy) => {
+      const d = get().doc; if (!d) return;
+      const idx = d.areas.findIndex((a) => a.id === id); if (idx < 0) return;
+      const a = d.areas[idx];
+      const nx = Math.max(0, Math.min(d.width - a.width, a.x + dx));
+      const ny = Math.max(0, Math.min(d.height - a.height, a.y + dy));
+      if (nx === a.x && ny === a.y) return;
+      d.areas[idx] = { ...a, x: nx, y: ny };
+      areasDirty = true; strokeChanged = true;
+    },
+    resizeArea: (id, rect) => {
+      const d = get().doc; if (!d) return;
+      const idx = d.areas.findIndex((a) => a.id === id); if (idx < 0) return;
+      const width = Math.max(1, Math.min(d.width, rect.w));
+      const height = Math.max(1, Math.min(d.height, rect.h));
+      const x = Math.max(0, Math.min(d.width - width, rect.x));
+      const y = Math.max(0, Math.min(d.height - height, rect.y));
+      const a = d.areas[idx];
+      if (a.x === x && a.y === y && a.width === width && a.height === height) return;
+      d.areas[idx] = { ...a, x, y, width, height };
+      areasDirty = true; strokeChanged = true;
+    },
+    removeArea: (id) => {
+      const d = get().doc; if (!d) return;
+      const idx = d.areas.findIndex((a) => a.id === id); if (idx < 0) return;
+      const snap = snapshot();
+      d.areas.splice(idx, 1);
+      areasDirty = true;
+      set({ selectedAreaId: null });
+      pushHistory(snap); commit();
     },
 
     clipboard: null,
@@ -660,7 +729,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         .map((a) => { const nx = Math.max(0, a.x), ny = Math.max(0, a.y); return { ...a, x: nx, y: ny, width: Math.min(a.x + a.width, width) - nx, height: Math.min(a.y + a.height, height) - ny }; })
         .filter((a) => a.width > 0 && a.height > 0);
       resizedDirty = true; objectsDirty = true; topDirty = true; effectsDirty = true; areasDirty = true;
-      pushHistory(snap); set({ selection: null }); commit();
+      pushHistory(snap); set({ selection: null, selectedAreaId: null }); commit();
     },
 
     undo: () => {
@@ -668,14 +737,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (!cur || !target) return;
       redoStack.push(cur); if (redoStack.length > HISTORY_LIMIT) redoStack.shift();
       applyGridSnapshot(target); restoreObjects(target);
-      set({ selectedObjectId: null, selection: null }); commit();
+      set({ selectedObjectId: null, selectedAreaId: null, selection: null }); commit();
     },
     redo: () => {
       const cur = snapshot(); const target = redoStack.pop();
       if (!cur || !target) return;
       undoStack.push(cur); if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
       applyGridSnapshot(target); restoreObjects(target);
-      set({ selectedObjectId: null, selection: null }); commit();
+      set({ selectedObjectId: null, selectedAreaId: null, selection: null }); commit();
     },
 
     takePending: () => {
