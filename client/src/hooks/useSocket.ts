@@ -653,6 +653,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       setTilesFromData(tiles);
       setFurniture(data.furniture || []);
       setZones(data.zones || []);
+      // Item #9 (precise-collision follow-up) — only applied when present:
+      // the legacy socket ROOM_UPDATE save path never includes this field at
+      // all (see RoomUpdatePayload's doc comment), and treating its absence
+      // as "clear the rects" would wipe a client's already-known Impassable
+      // Areas the instant anyone saved through that older path.
+      if (data.impassableAreaRects) useGameStore.getState().setImpassableAreaRects(data.impassableAreaRects);
     });
 
     socket.on(SocketEvents.ADMIN_CHANGED, (data: { adminUserIds: string[]; masterAdminUserId: string; staffUserIds?: string[] }) => {

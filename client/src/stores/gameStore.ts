@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData } from '@virtualmeet/shared';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -88,6 +88,15 @@ export interface GameState {
   // Tiles
   tiles: RoomTile[][];
   setTiles: (tiles: RoomTile[][]) => void;
+
+  // Item #9 (precise-collision follow-up) — Impassable Area rectangles,
+  // pixel space, for the client's own local movement PREDICTION (see
+  // useMovement.ts's wouldCollide) — the server independently re-checks the
+  // same rectangles authoritatively (movementHandler.ts), this is purely so
+  // the local avatar doesn't visibly walk into one for a frame before the
+  // server's rejection catches up.
+  impassableAreaRects: ImpassableAreaRect[];
+  setImpassableAreaRects: (rects: ImpassableAreaRect[]) => void;
 
   // Room meta
   roomId: string;
@@ -600,6 +609,8 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   tiles: [],
   setTiles: (tiles) => set({ tiles }),
+  impassableAreaRects: [],
+  setImpassableAreaRects: (rects) => set({ impassableAreaRects: rects }),
 
   roomId: 'default',
   roomName: 'Default Room',
@@ -1186,6 +1197,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       tiles: roomState.tiles.length > 0 ? roomState.tiles : prev.tiles,
       furniture: roomState.furniture ?? prev.furniture,
       zones: roomState.zones ?? prev.zones,
+      impassableAreaRects: roomState.impassableAreaRects ?? prev.impassableAreaRects,
       playerRecords: records,
       isAdmin: localIsAdmin,
       adminPlayerIds: adminIds,

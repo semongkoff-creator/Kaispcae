@@ -1,4 +1,5 @@
 import type { RoomTile, TileType } from './types/index';
+import type { ImpassableAreaRect } from './mapLayers';
 
 interface ZoneRect {
   x: number;
@@ -21,6 +22,31 @@ export function isTileBlocked(tiles: RoomTile[][], tileX: number, tileY: number)
   const row = tiles[tileY];
   if (!row || tileX < 0 || tileX >= row.length) return true;
   return BLOCKED_TILES.has(row[tileX].type);
+}
+
+// Item #9 (precise-collision follow-up) — the sub-tile counterpart to
+// isTileBlocked above. A free-resized Impassable Area rectangle is never
+// rasterized into the RoomTile grid (see mapLayers.ts's
+// getImpassableAreaRects doc comment for why), so it needs its OWN
+// collision check, done directly against pixel-space rectangles instead of
+// discrete tiles. Same single-source-of-truth posture as isTileBlocked:
+// shared by the server's authoritative check (movementHandler.ts, a
+// point-in-rect test against the target position — the same granularity
+// isTileBlocked already gets there) and the client's own prediction
+// (useMovement.ts's wouldCollide, a full hitbox-vs-rect overlap test — the
+// same granularity isTileBlocked already gets there too).
+export function isPointInImpassableArea(rects: ImpassableAreaRect[], x: number, y: number): boolean {
+  for (const r of rects) {
+    if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return true;
+  }
+  return false;
+}
+
+export function doesRectOverlapImpassableArea(rects: ImpassableAreaRect[], left: number, top: number, right: number, bottom: number): boolean {
+  for (const r of rects) {
+    if (left < r.x + r.w && right > r.x && top < r.y + r.h && bottom > r.y) return true;
+  }
+  return false;
 }
 
 // Bug 7 — doorways are exactly one tile wide, embedded in a wall line, and

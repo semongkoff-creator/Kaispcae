@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { Direction, TILE_SIZE, PLAYER_SPEED, PLAYER_RUN_SPEED } from '@virtualmeet/shared';
+import { Direction, TILE_SIZE, PLAYER_SPEED, PLAYER_RUN_SPEED, ImpassableAreaRect, doesRectOverlapImpassableArea } from '@virtualmeet/shared';
 
 // Bug 7 — half-width of the movement hitbox while standing/arriving on a
 // door tile, vs. the normal TILE_SIZE/2 - 2 (14px, i.e. a 28px hitbox) used
@@ -22,6 +22,13 @@ interface UseMovementOptions {
   // this hook shouldn't be forced to) just keeps the old door-is-a-normal-
   // tile behaviour.
   isDoor?: (tileX: number, tileY: number) => boolean;
+  // Item #9 (precise-collision follow-up) — Impassable Area rectangles
+  // (pixel space), checked as a full hitbox-vs-rect overlap alongside the
+  // tile-grid check in wouldCollide — same "read fresh every call via a
+  // getter, never triggers a hook recreation" pattern as isBlocked/isDoor.
+  // Optional so a caller that never wires it up just gets zero areas (no
+  // behavior change for anything that predates this).
+  getImpassableAreas?: () => ImpassableAreaRect[];
 }
 
 interface MovementState {
@@ -32,7 +39,7 @@ interface MovementState {
   isRunning: boolean;
 }
 
-export function useMovement({ isBlocked, onMove, isFrozen, isDoor }: UseMovementOptions) {
+export function useMovement({ isBlocked, onMove, isFrozen, isDoor, getImpassableAreas }: UseMovementOptions) {
   const keysRef = useRef<Set<string>>(new Set());
   const currentXRef = useRef<number>(0);
   const currentYRef = useRef<number>(0);
@@ -50,6 +57,9 @@ export function useMovement({ isBlocked, onMove, isFrozen, isDoor }: UseMovement
 
   const isDoorRef = useRef(isDoor);
   isDoorRef.current = isDoor;
+
+  const getImpassableAreasRef = useRef(getImpassableAreas);
+  getImpassableAreasRef.current = getImpassableAreas;
 
   const setPosition = useCallback((x: number, y: number) => {
     currentXRef.current = x;
@@ -125,6 +135,17 @@ export function useMovement({ isBlocked, onMove, isFrozen, isDoor }: UseMovement
           }
         }
       }
+
+      // Item #9 (precise-collision follow-up) — sub-tile check, separate
+      // from the tile-grid loop above (Impassable Area rectangles are never
+      // rasterized into tiles — see mapLayers.ts's getImpassableAreaRects
+      // doc comment). Full hitbox-vs-rect overlap, same box as the tile
+      // check just used (left/right/top/bottom already computed above).
+      const areas = getImpassableAreasRef.current?.();
+      if (areas && areas.length > 0 && doesRectOverlapImpassableArea(areas, left, top, right, bottom)) {
+        return true;
+      }
+
       return false;
     },
     [], // stable — reads from ref

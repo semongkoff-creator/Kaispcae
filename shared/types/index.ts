@@ -1,6 +1,6 @@
 import type { Role } from '../permissions';
 import type { RoomTemplateId } from '../defaultRoomLayout';
-import type { ReferenceImageData } from '../mapLayers';
+import type { ReferenceImageData, ImpassableAreaRect } from '../mapLayers';
 
 // Direction the avatar is facing or moving
 export type Direction = 'up' | 'down' | 'left' | 'right';
@@ -189,6 +189,12 @@ export interface RoomState {
   staffUserIds?: string[];
   furniture?: Furniture[];
   zones?: Zone[];
+  // Item #9 (precise-collision follow-up) — pixel-space Impassable Area
+  // rectangles, for the client's own local movement prediction (the server
+  // independently re-checks these authoritatively — see
+  // movementHandler.ts). Absent/undefined on a room saved before this
+  // field existed; treated as [] everywhere it's read.
+  impassableAreaRects?: ImpassableAreaRect[];
   theme?: RoomTheme;
   // Which layout this room was created with (see defaultRoomLayout.ts's
   // ROOM_TEMPLATES) — undefined for rooms created before this field
@@ -1434,14 +1440,20 @@ export interface RoomUpdatePayload {
   tiles: RoomTile[][];
   furniture: Furniture[];
   zones: Zone[];
+  // Item #9 (precise-collision follow-up) — absent on the legacy socket
+  // ROOM_UPDATE save path (roomHandler.ts), which never touches Impassable
+  // Areas at all; present on every save that goes through
+  // layerDataToLegacy. useSocket.ts's handler only applies it when present,
+  // so the legacy path can never wipe a client's already-known rects.
+  impassableAreaRects?: ImpassableAreaRect[];
 }
 
 export { createDefaultOfficeLayout, createKaitechOfficeLayout, findSpawnPixel, createRoomLayoutFromTemplate, ROOM_TEMPLATES } from '../defaultRoomLayout';
 export type { RoomTemplateId } from '../defaultRoomLayout';
-export { BLOCKED_TILES, isTileBlocked, isDoorTile, findZoneEntryTile, findAdjacentFreeTile } from '../tileCollision';
+export { BLOCKED_TILES, isTileBlocked, isDoorTile, findZoneEntryTile, findAdjacentFreeTile, isPointInImpassableArea, doesRectOverlapImpassableArea } from '../tileCollision';
 // ZEP Room Editor — Potong 1 layered map format + legacy adaptors.
-export { MAP_FORMAT_VERSION, legacyToLayerData, layerDataToLegacy, AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '../mapLayers';
-export type { LayerData, TileEffect, AreaEffect, CustomAssetEntry, ReferenceImageData } from '../mapLayers';
+export { MAP_FORMAT_VERSION, legacyToLayerData, layerDataToLegacy, AVATAR_SCALE_MIN, AVATAR_SCALE_MAX, getImpassableAreaRects } from '../mapLayers';
+export type { LayerData, TileEffect, AreaEffect, CustomAssetEntry, ReferenceImageData, ImpassableAreaRect } from '../mapLayers';
 export type { Role, FeatureKey } from '../permissions';
 export { roleAtLeast, hasFeatureAccess, FEATURE_MIN_ROLE } from '../permissions';
 export type { ShiftDef, AttendanceStatus, WorkTotals, Geofence, Coords, GeofenceResult } from '../attendanceRules';

@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, RoomTile, JumpEvent, NudgeEvent } from '@virtualmeet/shared';
-import { updatePlayerPosition, setPlayerStopped, getCachedTiles } from '../store/roomStore';
+import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointInImpassableArea, RoomTile, JumpEvent, NudgeEvent } from '@virtualmeet/shared';
+import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas } from '../store/roomStore';
 import { isDoorUnlocked, clearUnlockedDoors } from './doorLock';
 
 // Rate limiting: max 20 updates per second per player
@@ -21,8 +21,15 @@ interface MoveData {
 // silently dropped, same as walking into a wall. Not in BLOCKED_TILES itself
 // since that's a static set keyed only on TileType — this needs per-socket,
 // per-room session state isTileBlocked has no way to see.
-function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string, tileX: number, tileY: number): boolean {
+//
+// Item #9 (precise-collision follow-up) — pixelX/pixelY are the ACTUAL
+// (clamped, un-floored) target position, needed alongside tileX/tileY
+// because Impassable Area rectangles are checked at sub-tile precision, not
+// against the tile grid (see mapLayers.ts's getImpassableAreaRects doc
+// comment for why they're never rasterized into it).
+function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string, tileX: number, tileY: number, pixelX: number, pixelY: number): boolean {
   if (isTileBlocked(tiles, tileX, tileY)) return true;
+  if (isPointInImpassableArea(getCachedImpassableAreas(room), pixelX, pixelY)) return true;
   const tile = tiles[tileY]?.[tileX];
   if (tile?.type === 'door' && tile.doorPasswordEnabled && tile.doorPassword) {
     return !isDoorUnlocked(socketId, room, tileX, tileY);
@@ -60,7 +67,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
       if (tiles) {
         const tileX = Math.floor(clampedX / TILE_SIZE);
         const tileY = Math.floor(clampedY / TILE_SIZE);
-        if (isBlockedForSocket(tiles, gameRoom, socket.id, tileX, tileY)) return;
+        if (isBlockedForSocket(tiles, gameRoom, socket.id, tileX, tileY, clampedX, clampedY)) return;
       }
 
       socket.to(gameRoom).emit(SocketEvents.PLAYER_MOVED, {
@@ -88,7 +95,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     if (tiles) {
       const tileX = Math.floor(clampedX / TILE_SIZE);
       const tileY = Math.floor(clampedY / TILE_SIZE);
-      if (isBlockedForSocket(tiles, gameRoom, socket.id, tileX, tileY)) return; // refuse teleport into a wall/desk/locked door
+      if (isBlockedForSocket(tiles, gameRoom, socket.id, tileX, tileY, clampedX, clampedY)) return; // refuse teleport into a wall/desk/locked door
     }
     const direction = (data.direction as MoveData['direction']) || 'down';
     socket.to(gameRoom).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: clampedX, y: clampedY, direction });

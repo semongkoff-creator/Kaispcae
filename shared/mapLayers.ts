@@ -1,4 +1,5 @@
 import type { Furniture, RoomTile, Zone, TileType, Direction } from './types/index';
+import { TILE_SIZE } from './types/index';
 
 // ZEP-style Room Editor — Potong 1 data model. `LayerData` is the NEW per-room
 // map format (5 layers). It lives BESIDE the legacy tilemapData/furniture/zones
@@ -255,7 +256,7 @@ export function legacyToLayerData(tiles: RoomTile[][], furniture: Furniture[], z
 }
 
 // Read-time adaptor: reconstruct the exact runtime shape from LayerData.
-export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
+export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[]; impassableAreaRects: ImpassableAreaRect[] } {
   const { width, height, floor, wall } = ld;
   const effAt = new Map<string, TileEffect>();
   for (const e of ld.tileEffects) effAt.set(`${e.x},${e.y}`, e);
@@ -314,33 +315,19 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     tiles.push(row);
   }
 
-  // Item #9 — impassable AREAS (rectangles), overlaid on top of the per-tile
-  // grid built above. Only touches tiles still at the default 'floor' type,
-  // so a rectangle dragged over a spawn/portal/door/wall/desk/chair/already-
-  // impassable tile can never silently swallow it — same non-destructive
-  // posture as every per-tile effect above. Existing per-tile 'impassable'
-  // TileEffects (the only representation before this feature existed) are
-  // completely untouched by this loop; this is a strictly additive second
-  // source of blocked tiles, not a replacement.
-  for (const a of ld.areas) {
-    if (a.effect !== 'impassable') continue;
-    // Free-resize follow-up — the rectangle itself is no longer grid-snapped
-    // (drags freely at sub-tile precision in the editor), but collision is
-    // still fundamentally whole-tile (RoomTile has no notion of "half
-    // blocked") — floor/ceil so ANY tile the rectangle overlaps even
-    // partially is blocked. A no-op for the integer rectangles every OTHER
-    // area effect (and every impassable area saved before this) still uses:
-    // floor/ceil of a whole number is that same number.
-    const y0 = Math.max(0, Math.floor(a.y));
-    const y1 = Math.min(height, Math.ceil(a.y + a.height));
-    const x0 = Math.max(0, Math.floor(a.x));
-    const x1 = Math.min(width, Math.ceil(a.x + a.width));
-    for (let y = y0; y < y1; y++) {
-      for (let x = x0; x < x1; x++) {
-        if (tiles[y][x].type === 'floor') tiles[y][x].type = 'blocked';
-      }
-    }
-  }
+  // Item #9 — impassable AREAS (rectangles) are deliberately NOT rasterized
+  // into this per-tile grid at all — RoomTile has no notion of "partially
+  // blocked", so doing that would always round a free-resized (sub-tile)
+  // rectangle out to whole tiles, which no longer matches what was actually
+  // drawn (confirmed with the room admin: the collision boundary must match
+  // the drawn shape exactly, fractional edges included). See
+  // getImpassableAreaRects below — movementHandler.ts (server) and
+  // useMovement.ts (client) check the player's position/hitbox against
+  // those pixel-precise rectangles directly, as a SEPARATE check alongside
+  // this tile grid, not by mutating it. Existing per-tile 'impassable'
+  // TileEffects (the sparse per-tile stamps) are untouched either way —
+  // they still become 'blocked' tiles via the eff.kind==='impassable'
+  // branch above, exactly as before.
 
   // Tag top-layer pieces so the game renders them above the avatar. objects
   // stay untagged. (For a freshly-converted room topObjects is empty, so this
@@ -380,5 +367,17 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     return z;
   });
 
-  return { tiles, furniture, zones };
+  return { tiles, furniture, zones, impassableAreaRects: getImpassableAreaRects(ld) };
+}
+
+// Pixel-space collision rectangles for every impassable AreaEffect — the
+// precise-collision counterpart to the tile grid above. `x`/`y`/`w`/`h` are
+// world PIXELS (tile units × TILE_SIZE), matching the coordinate space
+// movement already works in (avatar x/y, hitbox math), so a caller can do a
+// direct point-in-rect or rect-overlap test with no further conversion.
+export interface ImpassableAreaRect { x: number; y: number; w: number; h: number; }
+export function getImpassableAreaRects(ld: LayerData): ImpassableAreaRect[] {
+  return ld.areas
+    .filter((a) => a.effect === 'impassable')
+    .map((a) => ({ x: a.x * TILE_SIZE, y: a.y * TILE_SIZE, w: a.width * TILE_SIZE, h: a.height * TILE_SIZE }));
 }

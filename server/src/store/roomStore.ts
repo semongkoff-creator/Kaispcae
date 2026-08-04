@@ -1,4 +1,4 @@
-import { Avatar, RoomState, AvatarConfig, RoomTile, WorkMode } from '@virtualmeet/shared';
+import { Avatar, RoomState, AvatarConfig, RoomTile, WorkMode, ImpassableAreaRect } from '@virtualmeet/shared';
 import { Redis } from 'ioredis';
 
 // In-memory fallback storage — always works, zero dependencies
@@ -280,6 +280,21 @@ export function setCachedTiles(roomId: string, tiles: RoomTile[][]): void {
 
 export function getCachedTiles(roomId: string): RoomTile[][] | undefined {
   return tileCache.get(roomId);
+}
+
+// Item #9 (precise-collision follow-up) — impassable Area rectangles, pixel
+// space, cached alongside the tile grid (same populate-on-join/refresh-on-
+// save lifecycle, same in-memory-only caveat). Kept as a SEPARATE cache
+// rather than folded into RoomTile: these need sub-tile precision, which a
+// per-tile grid can't represent at all.
+const impassableAreaCache = new Map<string, ImpassableAreaRect[]>();
+
+export function setCachedImpassableAreas(roomId: string, rects: ImpassableAreaRect[]): void {
+  impassableAreaCache.set(roomId, rects);
+}
+
+export function getCachedImpassableAreas(roomId: string): ImpassableAreaRect[] {
+  return impassableAreaCache.get(roomId) ?? [];
 }
 
 // ─── Last known position (reconnect persistence) ─────────────────────

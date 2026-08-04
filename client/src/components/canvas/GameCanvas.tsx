@@ -266,6 +266,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const emitFollowUnfollowRef = useRef(emitFollowUnfollow); emitFollowUnfollowRef.current = emitFollowUnfollow;
 
   const tiles = useGameStore((s) => s.tiles);
+  // Item #9 (precise-collision follow-up) — see useMovement.ts's wouldCollide;
+  // checked every animation-loop frame regardless of React re-renders, so
+  // this doesn't need to be reactive the way nudgedPlayers/speechBubbles
+  // below do — synced into a ref the same way tiles already is.
+  const impassableAreaRects = useGameStore((s) => s.impassableAreaRects);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const theme = useGameStore((s) => s.theme);
@@ -300,6 +305,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const unlockedDoors = useGameStore((s) => s.unlockedDoors);
 
   const tilesRef = useRef(tiles);
+  const impassableAreaRectsRef = useRef(impassableAreaRects);
   const themeRef = useRef(theme);
   const followInfoRef = useRef(followInfo);
   const playerRecordsRef = useRef(useGameStore.getState().playerRecords);
@@ -393,6 +399,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
 
   useEffect(() => {
     tilesRef.current = tiles;
+    impassableAreaRectsRef.current = impassableAreaRects;
     themeRef.current = theme;
     followInfoRef.current = followInfo;
     playerRecordsRef.current = useGameStore.getState().playerRecords;
@@ -473,6 +480,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     onMove: onMoveRef.current,
     isFrozen: () => useGameStore.getState().localPlayer.isSitting === true,
     isDoor,
+    getImpassableAreas: () => impassableAreaRectsRef.current,
   });
 
   useEffect(() => {

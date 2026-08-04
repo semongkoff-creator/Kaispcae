@@ -2,10 +2,10 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone, zoneKeyholderOf, admitUserToZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerWorkMode, updatePlayerSitting,
-  setCachedTiles, getCachedTiles, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
+  setCachedTiles, getCachedTiles, setCachedImpassableAreas, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
 } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';
 import { resolveEntry } from '../lib/roomMembership';
@@ -423,6 +423,11 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     let savedTiles: RoomTile[][] | undefined;
     let savedFurniture: any[] | undefined;
     let savedZones: any[] | undefined;
+    // Item #9 (precise-collision follow-up) — pixel-space Impassable Area
+    // rectangles, resolved alongside tiles/furniture/zones from the same
+    // layerDataToLegacy call. A legacy room with no layerData at all never
+    // had this feature, so it's simply [] on that path below.
+    let savedImpassableAreaRects: ImpassableAreaRect[] = [];
     // ZEP Room Editor (Potong 1) — once a room is converted, layerData is its
     // source of truth. The adaptor reconstructs the EXACT same runtime shape
     // (tiles/furniture/zones), so everything downstream — render, collision,
@@ -433,6 +438,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       savedTiles = derived.tiles;
       savedFurniture = derived.furniture;
       savedZones = derived.zones;
+      savedImpassableAreaRects = derived.impassableAreaRects;
     } else {
       if (dbRoom?.tilemapData && Array.isArray(dbRoom.tilemapData) && (dbRoom.tilemapData as any[]).length > 0) {
         savedTiles = (dbRoom.tilemapData as any[]).map((row: any[], y: number) =>
@@ -544,9 +550,11 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       // nothing to check against and fails open (see getCachedTiles's doc
       // comment there).
       setCachedTiles(room, tiles);
+      setCachedImpassableAreas(room, savedImpassableAreaRects);
 
       socket.emit(SocketEvents.ROOM_STATE, {
         ...state, tiles: redactDoorPasswords(tiles), furniture: redactInteractiveSecrets(savedFurniture || fallback!.furniture), zones: savedZones || fallback!.zones, players: playersWithMeta,
+        impassableAreaRects: savedImpassableAreaRects,
         adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId, staffUserIds: Array.from(rs.staffUserIds), theme, template,
         notice: roomNoticeMap.get(room) ?? null,
         locked: !!rs.locked,
@@ -766,7 +774,8 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         await getPrisma().room.update({ where: { id: dbRoom.id }, data: { layerData: ld as unknown as object } });
         const derived = layerDataToLegacy(ld);
         setCachedTiles(room, derived.tiles);
-        io.to(room).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones });
+        setCachedImpassableAreas(room, derived.impassableAreaRects);
+        io.to(room).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones, impassableAreaRects: derived.impassableAreaRects });
       }
     } catch (e) {
       console.warn('[room] change object error:', e);

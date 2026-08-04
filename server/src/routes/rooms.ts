@@ -12,7 +12,7 @@ import { isRoomLocked } from '../socket/roomHandler';
 import { isValidMediaPayload, isUploadUrl } from '../socket/mediaHandler';
 import { redactInteractiveSecrets, redactDoorPasswords } from '../lib/redactFurniture';
 import { deleteUploadedFile, storage as uploadStorage } from './uploads';
-import { setCachedTiles, getPlayers, updatePlayerPosition } from '../store/roomStore';
+import { setCachedTiles, setCachedImpassableAreas, getPlayers, updatePlayerPosition } from '../store/roomStore';
 
 // Client shape for a MapMediaObject row (mirrors mediaHandler.toClientShape).
 function mediaShape(r: { id: string; roomId: string; type: string; x: number; y: number; createdBy: string; createdByName: string; createdAt: Date; expiresAt: Date | null; payload: unknown }) {
@@ -343,7 +343,8 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
 
     const derived = layerDataToLegacy(layerData);
     setCachedTiles(room.slug, derived.tiles);
-    ioRef?.to(room.slug).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones });
+    setCachedImpassableAreas(room.slug, derived.impassableAreaRects);
+    ioRef?.to(room.slug).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones, impassableAreaRects: derived.impassableAreaRects });
 
     // On shrink, rescue any player now standing outside the new bounds to a
     // spawn tile so no avatar is stranded off-map (Potong 5).
