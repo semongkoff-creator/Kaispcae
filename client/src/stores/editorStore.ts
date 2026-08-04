@@ -6,7 +6,7 @@ import { AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@virtualmeet/shared';
 // distinct from the older per-tile 'impassable' above (same distinction as
 // 'mapLocation'/'privateArea' being rectangles vs. e.g. 'door' being a point).
 // Maps to AreaEffect.effect: 'impassable' (see mapLayers.ts).
-export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat';
+export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat';
 
 // Follow-up — a "Kursi Diklaim" marker used to be stamped wherever the admin
 // clicked, completely independent of any Furniture piece, so it could
@@ -205,7 +205,7 @@ interface EditorState {
   // effect it actually means, same principle as zones already not being
   // hit-testable by the point-effect tools.
   areaAt: (x: number, y: number, effect?: AreaEffect['effect']) => AreaEffect | null;
-  addArea: (effect: 'mapLocation' | 'privateArea' | 'impassable', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean) => string;
+  addArea: (effect: 'mapLocation' | 'privateArea' | 'impassable' | 'focusArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean) => string;
   removeAreaAt: (x: number, y: number, effect?: AreaEffect['effect']) => void;
   // Item #9 — select/move/resize/delete an EXISTING Impassable Area rectangle
   // (RoomEditorPage.tsx's drag-body / drag-handle / Delete-key interactions).
@@ -614,15 +614,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const snap = snapshot();
       // zoneType 'desk' → the game shows a name PILL and (when audioIsolated)
       // groups/isolates audio, WITHOUT the side effects of 'meeting' (mounts
-      // MeetingControl + sets in_meeting) or 'focus' (makes occupants solo,
-      // which would break private audio). label=name so the pill actually
-      // renders (game keys the pill off zone.label). audioIsolated left
-      // unset defaults to isolating for privateArea and NOT isolating for
-      // mapLocation — see layerDataToLegacy's inferred default. Irrelevant
-      // for 'impassable' (Item #9) — it's excluded from the zones list
-      // entirely, so zoneType/label/audioIsolated are never read for it.
+      // MeetingControl + sets in_meeting) or the OLD meaning of 'focus' (used
+      // to make occupants solo/isolated, which would've broken shared
+      // private audio) — 'focusArea' is the one deliberate exception: it
+      // WANTS 'focus' zoneType, since that's what makes App.tsx auto-set
+      // workMode to 'focus' (DND) for anyone standing inside. label=name so
+      // the pill actually renders (game keys the pill off zone.label).
+      // audioIsolated left unset defaults to isolating for privateArea and
+      // NOT isolating for mapLocation — see layerDataToLegacy's inferred
+      // default; irrelevant for 'focusArea' (proximity is already blocked by
+      // workMode==='focus' in useProximity, independent of any zone flag) and
+      // for 'impassable' (Item #9, excluded from the zones list entirely).
       const id = crypto.randomUUID();
-      d.areas.push({ id, effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, zoneType: 'desk', areaId, audioIsolated });
+      const zoneType = effect === 'focusArea' ? 'focus' : 'desk';
+      d.areas.push({ id, effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, zoneType, areaId, audioIsolated });
       areasDirty = true; pushHistory(snap); commit();
       return id;
     },

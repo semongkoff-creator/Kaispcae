@@ -125,7 +125,7 @@ export interface TileEffect {
 // replacing) the older per-tile 'impassable' TileEffect stamps.
 export interface AreaEffect {
   id: string;
-  effect: 'privateArea' | 'mapLocation' | 'impassable';
+  effect: 'privateArea' | 'mapLocation' | 'impassable' | 'focusArea';
   name: string;
   x: number;
   y: number;

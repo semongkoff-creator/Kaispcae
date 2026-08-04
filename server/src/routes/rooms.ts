@@ -346,6 +346,24 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
     setCachedImpassableAreas(room.slug, derived.impassableAreaRects);
     ioRef?.to(room.slug).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones, impassableAreaRects: derived.impassableAreaRects });
 
+    // Focus area — the first time an admin saves a room with at least one
+    // Focus-type zone (Room Editor's "Focus area" tile effect), lazily
+    // create the room's "Fokus" text channel — same backfill-on-first-use
+    // pattern GET /channels already uses for "general" — and broadcast it
+    // live so already-connected clients pick it up without a reload.
+    // App.tsx auto-opens this channel for anyone who walks into the zone.
+    if (derived.zones.some((z) => z.type === 'focus')) {
+      const existingFocusChannel = await prisma.channel.findFirst({ where: { roomId: room.id, name: 'Fokus' } });
+      if (!existingFocusChannel) {
+        const focusChannel = await prisma.channel.create({ data: { roomId: room.id, name: 'Fokus' } });
+        await ensureGroupConversation(prisma, focusChannel);
+        ioRef?.to(room.slug).emit(SocketEvents.CHANNEL_CREATED, {
+          id: focusChannel.id, roomId: focusChannel.roomId, name: focusChannel.name,
+          isDefault: focusChannel.isDefault, createdAt: focusChannel.createdAt.getTime(),
+        });
+      }
+    }
+
     // On shrink, rescue any player now standing outside the new bounds to a
     // spawn tile so no avatar is stranded off-map (Potong 5).
     if (resized) {

@@ -40,6 +40,7 @@ import { InteractiveObjectModal } from './components/ui/InteractiveObjectModal';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
 import { SoundboardPanel } from './components/ui/SoundboardPanel';
 import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
+import { FocusMusicPanel } from './components/ui/FocusMusicPanel';
 import { AwayReasonModal } from './components/ui/AwayReasonModal';
 import { ActivityFeed } from './components/ui/ActivityFeed';
 import { PendingRequestToast } from './components/ui/PendingRequestToast';
@@ -282,6 +283,30 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       emitWorkMode(effective, meetingZone?.id ?? focusZone?.id, effective === 'away' ? awayReason ?? undefined : undefined);
     }
   }, [localPlayer.x, localPlayer.y, zones, meetingZone, manualStatus, workMode, setWorkMode, emitWorkMode, awayReason]);
+
+  // Focus area — the room's dedicated "Fokus" text channel (lazily created
+  // server-side the first time an admin saves a Focus area, see rooms.ts's
+  // PUT /editor/layers) auto-opens the moment workMode flips TO 'focus' and
+  // closes again the moment it flips AWAY from 'focus', per the room admin's
+  // explicit ask. Gated on the transition itself (prevWorkModeRef), not on
+  // workMode being 'focus', so a player who closes/reopens chat manually
+  // mid-session while still standing in the area isn't fought every render.
+  const prevWorkModeRef = useRef<WorkMode>(workMode);
+  useEffect(() => {
+    const prev = prevWorkModeRef.current;
+    prevWorkModeRef.current = workMode;
+    if (workMode === prev) return;
+    if (workMode === 'focus') {
+      const fokus = channelChat.channels.find((c) => c.name === 'Fokus');
+      if (fokus) {
+        channelChat.setActiveChatTarget({ type: 'channel', id: fokus.id });
+        channelChat.setChatPanelOpen(true);
+      }
+    } else if (prev === 'focus') {
+      channelChat.setChatPanelOpen(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workMode]);
 
   // Fitur 3B — Away-reason popup. Fires either from the idle-AFK timer below
   // or a manual "Away" pick (PresenceButton) — never applies 'away' directly;
@@ -1149,6 +1174,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {meetingZone && !editorMode && (
         <MeetingControl roomId={roomSlug} zoneId={meetingZone.id} />
       )}
+
+      {/* Focus area — private per-player music, only while workMode is 'focus' */}
+      {workMode === 'focus' && !editorMode && <FocusMusicPanel />}
 
 
       {miniModeWindow && (

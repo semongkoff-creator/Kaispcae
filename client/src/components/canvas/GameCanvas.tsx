@@ -105,12 +105,13 @@ const FOLLOW_OFFSET: Record<Direction, { dx: number; dy: number }> = {
 // `effect` field surviving at runtime (Zone only carries `audioIsolated`,
 // see mapLayers.ts's layerDataToLegacy), so `audioIsolated !== false` is the
 // same signal useProximity.ts's audioZoneAt already uses to decide "is this
-// actually isolating" — same convention, not a new one. Meeting rooms are
-// excluded even when isolating: they already have their own full-width
-// label bar + video-call UI, and stacking this effect on top of that wasn't
-// asked for.
+// actually isolating" — same convention, not a new one. Meeting rooms and
+// Focus areas are excluded even when isolating: meeting rooms already have
+// their own full-width label bar + video-call UI, and Focus areas are meant
+// to stay visually normal (per the room admin) — only the presence status/
+// DND changes there, not the lighting.
 function isPrivateZone(zone: Zone): boolean {
-  return zone.audioIsolated !== false && zone.type !== 'meeting';
+  return zone.audioIsolated !== false && zone.type !== 'meeting' && zone.type !== 'focus';
 }
 
 function hexToRgb(hex: string | undefined): [number, number, number] | null {
