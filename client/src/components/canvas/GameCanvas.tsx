@@ -105,13 +105,16 @@ const FOLLOW_OFFSET: Record<Direction, { dx: number; dy: number }> = {
 // `effect` field surviving at runtime (Zone only carries `audioIsolated`,
 // see mapLayers.ts's layerDataToLegacy), so `audioIsolated !== false` is the
 // same signal useProximity.ts's audioZoneAt already uses to decide "is this
-// actually isolating" — same convention, not a new one. Meeting rooms and
-// Focus areas are excluded even when isolating: meeting rooms already have
-// their own full-width label bar + video-call UI, and Focus areas are meant
-// to stay visually normal (per the room admin) — only the presence status/
-// DND changes there, not the lighting.
+// actually isolating" — same convention, not a new one. Meeting rooms are
+// excluded even when isolating: they already have their own full-width
+// label bar + video-call UI, and stacking this effect on top of that wasn't
+// asked for. Focus areas DO get this treatment (label hidden, dimming
+// applied) per the room admin — reversed from an earlier "stay visually
+// normal" pass once they saw a room full of repeated "Focus" pills in
+// practice; see the dimming color split below for why it's not identical
+// to Private Area's.
 function isPrivateZone(zone: Zone): boolean {
-  return zone.audioIsolated !== false && zone.type !== 'meeting' && zone.type !== 'focus';
+  return zone.audioIsolated !== false && zone.type !== 'meeting';
 }
 
 function hexToRgb(hex: string | undefined): [number, number, number] | null {
@@ -1669,7 +1672,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const pzy = spotlightZone.y * TILE_SIZE - cameraY;
       const pzw = spotlightZone.width * TILE_SIZE;
       const pzh = spotlightZone.height * TILE_SIZE;
-      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      // Focus area asked for a noticeably lighter dim than Private Area's —
+      // "abu-abu, sekitar 50%" (grayish, ~50%) rather than the near-black
+      // 0.55 private areas already use.
+      ctx.fillStyle = spotlightZone.type === 'focus' ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.55)';
       ctx.fillRect(0, 0, worldViewW, pzy); // above the zone
       ctx.fillRect(0, pzy + pzh, worldViewW, worldViewH - (pzy + pzh)); // below
       ctx.fillRect(0, pzy, pzx, pzh); // left of the zone
@@ -2099,11 +2105,16 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                   }
                 }}
                 title={owner ? (isMine ? 'Kursimu — klik untuk duduk di sini' : `Diklaim ${owner.name}`) : 'Klaim kursi ini'}
-                className={`w-7 h-7 flex items-center justify-center text-base rounded-full shadow-md border-2 transition-transform cursor-pointer hover:scale-110 ${
-                  isMine ? 'bg-emerald-400/90 border-emerald-600' : owner ? 'bg-amber-300/90 border-amber-600' : 'bg-white/90 border-gray-300'
+                // Unclaimed — deliberately invisible (no bg/border/icon, per
+                // the room admin): the hit area still works exactly like an
+                // Impassable tile's invisible barrier, just with no shape
+                // drawn. Once claimed, the owner's name pill below (already
+                // existed) plus this chair icon are the only visual cues.
+                className={`w-7 h-7 flex items-center justify-center text-base rounded-full transition-transform cursor-pointer ${
+                  owner ? `shadow-md border-2 hover:scale-110 ${isMine ? 'bg-emerald-400/90 border-emerald-600' : 'bg-amber-300/90 border-amber-600'}` : ''
                 }`}
               >
-                {owner ? '🪑' : '🔔'}
+                {owner ? '🪑' : ''}
               </button>
               {owner && (
                 <span className={`mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold text-white shadow whitespace-nowrap ${isMine ? 'bg-emerald-600/90' : 'bg-amber-600/90'}`}>

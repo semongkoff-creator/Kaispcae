@@ -721,9 +721,14 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
         continue;
       }
       const isPriv = a.effect === 'privateArea';
-      ctx.fillStyle = isPriv ? 'rgba(59,130,246,0.16)' : 'rgba(168,85,247,0.16)'; // blue=private, purple=map location
+      // Private Area's outline used to match Map Location's near-opaque
+      // 0.95 stroke — per the room admin it read as too loud/attention-
+      // grabbing while just browsing tile effects in the editor ("jangan
+      // terlalu keliatan... jadi biasa"), so it's toned down to blend in
+      // more; Map Location's styling is unchanged (not what was asked).
+      ctx.fillStyle = isPriv ? 'rgba(59,130,246,0.08)' : 'rgba(168,85,247,0.16)'; // blue=private, purple=map location
       ctx.fillRect(zx, zy, zw, zh);
-      ctx.strokeStyle = isPriv ? 'rgba(96,165,250,0.95)' : 'rgba(192,132,252,0.95)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(zx, zy, zw, zh); ctx.setLineDash([]);
+      ctx.strokeStyle = isPriv ? 'rgba(96,165,250,0.35)' : 'rgba(192,132,252,0.95)'; ctx.lineWidth = 1; ctx.setLineDash([5, 4]); ctx.strokeRect(zx, zy, zw, zh); ctx.setLineDash([]);
       // Same default inference as layerDataToLegacy: unset → isolates for
       // privateArea, doesn't for mapLocation — shown so the admin can see at
       // a glance which areas actually cut off audio at their boundary.
