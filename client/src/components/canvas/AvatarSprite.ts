@@ -90,7 +90,13 @@ export function drawAvatar(
   ctx.restore();
 
   // ─── Name label above avatar ────────────────────────────────
-  drawNameLabel(ctx, cx, cy - r - 9, name, isLocal);
+  // ZEP-style Spotlight — prefixed straight onto the name string (rather
+  // than a separate badge) so drawNameLabel's existing width-measurement/
+  // pill-sizing logic doesn't need touching; reaches everyone in the room
+  // regardless of distance, so this is the one glanceable "why can I hear
+  // them from all the way over here" cue.
+  const displayName = avatar.spotlightActive ? `📢 ${name}` : name;
+  drawNameLabel(ctx, cx, cy - r - 9, displayName, isLocal);
 
   // ─── Status badge below name ────────────────────────────────
   let nextBadgeY = cy - r - 23;

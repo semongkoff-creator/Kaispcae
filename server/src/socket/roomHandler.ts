@@ -4,7 +4,7 @@ import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH } from '@virtualmeet/shared';
 import {
-  addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerWorkMode, updatePlayerSitting,
+  addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerWorkMode, updatePlayerSpotlight, updatePlayerSitting,
   setCachedTiles, getCachedTiles, setCachedImpassableAreas, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
 } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';
@@ -1224,7 +1224,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   // clients update the badge and room:state carries it for late joiners.
   socket.on(SocketEvents.WORK_MODE_CHANGE, (data: { mode: WorkMode; zoneId?: string; reason?: string }) => {
     const room = currentRoom; if (!room) return;
-    const VALID: WorkMode[] = ['available', 'in_meeting', 'focus', 'lunch', 'away'];
+    const VALID: WorkMode[] = ['available', 'in_meeting', 'focus', 'lunch', 'away', 'wfh', 'break'];
     const mode: WorkMode = VALID.includes(data?.mode) ? data.mode : 'available';
     // Fitur 3B — a reason only ever makes sense alongside 'away' (the popup
     // that produces it only ever fires for that transition); never trust the
@@ -1244,6 +1244,30 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       room,
       detail: { to: mode, zoneId: data?.zoneId, reason },
     });
+  });
+
+  // ZEP-style Spotlight — admin-only, targets another player (unlike
+  // WORK_MODE_CHANGE above, which is self-service), so this needs the same
+  // permission-check + userId→socket resolution shape as PLAYER_KICK below,
+  // not the self-service shape. Broadcasts with io.to() (not socket.to()) so
+  // the TARGET's own client also learns about it — they never applied this
+  // locally themselves the way a self-service toggle would.
+  socket.on(SocketEvents.SPOTLIGHT_TOGGLE, async (data: { targetUserId: string; active: boolean }) => {
+    const room = currentRoom; if (!room) return;
+    const senderUid = findUserIdBySocket(socket.id);
+    const rs = getRoomAdmin(room);
+    if (!canAccess(rs, senderUid, 'presence:spotlight')) {
+      socket.emit('admin:error', { message: 'Only admins can toggle Spotlight' });
+      return;
+    }
+    const targetUserId = data?.targetUserId;
+    if (!targetUserId) return;
+    const targetSocketId = userSocketMap.get(targetUserId);
+    if (!targetSocketId) return;
+    const active = !!data.active;
+
+    await updatePlayerSpotlight(room, targetSocketId, active);
+    io.to(room).emit(SocketEvents.SPOTLIGHT_CHANGED, { id: targetSocketId, active });
   });
 
   socket.on(SocketEvents.PLAYER_SIT, (data: { sitting: boolean; x: number; y: number; direction: Avatar['direction']; seatFurnitureId?: string }) => {

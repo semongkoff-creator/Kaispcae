@@ -209,6 +209,19 @@ export async function updatePlayerHand(
   }
 }
 
+export async function updatePlayerSpotlight(
+  roomId: string,
+  playerId: string,
+  active: boolean,
+): Promise<void> {
+  const players = await getPlayers(roomId);
+  const player = players.find((p) => p.id === playerId);
+  if (player) {
+    player.spotlightActive = active || undefined;
+    await setPlayers(roomId, players);
+  }
+}
+
 export async function updatePlayerSitting(
   roomId: string,
   playerId: string,

@@ -86,6 +86,12 @@ export const FEATURE_MIN_ROLE = {
   // any sound already in the panel (default or custom) has no gate at all —
   // every real member can do that, same as sending a chat message.
   'soundboard:upload': 'admin',
+  // ZEP-style Spotlight — an admin toggles a specific player's presence to
+  // reach EVERYONE in the room regardless of distance/zone/DND (a PA
+  // announcement). Same tier as Kick: a room-wide broadcast override is at
+  // least as disruptive as removing someone, so it isn't left at Summon's
+  // lower staff+ bar.
+  'presence:spotlight': 'admin',
 } as const satisfies Record<string, Role>;
 
 export type FeatureKey = keyof typeof FEATURE_MIN_ROLE;

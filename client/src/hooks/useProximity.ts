@@ -71,6 +71,18 @@ export function useProximity(
     return Object.values(remotePlayers).map((p) => {
       const distanceTiles = calcDistanceTiles(localPlayer, p);
 
+      // ZEP-style Spotlight — an admin-toggled PA broadcast (see
+      // shared/permissions.ts's 'presence:spotlight'). Checked BEFORE the
+      // Focus/DND check below so it overrides DND in both directions: a
+      // spotlighted player reaches someone who's in Focus mode, same as a
+      // real announcement breaking through noise-cancelling headphones.
+      // viaZone:true forces full volume (calcGain would otherwise fade it
+      // with distance) — an announcement should be uniformly audible, not
+      // quieter the farther away you are.
+      if (p.spotlightActive) {
+        return { id: p.id, distanceTiles, visibility: 'full_visible' as VisibilityStatus, viaZone: true };
+      }
+
       // A3 Focus/DND — checked before table/zone/distance so it overrides every
       // auto-connect path (including a shared 'focus' zone: focus is meant to be
       // solo). If either side is in focus mode, they don't auto-connect.

@@ -86,6 +86,13 @@ export interface Avatar {
   // workMode === 'away'; cleared whenever workMode changes to anything else.
   // Never set for the auto 'in_meeting'/'focus' zone-driven states.
   awayReason?: string;
+  // ZEP-style Spotlight — an admin-toggled broadcast override (see
+  // shared/permissions.ts's 'presence:spotlight'). While true, EVERY other
+  // client's useProximity forces this player to 'full_visible' regardless of
+  // distance, zone membership, or either side's Focus/DND state — a PA
+  // announcement, not a proximity connection. Kept on the player record like
+  // workMode/handRaised so it's in room:state for late joiners.
+  spotlightActive?: boolean;
 }
 
 // A11 — presence status. 'in_meeting' + 'focus' are auto-set from the zone
@@ -260,6 +267,16 @@ export enum SocketEvents {
   // A3 — Focus/Public work mode. Same relay+persist shape as status/hand.
   WORK_MODE_CHANGE = 'work_mode:change',
   WORK_MODE_CHANGED = 'work_mode:changed',
+
+  // ZEP-style Spotlight — an ADMIN toggles this on a TARGET player (unlike
+  // WORK_MODE_CHANGE/PLAYER_HAND, which are self-service), so the payload
+  // carries a targetUserId and the permission check happens server-side
+  // (see shared/permissions.ts's 'presence:spotlight'). Broadcast to the
+  // WHOLE room including the target's own socket (not `socket.to()`,
+  // unlike work-mode/hand) since the target never applied this locally
+  // themselves — they only learn about it from this event.
+  SPOTLIGHT_TOGGLE = 'presence:spotlight_toggle',
+  SPOTLIGHT_CHANGED = 'presence:spotlight_changed',
 
   // A5 — official meeting (Lark VC) started/ended in a meeting zone. Server
   // broadcasts to the room so everyone sees the "join via Lark" banner.

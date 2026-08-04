@@ -219,6 +219,19 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       } as Avatar);
     });
 
+    // ZEP-style Spotlight — unlike WORK_MODE_CHANGED above, this is NOT
+    // skipped for the local player: the target never applied it themselves
+    // (an admin toggled it on them), so if WE are the target this is the
+    // only place our own spotlightActive ever gets set.
+    socket.on(SocketEvents.SPOTLIGHT_CHANGED, (data: { id: string; active: boolean }) => {
+      const state = useGameStore.getState();
+      if (data.id === state.localPlayerId) {
+        state.setLocalPlayer({ spotlightActive: data.active || undefined });
+      } else {
+        upsertPlayer({ id: data.id, spotlightActive: data.active || undefined } as Avatar);
+      }
+    });
+
     // A5 — an official meeting started/ended in a zone; drives the join banner.
     socket.on(SocketEvents.MEETING_STARTED, (d: { momRecordId: string; zoneId: string; url: string; startedBy: string }) => {
       useGameStore.getState().setMeetingStarted(d.zoneId, { momRecordId: d.momRecordId, url: d.url, startedBy: d.startedBy });
@@ -812,6 +825,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.WORK_MODE_CHANGE, { mode, zoneId, reason });
   }, []);
 
+  const emitSpotlight = useCallback((targetUserId: string, active: boolean) => {
+    socketRef.current?.emit(SocketEvents.SPOTLIGHT_TOGGLE, { targetUserId, active });
+  }, []);
+
   // A4 — free double-click teleport. Server validates + re-broadcasts as
   // PLAYER_TELEPORTED so everyone snaps.
   const emitTeleportTo = useCallback((x: number, y: number, direction: Avatar['direction']) => {
@@ -1071,5 +1088,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay };
+  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight };
 }

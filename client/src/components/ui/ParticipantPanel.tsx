@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill } from 'react-bootstrap-icons';
+import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill, MegaphoneFill } from 'react-bootstrap-icons';
 import { roleAtLeast, Role, WorkMode } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
@@ -38,6 +38,10 @@ interface ParticipantPanelProps {
   // Temporary removal from the room, admin+ only (see shared/permissions.ts's
   // 'room:kick') — not a ban, the target can rejoin any time.
   emitKick?: (targetUserId: string) => void;
+  // ZEP-style Spotlight — admin+ only (see shared/permissions.ts's
+  // 'presence:spotlight'). Reaches everyone in the room regardless of
+  // distance/zone/DND once active.
+  emitSpotlight?: (targetUserId: string, active: boolean) => void;
   // Bug 12 — open state is now controlled by the parent's single-active-panel
   // coordinator (was local), so opening this closes any other panel and vice
   // versa. onToggle flips it (header click); onClose forces it shut.
@@ -48,7 +52,7 @@ interface ParticipantPanelProps {
 
 const MAX_VIDEO_THUMBS = 3;
 
-export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, emitKick, open, onToggle, onClose }: ParticipantPanelProps) {
+export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, emitKick, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
@@ -72,6 +76,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
     return 'member';
   };
   const canKick = roleAtLeast(localRole, 'admin');
+  const canSpotlight = roleAtLeast(localRole, 'admin');
 
   const remotePlayers = Object.values(playerRecords);
   const totalOnline = remotePlayers.length + 1;
@@ -130,6 +135,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
               handRaised={localPlayer.handRaised}
               workMode={localPlayer.workMode}
               awayReason={localPlayer.awayReason}
+              spotlightActive={localPlayer.spotlightActive}
               speaking={localSpeaking}
               role={localRole}
               isLocal
@@ -144,6 +150,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
                 handRaised={p.handRaised}
                 workMode={p.workMode}
                 awayReason={p.awayReason}
+                spotlightActive={p.spotlightActive}
                 speaking={speakingPlayers.has(p.id)}
                 role={roleOf(p.userId)}
                 isLocal={false}
@@ -155,6 +162,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
                 onSlap={() => emitSlap(p.name)}
                 onMessage={p.userId && onStartDm ? () => onStartDm(p.userId!) : undefined}
                 onKick={canKick && p.userId && emitKick ? () => emitKick(p.userId!) : undefined}
+                onSpotlight={canSpotlight && p.userId && emitSpotlight ? () => emitSpotlight(p.userId!, !p.spotlightActive) : undefined}
               />
             ))}
           </div>
@@ -170,6 +178,7 @@ function ParticipantRow({
   handRaised,
   workMode,
   awayReason,
+  spotlightActive,
   speaking,
   role,
   isLocal,
@@ -182,6 +191,7 @@ function ParticipantRow({
   onSlap,
   onMessage,
   onKick,
+  onSpotlight,
 }: {
   name: string;
   color: string;
@@ -196,6 +206,11 @@ function ParticipantRow({
   // under the name ("Away · External Meeting") only alongside workMode
   // === 'away'; undefined for every other status (never shown otherwise).
   awayReason?: string;
+  // ZEP-style Spotlight — broadcasts to everyone regardless of distance/
+  // zone/DND while true (see shared/permissions.ts's 'presence:spotlight').
+  // Shown on every row (including the local one) since it's meaningful
+  // whoever is spotlighted; only admins get the toggle action (onSpotlight).
+  spotlightActive?: boolean;
   speaking?: boolean;
   // Live room role (see gameStore roleOf) — renders a 👑 owner / 🛡️ admin
   // badge by the name; 'staff'/'member' show none.
@@ -220,6 +235,10 @@ function ParticipantRow({
   // Temporary removal from the room — undefined (not just a no-op) when I'm
   // below admin, same "hide, don't disable" convention as onSummon above.
   onKick?: () => void;
+  // Toggles Spotlight on/off for this row's player — undefined (not just a
+  // no-op) below admin, same convention as onKick. Never present on the
+  // local row (isLocal never gets action props, only the badge above).
+  onSpotlight?: () => void;
 }) {
   // Menu coordinates in viewport space, measured from the trigger when it
   // opens. null = closed.
@@ -272,7 +291,7 @@ function ParticipantRow({
   // leaving it open over a row whose state just changed reads as if the
   // click didn't register.
   const pick = (fn?: () => void) => () => { closeMenu(); fn?.(); };
-  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onMessage || onKick);
+  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onMessage || onKick || onSpotlight);
 
   return (
     <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50 dark:bg-gray-700/50">
@@ -292,6 +311,7 @@ function ParticipantRow({
       <div className="flex items-center gap-1 shrink-0">
         {/* Live presence cues, glanceable per row — same signals shown over
             the avatar (raise-hand ✋, presence badge) and video tile (speaking 🔊). */}
+        {spotlightActive && <MegaphoneFill title="Spotlight aktif — terdengar/terlihat seluruh room" size={11} className="text-amber-500 shrink-0" />}
         {handRaised && <span title="Hand raised" className="text-[11px] leading-none animate-bounce">✋</span>}
         {workMode === 'focus' && <Headphones title="Fokus (jangan diganggu)" size={12} className="text-purple-500 shrink-0" />}
         {workMode && workMode !== 'focus' && (
@@ -356,6 +376,13 @@ function ParticipantRow({
                 )}
                 {onMessage && (
                   <MenuItem icon={<ChatDotsFill size={11} />} label="Kirim pesan" onClick={pick(onMessage)} />
+                )}
+                {onSpotlight && (
+                  <MenuItem
+                    icon={<MegaphoneFill size={11} />}
+                    label={spotlightActive ? 'Matikan Spotlight' : 'Nyalakan Spotlight'}
+                    onClick={pick(onSpotlight)}
+                  />
                 )}
                 {onKick && (
                   <>
