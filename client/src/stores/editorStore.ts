@@ -562,10 +562,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
       effectsDirty = true; strokeChanged = true; return true;
     },
     resetAllTileEffects: () => {
-      const d = get().doc; if (!d || d.tileEffects.length === 0) return;
+      // Effects palette items aren't all stored the same way — point stamps
+      // (impassable/door/sittable/portal/startingPoint/claimableSeat) live in
+      // tileEffects, but the drag-drawn rectangle effects (impassableArea/
+      // privateArea/mapLocation) live in areas instead. The confirm dialog
+      // promises to clear "SEMUA tile effect", so both need wiping — a
+      // room's Impassable Area used to survive this button entirely.
+      const d = get().doc; if (!d || (d.tileEffects.length === 0 && d.areas.length === 0)) return;
       const snap = snapshot();
       d.tileEffects = [];
-      effectsDirty = true; pushHistory(snap); commit();
+      d.areas = [];
+      effectsDirty = true; areasDirty = true; pushHistory(snap); commit();
     },
     doorEffectAt: (x, y) => {
       const d = get().doc; if (!d) return null;
