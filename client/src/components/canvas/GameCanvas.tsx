@@ -117,14 +117,6 @@ function isPrivateZone(zone: Zone): boolean {
   return zone.audioIsolated !== false && zone.type !== 'meeting';
 }
 
-function hexToRgb(hex: string | undefined): [number, number, number] | null {
-  if (!hex) return null;
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
-  if (!m) return null;
-  const n = parseInt(m[1], 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
   const words = text.split(' ');
   const lines: string[] = [];
@@ -1141,24 +1133,26 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Zone overlays — boundary fill/outline only. The name/label text itself
-    // is a DOM overlay (see zoneBannerRefs below), not drawn on canvas, so it
-    // stays crisp and easy to restyle; zones without a `label` still get the
-    // plain centered canvas text they always had, for backward compatibility.
+    // Zone name fallback — the name/label text itself is a DOM overlay (see
+    // zoneBannerRefs below), not drawn on canvas, so it stays crisp and easy
+    // to restyle; zones without a `label` still get the plain centered
+    // canvas text they always had, for backward compatibility.
+    //
+    // Bug — this used to ALSO draw a tinted fill + dashed outline rectangle
+    // for every zone's full boundary, unconditionally, during real gameplay.
+    // That box is genuinely useful in the Room Editor (RoomEditorPage.tsx
+    // has its own, separate copy of this same idea, admin-only) so an admin
+    // can see exactly where an area's edges are while drawing it — but
+    // players were seeing it too, permanently, behind every desk cluster
+    // zone with no explicit color (defaulting to a cornflower-blue tint),
+    // which read as a leftover debug overlay rather than an intentional
+    // effect. Removed for gameplay; the editor's own overlay is untouched.
     const zones = zonesRef.current;
     for (const zone of zones) {
       const zx = zone.x * TILE_SIZE - cameraX;
       const zy = zone.y * TILE_SIZE - cameraY;
       const zw = zone.width * TILE_SIZE;
       const zh = zone.height * TILE_SIZE;
-      const [zr, zg, zb] = hexToRgb(zone.color) ?? [100, 149, 237];
-      ctx.fillStyle = `rgba(${zr}, ${zg}, ${zb}, 0.08)`;
-      ctx.fillRect(zx, zy, zw, zh);
-      ctx.strokeStyle = `rgba(${zr}, ${zg}, ${zb}, 0.35)`;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.strokeRect(zx, zy, zw, zh);
-      ctx.setLineDash([]);
       // ZEP-style spotlight follow-up — Private Area never shows a name
       // (see isPrivateZone's own doc comment); this is the legacy no-label
       // fallback text, so it needs the same exclusion the DOM pill below
