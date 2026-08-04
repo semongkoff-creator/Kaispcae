@@ -365,6 +365,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   }, [tiles]);
   const claimableSeatsRef = useRef(claimableSeats);
   const claimSeatMarkerRefs = useRef(new Map<string, HTMLDivElement>());
+  // ZEP-style confirm-before-claim — clicking a seat that isn't already
+  // yours used to fire emitClaimSeat immediately on click; per the room
+  // admin, EVERY claim (whether the seat looks free or is shown taken by
+  // someone else) should show a confirm popup first, not claim on a bare
+  // click. Null = no popup showing. ownerName is only set for the
+  // "already taken" wording; a free-looking seat gets the plain variant.
+  const [pendingSeatClaim, setPendingSeatClaim] = useState<{ seatId: string; ownerName: string | null } | null>(null);
   // Live ownership — reactive (not just .getState()) so a marker's label/
   // click-behavior updates the instant someone else claims or releases it.
   const seatClaims = useGameStore((s) => s.seatClaims);
@@ -2065,7 +2072,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                 if (el) claimSeatMarkerRefs.current.set(seat.id, el);
                 else claimSeatMarkerRefs.current.delete(seat.id);
               }}
-              className="absolute top-0 left-0 will-change-transform origin-top-left pointer-events-auto flex flex-col items-center -mt-3.5 -ml-3.5"
+              className="absolute top-0 left-0 will-change-transform origin-top-left pointer-events-auto flex flex-col items-center -mt-3.5 -ml-3.5 group"
             >
               <button
                 data-seat-id={seat.id}
@@ -2095,26 +2102,34 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                     store.setLocalPlayer({ x: cx, y: cy, direction: sitDirection, isMoving: false, isSitting: true, seatFurnitureId: seat.id });
                     emitSit(true, cx, cy, sitDirection, seat.id);
                   } else {
-                    emitClaimSeat(seat.id);
+                    // ZEP-style confirm — see pendingSeatClaim's own doc
+                    // comment; a bare click no longer claims directly.
+                    setPendingSeatClaim({ seatId: seat.id, ownerName: owner?.name ?? null });
                   }
                 }}
                 title={owner ? (isMine ? 'Kursimu — klik untuk duduk di sini' : `Diklaim ${owner.name}`) : 'Klaim kursi ini'}
                 // Unclaimed — deliberately invisible (no bg/border/icon, per
                 // the room admin): the hit area still works exactly like an
                 // Impassable tile's invisible barrier, just with no shape
-                // drawn. Once claimed, the owner's name pill below (already
-                // existed) plus this chair icon are the only visual cues.
-                className={`w-7 h-7 flex items-center justify-center text-base rounded-full transition-transform cursor-pointer ${
-                  owner ? `shadow-md border-2 hover:scale-110 ${isMine ? 'bg-emerald-400/90 border-emerald-600' : 'bg-amber-300/90 border-amber-600'}` : ''
+                // drawn. Once claimed, this same button also carries the
+                // "Kamu"/owner-name text (merged in — see the follow-up
+                // comment below) instead of a separate stacked pill, so a
+                // claimed seat is ONE small label, not three stacked pieces.
+                className={`h-7 px-2 flex items-center justify-center gap-1 text-xs font-semibold rounded-full transition-transform cursor-pointer whitespace-nowrap ${
+                  owner ? `shadow-md border-2 hover:scale-105 text-white ${isMine ? 'bg-emerald-500/95 border-emerald-600' : 'bg-amber-500/95 border-amber-600'}` : 'w-7'
                 }`}
               >
-                {owner ? '🪑' : ''}
+                {owner ? `🪑 ${isMine ? 'Kamu' : owner.name}` : ''}
               </button>
-              {owner && (
-                <span className={`mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold text-white shadow whitespace-nowrap ${isMine ? 'bg-emerald-600/90' : 'bg-amber-600/90'}`}>
-                  {isMine ? 'Kamu' : owner.name}
-                </span>
-              )}
+              {/* Follow-up — used to be a separate always-visible "Kamu" pill
+                  PLUS this release button stacked below it, permanently in
+                  view over every claimed seat. Merged the pill's text into
+                  the seat button itself above, and this release control now
+                  only exists in the DOM/is only clickable while the marker
+                  group is hovered (group-hover, opacity-0 by default) —
+                  the release action is still one click away, just not a
+                  permanent fixture cluttering the view of a seat you're not
+                  even looking at right now. */}
               {isMine && (
                 <button
                   data-release-seat-id={seat.id}
@@ -2131,7 +2146,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                     emitReleaseSeat(seat.id);
                   }}
                   title="Lepas kursi"
-                  className="mt-0.5 w-4 h-4 flex items-center justify-center text-[9px] rounded-full bg-black/50 hover:bg-black/70 text-white cursor-pointer"
+                  className="mt-0.5 w-4 h-4 flex items-center justify-center text-[9px] rounded-full bg-black/50 hover:bg-black/70 text-white cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
                 >
                   ✕
                 </button>
@@ -2140,6 +2155,32 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           );
         })}
       </div>
+
+      {pendingSeatClaim && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-auto">
+          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
+            <p className="text-gray-900 dark:text-gray-100 text-sm mb-4">
+              {pendingSeatClaim.ownerName
+                ? <>Kursi ini sudah diklaim <span className="font-semibold">{pendingSeatClaim.ownerName}</span>. Tetap ingin menjadikannya kursimu?</>
+                : 'Klaim kursi ini sebagai milikmu?'}
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => setPendingSeatClaim(null)}
+                className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 text-sm cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                onClick={() => { emitClaimSeat(pendingSeatClaim.seatId); setPendingSeatClaim(null); }}
+                className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm cursor-pointer"
+              >
+                Konfirmasi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

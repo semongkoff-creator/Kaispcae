@@ -842,7 +842,7 @@ export const SOURCE_TILE_SIZE = 32;
 // reception strip spanning the bottom.
 export const MAP_WIDTH = 50;
 export const MAP_HEIGHT = 36;
-export const PLAYER_SPEED = 150; // pixels per second
+export const PLAYER_SPEED = 175; // pixels per second — was 150, nudged up per feedback
 // Run (hold R while moving) — no dedicated run animation frames exist in
 // the LimeZu Character Generator pack (only idle/walk rows), so running is
 // the walk animation cycled faster (see AvatarSprite.ts's RUN_FRAME_MS)
