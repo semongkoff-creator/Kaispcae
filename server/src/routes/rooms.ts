@@ -34,6 +34,19 @@ export function setIo(io: Server): void {
   ioRef = io;
 }
 
+// The Lobby's "X / 50 online" count used to be `_count.members` — a DB row
+// count of everyone EVER granted membership (e.g. approved once), not who's
+// actually connected right now. A brand-new room with one approved member
+// and zero live players showed "1 online" and just sat there wrong until
+// some unrelated join/leave elsewhere happened to fire broadcastRoomCount
+// (roomHandler.ts) and overwrite it — "not real time" exactly as reported.
+// This mirrors that same live source (io.sockets.adapter.rooms, the actual
+// Socket.IO room membership) so the very first paint is already correct,
+// not just eventually-consistent after the first live update lands.
+function getLivePlayerCount(slug: string): number {
+  return ioRef?.sockets.adapter.rooms.get(slug)?.size ?? 0;
+}
+
 function generateSlug(name: string): string {
   let slug = name
     .toLowerCase()
@@ -53,7 +66,6 @@ rooms.get('/rooms', async (_req, res: Response) => {
     const roomList = await prisma.room.findMany({
       where: { isPublic: true },
       include: {
-        _count: { select: { members: true } },
         owner: { select: { displayName: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -70,7 +82,7 @@ rooms.get('/rooms', async (_req, res: Response) => {
         slug: r.slug,
         ownerId: r.ownerId,
         ownerDisplayName: r.owner?.displayName || 'Unknown',
-        playerCount: r._count.members,
+        playerCount: getLivePlayerCount(r.slug),
         maxPlayers: r.maxPlayers,
         theme: r.theme,
         createdAt: r.createdAt,
@@ -90,7 +102,6 @@ rooms.get('/rooms/:slug', async (req, res: Response) => {
     const room = await prisma.room.findUnique({
       where: { slug: req.params.slug },
       include: {
-        _count: { select: { members: true } },
         owner: { select: { displayName: true } },
       },
     });
@@ -105,7 +116,7 @@ rooms.get('/rooms/:slug', async (req, res: Response) => {
       slug: room.slug,
       ownerId: room.ownerId,
       ownerDisplayName: room.owner?.displayName || 'Unknown',
-      playerCount: room._count.members,
+      playerCount: getLivePlayerCount(room.slug),
       maxPlayers: room.maxPlayers,
       isPublic: room.isPublic,
       theme: room.theme,

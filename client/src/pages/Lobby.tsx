@@ -280,14 +280,15 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
               return (
               <div
                 key={room.id}
+                onClick={handleJoinClick}
                 className={`rounded-xl p-5 border shadow-sm transition-all ${
                   isConfirmingDelete
                     ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 ring-2 ring-red-200 dark:ring-red-800'
-                    : 'bg-white dark:bg-gray-800 border-purple-100 dark:border-gray-700 hover:border-purple-300 hover:shadow-md'
+                    : 'bg-white dark:bg-gray-800 border-purple-100 dark:border-gray-700 hover:border-purple-300 hover:shadow-md cursor-pointer'
                 }`}
               >
-                <div className="flex items-start justify-between mb-1" onClick={handleJoinClick}>
-                  <h3 className={`font-semibold text-sm text-gray-900 dark:text-gray-100 inline-flex items-center gap-1.5 ${isConfirmingDelete ? '' : 'cursor-pointer'}`}>
+                <div className="flex items-start justify-between mb-1">
+                  <h3 className="font-semibold text-sm text-gray-900 dark:text-gray-100 inline-flex items-center gap-1.5">
                     {room.locked && (
                       <span title="Locked — knock to enter" className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 shrink-0">
                         <LockFill size={9} />
@@ -302,13 +303,13 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-red-600 dark:text-red-400 font-medium">Delete this room permanently?</span>
                     <div className="flex gap-2">
-                      <button onClick={() => { handleDelete(room.slug); setDeletingSlug(null); }} className="text-[10px] font-semibold text-white bg-red-500 hover:bg-red-600 px-2 py-1 rounded cursor-pointer">Confirm</button>
-                      <button onClick={() => setDeletingSlug(null)} className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 px-2 py-1 rounded cursor-pointer">Cancel</button>
+                      <button onClick={(e) => { e.stopPropagation(); handleDelete(room.slug); setDeletingSlug(null); }} className="text-[10px] font-semibold text-white bg-red-500 hover:bg-red-600 px-2 py-1 rounded cursor-pointer">Confirm</button>
+                      <button onClick={(e) => { e.stopPropagation(); setDeletingSlug(null); }} className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 px-2 py-1 rounded cursor-pointer">Cancel</button>
                     </div>
                   </div>
                 ) : (
                   <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                    <span onClick={handleJoinClick} className="cursor-pointer">{room.playerCount} / {room.maxPlayers} online</span>
+                    <span>{room.playerCount} / {room.maxPlayers} online</span>
                     {room.ownerId === user.id && (
                       <button onClick={(e) => { e.stopPropagation(); setDeletingSlug(room.slug); }} className="text-red-500/70 hover:text-red-500 text-xs cursor-pointer inline-flex items-center gap-1"><TrashFill size={11} /> Delete</button>
                     )}
