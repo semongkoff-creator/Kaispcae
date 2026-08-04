@@ -103,6 +103,19 @@ function markSent(messageId: string): void {
 // prefix when the user has no valid token (manual-login user, expired+dead
 // refresh, or a Lark error). Either way the returned message_id is recorded for
 // anti-echo.
+// The in-app chat input's mention autocomplete stores "@[Name](userId)" in
+// the raw message text (see client/src/components/ui/ChatPanel.tsx's
+// insertMention) — this app's own chat resolves it back to a highlighted
+// "@Name" at RENDER time (client/src/utils/mentions.tsx), never storing the
+// plain form. Lark has no idea about that token format, so without this it
+// would receive the raw "@[Rizal Muzaki](cmabc123...) tes" literally. Same
+// pattern, duplicated rather than shared, since mentions.tsx is a client
+// (JSX) module the server can't import.
+const MENTION_TOKEN = /@\[([^\]]+)\]\(([^)]+)\)/g;
+function stripMentionTokens(text: string): string {
+  return text.replace(MENTION_TOKEN, '@$1');
+}
+
 export async function relayChannelMessageToLark(
   prisma: PrismaClient,
   channel: { roomId: string; isDefault: boolean },
@@ -111,7 +124,7 @@ export async function relayChannelMessageToLark(
   text: string,
 ): Promise<void> {
   if (!channel.isDefault) return;
-  const trimmed = (text || '').trim();
+  const trimmed = stripMentionTokens((text || '').trim());
   if (!trimmed) return; // attachment-only sends have nothing to relay
   const map = await prisma.roomChatMap.findUnique({ where: { roomId: channel.roomId } });
   if (!map) {

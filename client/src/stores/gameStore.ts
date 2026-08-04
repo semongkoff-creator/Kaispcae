@@ -44,7 +44,8 @@ export type PanelId =
   | 'larkAttendance'
   | 'messenger'
   | 'joinQueue'
-  | 'soundboard';
+  | 'soundboard'
+  | 'larkSync';
 
 // Keeps the feed skimmable and bounds its memory — old entries just fall
 // off the end rather than needing a separate pruning pass (see

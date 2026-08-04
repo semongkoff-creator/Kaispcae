@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane } from 'react-bootstrap-icons';
+import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -87,6 +87,12 @@ interface SidebarProps {
   larkAttendanceActive: boolean;
   onToggleLarkAttendance: () => void;
 
+  // Bagian 4 — admin-only picker binding this room's #general channel to a
+  // Lark group (see LarkSyncPanel.tsx). Same isAdmin gate as the join-queue
+  // entry above, not isWorkspaceAdmin — this is a per-room setting.
+  larkSyncActive: boolean;
+  onToggleLarkSync: () => void;
+
   // Messenger — the full-screen chat surface. The floating ChatPanel stays
   // for chatting while walking around; this is the one you sit down in.
   messengerViewActive: boolean;
@@ -173,6 +179,8 @@ export function Sidebar({
   onToggleAttendanceView,
   larkAttendanceActive,
   onToggleLarkAttendance,
+  larkSyncActive,
+  onToggleLarkSync,
   messengerViewActive,
   onToggleMessengerView,
   joinQueueActive,
@@ -282,6 +290,9 @@ export function Sidebar({
             {/* A12 — new Lark-backed attendance panel (check-in auto on login,
                 checkout here or in the Lark app). */}
             <MenuRow icon={<ClockHistory size={15} />} label={larkAttendanceActive ? 'Tutup Absensi' : 'Absensi'} active={larkAttendanceActive} onClick={closeAnd(onToggleLarkAttendance)} />
+            {isAdmin && (
+              <MenuRow icon={<ArrowLeftRight size={15} />} label={larkSyncActive ? 'Tutup Lark Sync' : 'Lark Sync'} active={larkSyncActive} onClick={closeAnd(onToggleLarkSync)} />
+            )}
             {isWorkspaceAdmin && (
               <MenuRow icon={<ShieldLock size={15} />} label={adminViewActive ? 'Tutup Konsol Admin' : 'Konsol Admin'} active={adminViewActive} onClick={closeAnd(onToggleAdminView)} />
             )}

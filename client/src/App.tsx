@@ -14,6 +14,7 @@ import { MeetingView } from './components/ui/MeetingView';
 import { MeetingControl } from './components/ui/MeetingControl';
 import { DailyTaskPanel } from './components/ui/DailyTaskPanel';
 import { LeavePanel } from './components/ui/LeavePanel';
+import { LarkSyncPanel } from './components/ui/LarkSyncPanel';
 import { AdminConsole } from './admin/AdminConsole';
 import { CalendarApp } from './components/Calendar/CalendarApp';
 import { AttendanceApp } from './components/Attendance/AttendanceApp';
@@ -659,6 +660,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const calendarViewActive = activePanel === 'calendar';
   const attendanceViewActive = activePanel === 'attendance';
   const larkAttendanceActive = activePanel === 'larkAttendance';
+  const larkSyncActive = activePanel === 'larkSync';
   const messengerViewActive = activePanel === 'messenger';
   // Join-approval queue (admin). pendingJoinCount only drives the menu badge;
   // the panel refetches from the server when opened, so a stale count can
@@ -687,7 +689,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // True while any full-screen suite module covers the room. Room affordances
   // (hotkeys, the floating Chat button) must stand down while it's open —
   // they belong to the office, not to a spreadsheet or a document.
-  const moduleOpen = dailyTaskActive || leaveActive || calendarViewActive || adminViewActive || attendanceViewActive || messengerViewActive;
+  const moduleOpen = dailyTaskActive || leaveActive || calendarViewActive || adminViewActive || attendanceViewActive || messengerViewActive || larkSyncActive;
 
   // Tab for admin panel. (The old E-for-editor hotkey went with the retired
   // overlay editor — Potong 7; editing now lives on the /?roomEditor= page.)
@@ -1386,6 +1388,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleAttendanceView={() => openPanel('attendance')}
         larkAttendanceActive={larkAttendanceActive}
         onToggleLarkAttendance={() => openPanel('larkAttendance')}
+        larkSyncActive={larkSyncActive}
+        onToggleLarkSync={() => openPanel('larkSync')}
         messengerViewActive={messengerViewActive}
         onToggleMessengerView={() => openPanel('messenger')}
         joinQueueActive={joinQueueActive}
@@ -1453,6 +1457,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {adminViewActive && <AdminConsole currentUser={currentUser} onClose={closePanel} />}
       {attendanceViewActive && <AttendanceApp onClose={closePanel} />}
       {larkAttendanceActive && <LarkAttendancePanel onClose={closePanel} />}
+      {larkSyncActive && <LarkSyncPanel roomSlug={roomSlug} onClose={closePanel} />}
       {joinQueueActive && isAdmin && (
         <JoinRequestPanel roomSlug={roomSlug} onClose={closePanel} />
       )}
