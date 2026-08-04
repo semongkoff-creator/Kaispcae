@@ -861,7 +861,15 @@ export interface NudgeEvent {
 
 // Proximity / WebRTC constants
 export const PROXIMITY_THRESHOLD = 3; // tiles — within 3 tiles: full video + audio
-export const PROXIMITY_THRESHOLD_PX = 96; // 3 tiles × 32px
+// Bug: this used to be a hardcoded `96` ("3 tiles × 32px") — a leftover from
+// before the grid was rescaled from 32px to 48px tiles (see TILE_SIZE
+// above). The actual connect distance (useProximity.ts's calcDistanceTiles,
+// which divides by TILE_SIZE) was already correct at 3×48=144px; only this
+// VISUAL ring (GameCanvas.tsx's "Proximity ring") was still drawn at the
+// stale 96px radius — 33% smaller than where players actually connect, so
+// someone could look clearly outside the ring and still be in a call.
+// Derived from PROXIMITY_THRESHOLD so the two can never drift apart again.
+export const PROXIMITY_THRESHOLD_PX = PROXIMITY_THRESHOLD * TILE_SIZE;
 // §6 (RTC upgrade) — beyond PROXIMITY_THRESHOLD but within this: still
 // connected, rendered translucent, audio faded near-zero. The spec's own
 // example numbers (6/10 tiles) were written for an unspecified room scale;
