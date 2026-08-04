@@ -25,6 +25,19 @@ textarea {
   -webkit-user-select: text;
 }
 
+/* Every canvas in this app (game view, Room Editor, avatar preview) is
+   pixel art scaled up with nearest-neighbor — `image-rendering: pixelated`
+   was already set inline on each one (a React style object can't declare a
+   property twice), but that alone skips older Firefox, which only ever
+   understood the vendor-prefixed `-moz-crisp-edges` value and silently
+   falls back to smooth/bilinear scaling without it. A real CSS rule (not
+   an inline style) is how a browser is supposed to pick whichever of
+   several `image-rendering` values it actually understands. */
+canvas {
+  image-rendering: -moz-crisp-edges;
+  image-rendering: pixelated;
+}
+
 /* Soft entrance for transient UI (video tiles, toasts) — the `animate-fade-in`
    utility is referenced in several components (VideoGrid, the nudge toast in
    App.tsx) but was never actually defined, so it was silently a no-op until

@@ -252,9 +252,14 @@ function drawLayeredAvatar(
   const srcY = (row - 1) * FRAME_SIZE + FRAME_ROW_Y_OFFSET;
 
   // 'left'-facing sit mirrors the 'right' pose (see SIT_ROW's doc comment) —
-  // flip around the sprite's own horizontal center (cx), not the canvas
-  // origin, so the mirrored frame lands in the exact same screen spot.
-  if (flipX) { ctx.save(); ctx.translate(cx, 0); ctx.scale(-1, 1); ctx.translate(-cx, 0); }
+  // flip around the sprite's own horizontal center, not the canvas origin,
+  // so the mirrored frame lands in the exact same screen spot. Pivots on
+  // dx's own rounded center (dx + displaySize/2), NOT the raw unrounded cx
+  // — cx is a continuous float (player position), so using it directly
+  // here reintroduced a sub-pixel offset on top of dx's already-rounded
+  // value, undoing the whole-pixel alignment dx was computed for in the
+  // first place (only visible on the sit+face-left pose).
+  if (flipX) { const pivotX = dx + displaySize / 2; ctx.save(); ctx.translate(pivotX, 0); ctx.scale(-1, 1); ctx.translate(-pivotX, 0); }
 
   let drewAny = false;
   for (const [category, field] of LAYER_CATEGORIES) {

@@ -776,11 +776,23 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
     const rect = container.getBoundingClientRect();
+    // Bug — a fluid (w-full h-full) container's getBoundingClientRect() is
+    // routinely fractional (e.g. 843.66px), and canvas.width/height (the
+    // backing store) always truncates to an integer regardless. Multiplying
+    // the RAW fractional rect by dpr before that truncation let the backing
+    // store and the CSS box (canvas.style.width/height, set from the same
+    // raw fractional rect) drift by a sub-pixel from each other — the
+    // browser then has to resample the canvas to fit its actual laid-out
+    // box, softening every already-crisp nearest-neighbor pixel. Rounding
+    // FIRST makes both sides agree exactly, so no implicit resampling ever
+    // happens between backing store and display box.
+    const cssWidth = Math.round(rect.width);
+    const cssHeight = Math.round(rect.height);
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    canvas.style.width = `${rect.width}px`;
-    canvas.style.height = `${rect.height}px`;
+    canvas.width = cssWidth * dpr;
+    canvas.height = cssHeight * dpr;
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
     const ctx = canvas.getContext('2d');
     if (ctx) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
