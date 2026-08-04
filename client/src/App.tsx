@@ -1988,7 +1988,7 @@ function MainApp() {
   if (loading) {
     return (
       <div className="w-screen h-screen bg-gradient-to-br from-white to-purple-50 flex items-center justify-center">
-        <p className="text-gray-500 text-sm">Loading VirtualMeet...</p>
+        <p className="text-gray-500 text-sm">Loading KaiSpace...</p>
       </div>
     );
   }
@@ -2039,7 +2039,7 @@ function MainApp() {
   if (!isRoomReady) {
     return (
       <div className="w-screen h-screen bg-gradient-to-br from-white to-purple-50 flex items-center justify-center">
-        <p className="text-gray-500 text-xl">Loading VirtualMeet…</p>
+        <p className="text-gray-500 text-xl">Loading KaiSpace…</p>
       </div>
     );
   }

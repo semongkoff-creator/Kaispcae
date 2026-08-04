@@ -20,7 +20,7 @@ export function NameModal({ onSubmit }: NameModalProps) {
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 w-full max-w-sm shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700">
-        <h2 className="text-gray-900 dark:text-gray-100 text-xl font-bold mb-2">Welcome to VirtualMeet</h2>
+        <h2 className="text-gray-900 dark:text-gray-100 text-xl font-bold mb-2">Welcome to KaiSpace</h2>
         <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">Enter your display name to join the room.</p>
 
         <input
