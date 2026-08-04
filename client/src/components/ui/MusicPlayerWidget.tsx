@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 
 interface MusicPlayerWidgetProps {
@@ -42,24 +42,43 @@ export function MusicPlayerWidget({ zoneId }: MusicPlayerWidgetProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.pausedAt, videoId]);
 
-  if (!zoneId || !current || !videoId) return null;
+  // Bug — this used to be a plain `const` recomputed on every render (via
+  // Date.now() while playing), baked straight into the iframe's `src`. Since
+  // `key` only changes on an actual track change, React doesn't remount for
+  // a pause/resume — it just patches the existing iframe's `src` attribute,
+  // and setting .src on an already-live iframe forces a full reload/
+  // navigation. That reload spun up a BRAND NEW YouTube player (autoplay=1)
+  // that started playing from scratch, racing the pauseVideo postMessage
+  // sent in the very same render — the reload always won, so a chat "Lagu
+  // sudah dijeda" confirmation never actually paused anything, and ANY
+  // MUSIC_STATE broadcast for the zone (someone else's !play, a resume, …)
+  // could unexpectedly restart playback for everyone. Memoized on videoId
+  // ALONE — computed once when a track first appears, never touched again
+  // by a later pause/resume — so postMessage is the only thing that ever
+  // controls play/pause after the initial embed.
+  const src = useMemo(() => {
+    if (!current || !videoId) return null;
+    // Elapsed playback at embed time — a client that joins the zone (or
+    // just had the tab backgrounded) after a track already started embeds
+    // roughly in sync instead of from 0:00. A tab that joins the zone
+    // mid-song gets this same MusicSessionState pushed the moment
+    // ZONE_ENTER is handled (see zoneHandler.ts's sendMusicStateToSocket),
+    // so audio starts on its own — no click, no popup to dismiss.
+    const elapsedSec = current.pausedAt !== null
+      ? Math.max(0, Math.floor((current.pausedAt - current.startedAt) / 1000))
+      : Math.max(0, Math.floor((Date.now() - current.startedAt) / 1000));
+    return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=0&rel=0&enablejsapi=1&start=${elapsedSec}`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoId]);
 
-  // Elapsed playback at embed time — a client that joins the zone (or just
-  // had the tab backgrounded) after a track already started embeds roughly
-  // in sync instead of from 0:00. A tab that joins the zone mid-song gets
-  // this same MusicSessionState pushed the moment ZONE_ENTER is handled (see
-  // zoneHandler.ts's sendMusicStateToSocket), so audio starts on its own —
-  // no click, no popup to dismiss.
-  const elapsedSec = current.pausedAt !== null
-    ? Math.max(0, Math.floor((current.pausedAt - current.startedAt) / 1000))
-    : Math.max(0, Math.floor((Date.now() - current.startedAt) / 1000));
+  if (!zoneId || !current || !videoId || !src) return null;
 
   return (
     <iframe
       key={videoId}
       ref={iframeRef}
       title="Music Bot audio (hidden — control via chat commands only)"
-      src={`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=0&rel=0&enablejsapi=1&start=${elapsedSec}`}
+      src={src}
       allow="autoplay; encrypted-media"
       style={{ position: 'fixed', left: '-9999px', top: '-9999px', width: 1, height: 1, border: 'none' }}
       aria-hidden="true"
