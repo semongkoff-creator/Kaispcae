@@ -16,6 +16,7 @@ import {
   NUDGE_DURATION_MS,
   NUDGE_SHAKE_PX,
   ReferenceImageData,
+  Zone,
 } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useMovement } from '@/hooks/useMovement';
@@ -99,6 +100,18 @@ const FOLLOW_OFFSET: Record<Direction, { dx: number; dy: number }> = {
   left: { dx: 1, dy: 0 },
   right: { dx: -1, dy: 0 },
 };
+
+// ZEP-style spotlight — a "Private Area" drawn in the Room Editor has no
+// `effect` field surviving at runtime (Zone only carries `audioIsolated`,
+// see mapLayers.ts's layerDataToLegacy), so `audioIsolated !== false` is the
+// same signal useProximity.ts's audioZoneAt already uses to decide "is this
+// actually isolating" — same convention, not a new one. Meeting rooms are
+// excluded even when isolating: they already have their own full-width
+// label bar + video-call UI, and stacking this effect on top of that wasn't
+// asked for.
+function isPrivateZone(zone: Zone): boolean {
+  return zone.audioIsolated !== false && zone.type !== 'meeting';
+}
 
 function hexToRgb(hex: string | undefined): [number, number, number] | null {
   if (!hex) return null;
@@ -1142,7 +1155,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       ctx.setLineDash([4, 4]);
       ctx.strokeRect(zx, zy, zw, zh);
       ctx.setLineDash([]);
-      if (!zone.label) {
+      // ZEP-style spotlight follow-up — Private Area never shows a name
+      // (see isPrivateZone's own doc comment); this is the legacy no-label
+      // fallback text, so it needs the same exclusion the DOM pill below
+      // already has, or an unlabeled private zone would show its raw
+      // `zone.name` here instead.
+      if (!zone.label && !isPrivateZone(zone)) {
         ctx.fillStyle = 'rgba(255,255,255,0.4)';
         ctx.font = '10px sans-serif';
         ctx.textAlign = 'center';
@@ -1182,7 +1200,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // class on these elements) doing the visual resize, same as the canvas
     // content right underneath it.
     for (const zone of zones) {
-      if (!zone.label) continue;
+      // ZEP-style spotlight follow-up — Private Area zones (isolating,
+      // non-meeting) never show a name at all now, replaced by the
+      // dim/spotlight effect below instead. Map Location/meeting labels are
+      // untouched — this only affects zones the ROOM ADMIN drew as Private
+      // Area (see isPrivateZone's own comment below for the exact signal).
+      if (!zone.label || isPrivateZone(zone)) continue;
       const el = zoneBannerRefs.current.get(zone.id);
       if (!el) continue;
       const zx = (zone.x * TILE_SIZE - cameraX) * zoom;
@@ -1621,6 +1644,37 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       });
     }
 
+    // ZEP-style Private Area spotlight — everything OUTSIDE the private
+    // zone the LOCAL player is currently standing in gets dimmed (tiles,
+    // furniture, other avatars — everything drawn so far this frame);
+    // inside the zone stays fully lit. Drawn as 4 plain dark rectangles
+    // framing the zone's box rather than a canvas-composite cutout — much
+    // simpler, and there's nothing else on this layer that needs a true
+    // hole punched through it. Purely local: computed from THIS client's
+    // own position against the same `zones` array everyone already has, the
+    // exact same "no server round trip" pattern the existing audio
+    // isolation check already uses (see useProximity.ts's audioZoneAt) — no
+    // one else's screen is affected by this, and nothing here is broadcast.
+    // Placed after avatars/overhead furniture (so people standing outside
+    // the room read as dimmed too) but before speech bubbles/prompts below
+    // (so in-world UI text stays legible either way).
+    const spotlightZone = zones.find((z) =>
+      isPrivateZone(z) &&
+      playerX / TILE_SIZE >= z.x && playerX / TILE_SIZE < z.x + z.width &&
+      playerY / TILE_SIZE >= z.y && playerY / TILE_SIZE < z.y + z.height,
+    );
+    if (spotlightZone) {
+      const pzx = spotlightZone.x * TILE_SIZE - cameraX;
+      const pzy = spotlightZone.y * TILE_SIZE - cameraY;
+      const pzw = spotlightZone.width * TILE_SIZE;
+      const pzh = spotlightZone.height * TILE_SIZE;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(0, 0, worldViewW, pzy); // above the zone
+      ctx.fillRect(0, pzy + pzh, worldViewW, worldViewH - (pzy + pzh)); // below
+      ctx.fillRect(0, pzy, pzx, pzh); // left of the zone
+      ctx.fillRect(pzx + pzw, pzy, worldViewW - (pzx + pzw), pzh); // right
+    }
+
     // Speech bubbles
     const bubbles = bubblesRef.current;
     for (const [pid, bubble] of Object.entries(bubbles)) {
@@ -1806,7 +1860,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           style.transform, not React state, so they track the camera at 60fps
           without re-rendering. */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {zones.filter((z) => z.label).map((zone) => (
+        {zones.filter((z) => z.label && !isPrivateZone(z)).map((zone) => (
           <div
             key={zone.id}
             ref={(el) => {
