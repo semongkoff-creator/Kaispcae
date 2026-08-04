@@ -1,7 +1,8 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
+import { useProfiles } from '@/hooks/useProfiles';
 import { ChatAvatar, avatarColor } from './ChatAvatar';
 
 // What a tile shows while someone's camera is off — the SAME ChatAvatar used in
@@ -429,8 +430,21 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   const speakingPlayers = useGameStore((s) => s.speakingPlayers);
   const localSpeaking = useGameStore((s) => s.localSpeaking);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
+  const localUserId = useGameStore((s) => s.localUserId);
   const emoteEvents = useGameStore((s) => s.emoteEvents);
   const videoTiles = getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams, recordedTargetUserId);
+
+  // Profile photos for the camera-off avatars — same source/pattern as
+  // MeetingView.tsx's identical fix (Bug 16): resolved by userId via the
+  // shared chat identity cache, so a tile shows the person's real photo and
+  // real-name initials instead of the corner label ("You") initialing to "Y".
+  const profileIds = useMemo(() => {
+    const ids = [localUserId];
+    for (const t of videoTiles) { const uid = playerRecords[t.id]?.userId; if (uid) ids.push(uid); }
+    return ids.filter(Boolean);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localUserId, videoTiles.map((t) => t.id).join(','), playerRecords]);
+  const profiles = useProfiles(profileIds);
   const [hidden, setHidden] = useState(false);
   // Which shared screen is the big one. Null = "whichever is first", so a
   // share that starts while nothing is featured is promoted automatically.
@@ -496,23 +510,27 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   const cameraTiles = (
     <>
       {localStream && (
-        <VideoTile name="You" stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} speaking={localSpeaking && !micMuted} />
+        <VideoTile name="You" avatarName={profiles.get(localUserId)?.name || localPlayer.name} photoUrl={profiles.get(localUserId)?.photo ?? undefined} stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} speaking={localSpeaking && !micMuted} />
       )}
-      {videoTiles.map((tile) => (
-        <VideoTile
-          key={tile.id}
-          name={tile.name}
-          stream={tile.stream}
-          isLocal={false}
-          speaking={speakingPlayers.has(tile.id)}
-
-          translucent={tile.translucent}
-          onVolumeChange={(v) => onManualVolumeChange(tile.id, v)}
-          isBeingRecorded={tile.isBeingRecorded}
-          handRaised={tile.handRaised}
-          reaction={latestReaction(emoteEvents, tile.id, now)}
-        />
-      ))}
+      {videoTiles.map((tile) => {
+        const uid = playerRecords[tile.id]?.userId;
+        return (
+          <VideoTile
+            key={tile.id}
+            name={tile.name}
+            avatarName={(uid ? profiles.get(uid)?.name : '') || tile.name}
+            photoUrl={uid ? profiles.get(uid)?.photo ?? undefined : undefined}
+            stream={tile.stream}
+            isLocal={false}
+            speaking={speakingPlayers.has(tile.id)}
+            translucent={tile.translucent}
+            onVolumeChange={(v) => onManualVolumeChange(tile.id, v)}
+            isBeingRecorded={tile.isBeingRecorded}
+            handRaised={tile.handRaised}
+            reaction={latestReaction(emoteEvents, tile.id, now)}
+          />
+        );
+      })}
     </>
   );
 
