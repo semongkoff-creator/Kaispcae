@@ -5,17 +5,17 @@ import { MANUAL_STATUSES, ManualStatus, PRESENCE_LABEL, PRESENCE_EMOJI } from '@
 interface PresenceButtonProps {
   manualStatus: ManualStatus;
   // 'away' is handled by the caller (opens the Away-reason popup instead of
-  // applying immediately) — 'available'/'lunch' apply straight away, no
-  // reason needed for those (see App.tsx's handlePresencePick).
+  // applying immediately) — every other status applies straight away, no
+  // reason needed (see App.tsx's handlePresencePick).
   onPick: (status: ManualStatus) => void;
   variant?: 'sidebar';
 }
 
-// Fitur 3B — the manual presence picker MANUAL_STATUSES/PRESENCE_LABEL/
-// PRESENCE_EMOJI (shared/data/presence.ts) were already defined for exactly
-// this ("so the HUD dropdown... all render the same label/emoji per
-// status") but had no actual dropdown wired to them yet — this is that
-// dropdown, same popover shape as StatusButton.tsx right next to it.
+// Fitur 3B — the manual presence picker. MANUAL_STATUSES/PRESENCE_LABEL/
+// PRESENCE_EMOJI (client/data/presence.ts) drive both this dropdown and the
+// avatar/participant-list badges, so every surface renders the same
+// label/emoji per status. Absorbed the old free-text Custom Status feature's
+// quick-pick presets (WFH/Focus/In a meeting/Break) as real entries here.
 export function PresenceButton({ manualStatus, onPick, variant = 'sidebar' }: PresenceButtonProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);

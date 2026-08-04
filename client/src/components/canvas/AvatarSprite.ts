@@ -100,18 +100,17 @@ export function drawAvatar(
   }
 
   // ─── Single unified status pill ─────────────────────────────────────
-  // One indicator, not two: show the user's custom free-text status if they
-  // set one; otherwise fall back to the effective work-mode/presence status
-  // (In Meeting/Focus/Lunch/Away). This replaces the old separate bare emoji
-  // badge that GameCanvas used to draw below — everything's in this one pill now.
+  // The effective work-mode/presence status (WFH/In Meeting/Focus/Lunch/
+  // Break/Away), shown as one glanceable pill above the avatar.
   const presenceLabel =
+    avatar.workMode === 'wfh' ? '🏠 WFH' :
     avatar.workMode === 'in_meeting' ? '🎥 In Meeting' :
     avatar.workMode === 'focus' ? '🎧 Focus' :
     avatar.workMode === 'lunch' ? '🍽️ Lunch' :
+    avatar.workMode === 'break' ? '☕ Break' :
     avatar.workMode === 'away' ? '🌙 Away' : '';
-  const statusText = avatar.status || presenceLabel;
-  if (statusText) {
-    drawCustomStatus(ctx, cx, nextBadgeY, statusText);
+  if (presenceLabel) {
+    drawPresencePill(ctx, cx, nextBadgeY, presenceLabel);
     nextBadgeY -= 15;
   }
 
@@ -700,10 +699,10 @@ function drawStatusTag(
   ctx.fillText(tag, x, baseY);
 }
 
-// Free-text status set via StatusButton (e.g. "WFH", "In a meeting") —
-// solid purple pill, more prominent than the subtle avatarConfig.statusTag
-// above, since it's meant to be glanceable across the room.
-function drawCustomStatus(
+// Presence status label (WFH/In Meeting/Focus/Lunch/Break/Away) — solid
+// purple pill, more prominent than the subtle avatarConfig.statusTag above,
+// since it's meant to be glanceable across the room.
+function drawPresencePill(
   ctx: CanvasRenderingContext2D,
   x: number,
   baseY: number,

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData } from '@virtualmeet/shared';
+import type { ManualStatus } from '../data/presence';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -207,12 +208,13 @@ export interface GameState {
   // status badge.
   workMode: WorkMode;
   setWorkMode: (mode: WorkMode) => void;
-  // A11 — the user's last MANUAL choice (Available/Lunch/Away). Distinct from
-  // the effective `workMode`: while inside a meeting/focus zone the effective
-  // status is auto ('in_meeting'/'focus'), but this manual value is remembered
-  // and re-applies the moment they leave the zone.
-  manualStatus: 'available' | 'lunch' | 'away';
-  setManualStatus: (status: 'available' | 'lunch' | 'away') => void;
+  // A11 — the user's last MANUAL choice (see MANUAL_STATUSES in
+  // data/presence.ts). Distinct from the effective `workMode`: while inside a
+  // meeting/focus zone the effective status is forced to 'in_meeting'/'focus'
+  // regardless of this value, which is remembered and re-applies the moment
+  // they leave the zone.
+  manualStatus: ManualStatus;
+  setManualStatus: (status: ManualStatus) => void;
   // Fitur 3B — reason picked from the Away popup, alongside manualStatus
   // 'away'. null when away has no specific reason (prompt timed out) or when
   // manualStatus isn't 'away' at all.

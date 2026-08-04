@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill, PersonPlusFill } from 'react-bootstrap-icons';
 import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
+import type { ManualStatus } from './data/presence';
 import { GameCanvas } from './components/canvas/GameCanvas';
 import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
 import { MapZoomControl } from './components/ui/MapZoomControl';
@@ -113,7 +114,7 @@ const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', 
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitPlayerStatus, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay } = useSocket(authDisplayName, roomSlug, authUserId);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -307,9 +308,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   }, [setManualStatus, setAwayReason]);
 
   // Manual pick from PresenceButton — 'away' opens the SAME reason prompt
-  // (poin 8b: "user klik tombol Away/Leave manual"); Available/Lunch apply
-  // immediately, no reason needed for those.
-  const handlePresencePick = useCallback((status: 'available' | 'lunch' | 'away') => {
+  // (poin 8b: "user klik tombol Away/Leave manual"); every other status
+  // applies immediately, no reason needed.
+  const handlePresencePick = useCallback((status: ManualStatus) => {
     autoAwayRef.current = false; // a deliberate pick is never auto-reverted
     if (status === 'away') {
       setAwayPromptOpen(true);
@@ -780,11 +781,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // used to drive the separate free-text `status` field instead, which read
   // as two disconnected presence signals rather than one source of truth.
   const lastActivityRef = useRef(Date.now());
-
-  const handleStatusSave = useCallback((status: string) => {
-    useGameStore.getState().setLocalPlayer({ status: status || undefined });
-    emitPlayerStatus(status);
-  }, [emitPlayerStatus]);
 
   useEffect(() => {
     const markActive = () => {
@@ -1329,8 +1325,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           one thing that must always stay reachable. */}
       <Sidebar
         onEditAvatar={() => setShowEditor(true)}
-        status={localPlayer.status || ''}
-        onSaveStatus={handleStatusSave}
         manualStatus={manualStatus}
         onPickPresence={handlePresencePick}
         isAdmin={isAdmin}

@@ -4,7 +4,7 @@ import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH } from '@virtualmeet/shared';
 import {
-  addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerStatus, updatePlayerHand, updatePlayerWorkMode, updatePlayerSitting,
+  addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerWorkMode, updatePlayerSitting,
   setCachedTiles, getCachedTiles, setCachedImpassableAreas, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
 } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';
@@ -1175,13 +1175,6 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // session, even though the nametag/ParticipantPanel — which read
     // playerRecords directly, not this map — updated live and correctly.
     if (avatarConfig.name) playerNames.set(socket.id, avatarConfig.name);
-  });
-
-  socket.on(SocketEvents.PLAYER_STATUS_UPDATE, (status: string) => {
-    const room = currentRoom; if (!room) return;
-    const trimmed = (status || '').slice(0, 24);
-    socket.to(room).emit(SocketEvents.PLAYER_STATUS_UPDATED, { id: socket.id, status: trimmed });
-    updatePlayerStatus(room, socket.id, trimmed);
   });
 
   socket.on(SocketEvents.PLAYER_HAND, async (raised: boolean) => {

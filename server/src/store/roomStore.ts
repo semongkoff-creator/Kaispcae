@@ -176,19 +176,6 @@ export async function updatePlayerAvatarConfig(
   }
 }
 
-export async function updatePlayerStatus(
-  roomId: string,
-  playerId: string,
-  status: string,
-): Promise<void> {
-  const players = await getPlayers(roomId);
-  const player = players.find((p) => p.id === playerId);
-  if (player) {
-    player.status = status || undefined;
-    await setPlayers(roomId, players);
-  }
-}
-
 // A3 — persist Focus/Public so it survives in room:state for late joiners.
 // Fitur 3B — awayReason travels alongside workMode (only meaningful when
 // workMode === 'away'); always cleared otherwise so a stale reason never

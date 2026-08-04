@@ -127,7 +127,6 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
             <ParticipantRow
               name={localPlayer.name}
               color={localPlayer.color}
-              status={localPlayer.status}
               handRaised={localPlayer.handRaised}
               workMode={localPlayer.workMode}
               awayReason={localPlayer.awayReason}
@@ -142,7 +141,6 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
                 key={p.id}
                 name={p.name}
                 color={p.color}
-                status={p.status}
                 handRaised={p.handRaised}
                 workMode={p.workMode}
                 awayReason={p.awayReason}
@@ -169,7 +167,6 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
 function ParticipantRow({
   name,
   color,
-  status,
   handRaised,
   workMode,
   awayReason,
@@ -188,7 +185,6 @@ function ParticipantRow({
 }: {
   name: string;
   color: string;
-  status?: string;
   // Live presence cues, mirroring what shows over the avatar / video tile:
   // a raised hand (see Avatar.handRaised) and whether they're currently
   // speaking (from speakingPlayers / localSpeaking in gameStore).
@@ -288,7 +284,6 @@ function ParticipantRow({
             {role === 'admin' && <span title="Admin" className="shrink-0">🛡️</span>}
             <span className="truncate">{name}</span>
           </span>
-          {status && <span className="text-gray-400 dark:text-gray-500 text-[10px] truncate block">{status}</span>}
           {workMode === 'away' && awayReason && (
             <span className="text-gray-400 dark:text-gray-500 text-[10px] truncate block">Away · {awayReason}</span>
           )}
@@ -296,7 +291,7 @@ function ParticipantRow({
       </div>
       <div className="flex items-center gap-1 shrink-0">
         {/* Live presence cues, glanceable per row — same signals shown over
-            the avatar (raise-hand ✋, AFK 💤) and video tile (speaking 🔊). */}
+            the avatar (raise-hand ✋, presence badge) and video tile (speaking 🔊). */}
         {handRaised && <span title="Hand raised" className="text-[11px] leading-none animate-bounce">✋</span>}
         {workMode === 'focus' && <Headphones title="Fokus (jangan diganggu)" size={12} className="text-purple-500 shrink-0" />}
         {workMode && workMode !== 'focus' && (
@@ -305,7 +300,6 @@ function ParticipantRow({
           </span>
         )}
         {speaking && <span title="Speaking" className="text-[11px] leading-none animate-pulse">🔊</span>}
-        {status?.startsWith('💤') && <span title="Away" className="text-[11px] leading-none opacity-70">💤</span>}
         {inCall && <CameraVideoFill className="text-purple-600" size={11} title="In call" />}
         {!!followerCount && (
           <span className="text-purple-500 text-[10px] inline-flex items-center gap-0.5" title={`Followed by ${followerCount}`}>

@@ -1,7 +1,6 @@
 import { ReactNode, useState } from 'react';
 import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
-import { StatusButton } from '../avatar/StatusButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
@@ -16,11 +15,10 @@ const ATTENDANCE_MENU_ENABLED = false;
 
 interface SidebarProps {
   onEditAvatar: () => void;
-  status: string;
-  onSaveStatus: (status: string) => void;
-  // Fitur 3B — manual presence picker (Available/Lunch/Away). 'away' opens
-  // the Away-reason popup upstream (see App.tsx's handlePresencePick) rather
-  // than applying immediately, unlike the other two.
+  // Fitur 3B / A11 — manual presence picker (Available/WFH/Focus/In a
+  // meeting/Lunch/Break/Away). 'away' opens the Away-reason popup upstream
+  // (see App.tsx's handlePresencePick) rather than applying immediately,
+  // unlike the others.
   manualStatus: ManualStatus;
   onPickPresence: (status: ManualStatus) => void;
 
@@ -144,8 +142,6 @@ interface SidebarProps {
 // there'd otherwise be no way to mute/exit without leaving that view first.
 export function Sidebar({
   onEditAvatar,
-  status,
-  onSaveStatus,
   manualStatus,
   onPickPresence,
   isAdmin,
@@ -371,7 +367,6 @@ export function Sidebar({
       <SidebarDivider />
 
       <AvatarEditorButton onClick={onEditAvatar} variant="sidebar" />
-      <StatusButton status={status} onSave={onSaveStatus} variant="sidebar" />
       <PresenceButton manualStatus={manualStatus} onPick={onPickPresence} variant="sidebar" />
 
       <SidebarIcon

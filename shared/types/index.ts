@@ -52,9 +52,6 @@ export interface Avatar {
   isAdmin?: boolean;
   isMasterAdmin?: boolean;
   userId?: string;
-  // Free-text custom status shown as a small badge above the name tag
-  // (e.g. "WFH", "In a meeting", "🎧 Focus") — independent of admin/online state.
-  status?: string;
   // True while sitting in a chair (see Furniture.isInteractable) — movement
   // input is ignored client-side while true, and x/y are snapped to the
   // chair's tile, so remote clients just render this player idle at that
@@ -91,11 +88,16 @@ export interface Avatar {
   awayReason?: string;
 }
 
-// A11 — presence status. 'in_meeting' + 'focus' are AUTO from the zone the
-// avatar is in (meeting/focus zone); 'available' | 'lunch' | 'away' are the
-// manual choices. Only 'focus' triggers DND behaviour (see useProximity /
-// Summon / Slap / Follow) — the rest are display-only labels.
-export type WorkMode = 'available' | 'in_meeting' | 'focus' | 'lunch' | 'away';
+// A11 — presence status. 'in_meeting' + 'focus' are auto-set from the zone
+// the avatar is in (meeting/focus zone), but can also be picked manually from
+// the Status list — same value either way, so a manual pick gets the exact
+// same DND behaviour a zone-triggered one does. 'available' | 'lunch' |
+// 'away' | 'wfh' | 'break' are always manual. Only 'focus' triggers DND
+// behaviour (see useProximity / Summon / Slap / Follow) — the rest are
+// display-only labels. 'wfh'/'break' replace the old free-text custom-status
+// field (Avatar.status, removed) — those were just unstructured strings for
+// the same "what am I doing" signal this enum already covers.
+export type WorkMode = 'available' | 'in_meeting' | 'focus' | 'lunch' | 'away' | 'wfh' | 'break';
 
 // Away-reason popup (idle-AFK or manual "Away" pick, see App.tsx) — how long
 // to wait for the user to pick a reason before defaulting to a plain 'away'
@@ -244,9 +246,6 @@ export enum SocketEvents {
 
   AVATAR_UPDATE = 'avatar:update',
   AVATAR_UPDATED = 'avatar:updated',
-
-  PLAYER_STATUS_UPDATE = 'player:status_update',
-  PLAYER_STATUS_UPDATED = 'player:status_updated',
 
   // Raise-hand toggle — same relay+persist shape as status above.
   PLAYER_HAND = 'player:hand',
