@@ -109,6 +109,11 @@ export function registerMediaHandlers(io: Server, socket: Socket): void {
       if (!dbRoom) return;
 
       const needsTtl = data.type === 'image' || data.type === 'file';
+      // Bug media #1 — BGM's shared-clock anchor (see MediaPayload.startedAt's
+      // doc comment). Stamped server-side, once, at creation — never from the
+      // client, so every listener agrees on the same origin regardless of
+      // their own clock being off.
+      const payload = data.type === 'bgm' ? { ...(data.payload ?? {}), startedAt: Date.now() } : (data.payload ?? {});
       const row = await prisma.mapMediaObject.create({
         data: {
           roomId: dbRoom.id,
@@ -118,7 +123,7 @@ export function registerMediaHandlers(io: Server, socket: Socket): void {
           createdBy: uid,
           createdByName: getPlayerName(socket.id),
           expiresAt: needsTtl ? new Date(Date.now() + IMAGE_FILE_TTL_MS) : null,
-          payload: (data.payload ?? {}) as object,
+          payload: payload as object,
         },
       });
       io.to(room).emit(SocketEvents.MEDIA_ADDED, toClientShape(row));

@@ -53,6 +53,23 @@ export function useBgm(conversationActive: boolean): BgmState {
           const a = new Audio(inside.payload.audioUrl);
           a.loop = true;
           a.volume = Math.max(0, Math.min(1, inside.payload.volume ?? 0.3));
+          // Bug media #1 — land on the position everyone else is (roughly) at,
+          // instead of always starting fresh at 0 (see MediaPayload.startedAt's
+          // doc comment for the shared-clock design). Needs the track's actual
+          // duration to wrap the elapsed time correctly (it loops), which isn't
+          // known synchronously from a bare `new Audio(url)` — wait for
+          // 'loadedmetadata' unless it's already cached and available. Areas
+          // placed before this field existed have no startedAt — falls through
+          // to today's start-at-0 behavior untouched.
+          const startedAt = inside.payload.startedAt;
+          if (startedAt) {
+            const applyElapsed = () => {
+              const dur = a.duration;
+              if (Number.isFinite(dur) && dur > 0) a.currentTime = ((Date.now() - startedAt) / 1000) % dur;
+            };
+            if (a.readyState >= a.HAVE_METADATA) applyElapsed();
+            else a.addEventListener('loadedmetadata', applyElapsed, { once: true });
+          }
           audioRef.current = a;
         }
       }

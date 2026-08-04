@@ -374,6 +374,19 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const [ytUnmuted, setYtUnmuted] = useState(false);
   const ytIframeRef = useRef<HTMLIFrameElement | null>(null);
   useEffect(() => { setYtUnmuted(false); }, [ytEmbedId]);
+  // Bug media #1 — "Perbesar" on the LIVE embed used to open MediaViewerModal,
+  // which renders a completely SEPARATE, freshly-created <iframe> (no
+  // autoplay/no start position) — the video the user was just watching kept
+  // playing invisibly behind the modal while a brand-new, unstarted player
+  // showed up front, reading as "the video stopped". Fixed by never creating
+  // a second iframe at all: this just grows the SAME marker (see the media
+  // render loop below and the per-frame transform loop) to fill the screen —
+  // the <iframe> element itself is never unmounted, so playback/mute state
+  // carries over untouched. Reset whenever the embedded tile changes (walked
+  // away, or someone deleted it) so a stale fullscreen view can't outlive the
+  // player it was showing.
+  const [maximizedYtId, setMaximizedYtId] = useState<string | null>(null);
+  useEffect(() => { setMaximizedYtId(null); }, [ytEmbedId]);
   // §6 — Add Media markers: same DOM-overlay-positioned-via-transform
   // pattern as zone/banner above, one small clickable pin per object.
   const mediaMarkerRefs = useRef(new Map<string, HTMLDivElement>());
@@ -1173,6 +1186,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       mediaTileCounts.set(tileKey, stackIndex + 1);
       const el = mediaMarkerRefs.current.get(media.id);
       if (!el) continue;
+      // Bug media #1 — the maximized marker fills the screen via its own
+      // `fixed inset-0` className (see the marker JSX) instead of tracking
+      // world position; clearing the transform here (rather than feeding it
+      // a camera-relative translate) is what lets that `position: fixed`
+      // actually size against the VIEWPORT — any transform on an ancestor
+      // (even a no-op one) would otherwise trap it to this element's own box.
+      if (media.id === maximizedYtId) { if (el.style.transform) el.style.transform = ''; continue; }
       // Image/YouTube render as a much bigger inline thumbnail below (see
       // the marker JSX) than the small pin whiteboard/file still use, so
       // they need a wider stacking gap to avoid overlapping.
@@ -1817,6 +1837,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
             : media.payload.videoId
               ? `https://img.youtube.com/vi/${media.payload.videoId}/mqdefault.jpg`
               : undefined;
+          const isMaximized = media.id === maximizedYtId;
           return (
             <div
               key={media.id}
@@ -1824,7 +1845,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                 if (el) mediaMarkerRefs.current.set(media.id, el);
                 else mediaMarkerRefs.current.delete(media.id);
               }}
-              className="absolute top-0 left-0 will-change-transform origin-top-left pointer-events-auto"
+              className={isMaximized ? 'absolute top-0 left-0 pointer-events-auto' : 'absolute top-0 left-0 will-change-transform origin-top-left pointer-events-auto'}
             >
               {/* Potong 6 — YouTube auto-embeds (muted) when the player is near;
                   website opens a new tab; bgm shows a non-interactive marker. */}
@@ -1836,16 +1857,31 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                 // gives the embed the same clear click-to-enlarge affordance
                 // the thumbnail state already has, without covering the
                 // player's own controls.
-                <div className="relative w-56 h-32 -mt-32 -ml-4">
+                //
+                // Bug media #1 — maximized uses `fixed inset-0` instead of
+                // opening a second modal/iframe (MediaViewerModal). This only
+                // works because the marker's own transform/will-change was
+                // dropped above (see className and the per-frame transform
+                // loop) — a `fixed` element is trapped to its nearest
+                // transformed ancestor's box otherwise, which would make this
+                // fill the tiny marker instead of the real viewport.
+                <div
+                  className={isMaximized ? 'fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-6' : 'relative w-56 h-32 -mt-32 -ml-4'}
+                  onMouseDown={isMaximized ? () => setMaximizedYtId(null) : undefined}
+                >
+                  <div
+                    className={isMaximized ? 'relative w-full h-full max-w-5xl max-h-[85vh] aspect-video' : 'relative w-full h-full'}
+                    onMouseDown={isMaximized ? (e) => e.stopPropagation() : undefined}
+                  >
                   {/* Bug 11 — autoplay=1&mute=1: modern browsers only permit
                       autoplay when muted, so the video starts playing
                       silently the moment the player walks near, and the
                       prominent button below is the sanctioned user gesture
                       that turns sound on (unMute via the IFrame postMessage
                       API — enablejsapi=1 — plus playVideo, in case the user
-                      had paused it). The lightbox embed (MediaViewerModal)
-                      is deliberately different: no autoplay, no mute — a
-                      manual play click there starts WITH sound. */}
+                      had paused it). Maximizing keeps this SAME iframe (see
+                      above) rather than swapping to a fresh, unstarted one —
+                      mute state carries over untouched either way. */}
                   <iframe
                     ref={ytIframeRef}
                     title="yt"
@@ -1853,13 +1889,23 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                     allow="autoplay; encrypted-media; picture-in-picture"
                     className="w-full h-full rounded-lg shadow-lg border border-purple-300 bg-black"
                   />
+                  {isMaximized ? (
+                    <button
+                      onClick={() => setMaximizedYtId(null)}
+                      title="Kecilkan"
+                      className="absolute top-1 right-1 w-8 h-8 rounded bg-black/60 hover:bg-black/80 text-white text-sm flex items-center justify-center cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  ) : (
                   <button
-                    onClick={() => onMediaOpen(media.id)}
+                    onClick={() => setMaximizedYtId(media.id)}
                     title="Perbesar"
                     className="absolute top-1 right-1 w-6 h-6 rounded bg-black/60 hover:bg-black/80 text-white text-xs flex items-center justify-center cursor-pointer"
                   >
                     ⛶
                   </button>
+                  )}
                   {!ytUnmuted && (
                     <button
                       onClick={() => {
@@ -1874,6 +1920,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                       🔇 Nyalakan suara
                     </button>
                   )}
+                  </div>
                 </div>
               ) : (
                 <button

@@ -389,8 +389,13 @@ rooms.post('/rooms/:slug/editor/media', authenticateToken, async (req: AuthReque
     if (!EDITOR_MEDIA_TYPES.includes(type) || !Number.isInteger(x) || !Number.isInteger(y)) return res.status(400).json({ error: 'Bad media data' });
     if (!isValidMediaPayload(type, payload)) return res.status(400).json({ error: 'Invalid or unsafe media payload' });
     const actor = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
+    // Bug media #1 — same shared-clock stamp as the socket MEDIA_ADD path
+    // (server/src/socket/mediaHandler.ts) — this REST route is the OTHER
+    // place a 'bgm' area gets created (via the Room Editor page), and both
+    // need to agree on the same startedAt convention.
+    const finalPayload = type === 'bgm' ? { ...(payload ?? {}), startedAt: Date.now() } : (payload ?? {});
     const row = await prisma.mapMediaObject.create({
-      data: { roomId: room.id, type, x: Math.round(x), y: Math.round(y), createdBy: req.userId!, createdByName: actor?.displayName ?? 'Admin', expiresAt: null, payload: (payload ?? {}) as object },
+      data: { roomId: room.id, type, x: Math.round(x), y: Math.round(y), createdBy: req.userId!, createdByName: actor?.displayName ?? 'Admin', expiresAt: null, payload: finalPayload as object },
     });
     ioRef?.to(room.slug).emit(SocketEvents.MEDIA_ADDED, mediaShape(row));
     return res.status(201).json(mediaShape(row));

@@ -727,6 +727,18 @@ export interface MediaPayload {
   areaW?: number; // 'bgm' — area size in tiles (music plays while inside x..x+areaW)
   areaH?: number;
   volume?: number; // 'bgm' — default playback volume 0..1
+  // Bug media #1 — 'bgm' only. Epoch ms, set ONCE server-side (mediaHandler.ts's
+  // MEDIA_ADD) the moment this area is placed — never updated afterward
+  // (there's no pause/skip for ambient BGM, unlike MusicSessionState's Music
+  // Bot). Every client computes its own playback position as
+  // `(Date.now() - startedAt) % audio.duration` instead of always starting
+  // fresh at 0 — so re-entering the room (or a second person joining) lands
+  // at roughly the same position everyone else hears, same shared-clock
+  // pattern MusicSessionState already uses for the Music Bot, just without
+  // the pause/resume bookkeeping this feature doesn't need. Absent on BGM
+  // areas placed before this field existed — falls back to today's
+  // start-at-0 behavior, no backfill needed.
+  startedAt?: number;
 }
 
 export interface MapMediaObject {
