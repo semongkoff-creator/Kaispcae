@@ -1875,11 +1875,13 @@ function MainApp() {
   const { theme, toggleTheme } = useTheme();
   const [roomSlug, setRoomSlug] = useState<string | null>(null);
   // Room join approval (see server/src/lib/roomMembership.ts). The socket
-  // gate denies the join for a room that needs approval, so entry is checked
-  // BEFORE rendering the room — otherwise the user stares at a room that
-  // never loads and has no idea a decision is pending on them.
+  // gate is the real enforcement (a failed/slow REST check here falls
+  // through to it, never locks anyone out) — this is only a faster,
+  // friendlier "why you're blocked" message than staring at a room that
+  // never loads. Runs IN PARALLEL with <Game> mounting/connecting below,
+  // not before it — swaps Game out for JoinGate on the next render if it
+  // resolves to denied after Game already started.
   const [entryBlock, setEntryBlock] = useState<{ slug: string; reason: string } | null>(null);
-  const [entryChecking, setEntryChecking] = useState(false);
 
   // Invite links (see the "Copy invite link" button in Game() above) are
   // just this app's own URL with ?join=<slug> appended. Also mirrored into
@@ -1993,7 +1995,6 @@ function MainApp() {
   useEffect(() => {
     if (!roomSlug || !user) { setEntryBlock(null); return; }
     let cancelled = false;
-    setEntryChecking(true);
     api.getMembership(roomSlug)
       .then((m) => {
         if (cancelled) return;
@@ -2001,8 +2002,7 @@ function MainApp() {
       })
       // A failed check must not lock someone out of a room they can enter —
       // the socket gate is the real enforcement, so fall through to it.
-      .catch(() => { if (!cancelled) setEntryBlock(null); })
-      .finally(() => { if (!cancelled) setEntryChecking(false); });
+      .catch(() => { if (!cancelled) setEntryBlock(null); });
     return () => { cancelled = true; };
   }, [roomSlug, user]);
 
@@ -2036,13 +2036,18 @@ function MainApp() {
       />
     );
   }
-  if (roomSlug && entryChecking) {
-    return (
-      <div className="w-screen h-screen bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
-        <p className="text-gray-500 text-sm">Memeriksa akses room...</p>
-      </div>
-    );
-  }
+  // Bug — this used to block here until the membership REST check resolved,
+  // THEN mount <Game> (which is what actually opens the socket connection
+  // and starts the JOIN_ROOM handshake) — one full network round trip
+  // serialized in front of another, even though the socket's own JOIN_ROOM
+  // is the REAL enforcement (see the effect above's own comment: "A failed
+  // check must not lock someone out... the socket gate is the real
+  // enforcement"). This check is purely a faster/friendlier "why you're
+  // blocked" UX than a blank room — not a gate — so it's safe to let <Game>
+  // start connecting in parallel instead of waiting on it. If entryBlock
+  // resolves to denied WHILE Game is already mounted/connecting, the
+  // `entryBlock` check above swaps it out for JoinGate on the next render,
+  // cleanly disconnecting the socket via Game's own unmount cleanup.
 
   // Room (existing flow)
   if (!playerName) {

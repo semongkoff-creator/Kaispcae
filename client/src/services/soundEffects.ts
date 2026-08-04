@@ -67,8 +67,18 @@ export function playHandRaiseSound(): void {
 // preloaded up front the same way; a plain Audio() per play is fine since
 // these are short (≤5s) one-shot clips, not something played back-to-back
 // fast enough to need the clone-node overlap trick.
+//
+// Bug — this used to share playClip's `soundOn` gate, framed in the UI
+// purely as "Notification Sound" (nested under a "Notifications" popover,
+// disabled whenever browser notifications themselves are off). Someone
+// muting notification pings had no way to know it was ALSO silently
+// killing every soundboard click with zero feedback (a swallowed
+// .play().catch, same as everywhere else) — indistinguishable from "the
+// soundboard is just broken". A soundboard click is always a deliberate,
+// visible user action (the button greys out during its own cooldown), not
+// a passive background notification, so it doesn't belong behind that
+// toggle at all.
 export function playSoundboardClip(src: string): void {
-  if (!getNotificationSettings().soundOn) return;
   if (typeof Audio === 'undefined') return;
   const node = new Audio(src);
   node.volume = 0.7;
