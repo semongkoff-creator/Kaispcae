@@ -28,7 +28,7 @@ const OBJ_CATEGORIES: { key: 'furniture' | 'decor' | 'electronics'; label: strin
 const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat'; label: string; color: string; hint: string }[] = [
   { id: 'startingPoint', label: 'Starting point', color: 'rgba(16,185,129,0.9)', hint: 'Stamp per tile = titik spawn (bisa banyak; pemain muncul di salah satunya).' },
   { id: 'impassable', label: 'Impassable', color: 'rgba(239,68,68,0.85)', hint: 'Stamp per tile = penghalang tak terlihat (memblok gerak, tanpa tekstur).' },
-  { id: 'impassableArea', label: 'Impassable Area', color: 'rgba(220,38,38,0.6)', hint: 'Drag di area kosong = buat area kotak baru. Klik area yang sudah ada = pilih (muncul handle) — drag badan untuk pindah, tarik pojok/sisi untuk resize, Delete untuk hapus. Semua snap ke grid, invisible saat main (sama seperti Impassable per-tile).' },
+  { id: 'impassableArea', label: 'Impassable Area', color: 'rgba(220,38,38,0.6)', hint: 'Drag di area kosong = buat area kotak baru, ukuran bebas (tidak ikut grid). Klik area yang sudah ada = pilih (muncul handle) — drag badan untuk pindah, tarik pojok/sisi untuk resize, Delete untuk hapus. Saat main, penghalangnya tetap memblok tile penuh mana pun yang tersentuh kotak ini — invisible, sama seperti Impassable per-tile.' },
   { id: 'mapLocation', label: 'Map location', color: 'rgba(192,132,252,0.95)', hint: 'Stamp: drag area lalu beri nama → pill label muncul di game. Bisa pilih kedap suara atau tidak (default: tidak, jarak biasa).' },
   { id: 'privateArea', label: 'Private area', color: 'rgba(96,165,250,0.95)', hint: 'Stamp: drag area + Area ID. Area ber-ID sama = satu grup audio (walau terpisah). Bisa pilih kedap suara atau tidak (default: kedap suara).' },
   { id: 'portal', label: 'Portal', color: 'rgba(124,58,237,0.95)', hint: 'Stamp klik tile portal → pilih tujuan room lain, atau klik titik tujuan di room ini. Pemain tekan F untuk pindah.' },
@@ -1293,35 +1293,42 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           }
         }, DIALOG_DEFER_MS);
       } else if (eff === 'impassableArea') {
-        // Item #9 — select/move/resize/create, in that priority order (a
-        // handle on the currently-selected area always wins over starting a
-        // new rectangle or re-selecting something else underneath it).
-        if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y, 'impassable'); return; }
+        // Item #9 (free-resize follow-up) — select/move/resize/create, in
+        // that priority order (a handle on the currently-selected area
+        // always wins over starting a new rectangle or re-selecting
+        // something else underneath it). Uses raw fractional tile position
+        // (worldPointAt ÷ TILE_SIZE, NOT tileAt()'s floored integer) for
+        // every hit-test/anchor here — unlike every other rectangle tool on
+        // this page, an Impassable Area's position/size is intentionally
+        // NOT grid-snapped, so a click near a fractional edge must be
+        // tested against that same fractional boundary or it'll miss.
+        const wp0 = worldPointAt(e.clientX, e.clientY);
+        const fx = wp0.x / TILE_SIZE, fy = wp0.y / TILE_SIZE;
+        if (s.activeTool === 'eraser') { s.removeAreaAt(fx, fy, 'impassable'); return; }
         const selected = s.selectedAreaId ? (s.doc?.areas.find((a) => a.id === s.selectedAreaId && a.effect === 'impassable') ?? null) : null;
         if (selected) {
-          const wp = worldPointAt(e.clientX, e.clientY);
-          const handle = hitTestAreaHandle(selected, wp.x, wp.y, s.viewport.zoom);
+          const handle = hitTestAreaHandle(selected, wp0.x, wp0.y, s.viewport.zoom);
           if (handle) {
             s.beginStroke();
             dragRef.current = { mode: 'areaResize', areaId: selected.id, handle, orig: { x: selected.x, y: selected.y, w: selected.width, h: selected.height } };
             return;
           }
-          if (t.x >= selected.x && t.x < selected.x + selected.width && t.y >= selected.y && t.y < selected.y + selected.height) {
+          if (fx >= selected.x && fx < selected.x + selected.width && fy >= selected.y && fy < selected.y + selected.height) {
             s.beginStroke();
-            dragRef.current = { mode: 'areaMove', areaId: selected.id, anchor: { x: t.x, y: t.y } };
+            dragRef.current = { mode: 'areaMove', areaId: selected.id, anchor: { x: fx, y: fy } };
             return;
           }
         }
-        const hit = s.areaAt(t.x, t.y, 'impassable');
+        const hit = s.areaAt(fx, fy, 'impassable');
         if (hit) {
-          s.selectAreaAt(t.x, t.y, 'impassable');
+          s.selectAreaAt(fx, fy, 'impassable');
           s.beginStroke();
-          dragRef.current = { mode: 'areaMove', areaId: hit.id, anchor: { x: t.x, y: t.y } };
+          dragRef.current = { mode: 'areaMove', areaId: hit.id, anchor: { x: fx, y: fy } };
           return;
         }
         s.clearSelectedArea();
-        s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 });
-        dragRef.current = { mode: 'impassableAreaRect', anchor: { x: t.x, y: t.y } };
+        s.setSelection({ x: fx, y: fy, w: 0, h: 0 });
+        dragRef.current = { mode: 'impassableAreaRect', anchor: { x: fx, y: fy } };
       } else { // mapLocation | privateArea — rectangular
         if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y, eff as 'mapLocation' | 'privateArea'); }
         else { s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 }); dragRef.current = { mode: 'areaRect', anchor: { x: t.x, y: t.y } }; }
@@ -1343,25 +1350,40 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     else if (d.mode === 'effPaint') forEachBrushTile(t.x, t.y, s.stampEffectAt);
     else if (d.mode === 'effErase') forEachBrushTile(t.x, t.y, s.eraseEffectAt);
     else if (d.mode === 'areaMove' && d.areaId && d.anchor) {
-      const dx = t.x - d.anchor.x, dy = t.y - d.anchor.y;
-      if (dx !== 0 || dy !== 0) { s.moveAreaBy(d.areaId, dx, dy); d.anchor = t; }
+      // Free-resize follow-up — fractional tile position (not tileAt's
+      // floored integer), so the drag tracks the cursor smoothly instead of
+      // hopping a whole tile at a time.
+      const wp = worldPointAt(e.clientX, e.clientY);
+      const fx = wp.x / TILE_SIZE, fy = wp.y / TILE_SIZE;
+      const dx = fx - d.anchor.x, dy = fy - d.anchor.y;
+      if (dx !== 0 || dy !== 0) { s.moveAreaBy(d.areaId, dx, dy); d.anchor = { x: fx, y: fy }; }
     }
     else if (d.mode === 'areaResize' && d.areaId && d.handle && d.orig) {
       const wp = worldPointAt(e.clientX, e.clientY);
-      // Round the fractional tile position to the nearest GRID LINE (not tile
-      // index) — handles sit on tile boundaries/corners, so this is what
-      // makes a resize snap to the grid, same as every other rectangle here
-      // being built directly from integer tileAt() results.
-      const rx = Math.round(wp.x / TILE_SIZE), ry = Math.round(wp.y / TILE_SIZE);
+      // Free-resize follow-up — the raw fractional tile position, unrounded.
+      // Every OTHER rectangle on this page snaps to whole tiles; Impassable
+      // Area deliberately doesn't (collision still ends up whole-tile at
+      // save time regardless — see layerDataToLegacy's floor/ceil pass —
+      // this only affects how smoothly it drags in the editor).
+      const rx = wp.x / TILE_SIZE, ry = wp.y / TILE_SIZE;
       let { x, y, w, h } = d.orig;
       const x2 = x + w, y2 = y + h;
-      if (d.handle.includes('w')) { x = Math.min(rx, x2 - 1); w = x2 - x; }
-      if (d.handle.includes('e')) { const nx2 = Math.max(rx, x + 1); w = nx2 - x; }
-      if (d.handle.includes('n')) { y = Math.min(ry, y2 - 1); h = y2 - y; }
-      if (d.handle.includes('s')) { const ny2 = Math.max(ry, y + 1); h = ny2 - y; }
+      const MIN_SIZE = 0.2; // tiles — keeps a resize from collapsing to zero/negative
+      if (d.handle.includes('w')) { x = Math.min(rx, x2 - MIN_SIZE); w = x2 - x; }
+      if (d.handle.includes('e')) { const nx2 = Math.max(rx, x + MIN_SIZE); w = nx2 - x; }
+      if (d.handle.includes('n')) { y = Math.min(ry, y2 - MIN_SIZE); h = y2 - y; }
+      if (d.handle.includes('s')) { const ny2 = Math.max(ry, y + MIN_SIZE); h = ny2 - y; }
       s.resizeArea(d.areaId, { x: Math.max(0, x), y: Math.max(0, y), w, h });
     }
-    else if ((d.mode === 'selectRect' || d.mode === 'areaRect' || d.mode === 'impassableAreaRect' || d.mode === 'copyRect' || d.mode === 'blockRect') && d.anchor) s.setSelection({ x: Math.min(d.anchor.x, t.x), y: Math.min(d.anchor.y, t.y), w: Math.abs(t.x - d.anchor.x) + 1, h: Math.abs(t.y - d.anchor.y) + 1 });
+    else if (d.mode === 'impassableAreaRect' && d.anchor) {
+      // Free-resize follow-up — fractional, not tile-snapped (see areaResize
+      // above for why). No "+1" tile-inclusive term either — that only made
+      // sense for integer tile counting.
+      const wp = worldPointAt(e.clientX, e.clientY);
+      const fx = wp.x / TILE_SIZE, fy = wp.y / TILE_SIZE;
+      s.setSelection({ x: Math.min(d.anchor.x, fx), y: Math.min(d.anchor.y, fy), w: Math.abs(fx - d.anchor.x), h: Math.abs(fy - d.anchor.y) });
+    }
+    else if ((d.mode === 'selectRect' || d.mode === 'areaRect' || d.mode === 'copyRect' || d.mode === 'blockRect') && d.anchor) s.setSelection({ x: Math.min(d.anchor.x, t.x), y: Math.min(d.anchor.y, t.y), w: Math.abs(t.x - d.anchor.x) + 1, h: Math.abs(t.y - d.anchor.y) + 1 });
   }, [tileAt, worldPointAt, forEachBrushTile]);
 
   const endDrag = useCallback(() => {
@@ -1423,7 +1445,10 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       // di-adjust" rather than requiring a second click to select it.
       const s = useEditorStore.getState();
       const sel = s.selection; s.setSelection(null);
-      if (sel) {
+      // A plain click without dragging now yields a 0×0 selection (no "+1
+      // tile" floor like the grid-snapped rectangles get) — skip creating a
+      // degenerate, invisible area instead of silently adding a zero-size one.
+      if (sel && sel.w > 0.05 && sel.h > 0.05) {
         s.addArea('impassable', sel, 'Impassable Area');
         s.selectAreaAt(sel.x, sel.y, 'impassable');
       }

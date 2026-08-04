@@ -272,8 +272,14 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
         .slice(0, 5000) as LayerData['tileEffects'];
     }
     if ('areas' in body && Array.isArray(body.areas)) {
+      // Free-resize follow-up — was Number.isInteger; Impassable Area
+      // rectangles (Item #9) are no longer grid-snapped, so their
+      // width/height are legitimately fractional now. isFinite + positive
+      // covers both that and the still-integer privateArea/mapLocation zones
+      // (an integer is always finite and positive, so nothing there changes).
+      const isPositiveFinite = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v > 0;
       layerData.areas = body.areas
-        .filter((a: unknown) => a && typeof a === 'object' && typeof (a as { id?: unknown }).id === 'string' && Number.isInteger((a as { width?: unknown }).width) && Number.isInteger((a as { height?: unknown }).height))
+        .filter((a: unknown) => a && typeof a === 'object' && typeof (a as { id?: unknown }).id === 'string' && isPositiveFinite((a as { width?: unknown }).width) && isPositiveFinite((a as { height?: unknown }).height))
         .slice(0, 500) as LayerData['areas'];
     }
 

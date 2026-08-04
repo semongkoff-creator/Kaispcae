@@ -324,8 +324,19 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
   // source of blocked tiles, not a replacement.
   for (const a of ld.areas) {
     if (a.effect !== 'impassable') continue;
-    for (let y = Math.max(0, a.y); y < Math.min(height, a.y + a.height); y++) {
-      for (let x = Math.max(0, a.x); x < Math.min(width, a.x + a.width); x++) {
+    // Free-resize follow-up — the rectangle itself is no longer grid-snapped
+    // (drags freely at sub-tile precision in the editor), but collision is
+    // still fundamentally whole-tile (RoomTile has no notion of "half
+    // blocked") — floor/ceil so ANY tile the rectangle overlaps even
+    // partially is blocked. A no-op for the integer rectangles every OTHER
+    // area effect (and every impassable area saved before this) still uses:
+    // floor/ceil of a whole number is that same number.
+    const y0 = Math.max(0, Math.floor(a.y));
+    const y1 = Math.min(height, Math.ceil(a.y + a.height));
+    const x0 = Math.max(0, Math.floor(a.x));
+    const x1 = Math.min(width, Math.ceil(a.x + a.width));
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
         if (tiles[y][x].type === 'floor') tiles[y][x].type = 'blocked';
       }
     }

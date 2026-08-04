@@ -611,8 +611,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
     resizeArea: (id, rect) => {
       const d = get().doc; if (!d) return;
       const idx = d.areas.findIndex((a) => a.id === id); if (idx < 0) return;
-      const width = Math.max(1, Math.min(d.width, rect.w));
-      const height = Math.max(1, Math.min(d.height, rect.h));
+      // Free-resize follow-up — Impassable Area isn't grid-snapped (see
+      // RoomEditorPage.tsx's areaResize handler), so its minimum is a small
+      // FRACTION of a tile, not a whole tile like this used to enforce.
+      const width = Math.max(0.2, Math.min(d.width, rect.w));
+      const height = Math.max(0.2, Math.min(d.height, rect.h));
       const x = Math.max(0, Math.min(d.width - width, rect.x));
       const y = Math.max(0, Math.min(d.height - height, rect.y));
       const a = d.areas[idx];
