@@ -8,6 +8,28 @@ import { AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@virtualmeet/shared';
 // Maps to AreaEffect.effect: 'impassable' (see mapLayers.ts).
 export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat';
 
+// Follow-up — a "Kursi Diklaim" marker used to be stamped wherever the admin
+// clicked, completely independent of any Furniture piece, so it could
+// easily land on a chair's tall visual/overhead rows instead of its actual
+// collision tile (Furniture.tilesH > 1 pieces only collide on their BOTTOM
+// row — see Furniture's own doc comment; anything above is purely
+// overhead art). Snapping to the nearest matching chair's real base row
+// here means the marker can never drift from where the chair actually
+// blocks movement, without needing a settings panel or any new per-marker
+// data. A no-op (returns x,y unchanged) when no chair's footprint covers
+// the clicked tile, or when the matching chair has tilesH === 1 (base row
+// IS the visual row already).
+function snapToNearestChair(doc: LayerData, x: number, y: number): { x: number; y: number } {
+  for (const f of [...doc.objects, ...doc.topObjects]) {
+    if (!f.isInteractable) continue;
+    const top = f.y - (f.tilesH - 1);
+    if (x >= f.x && x < f.x + f.tilesW && y >= top && y <= f.y) {
+      return { x: Math.min(Math.max(x, f.x), f.x + f.tilesW - 1), y: f.y };
+    }
+  }
+  return { x, y };
+}
+
 // ZEP-style Room Editor state. Potong 0: layers/tools/viewport. Potong 2: floor
 // editing + undo/redo + debounced save. Potong 3: Wall (tile, drives collision),
 // Objects (below avatar) and Top objects (above avatar) editing. Tile-effects
@@ -429,15 +451,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
               doc.tileEffects = doc.tileEffects.filter((e) => !(e.x === x && e.y === y));
               changed = true;
             } else {
-              const existing = doc.tileEffects.find((e) => e.x === x && e.y === y);
+              // Follow-up — same chair-snap as stampEffectAt; if two tiles in
+              // this rectangle both snap to the same chair, the second
+              // iteration's `existing.kind === eff` below naturally no-ops
+              // instead of stamping a duplicate on top.
+              const target: { x: number; y: number } = eff === 'claimableSeat' ? snapToNearestChair(doc, x, y) : { x, y };
+              const existing: TileEffect | undefined = doc.tileEffects.find((e) => e.x === target.x && e.y === target.y);
               if (existing && existing.kind === eff) continue;
-              doc.tileEffects = doc.tileEffects.filter((e) => !(e.x === x && e.y === y));
+              doc.tileEffects = doc.tileEffects.filter((e) => !(e.x === target.x && e.y === target.y));
               doc.tileEffects.push(
-                eff === 'impassable' ? { x, y, kind: 'impassable' }
-                : eff === 'door' ? { x, y, kind: 'door' }
-                : eff === 'sittable' ? { x, y, kind: 'sittable', sitDirection: 'down' }
-                : eff === 'claimableSeat' ? { x, y, kind: 'claimableSeat', id: crypto.randomUUID() }
-                : { x, y, kind: 'startingPoint' },
+                eff === 'impassable' ? { x: target.x, y: target.y, kind: 'impassable' }
+                : eff === 'door' ? { x: target.x, y: target.y, kind: 'door' }
+                : eff === 'sittable' ? { x: target.x, y: target.y, kind: 'sittable', sitDirection: 'down' }
+                : eff === 'claimableSeat' ? { x: target.x, y: target.y, kind: 'claimableSeat', id: crypto.randomUUID() }
+                : { x: target.x, y: target.y, kind: 'startingPoint' },
               );
               changed = true;
             }
@@ -509,18 +536,22 @@ export const useEditorStore = create<EditorState>((set, get) => {
     stampEffectAt: (x, y) => {
       const d = get().doc; const eff = get().selectedEffect;
       if (!d || (eff !== 'startingPoint' && eff !== 'impassable' && eff !== 'door' && eff !== 'sittable' && eff !== 'claimableSeat')) return;
-      const existing = d.tileEffects.find((e) => e.x === x && e.y === y);
+      // Follow-up — snap to the nearest chair's real (collision) tile BEFORE
+      // the existing-effect/no-op check below, so clicking anywhere on a
+      // tall chair's visual footprint always resolves to the SAME base tile.
+      const target = eff === 'claimableSeat' ? snapToNearestChair(d, x, y) : { x, y };
+      const existing = d.tileEffects.find((e) => e.x === target.x && e.y === target.y);
       if (existing && existing.kind === eff) return; // no change
-      d.tileEffects = d.tileEffects.filter((e) => !(e.x === x && e.y === y));
+      d.tileEffects = d.tileEffects.filter((e) => !(e.x === target.x && e.y === target.y));
       d.tileEffects.push(
-        eff === 'impassable' ? { x, y, kind: 'impassable' }
-        : eff === 'door' ? { x, y, kind: 'door' }
-        : eff === 'sittable' ? { x, y, kind: 'sittable', sitDirection: 'down' }
+        eff === 'impassable' ? { x: target.x, y: target.y, kind: 'impassable' }
+        : eff === 'door' ? { x: target.x, y: target.y, kind: 'door' }
+        : eff === 'sittable' ? { x: target.x, y: target.y, kind: 'sittable', sitDirection: 'down' }
         // A fresh id every stamp — even re-stamping the exact same tile is
         // treated as a brand-new marker (matches "erase then re-stamp = a
         // new marker" being this editor's only way to move one).
-        : eff === 'claimableSeat' ? { x, y, kind: 'claimableSeat', id: crypto.randomUUID() }
-        : { x, y, kind: 'startingPoint' },
+        : eff === 'claimableSeat' ? { x: target.x, y: target.y, kind: 'claimableSeat', id: crypto.randomUUID() }
+        : { x: target.x, y: target.y, kind: 'startingPoint' },
       );
       effectsDirty = true; strokeChanged = true;
     },

@@ -2070,29 +2070,39 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                 data-seat-id={seat.id}
                 onClick={() => {
                   if (isMine) {
-                    // Same "move the source-of-truth locally, then tell the
-                    // server so everyone else snaps" pattern as the existing
-                    // double-click teleport above — emitTeleportTo alone
-                    // only reaches OTHER clients (socket.to excludes the
-                    // sender), so skipping this would leave the clicker's
-                    // own avatar stuck in place.
+                    // Follow-up — this used to be a plain teleport (stand at
+                    // the tile, no sit state at all). Now performs a REAL
+                    // sit, same state/emit performSit uses for an ordinary
+                    // chair with no sitFacing configured: face the OPPOSITE
+                    // of whichever way the player was walking/facing right
+                    // before the click — i.e. away from the seat, back
+                    // toward the room they approached from, exactly the
+                    // "face away from the chair" convention every other
+                    // chair in the game already defaults to. setPosition
+                    // (movement source-of-truth) + setLocalPlayer both still
+                    // needed for the SAME reason as before (emitSit alone
+                    // only reaches OTHER clients — socket.to excludes the
+                    // sender).
                     const cx = seat.x * TILE_SIZE + TILE_SIZE / 2;
                     const cy = seat.y * TILE_SIZE + TILE_SIZE / 2;
                     const store = useGameStore.getState();
                     const from = store.localPlayer;
+                    const sitDirection = OPPOSITE_DIRECTION[from.direction];
                     setPosition(cx, cy);
-                    store.setLocalPlayer({ x: cx, y: cy, isMoving: false });
-                    emitTeleportTo(cx, cy, from.direction);
+                    store.setSitReturnPos({ x: from.x, y: from.y });
+                    store.setSittingFurnitureId(seat.id);
+                    store.setLocalPlayer({ x: cx, y: cy, direction: sitDirection, isMoving: false, isSitting: true, seatFurnitureId: seat.id });
+                    emitSit(true, cx, cy, sitDirection, seat.id);
                   } else {
                     emitClaimSeat(seat.id);
                   }
                 }}
-                title={owner ? (isMine ? 'Kursimu — klik untuk pindah ke sini' : `Diklaim ${owner.name}`) : 'Klaim kursi ini'}
+                title={owner ? (isMine ? 'Kursimu — klik untuk duduk di sini' : `Diklaim ${owner.name}`) : 'Klaim kursi ini'}
                 className={`w-7 h-7 flex items-center justify-center text-base rounded-full shadow-md border-2 transition-transform cursor-pointer hover:scale-110 ${
                   isMine ? 'bg-emerald-400/90 border-emerald-600' : owner ? 'bg-amber-300/90 border-amber-600' : 'bg-white/90 border-gray-300'
                 }`}
               >
-                🪑
+                {owner ? '🪑' : '🔔'}
               </button>
               {owner && (
                 <span className={`mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold text-white shadow whitespace-nowrap ${isMine ? 'bg-emerald-600/90' : 'bg-amber-600/90'}`}>
@@ -2102,7 +2112,18 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
               {isMine && (
                 <button
                   data-release-seat-id={seat.id}
-                  onClick={(e) => { e.stopPropagation(); emitReleaseSeat(seat.id); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Follow-up — releasing while actually sitting there now
+                    // also stands the player up (claiming it now sits them
+                    // down for real, see the seat button's onClick above),
+                    // rather than leaving them visually seated in a chair
+                    // that's no longer theirs.
+                    if (useGameStore.getState().localPlayer.isSitting && useGameStore.getState().localPlayer.seatFurnitureId === seat.id) {
+                      performStandUp();
+                    }
+                    emitReleaseSeat(seat.id);
+                  }}
                   title="Lepas kursi"
                   className="mt-0.5 w-4 h-4 flex items-center justify-center text-[9px] rounded-full bg-black/50 hover:bg-black/70 text-white cursor-pointer"
                 >
