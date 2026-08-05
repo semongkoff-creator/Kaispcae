@@ -36,7 +36,7 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
   };
 
   return (
-    <div className="w-screen h-screen bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-950 flex items-center justify-center relative">
+    <div className="w-screen h-screen bg-gradient-to-br from-white to-purple-50 dark:from-purple-950 dark:to-gray-950 flex items-center justify-center relative">
       <button
         onClick={onToggleTheme}
         title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
