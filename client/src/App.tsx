@@ -41,7 +41,6 @@ import { InteractiveObjectModal } from './components/ui/InteractiveObjectModal';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
 import { SoundboardPanel } from './components/ui/SoundboardPanel';
 import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
-import { FocusMusicPanel } from './components/ui/FocusMusicPanel';
 import { AwayReasonModal } from './components/ui/AwayReasonModal';
 import { ActivityFeed } from './components/ui/ActivityFeed';
 import { PendingRequestToast } from './components/ui/PendingRequestToast';
@@ -1176,10 +1175,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {meetingZone && !editorMode && (
         <MeetingControl roomId={roomSlug} zoneId={meetingZone.id} />
       )}
-
-      {/* Focus area — private per-player music, only while workMode is 'focus' */}
-      {workMode === 'focus' && !editorMode && <FocusMusicPanel />}
-
 
       {miniModeWindow && (
         <MiniMode

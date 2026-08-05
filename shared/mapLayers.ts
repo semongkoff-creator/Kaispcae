@@ -367,7 +367,7 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     return z;
   });
 
-  return { tiles, furniture, zones, impassableAreaRects: getImpassableAreaRects(ld) };
+  return { tiles, furniture, zones, impassableAreaRects: [...getImpassableAreaRects(ld), ...getFurnitureBlockRects(ld)] };
 }
 
 // Pixel-space collision rectangles for every impassable AreaEffect — the
@@ -380,4 +380,42 @@ export function getImpassableAreaRects(ld: LayerData): ImpassableAreaRect[] {
   return ld.areas
     .filter((a) => a.effect === 'impassable')
     .map((a) => ({ x: a.x * TILE_SIZE, y: a.y * TILE_SIZE, w: a.width * TILE_SIZE, h: a.height * TILE_SIZE }));
+}
+
+// Bug — Furniture has NEVER actually blocked movement anywhere in this
+// codebase, despite Furniture's own doc comment claiming "the bottom row...
+// is where collision is applied": isBlocked (GameCanvas.tsx) and
+// wouldCollide (useMovement.ts/movementHandler.ts) only ever check the tile
+// grid + Impassable Area rects above, never the furniture list. Built-in
+// palette items (desks, chairs, plants, picture frames) are fine walkable-
+// through-adjacent decoration by design, so this deliberately does NOT
+// block furniture in general — that would silently change walkability in
+// every existing room. What it DOES fix: a room's own uploaded custom
+// "Object" asset (Fitur 15's Floor/Wall/Object upload — see
+// CustomAssetEntry.category) is exactly the kind of thing an admin uploads
+// to look and act like a wall/partition/pillar, distinct from a "Wall"
+// upload only because Wall entries paint the tile grid instead (and
+// already collide correctly via `type: 'wall'`). Resolved from
+// ld.customAssets by category alone, not a stored per-instance flag — so
+// this applies automatically and retroactively to every existing placement
+// of a custom Object asset, not just newly-placed ones.
+//
+// Reuses ImpassableAreaRect / isPointInImpassableArea / doesRectOverlapImpassableArea
+// as-is (merged into the same array in layerDataToLegacy above) rather than
+// adding a parallel furniture-collision code path — same shape, same
+// pixel-space semantics, same single check already wired into both the
+// client's local prediction and the server's authoritative validation.
+//
+// Bottom-row-only rect (h: TILE_SIZE), matching Furniture's own documented
+// anchor convention: (x,y) is the piece's bottom-left tile, tilesW wide —
+// any rows above (tilesH > 1) are purely visual "overhead", walkable from
+// behind, same as every other multi-row piece already renders.
+export function getFurnitureBlockRects(ld: LayerData): ImpassableAreaRect[] {
+  const blockingPaletteIds = new Set(
+    (ld.customAssets ?? []).filter((a) => a.category === 'object').map((a) => a.id),
+  );
+  if (blockingPaletteIds.size === 0) return [];
+  return [...ld.objects, ...ld.topObjects]
+    .filter((f) => f.kind !== 'banner' && blockingPaletteIds.has(f.paletteId))
+    .map((f) => ({ x: f.x * TILE_SIZE, y: f.y * TILE_SIZE, w: f.tilesW * TILE_SIZE, h: TILE_SIZE }));
 }
