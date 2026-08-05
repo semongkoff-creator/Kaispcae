@@ -7,7 +7,19 @@ import type { ManualStatus } from '../data/presence';
 // per-socket RECORDING_STARTED emit, which simply never reaches anyone else.
 export const MIN_MAP_ZOOM = 0.6;
 export const MAX_MAP_ZOOM = 2;
-const clampMapZoom = (z: number) => Math.max(MIN_MAP_ZOOM, Math.min(MAX_MAP_ZOOM, z));
+// Sharpness follow-up — mapZoom used to be fully continuous (each +/-
+// click or wheel notch multiplied it by 1.2/1.1), so `mapZoom * dpr`
+// landed on an arbitrary value like 1.728 almost every time, and
+// GameCanvas draws every tile/sprite through that scale on top of its own
+// already-non-integer 48/32 source-to-display ratio (TILE_SIZE vs
+// SOURCE_TILE_SIZE — a separate, deliberately UNCHANGED tradeoff, see
+// shared/types/index.ts). Snapping to clean 10% steps doesn't erase that
+// underlying ratio, but it does make every zoom LEVEL land on the exact
+// same round number every time (100%, 110%, 120%, ...) instead of
+// compounding into odd fractional percentages the longer someone zooms,
+// which is both crisper on average and far more predictable as a control.
+const ZOOM_STEP = 0.1;
+const clampMapZoom = (z: number) => Math.max(MIN_MAP_ZOOM, Math.min(MAX_MAP_ZOOM, Math.round(z / ZOOM_STEP) * ZOOM_STEP));
 
 export interface ActiveRecordingInfo {
   recordingId: string;
