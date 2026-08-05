@@ -867,7 +867,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const followInfo = useGameStore((s) => s.followInfo);
   const followerUserIds = useGameStore((s) => s.followerUserIds);
   const [showEmoteWheel, setShowEmoteWheel] = useState(false);
-  const [showMinimap, setShowMinimap] = useState(true);
   const meetingViewActive = activePanel === 'meeting';
   const [miniModeWindow, setMiniModeWindow] = useState<Window | null>(null);
   const [miniModeError, setMiniModeError] = useState<string | null>(null);
@@ -1055,10 +1054,19 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     setShowEmoteWheel(false);
   }, [emitEmote, localPlayerId]);
 
-  // B key for emote wheel, M key for minimap — was Z, but Z is now the
-  // nudge/senggol key (GameCanvas.tsx), and both handlers listen on the
-  // same window keydown, so a single Z press fired the emote wheel toggle
-  // here AND the nudge attempt there at once.
+  // B key for emote wheel — was Z, but Z is now the nudge/senggol key
+  // (GameCanvas.tsx), and both handlers listen on the same window keydown,
+  // so a single Z press fired the emote wheel toggle here AND the nudge
+  // attempt there at once.
+  //
+  // Bug — M used to toggle the minimap's visibility, but nothing in the UI
+  // ever explained that, and M is a common mute-mic convention in other
+  // apps — a player pressing it expecting to mute instead made their
+  // minimap vanish with no obvious way to know why or bring it back short
+  // of knowing to press M again. The minimap is small and easy to ignore
+  // when not needed, so there was never a real reason to let it be
+  // toggled away at all — it's unconditionally visible now (still subject
+  // to simplifiedView, same as before).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Inert while typing (the Docs editor is contenteditable, so "B" used
@@ -1068,9 +1076,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       if (e.key === 'b' || e.key === 'B') {
         e.preventDefault();
         setShowEmoteWheel((v) => !v);
-      }
-      if (e.key === 'm' || e.key === 'M') {
-        setShowMinimap((v) => !v);
       }
     };
     window.addEventListener('keydown', handler);
@@ -1879,7 +1884,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           // blocked.
           emitMove(targetX, targetY, state.localPlayer.direction);
         }}
-        visible={showMinimap && !simplifiedView}
+        visible={!simplifiedView}
       />
     </div>
   );
@@ -2089,7 +2094,7 @@ function MainApp() {
   // key={roomSlug} — portal travel (handlePortalEnter -> onPortalTravel ->
   // setRoomSlug) previously updated roomSlug on the SAME mounted Game
   // instance, so its own useState (meetingViewActive, simplifiedView,
-  // miniModeWindow, showMinimap, ...) all survived into the new room
+  // miniModeWindow, ...) all survived into the new room
   // untouched — e.g. still full-screen in Meeting View, or a Mini Mode PiP
   // window still open, with no signal anything changed underneath. Forcing
   // a remount on room change gives every room a clean slate, matching what

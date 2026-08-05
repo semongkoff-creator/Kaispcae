@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import { Avatar, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
-import { drawMiniTileType, MINI_FURNITURE, MINI_WALL_AREA } from '@/components/canvas/miniRender';
+import { drawMiniTileType, drawMiniZoneBackground, MINI_FURNITURE, MINI_WALL_AREA } from '@/components/canvas/miniRender';
 
 interface MinimapProps {
   players: Avatar[];
@@ -20,6 +20,7 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
   const tiles = useGameStore((s) => s.tiles);
   const furniture = useGameStore((s) => s.furniture);
   const wallAreaRects = useGameStore((s) => s.wallAreaRects);
+  const zones = useGameStore((s) => s.zones);
   // Faded out (just a subtle presence) until hovered, then fades in to full
   // opacity — a permanently-opaque floor plan sitting over the game world
   // reads as visual clutter once you're not actively using it to navigate.
@@ -47,12 +48,20 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
     ctx.fillStyle = 'rgba(237,233,254,0.9)';
     ctx.fillRect(0, 0, MM_W, MM_H);
 
+    const cellW = MM_W / MAP_WIDTH;
+    const cellH = MM_H / MAP_HEIGHT;
+
+    // Per-zone background tint, drawn first so rooms read as visually
+    // distinct areas (Gather.town-style) instead of one flat color —
+    // same reasoning as GameCanvas.tsx's Overview mode, which mirrors this.
+    for (const zone of zones) {
+      drawMiniZoneBackground(ctx, zone, zone.x * cellW, zone.y * cellH, zone.width * cellW, zone.height * cellH);
+    }
+
     // Actual floor plan — walls/doors/desks/chairs, scaled down from the
     // room's real tile grid. This was missing entirely before: the minimap
     // only ever drew the background tint + player dots, so it always read
     // as a blank panel no matter which room you were in.
-    const cellW = MM_W / MAP_WIDTH;
-    const cellH = MM_H / MAP_HEIGHT;
     for (let ty = 0; ty < tiles.length; ty++) {
       const row = tiles[ty];
       if (!row) continue;
@@ -99,7 +108,7 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
         ctx.stroke();
       }
     }
-  }, [players, localPlayerId, tiles, furniture, wallAreaRects]);
+  }, [players, localPlayerId, tiles, furniture, wallAreaRects, zones]);
 
   const handleClick = (e: React.MouseEvent) => {
     // Belt-and-suspenders — you can't actually click this without the mouse

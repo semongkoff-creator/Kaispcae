@@ -30,7 +30,7 @@ import { avatarColor } from '@/components/ui/ChatAvatar';
 // mapRender.ts so the editor can render the map identically. GameCanvas's usage
 // is unchanged.
 import { drawTile, drawFloorTile, drawWallTile, drawFurnitureLayer, TILE_COLORS } from './mapRender';
-import { drawMiniTileType, MINI_FURNITURE, MINI_WALL_AREA } from './miniRender';
+import { drawMiniTileType, drawMiniZoneBackground, MINI_FURNITURE, MINI_WALL_AREA } from './miniRender';
 
 // Kept proportional to TILE_SIZE (same ratio as AvatarSprite.ts's own copy of
 // this constant) so decorations positioned relative to it — crown, speaker
@@ -1100,6 +1100,21 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       // second, differently-styled abstraction (this used to draw each Zone
       // as one flat colored block instead, which didn't show any of the
       // actual wall/furniture layout the minimap does).
+      //
+      // Bug — a single flat background tint for the WHOLE map read as
+      // monotone next to a Gather.town-style floor plan where every room is
+      // its own pastel color. Each zone's own background tint is drawn
+      // FIRST, underneath the wall/furniture blocks below, so distinct
+      // rooms are visually distinguishable at a glance without competing
+      // with the structural blocks for attention.
+      for (const zone of zonesRef.current) {
+        const zx = zone.x * TILE_SIZE - cameraX;
+        const zy = zone.y * TILE_SIZE - cameraY;
+        const zw = zone.width * TILE_SIZE;
+        const zh = zone.height * TILE_SIZE;
+        if (zx + zw < 0 || zx > worldViewW || zy + zh < 0 || zy > worldViewH) continue;
+        drawMiniZoneBackground(ctx, zone, zx, zy, zw, zh);
+      }
       for (let row = startRow; row < endRow; row++) {
         for (let col = startCol; col < endCol; col++) {
           const tile = tiles[row]?.[col];

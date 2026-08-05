@@ -1,4 +1,4 @@
-import { RoomTile } from '@virtualmeet/shared';
+import { RoomTile, Zone } from '@virtualmeet/shared';
 
 // Shared flat-color "floor plan" palette — walls/doors/desks/chairs as plain
 // blocks, no pixel-art sprites. Single source for both Minimap.tsx (the
@@ -11,6 +11,28 @@ export const MINI_DOOR = 'rgba(167,139,250,0.9)';
 export const MINI_DESK_CHAIR = 'rgba(124,58,237,0.4)';
 export const MINI_FURNITURE = 'rgba(124,58,237,0.35)';
 export const MINI_WALL_AREA = 'rgba(55,65,81,0.85)';
+const MINI_ZONE_FALLBACK = '#94a3b8';
+
+// Bug — the whole floor plan used to be one flat background tint no matter
+// how many distinct rooms/zones the map actually had, reading as monotone
+// next to a Gather.town-style floor plan where every room is its own
+// pastel color. Each Zone already carries a `color` (used elsewhere for its
+// in-game label pill) — reused here at low alpha as a background tint
+// UNDER the wall/furniture blocks above, so rooms read as visually
+// distinct areas without competing with those blocks for attention.
+function hexToRgba(hex: string | undefined, alpha: number): string {
+  const h = (hex ?? MINI_ZONE_FALLBACK).replace('#', '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const r = parseInt(full.slice(0, 2), 16) || 0;
+  const g = parseInt(full.slice(2, 4), 16) || 0;
+  const b = parseInt(full.slice(4, 6), 16) || 0;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+export function drawMiniZoneBackground(ctx: CanvasRenderingContext2D, zone: Pick<Zone, 'color'>, x: number, y: number, w: number, h: number) {
+  ctx.fillStyle = hexToRgba(zone.color, 0.3);
+  ctx.fillRect(x, y, w, h);
+}
 
 export function drawMiniTileType(ctx: CanvasRenderingContext2D, type: RoomTile['type'], x: number, y: number, w: number, h: number) {
   switch (type) {
