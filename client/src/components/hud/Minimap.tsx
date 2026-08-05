@@ -1,18 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
-import { Avatar, RoomTile, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT } from '@virtualmeet/shared';
+import { Avatar, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
-
-// Bug — a room built with the newer Room Editor tools (custom Object
-// furniture, the "Wall Area" tool) has little or nothing painted into the
-// raw tile-type grid this minimap used to exclusively read — those tools
-// deliberately DON'T touch it (see shared/mapLayers.ts's doc comments on
-// getFurnitureBlockRects/getWallAreaRects). A room built that way rendered
-// as an almost-blank panel, even though the real game view is full of
-// structure. Furniture (any piece, not just legacy desk/chair TILE types)
-// and Wall Area rects are drawn here too now, from the same store fields
-// GameCanvas.tsx's own Overview mode already reads.
-const MM_FURNITURE = 'rgba(124,58,237,0.35)';
-const MM_WALL_AREA = 'rgba(55,65,81,0.85)';
+import { drawMiniTileType, MINI_FURNITURE, MINI_WALL_AREA } from '@/components/canvas/miniRender';
 
 interface MinimapProps {
   players: Avatar[];
@@ -25,34 +14,6 @@ const MM_W = 150;
 const MM_H = 100;
 const SCALE_X = MM_W / (MAP_WIDTH * TILE_SIZE);
 const SCALE_Y = MM_H / (MAP_HEIGHT * TILE_SIZE);
-
-// Minimap tile colors — only the shapes that make the room readable as a
-// floor plan at this scale (walls/doors); everything else just shows the
-// floor tint underneath, same as the real room editor's collision model
-// (BLOCKED_TILES) but simplified to what's visible at 5px/tile.
-const MM_WALL = 'rgba(76,29,149,0.85)';
-const MM_DOOR = 'rgba(167,139,250,0.9)';
-const MM_DESK_CHAIR = 'rgba(124,58,237,0.4)';
-
-function drawTileType(ctx: CanvasRenderingContext2D, type: RoomTile['type'], x: number, y: number, w: number, h: number) {
-  switch (type) {
-    case 'wall':
-      ctx.fillStyle = MM_WALL;
-      ctx.fillRect(x, y, w, h);
-      break;
-    case 'door':
-      ctx.fillStyle = MM_DOOR;
-      ctx.fillRect(x, y, w, h);
-      break;
-    case 'desk':
-    case 'chair':
-      ctx.fillStyle = MM_DESK_CHAIR;
-      ctx.fillRect(x, y, w, h);
-      break;
-    default:
-      break; // floor/portal/spawn — just the background tint shows through
-  }
-}
 
 export function Minimap({ players, localPlayerId, onTeleport, visible }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -98,7 +59,7 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
       for (let tx = 0; tx < row.length; tx++) {
         const tile = row[tx];
         if (!tile) continue;
-        drawTileType(ctx, tile.type, tx * cellW, ty * cellH, cellW, cellH);
+        drawMiniTileType(ctx, tile.type, tx * cellW, ty * cellH, cellW, cellH);
       }
     }
 
@@ -108,14 +69,14 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
     // upward `tilesH` rows from `y`.
     for (const item of furniture) {
       if (item.kind === 'banner') continue;
-      ctx.fillStyle = MM_FURNITURE;
+      ctx.fillStyle = MINI_FURNITURE;
       ctx.fillRect(item.x * cellW, (item.y - item.tilesH + 1) * cellH, item.tilesW * cellW, item.tilesH * cellH);
     }
 
     // Room Editor's "Wall Area" tool — pixel-space rects, scaled with the
     // same SCALE_X/SCALE_Y the player dots below already use.
     for (const rect of wallAreaRects) {
-      ctx.fillStyle = MM_WALL_AREA;
+      ctx.fillStyle = MINI_WALL_AREA;
       ctx.fillRect(rect.x * SCALE_X, rect.y * SCALE_Y, rect.w * SCALE_X, rect.h * SCALE_Y);
     }
 

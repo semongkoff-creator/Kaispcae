@@ -30,6 +30,7 @@ import { avatarColor } from '@/components/ui/ChatAvatar';
 // mapRender.ts so the editor can render the map identically. GameCanvas's usage
 // is unchanged.
 import { drawTile, drawFloorTile, drawWallTile, drawFurnitureLayer, TILE_COLORS } from './mapRender';
+import { drawMiniTileType, MINI_FURNITURE, MINI_WALL_AREA } from './miniRender';
 
 // Kept proportional to TILE_SIZE (same ratio as AvatarSprite.ts's own copy of
 // this constant) so decorations positioned relative to it — crown, speaker
@@ -1074,7 +1075,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       }
     }
 
-    ctx.fillStyle = isOverview ? '#d7f2de' : '#1a1a2e';
+    // Same light-purple tint Minimap.tsx's own background uses (opaque here,
+    // unlike the minimap's 0.9 alpha, since this fills the WHOLE screen and
+    // has nothing behind it to blend with).
+    ctx.fillStyle = isOverview ? '#ede9fe' : '#1a1a2e';
     ctx.fillRect(0, 0, worldViewW, worldViewH);
 
     const tiles = tilesRef.current;
@@ -1089,35 +1093,36 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
 
     if (isOverview) {
       // Zoomed out past OVERVIEW_ZOOM_THRESHOLD — swap the whole detailed
-      // pixel-art pass (tiles/wall-skins/furniture) for a simplified
-      // floor-plan view: each Zone becomes one flat colored block with its
-      // name, same data (Zone.color/label) the game already has, just drawn
-      // once per zone instead of per-tile. No furniture/wall-area detail —
-      // legible at a glance is the whole point of this mode.
-      for (const zone of zonesRef.current) {
-        const zx = zone.x * TILE_SIZE - cameraX;
-        const zy = zone.y * TILE_SIZE - cameraY;
-        const zw = zone.width * TILE_SIZE;
-        const zh = zone.height * TILE_SIZE;
-        if (zx + zw < 0 || zx > worldViewW || zy + zh < 0 || zy > worldViewH) continue;
-        // Border width / label size / corner radius all divided by zoom —
-        // same "read as a constant on-screen size" reasoning as the avatar
-        // bubble above. Without this the label rendered at ~13*0.25=3px,
-        // completely illegible.
-        const radius = Math.min(10 / zoom, zw / 4, zh / 4);
-        ctx.beginPath();
-        ctx.roundRect(zx, zy, zw, zh, radius);
-        ctx.fillStyle = 'rgba(255,255,255,0.9)';
-        ctx.fill();
-        ctx.strokeStyle = zone.color || '#94a3b8';
-        ctx.lineWidth = 3 / zoom;
-        ctx.stroke();
-        if (zone.label) {
-          ctx.fillStyle = '#334155';
-          ctx.font = `600 ${Math.round(13 / zoom)}px sans-serif`;
-          ctx.textBaseline = 'top';
-          ctx.fillText(zone.label, zx + 10 / zoom, zy + 8 / zoom);
+      // pixel-art pass (tiles/wall-skins/furniture) for the SAME flat-color
+      // floor-plan rendering Minimap.tsx's corner panel already uses (see
+      // miniRender.ts) — the whole point of this mode is to read like a
+      // bigger version of the minimap the player already knows, not a
+      // second, differently-styled abstraction (this used to draw each Zone
+      // as one flat colored block instead, which didn't show any of the
+      // actual wall/furniture layout the minimap does).
+      for (let row = startRow; row < endRow; row++) {
+        for (let col = startCol; col < endCol; col++) {
+          const tile = tiles[row]?.[col];
+          if (!tile) continue;
+          drawMiniTileType(ctx, tile.type, col * TILE_SIZE - cameraX, row * TILE_SIZE - cameraY, TILE_SIZE, TILE_SIZE);
         }
+      }
+      for (const item of furnitureList) {
+        if (item.kind === 'banner') continue;
+        const fx = item.x * TILE_SIZE - cameraX;
+        const fy = (item.y - item.tilesH + 1) * TILE_SIZE - cameraY;
+        const fw = item.tilesW * TILE_SIZE;
+        const fh = item.tilesH * TILE_SIZE;
+        if (fx + fw < 0 || fx > worldViewW || fy + fh < 0 || fy > worldViewH) continue;
+        ctx.fillStyle = MINI_FURNITURE;
+        ctx.fillRect(fx, fy, fw, fh);
+      }
+      for (const rect of wallAreaRectsRef.current) {
+        const rsx = rect.x - cameraX;
+        const rsy = rect.y - cameraY;
+        if (rsx + rect.w < 0 || rsx > worldViewW || rsy + rect.h < 0 || rsy > worldViewH) continue;
+        ctx.fillStyle = MINI_WALL_AREA;
+        ctx.fillRect(rsx, rsy, rect.w, rect.h);
       }
     } else {
       for (let row = startRow; row < endRow; row++) {
