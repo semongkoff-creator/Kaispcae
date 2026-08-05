@@ -42,17 +42,10 @@ export function FocusMusicPanel() {
     setYoutubeId(id);
   };
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        title="Buka Focus Music"
-        className="absolute bottom-20 left-16 z-50 w-9 h-9 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-amber-300 dark:border-amber-700 shadow-sm flex items-center justify-center text-amber-600 dark:text-amber-400 cursor-pointer pointer-events-auto"
-      >
-        <MusicNoteBeamed size={14} />
-      </button>
-    );
-  }
+  // Closing the panel (X below) just leaves it closed — no dangling reopen
+  // button. It reopens on its own next time the player re-enters a Focus
+  // area (this component remounts fresh with open:true each time).
+  if (!open) return null;
 
   return (
     <div className="absolute bottom-20 left-16 z-50 w-64 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm border border-amber-300 dark:border-amber-700 rounded-xl shadow-lg p-3 pointer-events-auto text-xs text-gray-700 dark:text-gray-200">

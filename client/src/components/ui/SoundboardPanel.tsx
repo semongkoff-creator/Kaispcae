@@ -81,8 +81,15 @@ export function SoundboardPanel({ roomSlug, emitSoundboardPlay, open, onToggle, 
   // Client-side-only cooldown feedback (server enforces the real one) — just
   // so the grid visibly greys out instead of silently doing nothing for the
   // 3s after a click, which read as "the button is broken".
-  const [cooldownUntil, setCooldownUntil] = useState(0);
-  const onCooldown = Date.now() < cooldownUntil;
+  //
+  // Bug — this used to be a `cooldownUntil` timestamp compared against
+  // Date.now() at render time. Without a timer forcing a re-render exactly
+  // when it expired, the grid stayed visibly greyed out/disabled forever
+  // past the real 3s mark, until some UNRELATED store update happened to
+  // re-render this panel — which in a quiet room could be a long wait,
+  // making working soundboard look broken. A real timer-driven boolean
+  // guarantees a re-render right when the cooldown actually ends.
+  const [onCooldown, setOnCooldown] = useState(false);
 
   const allSounds = useMemo<SoundboardSoundData[]>(
     () => [...SOUNDBOARD_DEFAULT_SOUNDS, ...customSounds],
@@ -92,7 +99,8 @@ export function SoundboardPanel({ roomSlug, emitSoundboardPlay, open, onToggle, 
   const play = (soundId: string) => {
     if (onCooldown) return;
     emitSoundboardPlay(soundId);
-    setCooldownUntil(Date.now() + 3000);
+    setOnCooldown(true);
+    setTimeout(() => setOnCooldown(false), 3000);
   };
 
   const handleFile = async (file: File) => {
