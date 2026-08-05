@@ -15,10 +15,17 @@ interface MusicPlayerWidgetProps {
 // own chat replies ("Now playing: ...") are the only "now playing" indicator.
 //
 // display:none is NOT used to hide the iframe — browsers can pause/throttle
-// media on elements removed from layout that way. Instead it's rendered at
-// its normal size but shoved off-screen via fixed positioning, well outside
-// the viewport, so nothing is ever painted on screen while the media
-// pipeline still treats it as a live, playing element.
+// media on elements removed from layout that way. It also must NOT be
+// positioned off-screen (e.g. left: -9999px) for the same reason: Chrome's
+// viewport-intersection throttling treats an iframe that never intersects
+// the viewport rect the same as an invisible one, and throttles its
+// internal requestAnimationFrame loop — which is exactly what YouTube's
+// embedded player uses for buffering/quality-adaptation timing, so the
+// audio came out continuously glitchy/stuttering even though the postMessage
+// play/pause control itself worked fine. Kept inside the viewport at (0,0)
+// instead, shrunk to 1x1 and opacity:0 so it's imperceptible without ever
+// leaving the intersecting/visible region the browser's media pipeline
+// checks.
 export function MusicPlayerWidget({ zoneId }: MusicPlayerWidgetProps) {
   const session = useGameStore((s) => (zoneId ? s.musicSessionsByZone[zoneId] : undefined));
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -80,7 +87,7 @@ export function MusicPlayerWidget({ zoneId }: MusicPlayerWidgetProps) {
       title="Music Bot audio (hidden — control via chat commands only)"
       src={src}
       allow="autoplay; encrypted-media"
-      style={{ position: 'fixed', left: '-9999px', top: '-9999px', width: 1, height: 1, border: 'none' }}
+      style={{ position: 'fixed', left: 0, top: 0, width: 1, height: 1, opacity: 0, border: 'none', pointerEvents: 'none' }}
       aria-hidden="true"
       tabIndex={-1}
     />
