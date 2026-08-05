@@ -581,6 +581,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     return () => clearTimeout(timer);
   }, [slappedBy]);
 
+  // Server-side admin-permission rejections (Spotlight, Kick, room lock, …)
+  // — same brief-toast pattern as nudgedBy/slappedBy above, see gameStore's
+  // doc comment on adminErrorMessage for why this needed to exist at all.
+  const adminErrorMessage = useGameStore((s) => s.adminErrorMessage);
+  useEffect(() => {
+    if (!adminErrorMessage) return;
+    const timer = setTimeout(() => useGameStore.getState().setAdminErrorMessage(null), 4000);
+    return () => clearTimeout(timer);
+  }, [adminErrorMessage]);
+
   const incomingFollowRequest = useGameStore((s) => s.incomingFollowRequest);
   useEffect(() => {
     if (!incomingFollowRequest) return;
@@ -1331,6 +1341,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         {slappedBy && (
           <div className="bg-purple-600/95 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-2 animate-fade-in">
             👋 <span className="font-bold">{slappedBy}</span> nyoel kamu — sadar dong!
+          </div>
+        )}
+        {adminErrorMessage && (
+          <div className="bg-red-600/95 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-2 animate-fade-in">
+            ⚠️ {adminErrorMessage}
           </div>
         )}
       </div>

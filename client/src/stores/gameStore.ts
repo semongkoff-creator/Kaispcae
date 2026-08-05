@@ -485,6 +485,16 @@ export interface GameState {
   slappedBy: string | null;
   setSlappedBy: (name: string | null) => void;
 
+  // Bug — the server's 'admin:error' event (a permission check rejecting an
+  // admin-only action: Spotlight, Kick, room lock, ...) used to only ever
+  // reach console.warn. Clicking a button you don't actually have server-
+  // side permission for (a stale client-side role check, a room-admin list
+  // that hasn't caught up, etc.) then did NOTHING visible at all —
+  // indistinguishable from "the feature is just broken". Same brief-toast
+  // pattern as slappedBy/nudgedBy above.
+  adminErrorMessage: string | null;
+  setAdminErrorMessage: (message: string | null) => void;
+
   // Soundboard — this room's custom uploaded sounds (defaults live purely
   // client-side as SOUNDBOARD_DEFAULT_SOUNDS, no server round trip needed).
   // Synced from SOUNDBOARD_LIST on join, kept live via SOUNDBOARD_SOUND_ADDED.
@@ -1057,6 +1067,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   setNudgedBy: (name) => set({ nudgedBy: name }),
   slappedBy: null,
   setSlappedBy: (name) => set({ slappedBy: name }),
+  adminErrorMessage: null,
+  setAdminErrorMessage: (message) => set({ adminErrorMessage: message }),
 
   soundboardSounds: [],
   setSoundboardSounds: (sounds) => set({ soundboardSounds: sounds }),

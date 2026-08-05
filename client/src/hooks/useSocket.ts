@@ -676,6 +676,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
     socket.on('admin:error', (data: { message: string }) => {
       console.warn('[socket] admin error:', data.message);
+      useGameStore.getState().setAdminErrorMessage(data.message);
     });
 
     socket.on(SocketEvents.ROOM_DELETED, (data: { roomId: string }) => {

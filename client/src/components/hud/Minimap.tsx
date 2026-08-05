@@ -2,6 +2,18 @@ import { useRef, useEffect, useState } from 'react';
 import { Avatar, RoomTile, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 
+// Bug — a room built with the newer Room Editor tools (custom Object
+// furniture, the "Wall Area" tool) has little or nothing painted into the
+// raw tile-type grid this minimap used to exclusively read — those tools
+// deliberately DON'T touch it (see shared/mapLayers.ts's doc comments on
+// getFurnitureBlockRects/getWallAreaRects). A room built that way rendered
+// as an almost-blank panel, even though the real game view is full of
+// structure. Furniture (any piece, not just legacy desk/chair TILE types)
+// and Wall Area rects are drawn here too now, from the same store fields
+// GameCanvas.tsx's own Overview mode already reads.
+const MM_FURNITURE = 'rgba(124,58,237,0.35)';
+const MM_WALL_AREA = 'rgba(55,65,81,0.85)';
+
 interface MinimapProps {
   players: Avatar[];
   localPlayerId: string;
@@ -45,6 +57,8 @@ function drawTileType(ctx: CanvasRenderingContext2D, type: RoomTile['type'], x: 
 export function Minimap({ players, localPlayerId, onTeleport, visible }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const tiles = useGameStore((s) => s.tiles);
+  const furniture = useGameStore((s) => s.furniture);
+  const wallAreaRects = useGameStore((s) => s.wallAreaRects);
   // Faded out (just a subtle presence) until hovered, then fades in to full
   // opacity — a permanently-opaque floor plan sitting over the game world
   // reads as visual clutter once you're not actively using it to navigate.
@@ -88,6 +102,23 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
       }
     }
 
+    // Furniture — any piece (desks, chairs, custom Object walls/partitions),
+    // not just the legacy TILE-type desk/chair drawn above. Anchored at its
+    // bottom-left tile per Furniture's own doc comment, so the block spans
+    // upward `tilesH` rows from `y`.
+    for (const item of furniture) {
+      if (item.kind === 'banner') continue;
+      ctx.fillStyle = MM_FURNITURE;
+      ctx.fillRect(item.x * cellW, (item.y - item.tilesH + 1) * cellH, item.tilesW * cellW, item.tilesH * cellH);
+    }
+
+    // Room Editor's "Wall Area" tool — pixel-space rects, scaled with the
+    // same SCALE_X/SCALE_Y the player dots below already use.
+    for (const rect of wallAreaRects) {
+      ctx.fillStyle = MM_WALL_AREA;
+      ctx.fillRect(rect.x * SCALE_X, rect.y * SCALE_Y, rect.w * SCALE_X, rect.h * SCALE_Y);
+    }
+
     ctx.strokeStyle = 'rgba(124,58,237,0.5)';
     ctx.lineWidth = 1;
     ctx.strokeRect(1, 1, MM_W - 2, MM_H - 2);
@@ -107,7 +138,7 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
         ctx.stroke();
       }
     }
-  }, [players, localPlayerId]);
+  }, [players, localPlayerId, tiles, furniture, wallAreaRects]);
 
   const handleClick = (e: React.MouseEvent) => {
     // Belt-and-suspenders — you can't actually click this without the mouse
