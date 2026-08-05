@@ -571,7 +571,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     if (!canvas) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      useGameStore.getState().zoomMapBy(e.deltaY < 0 ? 1.1 : 1 / 1.1);
+      useGameStore.getState().stepMapZoom(e.deltaY < 0 ? 1 : -1);
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);

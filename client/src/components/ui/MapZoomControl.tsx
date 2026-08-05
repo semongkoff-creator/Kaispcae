@@ -7,13 +7,13 @@ import { useGameStore, MIN_MAP_ZOOM, MAX_MAP_ZOOM } from '@/stores/gameStore';
 // unlike TILE_SIZE this is safe to be a per-client-only preference.
 export function MapZoomControl() {
   const zoom = useGameStore((s) => s.mapZoom);
-  const zoomMapBy = useGameStore((s) => s.zoomMapBy);
+  const stepMapZoom = useGameStore((s) => s.stepMapZoom);
   const setMapZoom = useGameStore((s) => s.setMapZoom);
 
   return (
     <div className="flex items-center gap-0.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-100 dark:border-gray-700 shadow-sm rounded-lg px-1.5 py-2">
       <button
-        onClick={() => zoomMapBy(1 / 1.2)}
+        onClick={() => stepMapZoom(-1)}
         disabled={zoom <= MIN_MAP_ZOOM}
         title="Zoom out"
         className="w-4 h-4 flex items-center justify-center rounded hover:bg-purple-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300 text-xs font-bold leading-none cursor-pointer"
@@ -28,7 +28,7 @@ export function MapZoomControl() {
         {Math.round(zoom * 100)}%
       </button>
       <button
-        onClick={() => zoomMapBy(1.2)}
+        onClick={() => stepMapZoom(1)}
         disabled={zoom >= MAX_MAP_ZOOM}
         title="Zoom in"
         className="w-4 h-4 flex items-center justify-center rounded hover:bg-purple-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300 text-xs font-bold leading-none cursor-pointer"

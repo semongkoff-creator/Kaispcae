@@ -285,7 +285,17 @@ export interface GameState {
   // desync risk — unlike TILE_SIZE, which every client must share.
   mapZoom: number;
   setMapZoom: (zoom: number) => void;
-  zoomMapBy: (factor: number) => void;
+  // Bug — zoomMapBy(factor) multiplied the raw zoom by a continuous factor
+  // (1.2 for the +/- buttons, 1.1 for the wheel/trackpad) and re-snapped to
+  // the nearest 10% grid step. That round-trip has fixed points: at 50%,
+  // 0.5/1.1 = 0.4545... rounds back UP to 50% (4.545 > 4.5), so the wheel
+  // could never move off it at all — permanently stuck, not just slow.
+  // 40% has the same fixed point. The buttons' bigger 1.2× step happens to
+  // dodge this across the current zoom range, but nothing guaranteed that.
+  // stepMapZoom moves by an exact integer number of grid steps instead —
+  // no float multiplication in the loop at all, so there's no fixed point
+  // to get stuck on, ever, regardless of how the range changes later.
+  stepMapZoom: (steps: number) => void;
   speakingPlayers: Set<string>;
   setPlayerSpeaking: (id: string, speaking: boolean) => void;
 
@@ -748,7 +758,10 @@ export const useGameStore = create<GameState>((set, get) => ({
     set((s) => ({ musicSessionsByZone: { ...s.musicSessionsByZone, [state.zoneId]: state } })),
   mapZoom: 1,
   setMapZoom: (zoom) => set({ mapZoom: clampMapZoom(zoom) }),
-  zoomMapBy: (factor) => set((s) => ({ mapZoom: clampMapZoom(s.mapZoom * factor) })),
+  stepMapZoom: (steps) => set((s) => {
+    const currentStep = Math.round(s.mapZoom / ZOOM_STEP);
+    return { mapZoom: clampMapZoom((currentStep + steps) * ZOOM_STEP) };
+  }),
   speakingPlayers: new Set<string>(),
   setPlayerSpeaking: (id, speaking) =>
     set((state) => {
