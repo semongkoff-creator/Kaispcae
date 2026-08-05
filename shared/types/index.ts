@@ -204,6 +204,11 @@ export interface RoomState {
   // movementHandler.ts). Absent/undefined on a room saved before this
   // field existed; treated as [] everywhere it's read.
   impassableAreaRects?: ImpassableAreaRect[];
+  // Room Editor's "Wall Area" tool — a subset of the rects above (already
+  // merged into impassableAreaRects for collision) also broken out here on
+  // their own, since this is the one flavor GameCanvas.tsx actually draws —
+  // an Impassable Area proper stays invisible on purpose.
+  wallAreaRects?: ImpassableAreaRect[];
   theme?: RoomTheme;
   // Which layout this room was created with (see defaultRoomLayout.ts's
   // ROOM_TEMPLATES) — undefined for rooms created before this field
@@ -1471,6 +1476,7 @@ export interface RoomUpdatePayload {
   // layerDataToLegacy. useSocket.ts's handler only applies it when present,
   // so the legacy path can never wipe a client's already-known rects.
   impassableAreaRects?: ImpassableAreaRect[];
+  wallAreaRects?: ImpassableAreaRect[];
 }
 
 export { createDefaultOfficeLayout, createKaitechOfficeLayout, findSpawnPixel, createRoomLayoutFromTemplate, ROOM_TEMPLATES } from '../defaultRoomLayout';

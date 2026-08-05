@@ -666,6 +666,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       // as "clear the rects" would wipe a client's already-known Impassable
       // Areas the instant anyone saved through that older path.
       if (data.impassableAreaRects) useGameStore.getState().setImpassableAreaRects(data.impassableAreaRects);
+      if (data.wallAreaRects) useGameStore.getState().setWallAreaRects(data.wallAreaRects);
     });
 
     socket.on(SocketEvents.ADMIN_CHANGED, (data: { adminUserIds: string[]; masterAdminUserId: string; staffUserIds?: string[] }) => {

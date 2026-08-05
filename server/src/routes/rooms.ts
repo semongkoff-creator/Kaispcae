@@ -355,7 +355,7 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
     const derived = layerDataToLegacy(layerData);
     setCachedTiles(room.slug, derived.tiles);
     setCachedImpassableAreas(room.slug, derived.impassableAreaRects);
-    ioRef?.to(room.slug).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones, impassableAreaRects: derived.impassableAreaRects });
+    ioRef?.to(room.slug).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones, impassableAreaRects: derived.impassableAreaRects, wallAreaRects: derived.wallAreaRects });
 
     // Focus area — the first time an admin saves a room with at least one
     // Focus-type zone (Room Editor's "Focus area" tile effect), lazily

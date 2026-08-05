@@ -428,6 +428,10 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // layerDataToLegacy call. A legacy room with no layerData at all never
     // had this feature, so it's simply [] on that path below.
     let savedImpassableAreaRects: ImpassableAreaRect[] = [];
+    // Room Editor's "Wall Area" tool — same [] -on-legacy-rooms posture as
+    // savedImpassableAreaRects above, resolved from the same layerDataToLegacy
+    // call.
+    let savedWallAreaRects: ImpassableAreaRect[] = [];
     // ZEP Room Editor (Potong 1) — once a room is converted, layerData is its
     // source of truth. The adaptor reconstructs the EXACT same runtime shape
     // (tiles/furniture/zones), so everything downstream — render, collision,
@@ -439,6 +443,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       savedFurniture = derived.furniture;
       savedZones = derived.zones;
       savedImpassableAreaRects = derived.impassableAreaRects;
+      savedWallAreaRects = derived.wallAreaRects;
     } else {
       if (dbRoom?.tilemapData && Array.isArray(dbRoom.tilemapData) && (dbRoom.tilemapData as any[]).length > 0) {
         savedTiles = (dbRoom.tilemapData as any[]).map((row: any[], y: number) =>
@@ -555,6 +560,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       socket.emit(SocketEvents.ROOM_STATE, {
         ...state, tiles: redactDoorPasswords(tiles), furniture: redactInteractiveSecrets(savedFurniture || fallback!.furniture), zones: savedZones || fallback!.zones, players: playersWithMeta,
         impassableAreaRects: savedImpassableAreaRects,
+        wallAreaRects: savedWallAreaRects,
         adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId, staffUserIds: Array.from(rs.staffUserIds), theme, template,
         notice: roomNoticeMap.get(room) ?? null,
         locked: !!rs.locked,
@@ -775,7 +781,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         const derived = layerDataToLegacy(ld);
         setCachedTiles(room, derived.tiles);
         setCachedImpassableAreas(room, derived.impassableAreaRects);
-        io.to(room).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones, impassableAreaRects: derived.impassableAreaRects });
+        io.to(room).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones, impassableAreaRects: derived.impassableAreaRects, wallAreaRects: derived.wallAreaRects });
       }
     } catch (e) {
       console.warn('[room] change object error:', e);

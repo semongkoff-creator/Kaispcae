@@ -123,9 +123,21 @@ export interface TileEffect {
 // layerDataToLegacy (see below) — it must never become a chat/audio zone —
 // and rasterized into blocked tiles there instead, alongside (never
 // replacing) the older per-tile 'impassable' TileEffect stamps.
+//
+// 'wallArea' — a FOURTH kind, same draggable/resizable rectangle as
+// 'impassable' and merged into the same collision rects (see
+// getImpassableAreaRects below), but for a different situation: 'impassable'
+// is meant to be an invisible tweak (e.g. blocking behind a decorative
+// overhang), while 'wallArea' is an explicit, freely-placed wall an admin
+// wants EVERY player to actually see blocking the path — not just an
+// implicit side effect of what furniture happens to be placed there (see
+// getFurnitureBlockRects). Also excluded from the zones list (it's collision
+// + visuals, never a chat/audio zone), but unlike 'impassable' it's ALSO
+// exposed as its own `wallAreaRects` list (see layerDataToLegacy's return)
+// so GameCanvas.tsx has something to actually draw.
 export interface AreaEffect {
   id: string;
-  effect: 'privateArea' | 'mapLocation' | 'impassable' | 'focusArea';
+  effect: 'privateArea' | 'mapLocation' | 'impassable' | 'focusArea' | 'wallArea';
   name: string;
   x: number;
   y: number;
@@ -256,7 +268,7 @@ export function legacyToLayerData(tiles: RoomTile[][], furniture: Furniture[], z
 }
 
 // Read-time adaptor: reconstruct the exact runtime shape from LayerData.
-export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[]; impassableAreaRects: ImpassableAreaRect[] } {
+export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[]; impassableAreaRects: ImpassableAreaRect[]; wallAreaRects: ImpassableAreaRect[] } {
   const { width, height, floor, wall } = ld;
   const effAt = new Map<string, TileEffect>();
   for (const e of ld.tileEffects) effAt.set(`${e.x},${e.y}`, e);
@@ -344,7 +356,10 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
   // `zones` list, never the raw `areas`, and GameCanvas.tsx has no other way
   // to see them — see RoomEditorPage.tsx's "Overlay ini hanya tampil di
   // editor" for the same posture on every other effect drawn there).
-  const zones: Zone[] = ld.areas.filter((a) => a.effect !== 'impassable').map((a) => {
+  // 'wallArea' is excluded the same way (it's not a chat/audio zone either)
+  // but — unlike 'impassable' — it IS meant to be visible, via the separate
+  // `wallAreaRects` list below instead of the Zone system.
+  const zones: Zone[] = ld.areas.filter((a) => a.effect !== 'impassable' && a.effect !== 'wallArea').map((a) => {
     // ZEP areaId → shared zone.id so same-areaId private areas are ONE audio
     // group (useProximity compares zone.id). Converted areas have no areaId, so
     // their id is unchanged — the Potong-1 round-trip stays byte-identical.
@@ -367,7 +382,11 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     return z;
   });
 
-  return { tiles, furniture, zones, impassableAreaRects: [...getImpassableAreaRects(ld), ...getFurnitureBlockRects(ld)] };
+  return {
+    tiles, furniture, zones,
+    impassableAreaRects: [...getImpassableAreaRects(ld), ...getFurnitureBlockRects(ld), ...getWallAreaRects(ld)],
+    wallAreaRects: getWallAreaRects(ld),
+  };
 }
 
 // Pixel-space collision rectangles for every impassable AreaEffect — the
@@ -379,6 +398,17 @@ export interface ImpassableAreaRect { x: number; y: number; w: number; h: number
 export function getImpassableAreaRects(ld: LayerData): ImpassableAreaRect[] {
   return ld.areas
     .filter((a) => a.effect === 'impassable')
+    .map((a) => ({ x: a.x * TILE_SIZE, y: a.y * TILE_SIZE, w: a.width * TILE_SIZE, h: a.height * TILE_SIZE }));
+}
+
+// 'wallArea' rects — same pixel-space shape as ImpassableAreaRect (folded
+// into the SAME merged collision list above, so movement blocks on them
+// exactly like any other impassable rect), but ALSO returned on their own
+// here so GameCanvas.tsx can actually draw them — the one thing that
+// distinguishes a Wall Area from a plain Impassable Area.
+export function getWallAreaRects(ld: LayerData): ImpassableAreaRect[] {
+  return ld.areas
+    .filter((a) => a.effect === 'wallArea')
     .map((a) => ({ x: a.x * TILE_SIZE, y: a.y * TILE_SIZE, w: a.width * TILE_SIZE, h: a.height * TILE_SIZE }));
 }
 

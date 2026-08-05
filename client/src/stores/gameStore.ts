@@ -112,6 +112,13 @@ export interface GameState {
   impassableAreaRects: ImpassableAreaRect[];
   setImpassableAreaRects: (rects: ImpassableAreaRect[]) => void;
 
+  // Room Editor's "Wall Area" tool — a subset of impassableAreaRects above
+  // (already merged in for collision), kept separately here purely so
+  // GameCanvas.tsx has something to draw — the one visible flavor of
+  // impassable rect, unlike a plain Impassable Area which stays invisible.
+  wallAreaRects: ImpassableAreaRect[];
+  setWallAreaRects: (rects: ImpassableAreaRect[]) => void;
+
   // Room meta
   roomId: string;
   roomName: string;
@@ -626,6 +633,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   setTiles: (tiles) => set({ tiles }),
   impassableAreaRects: [],
   setImpassableAreaRects: (rects) => set({ impassableAreaRects: rects }),
+  wallAreaRects: [],
+  setWallAreaRects: (rects) => set({ wallAreaRects: rects }),
 
   roomId: 'default',
   roomName: 'Default Room',
@@ -1213,6 +1222,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       furniture: roomState.furniture ?? prev.furniture,
       zones: roomState.zones ?? prev.zones,
       impassableAreaRects: roomState.impassableAreaRects ?? prev.impassableAreaRects,
+      wallAreaRects: roomState.wallAreaRects ?? prev.wallAreaRects,
       playerRecords: records,
       isAdmin: localIsAdmin,
       adminPlayerIds: adminIds,

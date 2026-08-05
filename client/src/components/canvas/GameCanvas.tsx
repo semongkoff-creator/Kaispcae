@@ -280,6 +280,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // this doesn't need to be reactive the way nudgedPlayers/speechBubbles
   // below do — synced into a ref the same way tiles already is.
   const impassableAreaRects = useGameStore((s) => s.impassableAreaRects);
+  // Room Editor's "Wall Area" tool — drawn every frame in the render loop
+  // below (the one impassable-rect flavor that's actually visible), same
+  // ref-mirroring as impassableAreaRects above so the draw loop reads a
+  // fresh value every frame without depending on React re-renders.
+  const wallAreaRects = useGameStore((s) => s.wallAreaRects);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const theme = useGameStore((s) => s.theme);
@@ -315,6 +320,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
 
   const tilesRef = useRef(tiles);
   const impassableAreaRectsRef = useRef(impassableAreaRects);
+  const wallAreaRectsRef = useRef(wallAreaRects);
   const themeRef = useRef(theme);
   const followInfoRef = useRef(followInfo);
   const playerRecordsRef = useRef(useGameStore.getState().playerRecords);
@@ -416,6 +422,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   useEffect(() => {
     tilesRef.current = tiles;
     impassableAreaRectsRef.current = impassableAreaRects;
+    wallAreaRectsRef.current = wallAreaRects;
     themeRef.current = theme;
     followInfoRef.current = followInfo;
     playerRecordsRef.current = useGameStore.getState().playerRecords;
@@ -1100,6 +1107,39 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           ctx.setLineDash([]);
         }
       }
+    }
+
+    // Room Editor's "Wall Area" tool — the one impassable-rect flavor that's
+    // actually meant to be seen (a plain Impassable Area stays invisible on
+    // purpose, see its own doc comment in shared/mapLayers.ts). Drawn here,
+    // alongside the tile/floor layer and before furniture/avatars, so it
+    // reads as solid architecture — the same z-order a real 'wall' tile
+    // above already renders at. Solid fill + diagonal hazard stripes so it's
+    // unmistakable even sitting on a plain floor tile with nothing else
+    // drawn there.
+    for (const rect of wallAreaRectsRef.current) {
+      const rsx = rect.x - cameraX;
+      const rsy = rect.y - cameraY;
+      if (rsx + rect.w < 0 || rsx > worldViewW || rsy + rect.h < 0 || rsy > worldViewH) continue;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(rsx, rsy, rect.w, rect.h);
+      ctx.clip();
+      ctx.fillStyle = 'rgba(55,65,81,0.92)';
+      ctx.fillRect(rsx, rsy, rect.w, rect.h);
+      ctx.strokeStyle = 'rgba(250,204,21,0.85)';
+      ctx.lineWidth = 4;
+      const stripeGap = 14;
+      for (let sx = rsx - rect.h; sx < rsx + rect.w; sx += stripeGap) {
+        ctx.beginPath();
+        ctx.moveTo(sx, rsy + rect.h);
+        ctx.lineTo(sx + rect.h, rsy);
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.strokeStyle = 'rgba(17,24,39,0.9)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(rsx, rsy, rect.w, rect.h);
     }
 
     drawLiveReferenceImage(ctx, liveReferenceImageRef.current, cameraX, cameraY);
