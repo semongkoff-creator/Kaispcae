@@ -106,7 +106,11 @@ export function getVideoTiles(
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 3;
 
-function ScreenSharePanel({ name, stream, isLocal, onClose, onMaximizedChange }: { name: string; stream: MediaStream; isLocal: boolean; onClose: () => void; onMaximizedChange?: (maximized: boolean) => void }) {
+// Also doubles as the enlarged-camera focus panel (see VideoGrid's
+// cameraEntries/onEnlarge) — same zoom/pan/maximize behavior works just as
+// well for zooming into a face as it does a shared screen, so this one panel
+// covers both rather than a second hand-maintained copy.
+function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedChange }: { name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean; onClose: () => void; onMaximizedChange?: (maximized: boolean) => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [maximized, setMaximizedState] = useState(false);
@@ -404,7 +408,7 @@ function ScreenSharePanel({ name, stream, isLocal, onClose, onMaximizedChange }:
           // Anchoring to the top puts all of that leftover space at the
           // bottom instead, where a screen share's actual content (browser
           // chrome, the app being shown) is never sitting anyway.
-          style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}
+          style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})${mirror ? ' scaleX(-1)' : ''}` }}
           className="absolute inset-0 w-full h-full object-contain object-top"
         />
         {/* The title bar's replacement while maximized — floats over the
@@ -454,7 +458,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // Local and remote shares merged into ONE list, because from the viewer's
   // side they're the same kind of thing — content someone is presenting —
   // and only their prominence should differ, not their source.
-  const screenEntries: { key: string; name: string; stream: MediaStream; isLocal: boolean }[] = [];
+  const screenEntries: { key: string; name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean }[] = [];
   if (localScreenStream) {
     screenEntries.push({ key: 'local-screen', name: 'Layar Anda', stream: localScreenStream, isLocal: true });
   }
@@ -462,18 +466,33 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
     if (t.screenStream) screenEntries.push({ key: `${t.id}-screen`, name: `Layar ${t.name}`, stream: t.screenStream, isLocal: false });
   }
 
+  // A tile's own enlarge button (see VideoTile's onEnlarge) opens the SAME
+  // focus panel screen shares use, keyed separately (`-camera` suffix) so a
+  // camera and that same person's screen share can never collide on one key.
+  // Gated on the tile actually having a stream — same "nothing to enlarge"
+  // rule VideoTile itself uses to decide whether to render the button.
+  const cameraEntries: { key: string; name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean }[] = [];
+  if (localStream && !cameraOff) {
+    cameraEntries.push({ key: 'local-camera', name: 'Anda', stream: localStream, isLocal: true, mirror: true });
+  }
+  for (const t of videoTiles) {
+    if (t.stream) cameraEntries.push({ key: `${t.id}-camera`, name: t.name, stream: t.stream, isLocal: false });
+  }
+
   // Resolved every render rather than stored: when the featured presenter
   // stops sharing (or walks out of range) their key simply stops matching, the
   // panel closes on its own, and nothing needs cleaning up. Holding it in
   // state would strand the layout on a stream that no longer exists until
-  // something else forced an update.
+  // something else forced an update. Same applies to an enlarged camera —
+  // if that person's camera goes off, their -camera key vanishes from
+  // cameraEntries and the panel closes itself right along with it.
   //
   // No `?? screenEntries[0]` fallback any more. That silently promoted the
   // first share straight to a full focus panel, so the thumbnail step never
   // existed for a single presenter — a screen appeared over the map without
   // anyone asking for it. Now every share starts as a thumbnail in the
   // column and only becomes the focus panel when its enlarge button is used.
-  const featured = screenEntries.find((s) => s.key === featuredKey) ?? null;
+  const featured = [...screenEntries, ...cameraEntries].find((s) => s.key === featuredKey) ?? null;
   const otherScreens = screenEntries.filter((s) => s.key !== featured?.key);
 
   const totalTiles = (localStream ? 1 : 0) + (localScreenStream ? 1 : 0) + videoTiles.length
@@ -510,7 +529,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   const cameraTiles = (
     <>
       {localStream && (
-        <VideoTile name="You" avatarName={profiles.get(localUserId)?.name || localPlayer.name} photoUrl={profiles.get(localUserId)?.photo ?? undefined} stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} speaking={localSpeaking && !micMuted} />
+        <VideoTile name="You" avatarName={profiles.get(localUserId)?.name || localPlayer.name} photoUrl={profiles.get(localUserId)?.photo ?? undefined} stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} speaking={localSpeaking && !micMuted} onEnlarge={() => setFeaturedKey('local-camera')} />
       )}
       {videoTiles.map((tile) => {
         const uid = playerRecords[tile.id]?.userId;
@@ -522,12 +541,14 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
             photoUrl={uid ? profiles.get(uid)?.photo ?? undefined : undefined}
             stream={tile.stream}
             isLocal={false}
+            micMuted={!!playerRecords[tile.id]?.micMuted}
             speaking={speakingPlayers.has(tile.id)}
             translucent={tile.translucent}
             onVolumeChange={(v) => onManualVolumeChange(tile.id, v)}
             isBeingRecorded={tile.isBeingRecorded}
             handRaised={tile.handRaised}
             reaction={latestReaction(emoteEvents, tile.id, now)}
+            onEnlarge={() => setFeaturedKey(`${tile.id}-camera`)}
           />
         );
       })}
@@ -540,7 +561,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   return (
     <>
       {featured && (
-        <ScreenSharePanel key={featured.key} name={featured.name} stream={featured.stream} isLocal={featured.isLocal} onClose={() => setFeaturedKey(null)} onMaximizedChange={setHidden} />
+        <ScreenSharePanel key={featured.key} name={featured.name} stream={featured.stream} isLocal={featured.isLocal} mirror={featured.mirror} onClose={() => setFeaturedKey(null)} onMaximizedChange={setHidden} />
       )}
       <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 pointer-events-none">
         {hideButton}
@@ -585,6 +606,7 @@ export function VideoTile({
   reaction,
   large,
   speaking,
+  onEnlarge,
 }: {
   name: string;
   // The camera-off avatar draws from the person's REAL identity, not the
@@ -609,6 +631,11 @@ export function VideoTile({
   reaction?: { emoji: string; ts: number } | null;
   large?: boolean;
   speaking?: boolean;
+  // Opens this tile's live video full-size in the same focus panel screen
+  // shares use (see VideoGrid's featuredKey). Only rendered while there's
+  // actually a live picture to enlarge (!showAvatar) — an avatar placeholder
+  // has nothing bigger to show.
+  onEnlarge?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [volume, setVolume] = useState(1);
@@ -722,6 +749,20 @@ export function VideoTile({
           <DisplayFill size={large ? 10 : 8} />
         </span>
       )}
+      {/* Enlarge — opens the live camera picture full-size in the same focus
+          panel screen shares use. Only while there's an actual picture to
+          enlarge (!showAvatar); a placeholder initials tile has nothing
+          bigger to show. Hover-revealed via the tile's own `group`, same
+          convention as the volume slider below. */}
+      {onEnlarge && !showAvatar && !isScreen && (
+        <button
+          onClick={onEnlarge}
+          title={`Perbesar video ${isLocal ? 'Anda' : name}`}
+          className="absolute top-0.5 right-0.5 w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+        >
+          <ArrowsFullscreen size={9} />
+        </button>
+      )}
       {/* Quick reaction — a single emoji floating up from the bottom-center
           of the tile, restarting whenever a newer reaction arrives (keyed by
           its timestamp). Shared with the in-world emote system, so a reaction
@@ -752,10 +793,14 @@ export function VideoTile({
       )}
       <div className={`flex items-center justify-between gap-1 ${large ? 'px-2 py-1 text-xs' : 'px-1 py-0.5 text-[10px]'}`}>
         <span className="text-gray-700 truncate flex-1">{name}</span>
-        {isLocal && (
+        {/* Mic-muted now shown for remote tiles too (broadcast via
+            PLAYER_MIC — see Avatar.micMuted), not just the local preview;
+            camera-off stays local-only since a remote camera-off already
+            shows as the avatar placeholder instead of video. */}
+        {(micMuted || (isLocal && cameraOff)) && (
           <span className="flex gap-1 shrink-0">
             {micMuted && <MicMuteFill className="text-red-500" size={large ? 12 : 9} />}
-            {cameraOff && <CameraVideoOffFill className="text-red-500" size={large ? 12 : 9} />}
+            {isLocal && cameraOff && <CameraVideoOffFill className="text-red-500" size={large ? 12 : 9} />}
           </span>
         )}
       </div>

@@ -206,6 +206,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       upsertPlayer({ id: data.id, handRaised: data.handRaised || undefined } as Avatar);
     });
 
+    socket.on(SocketEvents.PLAYER_MIC_UPDATED, (data: { id: string; micMuted: boolean }) => {
+      const state = useGameStore.getState();
+      if (data.id === state.localPlayerId) return;
+      upsertPlayer({ id: data.id, micMuted: data.micMuted || undefined } as Avatar);
+    });
+
     // A3 — another player's Focus/Public change; update their record so their
     // badge + proximity DND (useProximity) reflect it here.
     socket.on(SocketEvents.WORK_MODE_CHANGED, (data: { id: string; workMode: WorkMode; reason?: string }) => {
@@ -844,6 +850,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.PLAYER_HAND, raised);
   }, []);
 
+  const emitPlayerMic = useCallback((muted: boolean) => {
+    socketRef.current?.emit(SocketEvents.PLAYER_MIC, muted);
+  }, []);
+
   const emitSit = useCallback((sitting: boolean, x: number, y: number, direction: Avatar['direction'], seatFurnitureId?: string) => {
     socketRef.current?.emit(SocketEvents.PLAYER_SIT, { sitting, x, y, direction, seatFurnitureId });
   }, []);
@@ -1093,5 +1103,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight };
+  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight };
 }

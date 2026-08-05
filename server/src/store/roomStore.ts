@@ -209,6 +209,19 @@ export async function updatePlayerHand(
   }
 }
 
+export async function updatePlayerMic(
+  roomId: string,
+  playerId: string,
+  muted: boolean,
+): Promise<void> {
+  const players = await getPlayers(roomId);
+  const player = players.find((p) => p.id === playerId);
+  if (player) {
+    player.micMuted = muted || undefined;
+    await setPlayers(roomId, players);
+  }
+}
+
 export async function updatePlayerSpotlight(
   roomId: string,
   playerId: string,

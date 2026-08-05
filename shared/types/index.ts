@@ -93,6 +93,13 @@ export interface Avatar {
   // announcement, not a proximity connection. Kept on the player record like
   // workMode/handRaised so it's in room:state for late joiners.
   spotlightActive?: boolean;
+  // Whether this player's mic is currently muted — broadcast on every toggle
+  // (see MicButton/handleMicToggle) and kept on the player record like
+  // handRaised/workMode, so ParticipantPanel and VideoTile can show a muted
+  // badge for someone even outside WebRTC proximity range, not just peers
+  // you're actually connected to. Undefined (not explicitly muted=false)
+  // until the first toggle, same convention as handRaised.
+  micMuted?: boolean;
 }
 
 // A11 — presence status. 'in_meeting' + 'focus' are auto-set from the zone
@@ -268,6 +275,12 @@ export enum SocketEvents {
   // visual ✋ badge still goes to the whole room via PLAYER_HAND_UPDATED above;
   // this is only the sound cue.
   HAND_RAISED_ALERT = 'player:hand_alert',
+
+  // Mic mute toggle — same relay+persist shape as hand above, so
+  // ParticipantPanel/VideoTile can show a muted badge for a peer regardless
+  // of WebRTC proximity range.
+  PLAYER_MIC = 'player:mic',
+  PLAYER_MIC_UPDATED = 'player:mic_updated',
 
   // A3 — Focus/Public work mode. Same relay+persist shape as status/hand.
   WORK_MODE_CHANGE = 'work_mode:change',

@@ -4,7 +4,7 @@ import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH } from '@virtualmeet/shared';
 import {
-  addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerWorkMode, updatePlayerSpotlight, updatePlayerSitting,
+  addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerMic, updatePlayerWorkMode, updatePlayerSpotlight, updatePlayerSitting,
   setCachedTiles, getCachedTiles, setCachedImpassableAreas, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
 } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';
@@ -1204,6 +1204,15 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     for (const sid of recipients) {
       io.to(sid).emit(SocketEvents.HAND_RAISED_ALERT, { fromId: socket.id, fromName });
     }
+  });
+
+  // Mic mute toggle — same relay+persist shape as raise-hand above, so a
+  // muted badge shows for a peer even outside WebRTC proximity range.
+  socket.on(SocketEvents.PLAYER_MIC, async (muted: boolean) => {
+    const room = currentRoom; if (!room) return;
+    const val = !!muted;
+    socket.to(room).emit(SocketEvents.PLAYER_MIC_UPDATED, { id: socket.id, micMuted: val });
+    updatePlayerMic(room, socket.id, val);
   });
 
   // Soundboard — cosmetic, fire-and-forget, same trust level as Jump/Nudge:

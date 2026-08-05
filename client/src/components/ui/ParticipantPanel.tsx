@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill, MegaphoneFill } from 'react-bootstrap-icons';
+import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill, MegaphoneFill, MicMuteFill } from 'react-bootstrap-icons';
 import { roleAtLeast, Role, WorkMode } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
@@ -26,6 +26,11 @@ function MenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode; lab
 
 interface ParticipantPanelProps {
   remoteStreams: Map<string, MediaStream>;
+  // Local mic state lives in useWebRTC (isMicMuted), not on the local
+  // player's own record — the PLAYER_MIC_UPDATED listener deliberately
+  // skips writing back to yourself (see useSocket.ts), so it's passed
+  // through separately for the local row's badge.
+  isMicMuted: boolean;
   emitFollowRequest: (targetUserId: string) => void;
   emitFollowUnfollow: () => void;
   emitSummonUser: (nickname: string) => void;
@@ -52,7 +57,7 @@ interface ParticipantPanelProps {
 
 const MAX_VIDEO_THUMBS = 3;
 
-export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, emitKick, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
+export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, emitKick, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
@@ -136,6 +141,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
               workMode={localPlayer.workMode}
               awayReason={localPlayer.awayReason}
               spotlightActive={localPlayer.spotlightActive}
+              micMuted={isMicMuted}
               speaking={localSpeaking}
               role={localRole}
               isLocal
@@ -151,6 +157,7 @@ export function ParticipantPanel({ remoteStreams, emitFollowRequest, emitFollowU
                 workMode={p.workMode}
                 awayReason={p.awayReason}
                 spotlightActive={p.spotlightActive}
+                micMuted={p.micMuted}
                 speaking={speakingPlayers.has(p.id)}
                 role={roleOf(p.userId)}
                 isLocal={false}
@@ -179,6 +186,7 @@ function ParticipantRow({
   workMode,
   awayReason,
   spotlightActive,
+  micMuted,
   speaking,
   role,
   isLocal,
@@ -211,6 +219,10 @@ function ParticipantRow({
   // Shown on every row (including the local one) since it's meaningful
   // whoever is spotlighted; only admins get the toggle action (onSpotlight).
   spotlightActive?: boolean;
+  // Mic mute badge — broadcast via PLAYER_MIC/PLAYER_MIC_UPDATED (see
+  // Avatar.micMuted), so it's visible for every participant regardless of
+  // WebRTC proximity range, not just peers you're actually in call with.
+  micMuted?: boolean;
   speaking?: boolean;
   // Live room role (see gameStore roleOf) — renders a 👑 owner / 🛡️ admin
   // badge by the name; 'staff'/'member' show none.
@@ -320,6 +332,7 @@ function ParticipantRow({
           </span>
         )}
         {speaking && <span title="Speaking" className="text-[11px] leading-none animate-pulse">🔊</span>}
+        {micMuted && <MicMuteFill className="text-red-500" size={11} title={isLocal ? 'Mic Anda mati' : 'Mic mati'} />}
         {inCall && <CameraVideoFill className="text-purple-600" size={11} title="In call" />}
         {!!followerCount && (
           <span className="text-purple-500 text-[10px] inline-flex items-center gap-0.5" title={`Followed by ${followerCount}`}>
