@@ -539,6 +539,31 @@ rooms.post('/rooms/:slug/soundboard', authenticateToken, soundboardUpload.single
   }
 });
 
+// DELETE /api/rooms/:slug/soundboard/:soundId — remove a room's own custom
+// upload. Same 'soundboard:upload' gate as adding one (whoever can add can
+// also clean up) — default sounds aren't DB rows at all, so soundId here is
+// always a custom upload's id; an unknown/already-deleted id just 404s.
+rooms.delete('/rooms/:slug/soundboard/:soundId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    if (!hasFeatureAccess(role, 'soundboard:upload')) {
+      return res.status(403).json({ error: 'Hanya admin yang bisa menghapus suara custom.' });
+    }
+    const sound = await prisma.soundboardSound.findUnique({ where: { id: req.params.soundId } });
+    if (!sound || sound.roomId !== room.id) return res.status(404).json({ error: 'Sound not found' });
+    await prisma.soundboardSound.delete({ where: { id: sound.id } });
+    deleteUploadedFile(sound.url);
+    ioRef?.to(room.slug).emit(SocketEvents.SOUNDBOARD_SOUND_REMOVED, { id: sound.id });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[rooms] soundboard delete error:', err);
+    return res.status(500).json({ error: 'Failed' });
+  }
+});
+
 // POST /api/rooms — create room
 rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: AuthRequest, res: Response) => {
   console.log('[rooms] POST create received — userId:', req.userId, 'body:', req.body);

@@ -389,6 +389,9 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socket.on(SocketEvents.SOUNDBOARD_SOUND_ADDED, (data: SoundboardSoundData) => {
       useGameStore.getState().addSoundboardSound(data);
     });
+    socket.on(SocketEvents.SOUNDBOARD_SOUND_REMOVED, (data: { id: string }) => {
+      useGameStore.getState().removeSoundboardSound(data.id);
+    });
     // Server already scoped this to proximity/zone (see getNearbyRecipients,
     // shared with HAND_RAISED_ALERT) and never echoes it back to the sender —
     // the sender's own playback is the optimistic local play in

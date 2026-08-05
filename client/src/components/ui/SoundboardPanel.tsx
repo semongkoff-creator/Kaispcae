@@ -69,6 +69,7 @@ interface SoundboardPanelProps {
 export function SoundboardPanel({ roomSlug, emitSoundboardPlay, open, onToggle, onClose }: SoundboardPanelProps) {
   const customSounds = useGameStore((s) => s.soundboardSounds);
   const addSoundboardSound = useGameStore((s) => s.addSoundboardSound);
+  const removeSoundboardSound = useGameStore((s) => s.removeSoundboardSound);
   const localRole = useGameStore((s) => s.localRole);
   // Uploading a new custom sound is admin+ (see shared/permissions.ts's
   // 'soundboard:upload') — hidden entirely, not disabled, same convention as
@@ -90,6 +91,7 @@ export function SoundboardPanel({ roomSlug, emitSoundboardPlay, open, onToggle, 
   // making working soundboard look broken. A real timer-driven boolean
   // guarantees a re-render right when the cooldown actually ends.
   const [onCooldown, setOnCooldown] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const allSounds = useMemo<SoundboardSoundData[]>(
     () => [...SOUNDBOARD_DEFAULT_SOUNDS, ...customSounds],
@@ -139,6 +141,22 @@ export function SoundboardPanel({ roomSlug, emitSoundboardPlay, open, onToggle, 
     }
   };
 
+  const handleDelete = async (soundId: string) => {
+    setError(null);
+    setDeletingId(soundId);
+    try {
+      await api.deleteSoundboardSound(roomSlug, soundId);
+      // SOUNDBOARD_SOUND_REMOVED will also arrive over the socket (same
+      // optimistic-then-dedupe pattern handleFile's upload already uses) —
+      // removeSoundboardSound is a no-op if it's already gone by then.
+      removeSoundboardSound(soundId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Gagal menghapus.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div className="relative z-40 pointer-events-auto">
       <button
@@ -168,21 +186,37 @@ export function SoundboardPanel({ roomSlug, emitSoundboardPlay, open, onToggle, 
             <div className="grid grid-cols-3 gap-2">
               {allSounds.map((sound) => {
                 const Icon = DEFAULT_SOUND_ICONS[sound.id] ?? SpeakerFill;
+                // Only a room's own custom upload can be deleted — default
+                // sounds (SOUNDBOARD_DEFAULT_SOUNDS) have no DB row/file to
+                // remove, they're a static list every room shares for free.
+                const isCustom = customSounds.some((s) => s.id === sound.id);
+                const isDeleting = deletingId === sound.id;
                 return (
-                  <button
-                    key={sound.id}
-                    onClick={() => play(sound.id)}
-                    disabled={onCooldown}
-                    title={sound.createdByName ? `${sound.name} — diunggah oleh ${sound.createdByName}` : sound.name}
-                    className={`flex flex-col items-center gap-1 rounded-lg border border-purple-100 dark:border-gray-700 py-2 px-1 transition-colors ${
-                      onCooldown
-                        ? 'opacity-40 cursor-not-allowed'
-                        : 'cursor-pointer bg-purple-50/50 dark:bg-gray-800/50 hover:bg-purple-100 dark:hover:bg-gray-700'
-                    }`}
-                  >
-                    <Icon size={18} className="text-purple-600 dark:text-purple-300" />
-                    <span className="text-[10px] text-gray-700 dark:text-gray-300 truncate w-full text-center">{sound.name}</span>
-                  </button>
+                  <div key={sound.id} className="relative group">
+                    <button
+                      onClick={() => play(sound.id)}
+                      disabled={onCooldown || isDeleting}
+                      title={sound.createdByName ? `${sound.name} — diunggah oleh ${sound.createdByName}` : sound.name}
+                      className={`w-full flex flex-col items-center gap-1 rounded-lg border border-purple-100 dark:border-gray-700 py-2 px-1 transition-colors ${
+                        onCooldown || isDeleting
+                          ? 'opacity-40 cursor-not-allowed'
+                          : 'cursor-pointer bg-purple-50/50 dark:bg-gray-800/50 hover:bg-purple-100 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      <Icon size={18} className="text-purple-600 dark:text-purple-300" />
+                      <span className="text-[10px] text-gray-700 dark:text-gray-300 truncate w-full text-center">{sound.name}</span>
+                    </button>
+                    {isCustom && canUpload && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); void handleDelete(sound.id); }}
+                        disabled={isDeleting}
+                        title="Hapus suara ini"
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-60"
+                      >
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
                 );
               })}
             </div>

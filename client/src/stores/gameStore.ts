@@ -501,6 +501,7 @@ export interface GameState {
   soundboardSounds: SoundboardSoundData[];
   setSoundboardSounds: (sounds: SoundboardSoundData[]) => void;
   addSoundboardSound: (sound: SoundboardSoundData) => void;
+  removeSoundboardSound: (id: string) => void;
   // Who currently has a sound playing, for the blinking-speaker avatar
   // indicator — same Map-of-most-recent-expiry shape as momentaryReveals
   // above. A reactive selector (not a lazy .getState() pull) since GameCanvas
@@ -1076,6 +1077,8 @@ export const useGameStore = create<GameState>((set, get) => ({
     set((state) => (state.soundboardSounds.some((s) => s.id === sound.id)
       ? state
       : { soundboardSounds: [...state.soundboardSounds, sound] })),
+  removeSoundboardSound: (id) =>
+    set((state) => ({ soundboardSounds: state.soundboardSounds.filter((s) => s.id !== id) })),
 
   playingSoundboard: new Map(),
   triggerSoundboardPlaying: (playerId, expireAt) =>

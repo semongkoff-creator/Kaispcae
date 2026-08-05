@@ -344,6 +344,10 @@ export enum SocketEvents {
   SOUNDBOARD_PLAY = 'soundboard:play',
   SOUNDBOARD_PLAYED = 'soundboard:played',
   SOUNDBOARD_SOUND_ADDED = 'soundboard:sound_added',
+  // Mirrors SOUNDBOARD_SOUND_ADDED — plain whole-room broadcast (io.to, not
+  // socket.to, so the deleter's own other tabs/clients also sync) so every
+  // open panel drops the removed sound live, same as an upload appearing.
+  SOUNDBOARD_SOUND_REMOVED = 'soundboard:sound_removed',
   // Initial sync of this room's custom sounds, sent once right after
   // ROOM_STATE on join — same "list arrives right after room:state" shape
   // as MEDIA_LIST.

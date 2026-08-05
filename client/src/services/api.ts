@@ -495,6 +495,8 @@ export const api = {
   getSoundboardSounds: (slug: string) => request<{ sounds: SoundboardSoundData[] }>(`/rooms/${slug}/soundboard`),
   uploadSoundboardSound: (slug: string, file: File, name: string, durationMs: number) =>
     uploadSoundboardSoundFile(slug, file, name, durationMs),
+  deleteSoundboardSound: (slug: string, soundId: string) =>
+    request<{ success: boolean }>(`/rooms/${slug}/soundboard/${soundId}`, { method: 'DELETE' }),
 
   // Persisted Channel/DM/Thread chat (see server/src/routes/chat.ts). Message
   // *sending* goes over the socket (channelChatHandler.ts) for live delivery —
