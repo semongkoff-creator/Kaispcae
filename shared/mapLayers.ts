@@ -406,10 +406,14 @@ export function getImpassableAreaRects(ld: LayerData): ImpassableAreaRect[] {
 // pixel-space semantics, same single check already wired into both the
 // client's local prediction and the server's authoritative validation.
 //
-// Bottom-row-only rect (h: TILE_SIZE), matching Furniture's own documented
-// anchor convention: (x,y) is the piece's bottom-left tile, tilesW wide —
-// any rows above (tilesH > 1) are purely visual "overhead", walkable from
-// behind, same as every other multi-row piece already renders.
+// Full footprint (tilesW × tilesH), not just the bottom row — the bottom-
+// row-only convention is right for furniture you're meant to walk BEHIND
+// (a wardrobe's tall back, a chair's headrest rendered above the avatar),
+// but a wall/partition is meant to divide space along its whole drawn
+// shape, so blocking only its base row let a player walk straight through
+// the tall part above it — the block didn't match what the image actually
+// showed. (x,y) is the piece's bottom-LEFT tile (see Furniture's own doc
+// comment), so the rect's top edge sits `tilesH - 1` rows above y.
 export function getFurnitureBlockRects(ld: LayerData): ImpassableAreaRect[] {
   const blockingPaletteIds = new Set(
     (ld.customAssets ?? []).filter((a) => a.category === 'object').map((a) => a.id),
@@ -417,5 +421,10 @@ export function getFurnitureBlockRects(ld: LayerData): ImpassableAreaRect[] {
   if (blockingPaletteIds.size === 0) return [];
   return [...ld.objects, ...ld.topObjects]
     .filter((f) => f.kind !== 'banner' && blockingPaletteIds.has(f.paletteId))
-    .map((f) => ({ x: f.x * TILE_SIZE, y: f.y * TILE_SIZE, w: f.tilesW * TILE_SIZE, h: TILE_SIZE }));
+    .map((f) => ({
+      x: f.x * TILE_SIZE,
+      y: (f.y - f.tilesH + 1) * TILE_SIZE,
+      w: f.tilesW * TILE_SIZE,
+      h: f.tilesH * TILE_SIZE,
+    }));
 }
