@@ -289,10 +289,17 @@ export function useMovement({ isBlocked, onMove, isFrozen, isDoor, getImpassable
       if (e.code) keysRef.current.add(e.code);
     };
 
+    // Bug — this used to early-return on the same "don't touch movement
+    // while typing" check handleKeyDown uses. That's the right guard for
+    // keyDOWN (don't hijack typing as a movement key), but wrong for keyUP:
+    // if focus shifted to an input WHILE a movement key was still physically
+    // held (e.g. clicking the chat box mid-sprint), the eventual release
+    // got silently ignored — the key stayed stuck in keysRef forever, and
+    // the avatar kept walking on its own in that direction even after the
+    // player let go. A key release must always clear the tracked key
+    // regardless of where focus currently is; only a NEW keydown should be
+    // gated by "are we typing right now".
     const handleKeyUp = (e: KeyboardEvent) => {
-      const tag = document.activeElement?.tagName.toLowerCase();
-      if (tag === 'input' || tag === 'textarea' || (document.activeElement as HTMLElement)?.isContentEditable) return;
-
       keysRef.current.delete(e.key);
       if (e.code) keysRef.current.delete(e.code);
     };
