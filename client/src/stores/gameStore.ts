@@ -5,8 +5,17 @@ import type { ManualStatus } from '../data/presence';
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
 // per-socket RECORDING_STARTED emit, which simply never reaches anyone else.
-export const MIN_MAP_ZOOM = 0.6;
+// Lowered from 0.6 — Overview mode (GameCanvas.tsx's isOverview branch) needs
+// a floor of 0.25 (25%) to reach the simplified "rooms as blocks, players as
+// initial bubbles" rendering the zoom control can now drop into.
+export const MIN_MAP_ZOOM = 0.25;
 export const MAX_MAP_ZOOM = 2;
+// Below this, GameCanvas.tsx swaps the whole rendering to Overview mode.
+// Clamped by clampMapZoom's Math.max(MIN_MAP_ZOOM, ...) below, so the lowest
+// reachable step lands exactly on MIN_MAP_ZOOM (25%) even though it isn't a
+// multiple of the normal 10%-step grid — the only value under this threshold
+// that's actually reachable.
+export const OVERVIEW_ZOOM_THRESHOLD = 0.3;
 // Sharpness follow-up — mapZoom used to be fully continuous (each +/-
 // click or wheel notch multiplied it by 1.2/1.1), so `mapZoom * dpr`
 // landed on an arbitrary value like 1.728 almost every time, and
@@ -19,7 +28,20 @@ export const MAX_MAP_ZOOM = 2;
 // compounding into odd fractional percentages the longer someone zooms,
 // which is both crisper on average and far more predictable as a control.
 const ZOOM_STEP = 0.1;
-const clampMapZoom = (z: number) => Math.max(MIN_MAP_ZOOM, Math.min(MAX_MAP_ZOOM, Math.round(z / ZOOM_STEP) * ZOOM_STEP));
+// Bug — MIN_MAP_ZOOM (0.25) isn't a multiple of ZOOM_STEP, and zooming out
+// from 30% lands EXACTLY on the 0.25/0.1=2.5 halfway point between grid
+// steps — JS's Math.round rounds .5 up, not down, so it rounded straight
+// back to 0.3 every time, making 25% completely unreachable (zoom out from
+// 30% just... did nothing, forever). Any raw value strictly below the
+// midpoint between the lowest real grid step (0.3) and the floor now snaps
+// directly to the floor instead of through the normal grid rounding, so 25%
+// is actually reachable — the strict `<` (not `<=`) matters: at exactly 0.3
+// (zooming back IN from 25%) this must fall through to normal rounding, or
+// zooming in from the floor would get stuck right back at the floor too.
+const clampMapZoom = (z: number) => {
+  if (z < MIN_MAP_ZOOM + ZOOM_STEP / 2) return MIN_MAP_ZOOM;
+  return Math.max(MIN_MAP_ZOOM, Math.min(MAX_MAP_ZOOM, Math.round(z / ZOOM_STEP) * ZOOM_STEP));
+};
 
 export interface ActiveRecordingInfo {
   recordingId: string;

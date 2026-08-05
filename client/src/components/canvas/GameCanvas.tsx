@@ -18,13 +18,14 @@ import {
   ReferenceImageData,
   Zone,
 } from '@virtualmeet/shared';
-import { useGameStore } from '@/stores/gameStore';
+import { useGameStore, OVERVIEW_ZOOM_THRESHOLD } from '@/stores/gameStore';
 import { useMovement } from '@/hooks/useMovement';
 import { drawAvatar } from './AvatarSprite';
 import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
 import { PALETTE_BY_ID } from '@/data/themeAssets';
 import { isTileBlocked, isDoorTile } from '@/utils/createDefaultRoom';
+import { avatarColor } from '@/components/ui/ChatAvatar';
 // Bug 16-project (Room Editor) — these map-draw helpers were moved verbatim to
 // mapRender.ts so the editor can render the map identically. GameCanvas's usage
 // is unchanged.
@@ -343,6 +344,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const playingSoundboardRef = useRef(playingSoundboard);
   const zones = useGameStore((s) => s.zones);
   const zonesRef = useRef(zones);
+  // Reactive (unlike the raw draw loop's own getState() zoom read) purely to
+  // gate the zone-label DOM banners below — they're redundant with Overview
+  // mode's in-canvas block labels, and zoom only changes on an actual user
+  // action (button/wheel), so this re-render is cheap/rare, not per-frame.
+  const mapZoomReactive = useGameStore((s) => s.mapZoom);
+  const isOverviewReactive = mapZoomReactive <= OVERVIEW_ZOOM_THRESHOLD;
   // Labeled zones render a DOM banner positioned imperatively (via transform,
   // inside the rAF loop below) instead of React state, so following the
   // camera at 60fps doesn't trigger a re-render for every frame.
@@ -828,6 +835,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const dpr = window.devicePixelRatio || 1;
     const zoom = useGameStore.getState().mapZoom;
     ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, 0, 0);
+    // Overview mode — zoomed out past this, the detailed pixel-art tile/
+    // furniture/sprite rendering below gives way to a simplified floor-plan
+    // view (rooms as flat colored blocks, players as initial bubbles) —
+    // see the isOverview branches further down.
+    const isOverview = zoom <= OVERVIEW_ZOOM_THRESHOLD;
 
     if (prevTimeRef.current === 0) prevTimeRef.current = timestamp;
     const rawDt = (timestamp - prevTimeRef.current) / 1000;
@@ -1062,7 +1074,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       }
     }
 
-    ctx.fillStyle = '#1a1a2e';
+    ctx.fillStyle = isOverview ? '#d7f2de' : '#1a1a2e';
     ctx.fillRect(0, 0, worldViewW, worldViewH);
 
     const tiles = tilesRef.current;
@@ -1070,90 +1082,127 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const endCol = Math.min(MAP_WIDTH, Math.ceil((cameraX + worldViewW) / TILE_SIZE) + 1);
     const startRow = Math.max(0, Math.floor(cameraY / TILE_SIZE));
     const endRow = Math.min(MAP_HEIGHT, Math.ceil((cameraY + worldViewH) / TILE_SIZE) + 1);
-
-    for (let row = startRow; row < endRow; row++) {
-      for (let col = startCol; col < endCol; col++) {
-        const tile = tiles[row]?.[col];
-        if (!tile) continue;
-        const screenX = col * TILE_SIZE - cameraX;
-        const screenY = row * TILE_SIZE - cameraY;
-
-        // Furniture/wall tiles have transparent sprite margins, so paint the
-        // floor underneath first — otherwise gaps show the dark canvas backdrop.
-        drawFloorTile(ctx, tile, screenX, screenY, themeRef.current);
-        // 'blocked' (ZEP impassable effect) blocks movement but renders nothing
-        // — only the floor shows. 'portal'/'spawn' draw their own markers below.
-        if (tile.type === 'wall') {
-          // Fitur 15 — a wall tile may carry a custom-uploaded skin.
-          drawWallTile(ctx, tile, screenX, screenY, themeRef.current);
-        } else if (tile.type !== 'floor' && tile.type !== 'portal' && tile.type !== 'spawn' && tile.type !== 'blocked') {
-          drawTile(ctx, tile.type, screenX, screenY, themeRef.current);
-        }
-
-        if (tile.type === 'portal') {
-          const pulse = Math.sin(timestamp * 0.005) * 0.3 + 0.7;
-          ctx.beginPath();
-          ctx.arc(screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2, TILE_SIZE / 2 - 3, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(124, 58, 237, ${pulse})`;
-          ctx.lineWidth = 2.5;
-          ctx.stroke();
-        } else if (tile.type === 'spawn') {
-          ctx.beginPath();
-          ctx.arc(screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2, TILE_SIZE / 2 - 5, 0, Math.PI * 2);
-          ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)';
-          ctx.setLineDash([3, 3]);
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-      }
-    }
-
-    // Room Editor's "Wall Area" tool — the one impassable-rect flavor that's
-    // actually meant to be seen (a plain Impassable Area stays invisible on
-    // purpose, see its own doc comment in shared/mapLayers.ts). Drawn here,
-    // alongside the tile/floor layer and before furniture/avatars, so it
-    // reads as solid architecture — the same z-order a real 'wall' tile
-    // above already renders at. Solid fill + diagonal hazard stripes so it's
-    // unmistakable even sitting on a plain floor tile with nothing else
-    // drawn there.
-    for (const rect of wallAreaRectsRef.current) {
-      const rsx = rect.x - cameraX;
-      const rsy = rect.y - cameraY;
-      if (rsx + rect.w < 0 || rsx > worldViewW || rsy + rect.h < 0 || rsy > worldViewH) continue;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(rsx, rsy, rect.w, rect.h);
-      ctx.clip();
-      ctx.fillStyle = 'rgba(55,65,81,0.92)';
-      ctx.fillRect(rsx, rsy, rect.w, rect.h);
-      ctx.strokeStyle = 'rgba(250,204,21,0.85)';
-      ctx.lineWidth = 4;
-      const stripeGap = 14;
-      for (let sx = rsx - rect.h; sx < rsx + rect.w; sx += stripeGap) {
-        ctx.beginPath();
-        ctx.moveTo(sx, rsy + rect.h);
-        ctx.lineTo(sx + rect.h, rsy);
-        ctx.stroke();
-      }
-      ctx.restore();
-      ctx.strokeStyle = 'rgba(17,24,39,0.9)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(rsx, rsy, rect.w, rect.h);
-    }
-
-    drawLiveReferenceImage(ctx, liveReferenceImageRef.current, cameraX, cameraY);
-
-    // Furniture — object layer (base row, drawn before avatars). Banners
-    // are DOM overlays (see bannerRefs below), not tileset sprites.
+    // Declared unconditionally — still read further down (overhead furniture
+    // pass, assigned-seat labels) regardless of isOverview, which only skips
+    // the DRAWING below, not this list itself.
     const furnitureList = furnitureRef.current;
-    for (const item of furnitureList) {
-      if (item.kind === 'banner') continue;
-      // Top-layer objects (ZEP editor) draw entirely AFTER avatars — skip them
-      // in this before-avatars pass; the overhead pass below draws them whole.
-      if (item.topLayer) continue;
-      if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
-      drawFurnitureLayer(ctx, item, cameraX, cameraY, 'object');
+
+    if (isOverview) {
+      // Zoomed out past OVERVIEW_ZOOM_THRESHOLD — swap the whole detailed
+      // pixel-art pass (tiles/wall-skins/furniture) for a simplified
+      // floor-plan view: each Zone becomes one flat colored block with its
+      // name, same data (Zone.color/label) the game already has, just drawn
+      // once per zone instead of per-tile. No furniture/wall-area detail —
+      // legible at a glance is the whole point of this mode.
+      for (const zone of zonesRef.current) {
+        const zx = zone.x * TILE_SIZE - cameraX;
+        const zy = zone.y * TILE_SIZE - cameraY;
+        const zw = zone.width * TILE_SIZE;
+        const zh = zone.height * TILE_SIZE;
+        if (zx + zw < 0 || zx > worldViewW || zy + zh < 0 || zy > worldViewH) continue;
+        // Border width / label size / corner radius all divided by zoom —
+        // same "read as a constant on-screen size" reasoning as the avatar
+        // bubble above. Without this the label rendered at ~13*0.25=3px,
+        // completely illegible.
+        const radius = Math.min(10 / zoom, zw / 4, zh / 4);
+        ctx.beginPath();
+        ctx.roundRect(zx, zy, zw, zh, radius);
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.fill();
+        ctx.strokeStyle = zone.color || '#94a3b8';
+        ctx.lineWidth = 3 / zoom;
+        ctx.stroke();
+        if (zone.label) {
+          ctx.fillStyle = '#334155';
+          ctx.font = `600 ${Math.round(13 / zoom)}px sans-serif`;
+          ctx.textBaseline = 'top';
+          ctx.fillText(zone.label, zx + 10 / zoom, zy + 8 / zoom);
+        }
+      }
+    } else {
+      for (let row = startRow; row < endRow; row++) {
+        for (let col = startCol; col < endCol; col++) {
+          const tile = tiles[row]?.[col];
+          if (!tile) continue;
+          const screenX = col * TILE_SIZE - cameraX;
+          const screenY = row * TILE_SIZE - cameraY;
+
+          // Furniture/wall tiles have transparent sprite margins, so paint the
+          // floor underneath first — otherwise gaps show the dark canvas backdrop.
+          drawFloorTile(ctx, tile, screenX, screenY, themeRef.current);
+          // 'blocked' (ZEP impassable effect) blocks movement but renders nothing
+          // — only the floor shows. 'portal'/'spawn' draw their own markers below.
+          if (tile.type === 'wall') {
+            // Fitur 15 — a wall tile may carry a custom-uploaded skin.
+            drawWallTile(ctx, tile, screenX, screenY, themeRef.current);
+          } else if (tile.type !== 'floor' && tile.type !== 'portal' && tile.type !== 'spawn' && tile.type !== 'blocked') {
+            drawTile(ctx, tile.type, screenX, screenY, themeRef.current);
+          }
+
+          if (tile.type === 'portal') {
+            const pulse = Math.sin(timestamp * 0.005) * 0.3 + 0.7;
+            ctx.beginPath();
+            ctx.arc(screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2, TILE_SIZE / 2 - 3, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(124, 58, 237, ${pulse})`;
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+          } else if (tile.type === 'spawn') {
+            ctx.beginPath();
+            ctx.arc(screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2, TILE_SIZE / 2 - 5, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.6)';
+            ctx.setLineDash([3, 3]);
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+      }
+
+      // Room Editor's "Wall Area" tool — the one impassable-rect flavor that's
+      // actually meant to be seen (a plain Impassable Area stays invisible on
+      // purpose, see its own doc comment in shared/mapLayers.ts). Drawn here,
+      // alongside the tile/floor layer and before furniture/avatars, so it
+      // reads as solid architecture — the same z-order a real 'wall' tile
+      // above already renders at. Solid fill + diagonal hazard stripes so it's
+      // unmistakable even sitting on a plain floor tile with nothing else
+      // drawn there.
+      for (const rect of wallAreaRectsRef.current) {
+        const rsx = rect.x - cameraX;
+        const rsy = rect.y - cameraY;
+        if (rsx + rect.w < 0 || rsx > worldViewW || rsy + rect.h < 0 || rsy > worldViewH) continue;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(rsx, rsy, rect.w, rect.h);
+        ctx.clip();
+        ctx.fillStyle = 'rgba(55,65,81,0.92)';
+        ctx.fillRect(rsx, rsy, rect.w, rect.h);
+        ctx.strokeStyle = 'rgba(250,204,21,0.85)';
+        ctx.lineWidth = 4;
+        const stripeGap = 14;
+        for (let sx = rsx - rect.h; sx < rsx + rect.w; sx += stripeGap) {
+          ctx.beginPath();
+          ctx.moveTo(sx, rsy + rect.h);
+          ctx.lineTo(sx + rect.h, rsy);
+          ctx.stroke();
+        }
+        ctx.restore();
+        ctx.strokeStyle = 'rgba(17,24,39,0.9)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(rsx, rsy, rect.w, rect.h);
+      }
+
+      drawLiveReferenceImage(ctx, liveReferenceImageRef.current, cameraX, cameraY);
+
+      // Furniture — object layer (base row, drawn before avatars). Banners
+      // are DOM overlays (see bannerRefs below), not tileset sprites.
+      for (const item of furnitureList) {
+        if (item.kind === 'banner') continue;
+        // Top-layer objects (ZEP editor) draw entirely AFTER avatars — skip them
+        // in this before-avatars pass; the overhead pass below draws them whole.
+        if (item.topLayer) continue;
+        if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
+        drawFurnitureLayer(ctx, item, cameraX, cameraY, 'object');
+      }
     }
 
     // Editor overlay
@@ -1373,6 +1422,38 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       if (sx < -AVATAR_RADIUS - 30 || sx > worldViewW + AVATAR_RADIUS + 30 ||
           sy < -AVATAR_RADIUS - 40 || sy > worldViewH + AVATAR_RADIUS + 30) continue;
 
+      if (isOverview) {
+        // Overview mode — a colored initial bubble instead of the full
+        // sprite (nudge/jump/speech-bubble effects skipped too, same
+        // "legible at a glance" reasoning as the simplified room blocks
+        // above). Radius divided by zoom so the bubble reads as the SAME
+        // on-screen size at either overview zoom step (25% or 30%), rather
+        // than shrinking right along with everything else.
+        const bubbleRadius = 14 / zoom;
+        ctx.beginPath();
+        ctx.arc(sx, sy, bubbleRadius, 0, Math.PI * 2);
+        ctx.fillStyle = avatarColor(avatar.userId ?? avatar.id);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2 / zoom;
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `600 ${Math.round(14 / zoom)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText((avatar.name?.trim()?.[0] ?? '?').toUpperCase(), sx, sy);
+        // Online-status dot — every rendered avatar is a live connected
+        // player by definition (there's no "offline" entry in playerRecords).
+        ctx.beginPath();
+        ctx.arc(sx + bubbleRadius * 0.72, sy + bubbleRadius * 0.72, bubbleRadius * 0.32, 0, Math.PI * 2);
+        ctx.fillStyle = '#22c55e';
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5 / zoom;
+        ctx.stroke();
+        continue;
+      }
+
       const isLocal = avatar.id === localPlayerId;
       const bobOffset = isLocal ? walkOffset : avatar.isMoving ? Math.sin(timestamp * 0.008 + (avatar.id.charCodeAt(0) || 0) * 0.1) * 2 : 0;
       const jumpOffset = getJumpOffset(jumpingPlayersRef.current.get(avatar.id), now);
@@ -1492,35 +1573,37 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       }
     }
 
-    // Furniture — overhead layer (drawn after avatars, so tall pieces let
-    // players walk visually behind their upper portion)
-    for (const item of furnitureList) {
-      if (item.kind === 'banner') continue;
-      if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
-      // Top-layer objects draw whole here (base + overhead) so the avatar
-      // passes BEHIND them; ordinary objects only draw their overhead rows.
-      if (item.topLayer) drawFurnitureLayer(ctx, item, cameraX, cameraY, 'object');
-      drawFurnitureLayer(ctx, item, cameraX, cameraY, 'overhead');
-    }
+    if (!isOverview) {
+      // Furniture — overhead layer (drawn after avatars, so tall pieces let
+      // players walk visually behind their upper portion)
+      for (const item of furnitureList) {
+        if (item.kind === 'banner') continue;
+        if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
+        // Top-layer objects draw whole here (base + overhead) so the avatar
+        // passes BEHIND them; ordinary objects only draw their overhead rows.
+        if (item.topLayer) drawFurnitureLayer(ctx, item, cameraX, cameraY, 'object');
+        drawFurnitureLayer(ctx, item, cameraX, cameraY, 'overhead');
+      }
 
-    // Permanently-assigned seat labels — unlike the "SPACE to sit" prompt
-    // below, these are always visible (not just while facing the piece), so
-    // everyone can see whose desk is whose at a glance, ZEP-style.
-    for (const item of furnitureList) {
-      if (!item.assignedToUserId) continue;
-      if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
-      const asx = item.x * TILE_SIZE - cameraX + TILE_SIZE / 2;
-      const asy = item.y * TILE_SIZE - cameraY - (item.tilesH - 1) * TILE_SIZE;
-      const label = `🪑 ${item.assignedToName || 'Reserved'}`;
-      ctx.font = 'bold 9px sans-serif';
-      ctx.textAlign = 'center';
-      const tw = ctx.measureText(label).width;
-      ctx.fillStyle = 'rgba(76, 29, 149, 0.85)';
-      ctx.beginPath();
-      ctx.roundRect(asx - tw / 2 - 5, asy - 20, tw + 10, 14, 6);
-      ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(label, asx, asy - 9);
+      // Permanently-assigned seat labels — unlike the "SPACE to sit" prompt
+      // below, these are always visible (not just while facing the piece), so
+      // everyone can see whose desk is whose at a glance, ZEP-style.
+      for (const item of furnitureList) {
+        if (!item.assignedToUserId) continue;
+        if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
+        const asx = item.x * TILE_SIZE - cameraX + TILE_SIZE / 2;
+        const asy = item.y * TILE_SIZE - cameraY - (item.tilesH - 1) * TILE_SIZE;
+        const label = `🪑 ${item.assignedToName || 'Reserved'}`;
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        const tw = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(76, 29, 149, 0.85)';
+        ctx.beginPath();
+        ctx.roundRect(asx - tw / 2 - 5, asy - 20, tw + 10, 14, 6);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, asx, asy - 9);
+      }
     }
 
     // Sit-in-chair prompt — a small floating chair icon + hint over the
@@ -1715,7 +1798,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // Placed after avatars/overhead furniture (so people standing outside
     // the room read as dimmed too) but before speech bubbles/prompts below
     // (so in-world UI text stays legible either way).
-    const spotlightZone = zones.find((z) =>
+    const spotlightZone = isOverview ? undefined : zones.find((z) =>
       isPrivateZone(z) &&
       playerX / TILE_SIZE >= z.x && playerX / TILE_SIZE < z.x + z.width &&
       playerY / TILE_SIZE >= z.y && playerY / TILE_SIZE < z.y + z.height,
@@ -1920,7 +2003,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           style.transform, not React state, so they track the camera at 60fps
           without re-rendering. */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {zones.filter((z) => z.label && !isPrivateZone(z)).map((zone) => (
+        {zones.filter((z) => z.label && !isPrivateZone(z) && !isOverviewReactive).map((zone) => (
           <div
             key={zone.id}
             ref={(el) => {
