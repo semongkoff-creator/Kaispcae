@@ -887,13 +887,15 @@ export const PROXIMITY_THRESHOLD = 3; // tiles — within 3 tiles: full video + 
 // someone could look clearly outside the ring and still be in a call.
 // Derived from PROXIMITY_THRESHOLD so the two can never drift apart again.
 export const PROXIMITY_THRESHOLD_PX = PROXIMITY_THRESHOLD * TILE_SIZE;
-// §6 (RTC upgrade) — beyond PROXIMITY_THRESHOLD but within this: still
-// connected, rendered translucent, audio faded near-zero. The spec's own
-// example numbers (6/10 tiles) were written for an unspecified room scale;
-// this app's rooms are already tuned around PROXIMITY_THRESHOLD=3, so this
-// keeps that scale and applies the same ~1.7x ratio the spec used (10/6)
-// rather than copying its absolute tile counts.
-export const TRANSLUCENT_THRESHOLD = 5;
+// §6 (RTC upgrade) — used to be a wider outer band (5 tiles) beyond
+// PROXIMITY_THRESHOLD where a peer stayed connected/audible-but-fading even
+// though they'd already walked outside the visible ring — audio (and,
+// worse, the Soundboard's un-faded full-volume clips) reached noticeably
+// past what the ring on screen promised. Collapsed to equal
+// PROXIMITY_THRESHOLD so the audible range can never again drift wider than
+// the ring that's supposed to represent it — same "derive so they can't
+// drift apart" fix PROXIMITY_THRESHOLD_PX above already got.
+export const TRANSLUCENT_THRESHOLD = PROXIMITY_THRESHOLD;
 export const DISCONNECT_DEBOUNCE_MS = 500;
 
 // §6 — mirrors the spec's own three-state enum name
