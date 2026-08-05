@@ -406,7 +406,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socket.on(SocketEvents.SOUNDBOARD_PLAYED, (data: SoundboardPlayedPayload) => {
       const sound = resolveSoundboardSound(data.soundId);
       if (!sound) return;
-      playSoundboardClip(sound.url);
+      playSoundboardClip(data.fromId, sound.url);
       useGameStore.getState().triggerSoundboardPlaying(data.fromId, Date.now() + Math.max(sound.durationMs, 800));
     });
 
@@ -1048,8 +1048,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.SOUNDBOARD_PLAY, { soundId });
     const sound = resolveSoundboardSound(soundId);
     if (!sound) return;
-    playSoundboardClip(sound.url);
     const state = useGameStore.getState();
+    playSoundboardClip(state.localPlayerId, sound.url);
     state.triggerSoundboardPlaying(state.localPlayerId, Date.now() + Math.max(sound.durationMs, 800));
   }, []);
 

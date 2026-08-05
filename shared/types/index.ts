@@ -851,7 +851,7 @@ export const SOURCE_TILE_SIZE = 32;
 // reception strip spanning the bottom.
 export const MAP_WIDTH = 50;
 export const MAP_HEIGHT = 36;
-export const PLAYER_SPEED = 200; // pixels per second — was 175, nudged up again per feedback
+export const PLAYER_SPEED = 230; // pixels per second — was 200, nudged up again per feedback (ZEP-like brisker pace)
 // Run (hold R while moving) — no dedicated run animation frames exist in
 // the LimeZu Character Generator pack (only idle/walk rows), so running is
 // the walk animation cycled faster (see AvatarSprite.ts's RUN_FRAME_MS)
@@ -859,7 +859,7 @@ export const PLAYER_SPEED = 200; // pixels per second — was 175, nudged up aga
 // validate beyond what it already does for normal movement (bounds +
 // tile-collision — see movementHandler.ts's doc comment on why per-tick
 // max-distance was never enforced even before Run existed).
-export const PLAYER_RUN_SPEED = 300; // pixels per second — was 260, keeps the same ~1.5x ratio over PLAYER_SPEED
+export const PLAYER_RUN_SPEED = 345; // pixels per second — was 300, keeps the same ~1.5x ratio over PLAYER_SPEED
 
 // Jump (Space, when not sitting/near a chair) — cosmetic one-shot vertical
 // hop, rendered client-side only (see AvatarSprite.ts/GameCanvas.tsx);

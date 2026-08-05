@@ -6,6 +6,7 @@
 // <audio> element playing a real asset sidesteps both: once the user has
 // interacted with the page (they clicked to join the room), .play() works.
 import { getNotificationSettings } from './browserNotifications';
+import { calcGain } from '@/hooks/useProximity';
 
 const NUDGE_SRC = '/assets/sfx/nudge.wav';
 const NUDGE_STRONG_SRC = '/assets/sfx/nudge-strong.wav';
@@ -78,9 +79,40 @@ export function playHandRaiseSound(): void {
 // visible user action (the button greys out during its own cooldown), not
 // a passive background notification, so it doesn't belong behind that
 // toggle at all.
-export function playSoundboardClip(src: string): void {
+// Bug — a soundboard clip's volume was only ever set ONCE, at the instant
+// it started playing, from whatever the listener's distance to the sender
+// happened to be right then. Walking away mid-clip had zero effect: it
+// just kept blasting at that original volume until it finished playing
+// (up to SOUNDBOARD_MAX_DURATION_MS, several seconds), completely
+// ignoring the listener's real-time movement — unlike mic/camera, which
+// already fades continuously via calcGain as you move. Tracked here by
+// sender id so updateSoundboardVolumes (called from the same proximity-
+// recalculation effect that already drives WebRTC's volume) can keep it
+// in sync for as long as it's actually playing.
+const activeSoundboardAudio = new Map<string, HTMLAudioElement>();
+const SOUNDBOARD_BASE_VOLUME = 0.7;
+
+export function playSoundboardClip(fromId: string, src: string): void {
   if (typeof Audio === 'undefined') return;
   const node = new Audio(src);
-  node.volume = 0.7;
+  node.volume = SOUNDBOARD_BASE_VOLUME;
   node.play().catch(() => {});
+  activeSoundboardAudio.set(fromId, node);
+  node.addEventListener('ended', () => {
+    if (activeSoundboardAudio.get(fromId) === node) activeSoundboardAudio.delete(fromId);
+  }, { once: true });
+}
+
+// Called on every proximity recalculation (App.tsx's updateProximity
+// effect) — mutes (not pauses) a playing clip once its sender falls out of
+// range, and un-mutes it again if the listener walks back within range
+// before it finishes, same real-time behavior as a live voice call rather
+// than a one-shot decision made at click time.
+export function updateSoundboardVolumes(nearby: { id: string; distanceTiles: number; viaZone?: boolean }[]): void {
+  if (activeSoundboardAudio.size === 0) return;
+  for (const [fromId, node] of activeSoundboardAudio) {
+    const p = nearby.find((n) => n.id === fromId);
+    const gain = p ? (p.viaZone ? 1 : calcGain(p.distanceTiles)) : 0;
+    node.volume = Math.max(0, Math.min(1, SOUNDBOARD_BASE_VOLUME * gain));
+  }
 }

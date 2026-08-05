@@ -47,7 +47,7 @@ import { PendingRequestToast } from './components/ui/PendingRequestToast';
 import { Sidebar } from './components/ui/Sidebar';
 import { MicButton } from './components/hud/MicButton';
 import { HandButton } from './components/hud/HandButton';
-import { playHandRaiseSound } from './services/soundEffects';
+import { playHandRaiseSound, updateSoundboardVolumes } from './services/soundEffects';
 import { CameraButton } from './components/hud/CameraButton';
 import { DeviceMenu } from './components/hud/DeviceMenu';
 import { ScreenShareButton } from './components/hud/ScreenShareButton';
@@ -253,6 +253,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // Update WebRTC connections based on proximity
   useEffect(() => {
     updateProximity(nearby);
+    updateSoundboardVolumes(nearby);
   }, [nearby, updateProximity]);
 
   // A5 — Meeting zone detection. The MeetingControl (Start/Join/End + history)
