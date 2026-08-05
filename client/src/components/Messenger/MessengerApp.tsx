@@ -299,10 +299,14 @@ export function MessengerApp({
     : [];
 
   return (
-    // pl-14 clears the room's Sidebar rail (z-50) — same as DocsApp,
-    // BasesLauncher and AttendanceApp. Without it the rail sits on top of this
-    // panel's own header and eats the "Chats" title.
-    <div className="absolute inset-0 z-40 flex bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 overflow-hidden pl-14">
+    // Docked to the left edge as a sidebar, NOT a full-screen overlay like
+    // DocsApp/BasesLauncher/AttendanceApp — the map/HUD stay visible and
+    // usable to the right (Gather-style), so you can keep an eye on the
+    // room while chatting instead of the room disappearing entirely.
+    // left-14 clears the room's Sidebar rail (z-50) — same offset those
+    // full-screen modules used via pl-14, just on the container's own
+    // position now instead of inner padding.
+    <div className="absolute inset-y-0 left-14 z-40 flex w-[720px] max-w-[75vw] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 overflow-hidden border-r border-purple-100 dark:border-gray-700 shadow-2xl">
       {/* ── Kolom daftar percakapan ───────────────────────────────── */}
       <aside className="w-[300px] shrink-0 border-r border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-850">
         <div className="px-4 pt-4 pb-3">

@@ -702,7 +702,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // True while any full-screen suite module covers the room. Room affordances
   // (hotkeys, the floating Chat button) must stand down while it's open —
   // they belong to the office, not to a spreadsheet or a document.
-  const moduleOpen = dailyTaskActive || leaveActive || calendarViewActive || adminViewActive || attendanceViewActive || messengerViewActive || larkSyncActive;
+  // Messenger is deliberately NOT included any more: it docks as a left
+  // sidebar now (see MessengerApp.tsx), not a full-screen takeover, so the
+  // map/HUD/movement stay live beside it, Gather-style.
+  const moduleOpen = dailyTaskActive || leaveActive || calendarViewActive || adminViewActive || attendanceViewActive || larkSyncActive;
 
   // Tab for admin panel. (The old E-for-editor hotkey went with the retired
   // overlay editor — Potong 7; editing now lives on the /?roomEditor= page.)
@@ -1624,8 +1627,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           Hidden while a SUITE module is open (moduleOpen). Meeting View is
           deliberately NOT part of moduleOpen, so the "stay reachable over
           Meeting View" behaviour above is untouched — but a full-screen
-          module is a different thing: the bar lands squarely on the
-          messenger's composer, covering the input you're trying to type in. */}
+          module (Calendar/Docs/Admin/etc.) is a different thing: the
+          centered bar would land squarely on its content. Messenger is
+          NOT part of moduleOpen either — it docks as a left sidebar now
+          (see MessengerApp.tsx), leaving this bottom-center bar clear. */}
       {/* Potong 6 — area background-music control (only while inside a BGM area). */}
       {!moduleOpen && bgm.inAreaName && (
         <div className="absolute bottom-20 right-4 z-50 flex items-center gap-2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 rounded-full px-3 py-1.5 shadow-sm pointer-events-auto text-xs text-gray-700 dark:text-gray-200">
