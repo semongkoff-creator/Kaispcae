@@ -904,6 +904,23 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const rawZoom = useGameStore.getState().mapZoom;
     const logicalW = canvas.width / dpr;
     const logicalH = canvas.height / dpr;
+    // QA follow-up (Full-office view still cropped after the first fit-zoom
+    // fix) — MAP_WIDTH/MAP_HEIGHT (50x36) are only the DEFAULT grid size. The
+    // Room Editor's Resize tool lets an admin grow a room up to 200x200
+    // (editorStore.ts's resizeMap, routes/rooms.ts accepts up to 200), and
+    // the server ships whatever size the room ACTUALLY is — layerDataToLegacy
+    // builds `tiles` from the room's own stored width/height, not the fixed
+    // constants. A room bigger than 50x36 was silently both under-fit
+    // (Overview's zoom math assumed the smaller default box) AND cropped
+    // (tile culling below was ALSO clamped to the fixed constants, so
+    // anything past column 50 / row 36 was never even drawn) — two symptoms
+    // of the same root cause. Deriving the real size from the loaded tiles
+    // array itself — the same source of truth the server and every other
+    // correct consumer in this file already use — fixes both at once, for
+    // every room regardless of whether it was ever resized.
+    const tiles = tilesRef.current;
+    const mapCols = tiles[0]?.length || MAP_WIDTH;
+    const mapRows = tiles.length || MAP_HEIGHT;
     // Overview mode — zoomed out past this, the detailed pixel-art tile/
     // furniture/sprite rendering below gives way to a simplified floor-plan
     // view (rooms as flat colored blocks, players as initial bubbles) —
@@ -916,12 +933,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // of the screen empty lavender background around a small chunk of the
     // office instead of the "whole office at a glance" the feature is
     // supposed to be. While in Overview, replace the raw zoom with one
-    // computed to fit the WHOLE map exactly into THIS viewport (recomputed
-    // every frame, so it also self-corrects on window resize) — the normal,
-    // non-overview zoom range (the +/- control, wheel/trackpad) is
-    // untouched, still driven by the raw mapZoom value.
+    // computed to fit the WHOLE (real-size) map exactly into THIS viewport
+    // (recomputed every frame, so it also self-corrects on window resize) —
+    // the normal, non-overview zoom range (the +/- control, wheel/trackpad)
+    // is untouched, still driven by the raw mapZoom value.
     const zoom = isOverview
-      ? Math.min(logicalW / (MAP_WIDTH * TILE_SIZE), logicalH / (MAP_HEIGHT * TILE_SIZE))
+      ? Math.min(logicalW / (mapCols * TILE_SIZE), logicalH / (mapRows * TILE_SIZE))
       : rawZoom;
     ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, 0, 0);
     // Read by the double-click-to-move and click-to-teleport handlers
@@ -1176,8 +1193,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // than the map on any reasonable screen" like the old fixed-threshold
     // version) — this puts the entire map in view, filling the screen,
     // regardless of where the local player is.
-    const centerX = isOverview ? (MAP_WIDTH * TILE_SIZE) / 2 : playerX;
-    const centerY = isOverview ? (MAP_HEIGHT * TILE_SIZE) / 2 : playerY;
+    const centerX = isOverview ? (mapCols * TILE_SIZE) / 2 : playerX;
+    const centerY = isOverview ? (mapRows * TILE_SIZE) / 2 : playerY;
     const cameraX = Math.round(centerX - worldViewW / 2);
     const cameraY = Math.round(centerY - worldViewH / 2);
 
@@ -1206,11 +1223,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     ctx.fillStyle = isOverview ? '#ede9fe' : '#1a1a2e';
     ctx.fillRect(0, 0, worldViewW, worldViewH);
 
-    const tiles = tilesRef.current;
     const startCol = Math.max(0, Math.floor(cameraX / TILE_SIZE));
-    const endCol = Math.min(MAP_WIDTH, Math.ceil((cameraX + worldViewW) / TILE_SIZE) + 1);
+    const endCol = Math.min(mapCols, Math.ceil((cameraX + worldViewW) / TILE_SIZE) + 1);
     const startRow = Math.max(0, Math.floor(cameraY / TILE_SIZE));
-    const endRow = Math.min(MAP_HEIGHT, Math.ceil((cameraY + worldViewH) / TILE_SIZE) + 1);
+    const endRow = Math.min(mapRows, Math.ceil((cameraY + worldViewH) / TILE_SIZE) + 1);
     // Declared unconditionally — still read further down (overhead furniture
     // pass, assigned-seat labels) regardless of isOverview, which only skips
     // the DRAWING below, not this list itself.
