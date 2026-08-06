@@ -752,6 +752,17 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       setCachedImpassableAreas(room, savedImpassableAreaRects);
       setCachedZones(room, savedZones || fallback!.zones);
 
+      // QA #7/#8/#9 — every desk note currently on a furniture piece in this
+      // room, so a fresh join sees them without a separate fetch. Its own
+      // table (see DeskNote in schema.prisma), independent of the
+      // legacy-furniture/layerData split above — never at risk of the
+      // "wrote to the store ROOM_STATE isn't reading from" bug that
+      // furnitureHandler.ts's seat-assignment fix (elsewhere in this same
+      // pass) had to work around.
+      const notes = dbRoom
+        ? await getPrisma().deskNote.findMany({ where: { roomId: dbRoom.id } }).catch((e) => { console.warn('[room] failed to load desk notes:', e); return []; })
+        : [];
+
       socket.emit(SocketEvents.ROOM_STATE, {
         ...state, tiles: redactDoorPasswords(tiles), furniture: redactInteractiveSecrets(savedFurniture || fallback!.furniture), zones: savedZones || fallback!.zones, players: playersWithMeta,
         impassableAreaRects: savedImpassableAreaRects,
@@ -780,6 +791,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // no opt-in gate (purely cosmetic, no privacy/content concern like
         // referenceImage above). Undefined in layerData means 1 (unchanged).
         avatarScale: (dbRoom?.layerData as unknown as LayerData | undefined)?.avatarScale,
+        notes: notes.map((n) => ({ furnitureId: n.furnitureId, authorUserId: n.authorUserId, authorName: n.authorName, text: n.text, updatedAt: n.updatedAt.getTime() })),
       });
 
       // "Tarik Paksa" (Force-pull) — this join just consumed a queued

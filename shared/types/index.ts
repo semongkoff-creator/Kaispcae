@@ -271,6 +271,21 @@ export interface RoomState {
   // Room-wide avatar sprite scale (see LayerData.avatarScale) — undefined
   // means 1 (unchanged size). Always forwarded, no opt-in gate.
   avatarScale?: number;
+  // QA #7/#8/#9 — every DeskNote currently stuck on a furniture piece in
+  // this room, so a fresh join sees them immediately without a separate
+  // fetch. Absent/[] on a room with none.
+  notes?: DeskNoteData[];
+}
+
+// QA #7/#8/#9 — a sticky note on a furniture piece. One per (roomId,
+// furnitureId) — see DeskNote in schema.prisma for the full reasoning on
+// why this is its own persisted row rather than a Furniture field.
+export interface DeskNoteData {
+  furnitureId: string;
+  authorUserId: string;
+  authorName: string;
+  text: string;
+  updatedAt: number;
 }
 
 // All socket event names used between client and server
@@ -416,6 +431,18 @@ export enum SocketEvents {
   FURNITURE_ASSIGNED = 'furniture:assigned',
   FURNITURE_UNASSIGN = 'furniture:unassign',
   FURNITURE_UNASSIGNED = 'furniture:unassigned',
+
+  // QA #7/#8/#9 — a sticky note "tempel" on a furniture piece (see
+  // DeskNoteData below). NOTE_SET both creates (no note there yet) and
+  // edits (sender is the existing author) — same single event either way,
+  // the server tells the difference by whether a row already exists. Only
+  // the author may NOTE_SET an existing note or NOTE_DELETE it; anyone who
+  // can see the room may read one (delivered via ROOM_STATE.notes on join,
+  // kept live via NOTE_UPDATED/NOTE_DELETED).
+  NOTE_SET = 'note:set',
+  NOTE_UPDATED = 'note:updated',
+  NOTE_DELETE = 'note:delete',
+  NOTE_DELETED = 'note:deleted',
 
   RTC_OFFER = 'rtc:offer',
   RTC_ANSWER = 'rtc:answer',

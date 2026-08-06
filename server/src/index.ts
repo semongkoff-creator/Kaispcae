@@ -14,6 +14,7 @@ import { registerZoneHandlers } from './socket/zoneHandler';
 import { registerZoneLockHandlers } from './socket/zoneLock';
 import { registerSeatClaimHandlers } from './socket/seatClaim';
 import { registerFurnitureHandlers } from './socket/furnitureHandler';
+import { registerNoteHandlers } from './socket/noteHandler';
 import { registerFollowHandlers } from './socket/followHandler';
 import { registerMediaHandlers, startMediaExpirySweep } from './socket/mediaHandler';
 import { registerRecordingHandlers } from './socket/recordingHandler';
@@ -210,6 +211,7 @@ async function start() {
       registerZoneLockHandlers(io, socket);
       registerSeatClaimHandlers(io, socket);
       registerFurnitureHandlers(io, socket);
+      registerNoteHandlers(io, socket);
       registerFollowHandlers(io, socket);
       registerMediaHandlers(io, socket);
       registerRecordingHandlers(io, socket);

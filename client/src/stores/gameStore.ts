@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, hasFeatureAccess } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, hasFeatureAccess } from '@virtualmeet/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 import { appendMovementSnapshot, MovementSnapshot, sampleMovementSnapshots } from './movementSmoothing';
@@ -521,6 +521,15 @@ export interface GameState {
   // it is but I'm not allowed to know (plain member, not the target).
   activeRecording: ActiveRecordingInfo | null;
   setActiveRecording: (info: ActiveRecordingInfo | null) => void;
+
+  // QA #7/#8/#9 — desk notes, keyed by furnitureId (one per piece). Full map
+  // synced from ROOM_STATE.notes on join, kept live via NOTE_UPDATED/
+  // NOTE_DELETED — same "full sync then live patches" shape as mediaObjects
+  // above.
+  notesByFurnitureId: Record<string, DeskNoteData>;
+  setNotes: (notes: DeskNoteData[]) => void;
+  upsertNote: (note: DeskNoteData) => void;
+  removeNote: (furnitureId: string) => void;
 
   // Emotes
   emoteEvents: EmoteEvent[];
@@ -1208,6 +1217,16 @@ export const useGameStore = create<GameState>((set, get) => ({
   activeRecording: null,
   setActiveRecording: (info) => set({ activeRecording: info }),
 
+  notesByFurnitureId: {},
+  setNotes: (notes) => set({ notesByFurnitureId: Object.fromEntries(notes.map((n) => [n.furnitureId, n])) }),
+  upsertNote: (note) => set((state) => ({ notesByFurnitureId: { ...state.notesByFurnitureId, [note.furnitureId]: note } })),
+  removeNote: (furnitureId) => set((state) => {
+    if (!(furnitureId in state.notesByFurnitureId)) return {};
+    const next = { ...state.notesByFurnitureId };
+    delete next[furnitureId];
+    return { notesByFurnitureId: next };
+  }),
+
   emoteEvents: [],
   addEmote: (event) =>
     set((state) => ({
@@ -1459,6 +1478,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       doorOverride: roomState.doorOverride ?? false,
       liveReferenceImage: roomState.referenceImage ?? null,
       avatarScale: roomState.avatarScale ?? 1,
+      notesByFurnitureId: roomState.notes ? Object.fromEntries(roomState.notes.map((n) => [n.furnitureId, n])) : prev.notesByFurnitureId,
     }));
 
     console.log('[store] setRoomState — adminPlayerIds:', Array.from(adminIds), 'masterAdminUserId:', roomState.masterAdminUserId, 'localIsAdmin:', localIsAdmin);

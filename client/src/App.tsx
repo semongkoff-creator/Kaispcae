@@ -38,6 +38,7 @@ import { useBgm } from './hooks/useBgm';
 import { AddMediaPanel } from './components/ui/AddMediaPanel';
 import { MediaViewerModal } from './components/ui/MediaViewerModal';
 import { InteractiveObjectModal } from './components/ui/InteractiveObjectModal';
+import { NoteModal } from './components/ui/NoteModal';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
 import { SoundboardPanel } from './components/ui/SoundboardPanel';
 import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
@@ -117,7 +118,7 @@ const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', 
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteSet, emitNoteDelete, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -190,6 +191,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const zones = useGameStore((s) => s.zones);
   const sittingFurnitureId = useGameStore((s) => s.sittingFurnitureId);
   const furniture = useGameStore((s) => s.furniture);
+  const notesByFurnitureId = useGameStore((s) => s.notesByFurnitureId);
   const roomLocked = useGameStore((s) => s.roomLocked);
   const doorOverride = useGameStore((s) => s.doorOverride);
   const localUserId = useGameStore((s) => s.localUserId);
@@ -729,6 +731,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // ZEP-style door password — same trigger shape as above, but a door is a
   // tile (x,y), not a Furniture id.
   const [doorPasswordTile, setDoorPasswordTile] = useState<{ x: number; y: number } | null>(null);
+  // QA #7/#8/#9 — Press N trigger. Same "just the id, resolve the rest at
+  // render time" shape as triggeredInteractiveId above.
+  const [noteEditingFurnitureId, setNoteEditingFurnitureId] = useState<string | null>(null);
   const localRole = useGameStore((s) => s.localRole);
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -1281,6 +1286,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         emitReleaseSeat={emitReleaseSeat}
         onMediaOpen={setViewingMediaId}
         onInteractiveTrigger={handleInteractiveTrigger}
+        onNoteOpen={setNoteEditingFurnitureId}
         onDoorPasswordTrigger={handleDoorPasswordTrigger}
       />
 
@@ -1704,6 +1710,18 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           passwordResult={doorPasswordResultAdapted}
           onCheckChoice={() => {}}
           choiceResult={null}
+        />
+      )}
+
+      {noteEditingFurnitureId && (
+        <NoteModal
+          furnitureId={noteEditingFurnitureId}
+          note={notesByFurnitureId[noteEditingFurnitureId]}
+          localUserId={authUserId}
+          isGuest={isGuest}
+          onSave={emitNoteSet}
+          onDelete={emitNoteDelete}
+          onClose={() => setNoteEditingFurnitureId(null)}
         />
       )}
 

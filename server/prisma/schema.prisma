@@ -682,6 +682,35 @@ model Room {
   layerData         Json?
   mapFormatVersion  Int?
   invites           RoomInvite[]
+  deskNotes         DeskNote[]
+}
+
+// QA #7/#8/#9 — a sticky note "tempel" on a furniture piece (desk/chair/
+// table), one at a time per piece. Deliberately its own table rather than a
+// field on the Furniture JSON blob: Furniture lives in EITHER the legacy
+// `furniture` column or `layerData.objects`/`topObjects` depending on
+// whether a room has ever been opened in the modern Room Editor (see
+// furnitureHandler.ts's own note on this split — patching furniture directly
+// risks writing into whichever one ROOM_STATE ISN'T currently reading from,
+// exactly the bug that made seat assignment silently not persist). A note
+// keyed by (roomId, furnitureId) sidesteps that split entirely — it's
+// read/written the same way regardless of which furniture storage the room
+// happens to be on.
+model DeskNote {
+  id             String   @id @default(cuid())
+  roomId         String
+  room           Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  furnitureId    String
+  authorUserId   String
+  authorName     String
+  text           String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // One live note per furniture piece per room — writing a new one where
+  // one already exists is an EDIT (author-only, enforced in the socket
+  // handler), not a second note stacking up.
+  @@unique([roomId, furnitureId])
 }
 
 // Guest Link & Ruang Tunggu — a room-scoped invite token an admin generates
