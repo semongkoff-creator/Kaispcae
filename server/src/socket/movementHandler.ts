@@ -52,24 +52,32 @@ function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string,
     if (locked) console.log('[collision-diag] door-locked', { room, socketId, tileX, tileY });
     return locked;
   }
-  if (isTileOccupiedInCapacityZone(room, tileX, tileY, socketId)) {
-    console.log('[collision-diag] capacity-zone-occupied', { room, socketId, tileX, tileY });
+  if (isTileOccupiedInPrivateArea(room, tileX, tileY, socketId)) {
+    console.log('[collision-diag] private-area-occupied', { room, socketId, tileX, tileY });
     return true;
   }
   return false;
 }
 
 // QA #2's own note — "karakter gabisa numpuk jika dalam private area"
-// (characters can't stack while inside a private area). Only enforced for
-// zones with an explicit seat capacity (Zone.capacity) — exactly the same
-// zones zoneHandler.ts's ZONE_ENTER already caps ENTRY to (a private area
-// left at "unlimited" capacity, or plain floor outside any zone, still
-// allows stacking exactly like before this existed). A player is never
-// blocked by their OWN current tile — this only stops walking ONTO someone
-// else, not standing still.
-function isTileOccupiedInCapacityZone(room: string, tileX: number, tileY: number, selfId: string): boolean {
+// (characters can't stack while inside a private area) — confirmed to apply
+// to EVERY private area, not just ones with a numeric capacity set (a
+// left-unlimited private area is still a "real room" someone shouldn't be
+// able to walk through another person inside). The Zone model has no
+// explicit "this is a Private Area, not a Map Location" flag (both are
+// zoneType 'desk' — see mapLayers.ts's layerDataToLegacy, which drops
+// AreaEffect.effect entirely once converted), so `audioIsolated !== false`
+// is the best available proxy: Private Area's whole point is isolating
+// audio (defaults to isolate=true), Map Location's is a plain name pin
+// (defaults to isolate=false) — matching the exact same inference
+// RoomEditorPage.tsx's own preview already uses to tell them apart. Meeting
+// Meeting/Focus areas (zoneType 'meeting'/'focus') are naturally excluded by the
+// zoneType==='desk' check — this was never asked to extend to those. A
+// player is never blocked by their OWN current tile — this only stops
+// walking ONTO someone else, not standing still.
+function isTileOccupiedInPrivateArea(room: string, tileX: number, tileY: number, selfId: string): boolean {
   const zone = getCachedZones(room).find(
-    (z) => z.capacity != null && z.capacity > 0 && tileX >= z.x && tileX < z.x + z.width && tileY >= z.y && tileY < z.y + z.height,
+    (z) => z.type === 'desk' && z.audioIsolated !== false && tileX >= z.x && tileX < z.x + z.width && tileY >= z.y && tileY < z.y + z.height,
   );
   if (!zone) return false;
   return getCachedPlayers(room).some((p) => {
