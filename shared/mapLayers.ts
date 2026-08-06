@@ -137,7 +137,7 @@ export interface TileEffect {
 // so GameCanvas.tsx has something to actually draw.
 export interface AreaEffect {
   id: string;
-  effect: 'privateArea' | 'mapLocation' | 'impassable' | 'focusArea' | 'wallArea';
+  effect: 'privateArea' | 'mapLocation' | 'impassable' | 'focusArea' | 'wallArea' | 'meetingArea';
   name: string;
   x: number;
   y: number;

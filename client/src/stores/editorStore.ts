@@ -6,7 +6,7 @@ import { AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@virtualmeet/shared';
 // distinct from the older per-tile 'impassable' above (same distinction as
 // 'mapLocation'/'privateArea' being rectangles vs. e.g. 'door' being a point).
 // Maps to AreaEffect.effect: 'impassable' (see mapLayers.ts).
-export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat';
+export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat';
 
 // Follow-up — a "Kursi Diklaim" marker used to be stamped wherever the admin
 // clicked, completely independent of any Furniture piece, so it could
@@ -205,7 +205,7 @@ interface EditorState {
   // effect it actually means, same principle as zones already not being
   // hit-testable by the point-effect tools.
   areaAt: (x: number, y: number, effect?: AreaEffect['effect']) => AreaEffect | null;
-  addArea: (effect: 'mapLocation' | 'privateArea' | 'impassable' | 'focusArea' | 'wallArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean, capacity?: number) => string;
+  addArea: (effect: 'mapLocation' | 'privateArea' | 'impassable' | 'focusArea' | 'meetingArea' | 'wallArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean, capacity?: number) => string;
   removeAreaAt: (x: number, y: number, effect?: AreaEffect['effect']) => void;
   // Item #9 — select/move/resize/delete an EXISTING Impassable Area rectangle
   // (RoomEditorPage.tsx's drag-body / drag-handle / Delete-key interactions).
@@ -616,18 +616,29 @@ export const useEditorStore = create<EditorState>((set, get) => {
       // groups/isolates audio, WITHOUT the side effects of 'meeting' (mounts
       // MeetingControl + sets in_meeting) or the OLD meaning of 'focus' (used
       // to make occupants solo/isolated, which would've broken shared
-      // private audio) — 'focusArea' is the one deliberate exception: it
-      // WANTS 'focus' zoneType, since that's what makes App.tsx auto-set
-      // workMode to 'focus' (DND) for anyone standing inside. label=name so
-      // the pill actually renders (game keys the pill off zone.label).
+      // private audio) — 'focusArea' and 'meetingArea' are the deliberate
+      // exceptions: 'focusArea' WANTS 'focus' zoneType (App.tsx auto-sets
+      // workMode to 'focus'/DND for anyone standing inside), 'meetingArea'
+      // WANTS 'meeting' zoneType (App.tsx auto-sets workMode to 'in_meeting'
+      // + mounts MeetingControl's "Start Meeting → Lark" button — see
+      // MeetingControl.tsx). Before this, there was no editor tool that ever
+      // produced zoneType 'meeting' at all — a room built from scratch had
+      // no way to get a working meeting area, only a room whose zones were
+      // seeded directly in the database could have one. label=name so the
+      // pill actually renders (game keys the pill off zone.label).
       // audioIsolated left unset defaults to isolating for privateArea and
       // NOT isolating for mapLocation — see layerDataToLegacy's inferred
       // default; irrelevant for 'focusArea' (proximity is already blocked by
       // workMode==='focus' in useProximity, independent of any zone flag) and
       // for 'impassable' (Item #9, excluded from the zones list entirely).
       const id = crypto.randomUUID();
-      const zoneType = effect === 'focusArea' ? 'focus' : 'desk';
-      d.areas.push({ id, effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, zoneType, areaId, audioIsolated, capacity });
+      const zoneType = effect === 'focusArea' ? 'focus' : effect === 'meetingArea' ? 'meeting' : 'desk';
+      // GameCanvas.tsx's in-game banner falls back to purple (#7c3aed) when
+      // a zone has no color — fine for every other area type (they've always
+      // been purple), but a meeting area gets its own teal so it reads as
+      // visually distinct in-game too, not just in the editor's overlay.
+      const color = effect === 'meetingArea' ? '#14b8a6' : undefined;
+      d.areas.push({ id, effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, color, zoneType, areaId, audioIsolated, capacity });
       areasDirty = true; pushHistory(snap); commit();
       return id;
     },
