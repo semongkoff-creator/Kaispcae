@@ -222,6 +222,19 @@ export async function updatePlayerMic(
   }
 }
 
+export async function updatePlayerHidden(
+  roomId: string,
+  playerId: string,
+  hidden: boolean,
+): Promise<void> {
+  const players = await getPlayers(roomId);
+  const player = players.find((p) => p.id === playerId);
+  if (player) {
+    player.hidden = hidden || undefined;
+    await setPlayers(roomId, players);
+  }
+}
+
 export async function updatePlayerSpotlight(
   roomId: string,
   playerId: string,

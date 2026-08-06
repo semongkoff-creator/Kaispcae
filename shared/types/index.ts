@@ -100,6 +100,15 @@ export interface Avatar {
   // you're actually connected to. Undefined (not explicitly muted=false)
   // until the first toggle, same convention as handRaised.
   micMuted?: boolean;
+  // Manual "hide myself" toggle — broadcast + persisted like micMuted/
+  // handRaised above. A hidden player's avatar is skipped entirely by
+  // OTHER clients' render loop (see GameCanvas.tsx), UNLESS the viewer is
+  // admin+ (shared/permissions.ts's roleAtLeast) — admins/war-room can
+  // always see everyone regardless of this flag. Purely a client-side
+  // rendering suppression: position updates, proximity, and WebRTC are
+  // all untouched, so this is "don't show my avatar to regular members",
+  // not a full stealth/incognito mode.
+  hidden?: boolean;
 }
 
 // A11 — presence status. 'in_meeting' + 'focus' are auto-set from the zone
@@ -281,6 +290,11 @@ export enum SocketEvents {
   // of WebRTC proximity range.
   PLAYER_MIC = 'player:mic',
   PLAYER_MIC_UPDATED = 'player:mic_updated',
+
+  // Manual "hide myself" toggle — same relay+persist shape as hand/mic
+  // above. See Avatar.hidden's doc comment for what this actually does.
+  PLAYER_HIDDEN = 'player:hidden',
+  PLAYER_HIDDEN_UPDATED = 'player:hidden_updated',
 
   // A3 — Focus/Public work mode. Same relay+persist shape as status/hand.
   WORK_MODE_CHANGE = 'work_mode:change',

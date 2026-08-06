@@ -18,6 +18,7 @@ import {
   ReferenceImageData,
   Zone,
   doesRectOverlapImpassableArea,
+  roleAtLeast,
 } from '@virtualmeet/shared';
 import { useGameStore, OVERVIEW_ZOOM_THRESHOLD } from '@/stores/gameStore';
 import { useMovement } from '@/hooks/useMovement';
@@ -1484,8 +1485,14 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     };
     const remoteAvatars = Object.values(playerRecords).filter((p) => p.id !== localPlayerId);
     const allAvatars: Avatar[] = [localAvatar, ...remoteAvatars];
+    // "Hide myself" (Avatar.hidden) — admin+ sees a hidden avatar regardless;
+    // everyone else, including anyone who just hasn't toggled it themselves,
+    // does not. Read once per frame, not per avatar — role can't change
+    // mid-frame.
+    const canSeeHidden = roleAtLeast(useGameStore.getState().localRole, 'admin');
 
     for (const avatar of allAvatars) {
+      if (avatar.hidden && avatar.id !== localPlayerId && !canSeeHidden) continue;
       const sx = avatar.x - cameraX;
       const sy = avatar.y - cameraY;
       // Never culled in Overview — "see the whole office + everyone in it"

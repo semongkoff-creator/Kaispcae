@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
-import { Avatar, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT } from '@virtualmeet/shared';
+import { Avatar, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, roleAtLeast } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { drawMiniTileType, drawMiniZoneBackground, MINI_FURNITURE, MINI_WALL_AREA } from '@/components/canvas/miniRender';
 
@@ -21,6 +21,7 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
   const furniture = useGameStore((s) => s.furniture);
   const wallAreaRects = useGameStore((s) => s.wallAreaRects);
   const zones = useGameStore((s) => s.zones);
+  const localRole = useGameStore((s) => s.localRole);
   // Faded out (just a subtle presence) until hovered, then fades in to full
   // opacity — a permanently-opaque floor plan sitting over the game world
   // reads as visual clutter once you're not actively using it to navigate.
@@ -93,7 +94,11 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
     ctx.lineWidth = 1;
     ctx.strokeRect(1, 1, MM_W - 2, MM_H - 2);
 
+    // "Hide myself" (Avatar.hidden) — same rule as GameCanvas.tsx's own
+    // avatar draw loop: admin+ still sees the dot, everyone else doesn't.
+    const canSeeHidden = roleAtLeast(localRole, 'admin');
     for (const p of players) {
+      if (p.hidden && p.id !== localPlayerId && !canSeeHidden) continue;
       const mx = p.x * SCALE_X;
       const my = p.y * SCALE_Y;
       const isLocal = p.id === localPlayerId;
@@ -108,7 +113,7 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
         ctx.stroke();
       }
     }
-  }, [players, localPlayerId, tiles, furniture, wallAreaRects, zones]);
+  }, [players, localPlayerId, tiles, furniture, wallAreaRects, zones, localRole]);
 
   const handleClick = (e: React.MouseEvent) => {
     // Belt-and-suspenders — you can't actually click this without the mouse

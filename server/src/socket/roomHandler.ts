@@ -4,7 +4,7 @@ import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH } from '@virtualmeet/shared';
 import {
-  addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerMic, updatePlayerWorkMode, updatePlayerSpotlight, updatePlayerSitting,
+  addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerMic, updatePlayerHidden, updatePlayerWorkMode, updatePlayerSpotlight, updatePlayerSitting,
   setCachedTiles, getCachedTiles, setCachedImpassableAreas, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
 } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';
@@ -1240,6 +1240,17 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const val = !!muted;
     socket.to(room).emit(SocketEvents.PLAYER_MIC_UPDATED, { id: socket.id, micMuted: val });
     updatePlayerMic(room, socket.id, val);
+  });
+
+  // Manual "hide myself" toggle — same relay+persist shape as mic above.
+  // Purely a broadcast flag; enforcing it (skipping render for non-admin
+  // viewers) is entirely client-side (see GameCanvas.tsx) — the server
+  // doesn't gate anything on it.
+  socket.on(SocketEvents.PLAYER_HIDDEN, async (hidden: boolean) => {
+    const room = currentRoom; if (!room) return;
+    const val = !!hidden;
+    socket.to(room).emit(SocketEvents.PLAYER_HIDDEN_UPDATED, { id: socket.id, hidden: val });
+    updatePlayerHidden(room, socket.id, val);
   });
 
   // Soundboard — cosmetic, fire-and-forget, same trust level as Jump/Nudge:

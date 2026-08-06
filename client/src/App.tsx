@@ -47,6 +47,7 @@ import { PendingRequestToast } from './components/ui/PendingRequestToast';
 import { Sidebar } from './components/ui/Sidebar';
 import { MicButton } from './components/hud/MicButton';
 import { HandButton } from './components/hud/HandButton';
+import { HiddenButton } from './components/hud/HiddenButton';
 import { playHandRaiseSound, updateSoundboardVolumes } from './services/soundEffects';
 import { CameraButton } from './components/hud/CameraButton';
 import { DeviceMenu } from './components/hud/DeviceMenu';
@@ -115,7 +116,7 @@ const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', 
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight } = useSocket(authDisplayName, roomSlug, authUserId);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -503,6 +504,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     // pressed it would hear nothing and think it did nothing). Raise only.
     if (next) playHandRaiseSound();
   }, [emitPlayerHand]);
+
+  // "Sembunyikan diri" — persistent toggle broadcast to the room; regular
+  // members' render loop skips this avatar entirely, admin+ still sees it
+  // (see Avatar.hidden's doc comment in shared/types).
+  const handleHiddenToggle = useCallback(() => {
+    const next = !useGameStore.getState().localPlayer.hidden;
+    useGameStore.getState().setLocalPlayer({ hidden: next || undefined });
+    emitPlayerHidden(next);
+  }, [emitPlayerHidden]);
 
   // Cleanup
   useEffect(() => () => destroy(), [destroy]);
@@ -1649,6 +1659,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
         <DeviceMenu kind="video" />
         <HandButton raised={!!localPlayer.handRaised} onToggle={handleHandToggle} />
+        <HiddenButton hidden={!!localPlayer.hidden} onToggle={handleHiddenToggle} />
         <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
         <NotificationSettings />
       </div>
