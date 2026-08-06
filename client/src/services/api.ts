@@ -375,6 +375,27 @@ export const api = {
 
   getRoom: (slug: string) => request<RoomInfo>(`/rooms/${slug}`),
 
+  // ── Guest Link & Ruang Tunggu ────────────────────────────────────
+  // Admin-only: mint a room-scoped invite link. Both params optional —
+  // omitted means "no expiry" / "unlimited uses" respectively.
+  createGuestInvite: (slug: string, opts: { expiresInHours?: number; maxUses?: number }) =>
+    request<{ token: string; expiresAt: string | null; maxUses: number | null }>(`/rooms/${slug}/guest-invites`, {
+      method: 'POST',
+      body: JSON.stringify(opts),
+    }),
+  revokeGuestInvite: (slug: string, id: string) =>
+    request<{ ok: boolean }>(`/rooms/${slug}/guest-invites/${id}`, { method: 'DELETE' }),
+
+  // PUBLIC — no account required. Exchanges an invite token + a display name
+  // for a short-lived guest session token (see GuestEntry.tsx). request()
+  // still runs fine unauthenticated: it only ever ATTACHES a Bearer header
+  // when one happens to be cached, and this route never checks it either way.
+  guestJoin: (token: string, name: string) =>
+    request<{ token: string; roomSlug: string; roomName: string; name: string }>('/guest/join', {
+      method: 'POST',
+      body: JSON.stringify({ token, name }),
+    }),
+
   // ZEP Room Editor (opened in its own tab) — admin-gated on the server. Returns
   // the room's stored map as-is (read-only). tilemapData is the raw 2D tile grid
   // (rows of tile objects); the editor normalizes it to RoomTile[][] on the

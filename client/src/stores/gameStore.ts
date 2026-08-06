@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData } from '@virtualmeet/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 
@@ -447,6 +447,16 @@ export interface GameState {
   incomingJoinRequests: JoinRequestPopupPayload[];
   addIncomingJoinRequest: (req: JoinRequestPopupPayload) => void;
   removeIncomingJoinRequest: (userId: string, roomSlug: string) => void;
+  // Guest Link & Ruang Tunggu — the GUEST'S OWN client-side wait state
+  // (App.tsx renders a waiting/rejected screen off this instead of <Game>).
+  guestWaitState: 'waiting' | 'admitted' | 'rejected' | null;
+  setGuestWaitState: (state: 'waiting' | 'admitted' | 'rejected' | null) => void;
+  // Admin side — pending guest requests popped up for admins currently
+  // connected to the room (see GuestJoinRequest). Array, not a single slot,
+  // same reasoning as incomingJoinRequests above.
+  pendingGuests: GuestJoinRequest[];
+  addPendingGuest: (req: GuestJoinRequest) => void;
+  removePendingGuest: (guestId: string) => void;
   summonResult: SummonResultPayload | null;
   setSummonResult: (result: SummonResultPayload | null) => void;
   // Fitur 15B — reply to MY OWN INTERACTIVE_PASSWORD_CHECK, same
@@ -1066,6 +1076,15 @@ export const useGameStore = create<GameState>((set, get) => ({
   })),
   removeIncomingJoinRequest: (userId, roomSlug) => set((s) => ({
     incomingJoinRequests: s.incomingJoinRequests.filter((r) => !(r.userId === userId && r.roomSlug === roomSlug)),
+  })),
+  guestWaitState: null,
+  setGuestWaitState: (state) => set({ guestWaitState: state }),
+  pendingGuests: [],
+  addPendingGuest: (req) => set((s) => ({
+    pendingGuests: s.pendingGuests.some((r) => r.guestId === req.guestId) ? s.pendingGuests : [...s.pendingGuests, req],
+  })),
+  removePendingGuest: (guestId) => set((s) => ({
+    pendingGuests: s.pendingGuests.filter((r) => r.guestId !== guestId),
   })),
   summonResult: null,
   setSummonResult: (result) => set({ summonResult: result }),

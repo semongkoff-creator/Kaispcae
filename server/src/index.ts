@@ -20,11 +20,12 @@ import { registerRecordingHandlers } from './socket/recordingHandler';
 import { getRedis } from './store/roomStore';
 import { loadConfig, getConfig } from './config';
 import { rateLimit } from './middleware/rateLimit';
-import { verifyTokenClaims, isSessionSuperseded, SESSION_SUPERSEDED } from './middleware/auth';
+import { verifyTokenClaims, verifyGuestTokenClaims, isSessionSuperseded, SESSION_SUPERSEDED } from './middleware/auth';
 import { setSessionKickIo } from './lib/sessionKick';
 import authRoutes from './routes/auth';
 import roomRoutes, { setIo } from './routes/rooms';
 import roomMemberRoutes, { setMembersIo } from './routes/roomMembers';
+import guestInviteRoutes from './routes/guestInvite';
 import teleportRoutes from './routes/teleport';
 import uploadRoutes from './routes/uploads';
 import recordingRoutes from './routes/recordings';
@@ -99,6 +100,20 @@ const io = new Server(httpServer, {
 io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token;
   if (typeof token === 'string' && token) {
+    // Guest Link & Ruang Tunggu — checked FIRST and structurally distinct
+    // from the real-account claims below (guestId, never userId — see
+    // signGuestToken's doc comment). A guest token never touches
+    // socket.data.userId at all, so every downstream check that gates on
+    // "is this a real account" (DB writes, admin/staff role checks, which
+    // all key off socket.data.userId) naturally excludes guest sockets
+    // without needing its own special-casing.
+    const guestClaims = verifyGuestTokenClaims(token);
+    if (guestClaims) {
+      socket.data.guestId = guestClaims.guestId;
+      socket.data.guestName = guestClaims.name;
+      socket.data.guestRoomSlug = guestClaims.roomSlug;
+      return next();
+    }
     const claims = verifyTokenClaims(token);
     if (claims) {
       // Bug 1 — single active session: reject a socket whose session has been
@@ -143,6 +158,7 @@ app.get('/api/metrics', (_req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api', roomRoutes);
 app.use('/api', roomMemberRoutes);
+app.use('/api', guestInviteRoutes);
 app.use('/api', teleportRoutes);
 app.use('/api', uploadRoutes);
 app.use('/api', recordingRoutes);
@@ -171,19 +187,33 @@ async function start() {
   io.on(SocketEvents.CONNECT, (socket) => {
     console.log(`[server] player connected: ${socket.id}`);
 
+    // Guest Link & Ruang Tunggu — a guest socket (see io.use() above) only
+    // ever gets the minimal set of handlers it actually needs (join/leave,
+    // movement, WebRTC signaling, the zone-scoped CHAT_MESSAGE/CHAT_BUBBLE
+    // pair, zone membership tracking, cosmetic emotes). Everything else is
+    // simply never registered on this socket at all — not role-gated, not
+    // reachable — which is a stronger guarantee than a per-handler check:
+    // internal Channel/DM chat (FK-writes a synthetic guest id would violate
+    // Postgres on), furniture assignment, media/soundboard, seat claims,
+    // follow, zone locking, and recording are all admin/member-tier features
+    // an external, unauthenticated visitor has no business touching.
+    const isGuest = !!(socket.data as { guestId?: string }).guestId;
+
     registerRoomHandlers(io, socket);
     registerMovementHandlers(io, socket);
     registerRtcHandlers(io, socket);
     registerChatHandlers(io, socket, () => getPlayerName(socket.id), () => getPlayerColor(socket.id));
-    registerChannelChatHandlers(io, socket);
-    registerEmoteHandlers(io, socket);
     registerZoneHandlers(io, socket);
-    registerZoneLockHandlers(io, socket);
-  registerSeatClaimHandlers(io, socket);
-    registerFurnitureHandlers(io, socket);
-    registerFollowHandlers(io, socket);
-    registerMediaHandlers(io, socket);
-    registerRecordingHandlers(io, socket);
+    registerEmoteHandlers(io, socket);
+    if (!isGuest) {
+      registerChannelChatHandlers(io, socket);
+      registerZoneLockHandlers(io, socket);
+      registerSeatClaimHandlers(io, socket);
+      registerFurnitureHandlers(io, socket);
+      registerFollowHandlers(io, socket);
+      registerMediaHandlers(io, socket);
+      registerRecordingHandlers(io, socket);
+    }
   });
 
   startMediaExpirySweep(io);

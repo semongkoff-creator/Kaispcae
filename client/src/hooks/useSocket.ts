@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, GuestJoinRequest } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
@@ -31,7 +31,13 @@ function resolveSoundboardSound(soundId: string): SoundboardSoundData | undefine
     ?? useGameStore.getState().soundboardSounds.find((s) => s.id === soundId);
 }
 
-export function useSocket(authUserName: string = '', roomSlug: string = 'main-office', authUserId: string = '') {
+// Guest Link & Ruang Tunggu — a guest session token (from GuestEntry.tsx's
+// POST /guest/join exchange), kept ENTIRELY separate from `vm_token` so a
+// guest visit never touches/overwrites a real account's stored session.
+// When present, it's used INSTEAD of vm_token for the socket handshake —
+// see index.ts's io.use(), which verifies it via a structurally different
+// claims shape (guestId, never userId).
+export function useSocket(authUserName: string = '', roomSlug: string = 'main-office', authUserId: string = '', guestToken?: string) {
   const socketRef = useRef<Socket | null>(null);
   const lastEmitRef = useRef<number>(0);
 
@@ -104,7 +110,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     const socket = io(SERVER_URL, {
       transports: ['websocket', 'polling'],
       autoConnect: false,
-      auth: { token: localStorage.getItem('vm_token') || undefined },
+      auth: { token: guestToken || localStorage.getItem('vm_token') || undefined },
     });
     socketRef.current = socket;
 
@@ -803,6 +809,41 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().setRoomLockedNotice(null);
     });
 
+    // Guest Link & Ruang Tunggu — this socket's OWN JOIN_ROOM landed it in
+    // the waiting room (see roomHandler.ts's guest branch).
+    socket.on(SocketEvents.GUEST_JOIN_WAITING, () => {
+      useGameStore.getState().setGuestWaitState('waiting');
+    });
+
+    // An admin admitted this guest — same "retry the exact same JOIN_ROOM"
+    // mechanic as ROOM_KNOCK_ADMITTED above; this time the server finds it
+    // on guestAllowlist and lets it fall through to a normal join.
+    socket.on(SocketEvents.GUEST_JOIN_ADMITTED, () => {
+      console.log('[socket] guest admitted — rejoining');
+      const config = loadAvatarConfig();
+      socket.emit(SocketEvents.JOIN_ROOM, roomSlug, authUserName, config, authUserId);
+      useGameStore.getState().setGuestWaitState('admitted');
+    });
+
+    socket.on(SocketEvents.GUEST_JOIN_REJECTED, () => {
+      useGameStore.getState().setGuestWaitState('rejected');
+    });
+
+    // Admin side — a guest is waiting for a decision. Fans out to every
+    // admin socket currently connected to the room (server-side), so
+    // anything arriving here is already safe to show without a further
+    // client-side admin check (same posture as JOIN_REQUESTED above).
+    socket.on(SocketEvents.GUEST_JOIN_REQUESTED, (payload: GuestJoinRequest) => {
+      useGameStore.getState().addPendingGuest(payload);
+    });
+
+    // The guest left/disconnected before a decision was made — drop it from
+    // the admin's pending list, same "stale request" cleanup as
+    // ROOM_KNOCK_CANCELLED above.
+    socket.on(SocketEvents.GUEST_JOIN_CANCELLED, (payload: { guestId: string }) => {
+      useGameStore.getState().removePendingGuest(payload.guestId);
+    });
+
     socket.on(SocketEvents.NOTICE_UPDATED, (notice: Notice | null) => {
       setNotice(notice);
       if (notice) useGameStore.getState().addActivity(`${notice.pinnedByName} pinned a notice`);
@@ -840,7 +881,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       socket.removeAllListeners();
       socket.disconnect();
     };
-  }, [authUserName, roomSlug, authUserId]);
+  }, [authUserName, roomSlug, authUserId, guestToken]);
 
   const emitMove = useCallback(
     (x: number, y: number, direction: string, isRunning?: boolean) => {
@@ -1078,6 +1119,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.ROOM_KNOCK_ADMIT, { userId });
   }, []);
 
+  const emitGuestJoinDecide = useCallback((guestId: string, admit: boolean) => {
+    socketRef.current?.emit(SocketEvents.GUEST_JOIN_DECIDE, { guestId, admit });
+  }, []);
+
   const emitNoticePin = useCallback((messageId: string, text: string, senderName: string) => {
     socketRef.current?.emit(SocketEvents.NOTICE_PIN, { messageId, text, senderName });
   }, []);
@@ -1157,5 +1202,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight };
+  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight };
 }

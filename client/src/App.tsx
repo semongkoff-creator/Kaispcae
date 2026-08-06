@@ -55,6 +55,7 @@ import { ScreenShareButton } from './components/hud/ScreenShareButton';
 import { NotificationSettings } from './components/ui/NotificationSettings';
 import { Lobby } from './pages/Lobby';
 import { LoginPage } from './pages/LoginPage';
+import { GuestEntry, GuestSession } from './pages/GuestEntry';
 import { useAuth } from './hooks/useAuth';
 import { useTheme, Theme } from './hooks/useTheme';
 import { api } from './services/api';
@@ -114,9 +115,9 @@ const AFK_IDLE_MS = 120000; // 2 minutes
 // picked once per trigger (see handleInteractiveTrigger below).
 const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#ddd6fe'];
 
-function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void }) {
+function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight } = useSocket(authDisplayName, roomSlug, authUserId);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -184,6 +185,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const roomStateReceived = useGameStore((s) => s.roomStateReceived);
+  const guestWaitState = useGameStore((s) => s.guestWaitState);
+  const pendingGuests = useGameStore((s) => s.pendingGuests);
   const zones = useGameStore((s) => s.zones);
   const sittingFurnitureId = useGameStore((s) => s.sittingFurnitureId);
   const furniture = useGameStore((s) => s.furniture);
@@ -559,6 +562,28 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     emitKnockCancel();
     setKnocked(false);
   }, [emitKnockCancel]);
+
+  // Guest Link & Ruang Tunggu — prompt-based, same lightweight "quick admin
+  // config" convention as the Room Editor's door-password/capacity prompts,
+  // rather than a dedicated management panel. api.revokeGuestInvite exists
+  // server-side but has no UI yet — out of scope for this pass (an admin can
+  // still revoke via a direct API call if a link needs to be killed early).
+  const handleCreateGuestLink = useCallback(async () => {
+    const hoursRaw = window.prompt('Guest link berlaku berapa jam? (kosongkan = tanpa batas waktu)', '24');
+    if (hoursRaw === null) return;
+    const oneTime = window.confirm('Link ini HANYA BISA DIPAKAI SEKALI?\n\nOK = ya, sekali pakai — otomatis tidak berlaku lagi setelah satu tamu masuk.\nBatal = tidak, bisa dipakai berkali-kali sampai kedaluwarsa.');
+    const trimmed = hoursRaw.trim();
+    const expiresInHours = trimmed ? Number(trimmed) : undefined;
+    try {
+      const result = await api.createGuestInvite(roomSlug, { expiresInHours, maxUses: oneTime ? 1 : undefined });
+      const url = `${window.location.origin}/?guest=${encodeURIComponent(result.token)}`;
+      await navigator.clipboard.writeText(url);
+      useGameStore.getState().addActivity('🔗 Guest link disalin ke clipboard.');
+    } catch (e) {
+      console.error('[guest] create invite failed:', e);
+      useGameStore.getState().addActivity('Gagal membuat guest link.');
+    }
+  }, [roomSlug]);
 
   // Summon/Follow consent requests (see PendingRequestToast.tsx). Incoming
   // requests auto-clear on the same clock the server uses to auto-decline
@@ -1160,10 +1185,33 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // the wrong room shape (and risking a spawn tile that's a wall in the
   // real layout). If we were denied entry (locked room), show that overlay
   // here instead — room:state will never come, so this is the final state.
+  //
+  // Guest Link & Ruang Tunggu — a guest waiting on GUEST_JOIN_DECIDE (or
+  // already rejected) also never gets room:state, so it needs the exact
+  // same "final state, not just a loading flash" treatment.
   if (!roomStateReceived) {
     return (
       <div className="relative w-screen h-screen bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
-        <p className="text-gray-500 dark:text-gray-400 text-xl">Joining room…</p>
+        {isGuest && guestWaitState === 'waiting' ? (
+          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
+            <p className="text-2xl mb-1">⏳</p>
+            <p className="text-gray-900 dark:text-gray-100 text-sm font-medium mb-1">Menunggu persetujuan admin…</p>
+            <p className="text-gray-400 dark:text-gray-500 text-xs">Anda akan masuk otomatis begitu disetujui.</p>
+          </div>
+        ) : isGuest && guestWaitState === 'rejected' ? (
+          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
+            <p className="text-2xl mb-1">🚫</p>
+            <p className="text-gray-900 dark:text-gray-100 text-sm font-medium mb-1">Permintaan Anda ditolak.</p>
+            <button
+              onClick={onLeave}
+              className="mt-3 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium cursor-pointer"
+            >
+              Tutup
+            </button>
+          </div>
+        ) : (
+          <p className="text-gray-500 dark:text-gray-400 text-xl">Joining room…</p>
+        )}
         {lockedDeniedOverlay}
       </div>
     );
@@ -1339,6 +1387,23 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             +{incomingJoinRequests.length - 3} permintaan bergabung lainnya
           </div>
         )}
+        {/* Guest Link & Ruang Tunggu — same stacked-toast shape as the
+            member join-request queue above, distinct tint so the two are
+            visually distinguishable (a guest has no account behind them). */}
+        {isAdmin && pendingGuests.slice(0, 3).map((req) => (
+          <PendingRequestToast
+            key={req.guestId}
+            icon={<PersonPlusFill size={13} className="text-purple-500" />}
+            message={<><span className="font-medium">{req.name}</span> (tamu) minta masuk ke room ini</>}
+            onAccept={() => { emitGuestJoinDecide(req.guestId, true); useGameStore.getState().removePendingGuest(req.guestId); }}
+            onDecline={() => { emitGuestJoinDecide(req.guestId, false); useGameStore.getState().removePendingGuest(req.guestId); }}
+          />
+        ))}
+        {isAdmin && pendingGuests.length > 3 && (
+          <div className="bg-slate-800/90 text-white text-xs font-medium px-3 py-1.5 rounded-full shadow pointer-events-none">
+            +{pendingGuests.length - 3} tamu menunggu lainnya
+          </div>
+        )}
         {summonResult && (
           <div className="bg-purple-600/90 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-1.5">
             <MagnetFill size={13} />
@@ -1405,6 +1470,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         doorOverride={doorOverride}
         canDoorOverride={isAdmin}
         onToggleDoorOverride={() => emitDoorOverride(!doorOverride)}
+        canManageGuests={isAdmin}
+        onCreateGuestLink={handleCreateGuestLink}
+        isGuest={isGuest}
         simplifiedView={simplifiedView}
         onToggleSimplifiedView={() => setSimplifiedView((v) => !v)}
         currentZoneName={currentZone?.name ?? null}
@@ -1924,10 +1992,69 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   );
 }
 
+// Guest Link & Ruang Tunggu — kept entirely separate from vm_token/vm_userId
+// (the real-account storage keys) so a guest visit never touches a real
+// account's stored session, and a real login never inherits a stale guest one.
+const GUEST_TOKEN_KEY = 'vm_guest_token';
+const GUEST_ROOM_SLUG_KEY = 'vm_guest_room_slug';
+const GUEST_ROOM_NAME_KEY = 'vm_guest_room_name';
+const GUEST_NAME_KEY = 'vm_guest_name';
+
+function loadStoredGuestSession(): GuestSession | null {
+  const token = localStorage.getItem(GUEST_TOKEN_KEY);
+  const roomSlug = localStorage.getItem(GUEST_ROOM_SLUG_KEY);
+  const roomName = localStorage.getItem(GUEST_ROOM_NAME_KEY);
+  const name = localStorage.getItem(GUEST_NAME_KEY);
+  if (token && roomSlug && roomName && name) return { token, roomSlug, roomName, name };
+  return null;
+}
+
+function storeGuestSession(session: GuestSession | null): void {
+  if (session) {
+    localStorage.setItem(GUEST_TOKEN_KEY, session.token);
+    localStorage.setItem(GUEST_ROOM_SLUG_KEY, session.roomSlug);
+    localStorage.setItem(GUEST_ROOM_NAME_KEY, session.roomName);
+    localStorage.setItem(GUEST_NAME_KEY, session.name);
+  } else {
+    localStorage.removeItem(GUEST_TOKEN_KEY);
+    localStorage.removeItem(GUEST_ROOM_SLUG_KEY);
+    localStorage.removeItem(GUEST_ROOM_NAME_KEY);
+    localStorage.removeItem(GUEST_NAME_KEY);
+  }
+}
+
 function MainApp() {
   const { user, loading, error, sessionExpiredMessage, login, register, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [roomSlug, setRoomSlug] = useState<string | null>(null);
+
+  // ?guest=<token> — the invite link itself. Read once at mount, same
+  // "scrub it back out of the visible URL immediately" treatment as ?join=
+  // below (the token isn't meant to sit in browser history once consumed).
+  const [guestInviteToken, setGuestInviteToken] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('guest'),
+  );
+  useEffect(() => {
+    if (!guestInviteToken) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('guest');
+    window.history.replaceState({}, '', url.toString());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // The exchanged guest session (see GuestEntry.tsx) — restored from
+  // localStorage on mount so a refresh mid-visit doesn't force re-entering a
+  // name and waiting for approval all over again.
+  const [guestSession, setGuestSessionState] = useState<GuestSession | null>(loadStoredGuestSession);
+  const setGuestSession = useCallback((session: GuestSession | null) => {
+    storeGuestSession(session);
+    setGuestSessionState(session);
+  }, []);
+  const handleGuestLeave = useCallback(() => {
+    // No Lobby to fall back to (a guest never has one) — clear the session
+    // and reload to a clean slate; a fresh visit needs a new invite link.
+    setGuestSession(null);
+    window.location.href = '/';
+  }, [setGuestSession]);
   // Room join approval (see server/src/lib/roomMembership.ts). The socket
   // gate is the real enforcement (a failed/slow REST check here falls
   // through to it, never locks anyone out) — this is only a faster,
@@ -2066,6 +2193,36 @@ function MainApp() {
       <div className="w-screen h-screen bg-gradient-to-br from-white to-purple-50 flex items-center justify-center">
         <p className="text-gray-500 text-sm">Loading KaiSpace...</p>
       </div>
+    );
+  }
+
+  // Guest Link & Ruang Tunggu — checked BEFORE the account gate below. A
+  // guest never sees LoginPage/Lobby/JoinGate at all: name entry replaces
+  // login, and the invite token already pins them to exactly one room.
+  if (guestInviteToken && !guestSession) {
+    return (
+      <GuestEntry
+        inviteToken={guestInviteToken}
+        onEntered={(session) => { setGuestInviteToken(null); setGuestSession(session); }}
+      />
+    );
+  }
+  if (guestSession) {
+    return (
+      <Game
+        key={guestSession.roomSlug}
+        roomSlug={guestSession.roomSlug}
+        onLeave={handleGuestLeave}
+        onLogout={handleGuestLeave}
+        onPortalTravel={() => {}}
+        authDisplayName={guestSession.name}
+        authUserId=""
+        guestToken={guestSession.token}
+        isGuest
+        currentUser={{ id: 'guest', name: guestSession.name, workspaceRole: 'member', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
     );
   }
 

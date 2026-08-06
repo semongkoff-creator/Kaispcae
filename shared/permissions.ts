@@ -10,10 +10,12 @@
 // entirely on the client hiding the Room Editor button — exactly the gap
 // this spec section explicitly warns about.
 //
-// 'guest' exists in the hierarchy for completeness (the spec's reference
-// design includes anonymous participants) but is currently unreachable in
-// this app — login is mandatory before joining a room (see LoginPage.tsx /
-// the auth gate in App.tsx), so every real user is at least 'member'.
+// 'guest' is reachable via a room invite link (see server/src/routes/
+// guestInvite.ts + roomHandler.ts's JOIN_ROOM guest branch) — an
+// unauthenticated visitor who joined with just a name, admitted through the
+// waiting room. Every OTHER path into a room still requires a real account
+// (see LoginPage.tsx / the auth gate in App.tsx), so any uid that resolves
+// through the normal account flow is always at least 'member'.
 export type Role = 'owner' | 'admin' | 'staff' | 'member' | 'guest';
 
 // Global, ACCOUNT-level role — orthogonal to the per-room Role hierarchy
@@ -101,6 +103,13 @@ export const FEATURE_MIN_ROLE = {
   // this map already gets its own dedicated key even when several share the
   // 'admin' tier (room:kick, presence:spotlight, room:lock itself, etc.).
   'door:override': 'admin',
+  // Guest Link & Ruang Tunggu — creating/revoking a room invite link AND
+  // admitting/rejecting a guest waiting to enter share this one key, same
+  // "one trust tier, several actions" precedent as 'room:lock' covering both
+  // the lock toggle and admin-summon-bypass. Admin+ specifically (not
+  // staff+) since this is external-people access, the highest-risk category
+  // in the whole permission map.
+  'guest:manage': 'admin',
 } as const satisfies Record<string, Role>;
 
 export type FeatureKey = keyof typeof FEATURE_MIN_ROLE;

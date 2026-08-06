@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill } from 'react-bootstrap-icons';
+import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -56,6 +56,19 @@ interface SidebarProps {
   doorOverride: boolean;
   canDoorOverride: boolean;
   onToggleDoorOverride: () => void;
+
+  // Guest Link & Ruang Tunggu — admin-only, prompt-based (see App.tsx's
+  // handleCreateGuestLink). No "current state" to reflect here (unlike Lock
+  // Room/Door Override above) — this just fires an action, it isn't a toggle.
+  canManageGuests: boolean;
+  onCreateGuestLink: () => void;
+  // Guest Link & Ruang Tunggu — hides every workspace/internal-only row
+  // (Messenger chat, Daily Task, Kalender, Cuti, Absensi) for a guest
+  // session: all of them require a real account server-side and would just
+  // fail if clicked, and internal chat specifically is an explicit
+  // restriction (a guest gets room-scoped chat only, via ChatPanel, never
+  // channels/DM).
+  isGuest?: boolean;
 
   // Zone-aware lock: while you're standing inside a zone, this same row locks
   // THAT zone instead of the whole room — "Lock Room" means the room you're
@@ -172,6 +185,9 @@ export function Sidebar({
   doorOverride,
   canDoorOverride,
   onToggleDoorOverride,
+  canManageGuests,
+  onCreateGuestLink,
+  isGuest,
   currentZoneName,
   zoneLocked,
   zoneLockedByName,
@@ -278,8 +294,12 @@ export function Sidebar({
               />
             )}
             <MenuRow icon={<EyeFill size={15} />} label="Simplify" onClick={closeAnd(onToggleSimplifiedView)} />
-            <MenuRow icon={<TableIcon size={15} />} label={dailyTaskActive ? 'Tutup Daily Task' : 'Daily Task'} active={dailyTaskActive} onClick={closeAnd(onToggleDailyTask)} />
-            <MenuRow icon={<ChatDotsFill size={15} />} label={messengerViewActive ? 'Tutup Chat' : 'Chat'} active={messengerViewActive} onClick={closeAnd(onToggleMessengerView)} />
+            {!isGuest && (
+              <MenuRow icon={<TableIcon size={15} />} label={dailyTaskActive ? 'Tutup Daily Task' : 'Daily Task'} active={dailyTaskActive} onClick={closeAnd(onToggleDailyTask)} />
+            )}
+            {!isGuest && (
+              <MenuRow icon={<ChatDotsFill size={15} />} label={messengerViewActive ? 'Tutup Chat' : 'Chat'} active={messengerViewActive} onClick={closeAnd(onToggleMessengerView)} />
+            )}
             {isAdmin && (
               <MenuRow
                 icon={<PersonCheck size={15} />}
@@ -288,8 +308,12 @@ export function Sidebar({
                 onClick={closeAnd(onToggleJoinQueue)}
               />
             )}
-            <MenuRow icon={<CalendarEvent size={15} />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
-            <MenuRow icon={<Airplane size={15} />} label={leaveActive ? 'Tutup Cuti' : 'Cuti'} active={leaveActive} onClick={closeAnd(onToggleLeave)} />
+            {!isGuest && (
+              <MenuRow icon={<CalendarEvent size={15} />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
+            )}
+            {!isGuest && (
+              <MenuRow icon={<Airplane size={15} />} label={leaveActive ? 'Tutup Cuti' : 'Cuti'} active={leaveActive} onClick={closeAnd(onToggleLeave)} />
+            )}
             {/* A2 — Absensi kini otomatis lewat Lark Attendance (check-in dipicu
                 di /auth/me). Menu MeetKai lama disembunyikan (flag false) supaya
                 tak ada pencatatan manual baru; komponen AttendanceApp & data
@@ -299,7 +323,9 @@ export function Sidebar({
             )}
             {/* A12 — new Lark-backed attendance panel (check-in auto on login,
                 checkout here or in the Lark app). */}
-            <MenuRow icon={<ClockHistory size={15} />} label={larkAttendanceActive ? 'Tutup Absensi' : 'Absensi'} active={larkAttendanceActive} onClick={closeAnd(onToggleLarkAttendance)} />
+            {!isGuest && (
+              <MenuRow icon={<ClockHistory size={15} />} label={larkAttendanceActive ? 'Tutup Absensi' : 'Absensi'} active={larkAttendanceActive} onClick={closeAnd(onToggleLarkAttendance)} />
+            )}
             {isAdmin && (
               <MenuRow icon={<ArrowLeftRight size={15} />} label={larkSyncActive ? 'Tutup Lark Sync' : 'Lark Sync'} active={larkSyncActive} onClick={closeAnd(onToggleLarkSync)} />
             )}
@@ -357,6 +383,13 @@ export function Sidebar({
                 onClick={closeAnd(onToggleDoorOverride)}
                 title={doorOverride ? 'Matikan override — pintu berpassword kembali terkunci seperti biasa' : 'Buka semua pintu berpassword di room ini untuk semua orang (keadaan darurat)'}
               />
+            )}
+            {/* Guest Link & Ruang Tunggu — admin generates a room-scoped
+                invite link for an external, unauthenticated visitor (see
+                App.tsx's handleCreateGuestLink). No active/current-state
+                indicator — this is a one-shot action, not a toggle. */}
+            {canManageGuests && (
+              <MenuRow icon={<Link45deg size={15} />} label="Buat Guest Link" onClick={closeAnd(onCreateGuestLink)} title="Buat link undangan untuk tamu (tanpa akun) masuk ke room ini" />
             )}
             {isAdmin && (
               <MenuRow icon={<Tools size={15} />} label="Edit Room" onClick={closeAnd(onOpenRoomEditor)} />

@@ -90,6 +90,15 @@ function cancelKnock(knockerSocketId: string, io: Server) {
 
 const AVATAR_COLORS = ['#4ecdc4', '#ffe66d', '#a786df', '#6bcb77', '#4d96ff', '#ff6b6b'];
 
+// Guest Link & Ruang Tunggu — a guest's uid throughout this file is this
+// prefix + their JWT's guestId (never a real cuid, so it can never collide
+// with — or be mistaken for — an actual User.id in any of the plain
+// string-keyed Maps below, which is the whole reason to prefix it rather
+// than use the bare guestId).
+const GUEST_UID_PREFIX = 'guest:';
+function guestUid(guestId: string): string { return `${GUEST_UID_PREFIX}${guestId}`; }
+function isGuestUid(uid: string): boolean { return uid.startsWith(GUEST_UID_PREFIX); }
+
 const DEFAULT_ROOM = 'main-office';
 const DEFAULT_ROOM_NAME = 'Main Office';
 
@@ -140,15 +149,35 @@ interface RoomAdminState {
   // restart" posture as `locked` above — an emergency mode isn't config that
   // should silently survive a redeploy.
   doorOverride?: boolean;
+  // Guest Link & Ruang Tunggu — guestIds (not socket ids, not full uids) an
+  // admin has explicitly admitted via GUEST_JOIN_DECIDE. Checked on every
+  // guest JOIN_ROOM: absent → held in the waiting room; present → proceeds
+  // like a normal join. Revoked the instant the guest leaves (handleLeave)
+  // — same "one-time entry pass, not a standing grant" rule as
+  // knockAllowlist, so a returning guest is re-vetted every visit.
+  guestAllowlist?: Set<string>;
+  // Guest requests currently awaiting an admin decision, keyed by guestId.
+  // notifiedAdminSocketIds mirrors PendingKnock's own field — remembered so
+  // a later cancel (guest disconnects before a decision) tells exactly the
+  // admin sockets that were actually notified, never a room-wide broadcast.
+  pendingGuests?: Map<string, { socketId: string; name: string; requestedAt: number; notifiedAdminSocketIds: string[] }>;
 }
 
 const roomAdminMap = new Map<string, RoomAdminState>();
 
 // Resolves a user's current Role in a room from the in-memory admin state
 // — the single place this app decides "what tier is this person" (see
-// shared/permissions.ts's Role hierarchy doc comment). 'guest' is never
-// returned here since login is mandatory before joining a room at all.
+// shared/permissions.ts's Role hierarchy doc comment). 'guest' IS reachable
+// here (see isGuestUid below) — the one case where login isn't mandatory.
 function getRole(rs: RoomAdminState, uid: string): Role {
+  // Guest Link & Ruang Tunggu — a guest uid (see isGuestUid below) is never
+  // the room owner/admin/staff by construction (those Sets only ever hold
+  // real account ids), but checking explicitly here — rather than falling
+  // through to 'member' — is what makes every 'member'-tier gate in this
+  // file (teleport:use, furniture:assign, etc.) correctly reject a guest
+  // too, not just the higher-tier ones a wrong-but-lucky 'member' floor
+  // would already have blocked.
+  if (isGuestUid(uid)) return 'guest';
   if (uid === rs.masterAdminUserId) return 'owner';
   if (rs.adminUserIds.has(uid)) return 'admin';
   if (rs.staffUserIds.has(uid)) return 'staff';
@@ -308,74 +337,116 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   socket.on(SocketEvents.JOIN_ROOM, async (roomId: string, playerName?: string, avatarConfig?: AvatarConfig, userId?: string) => {
     const room = roomId || DEFAULT_ROOM;
 
-    // Approval gate — BEFORE socket.join, or a rejected user still lands in
-    // the socket.io room and keeps receiving everything broadcast to it. The
-    // REST routes alone would be theatre: this is the door.
-    //
-    // socket.data.userId only (never the `userId` param, which the client
-    // supplies and can lie about — the comment further down explains why that
-    // distinction already mattered here).
-    const enteringUid = (socket.data as { userId?: string }).userId;
-    const prisma = getPrisma();
+    // Guest Link & Ruang Tunggu — an entirely separate gate from the member
+    // approval-gate below. A guest has no RoomMember row (no real User at
+    // all), so it must never fall through to that account-only logic.
+    const guestId = (socket.data as { guestId?: string }).guestId;
+    const isGuest = !!guestId;
 
-    // Two lookups, two different failure policies — deliberately not one
-    // try/catch around both. A single catch that denied on any error would
-    // fail closed for the ~191 walk-in rooms too, so a DB blip would lock
-    // everyone out of rooms that never asked to be gated.
-    let approvalRoom: { id: string; ownerId: string; requiresApproval: boolean; slug: string } | null = null;
-    try {
-      approvalRoom = await prisma.room.findUnique({ where: { slug: room } });
-    } catch (e) {
-      // Can't tell whether this room is gated. Unknown slugs (DEFAULT_ROOM,
-      // ad-hoc rooms) have always been walk-in, and this lookup is the only
-      // thing that distinguishes them, so treat an unreadable answer the same
-      // way — matching pre-existing behaviour rather than inventing a lockout.
-      console.error('[room] could not read room for approval check:', e);
-    }
-
-    if (approvalRoom?.requiresApproval) {
-      // Past this point the room HAS asked to be gated, so errors fail closed:
-      // an unverifiable entry into an approval-required room is exactly what
-      // the gate exists to prevent.
-      if (!enteringUid) {
-        socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'needs-request' });
+    if (isGuest) {
+      const guestRoomSlug = (socket.data as { guestRoomSlug?: string }).guestRoomSlug;
+      // The invite token only ever authorizes ONE room — a guest socket
+      // trying any other slug (tampered client, stale param) is rejected
+      // outright, never silently redirected to it.
+      if (room !== guestRoomSlug) {
+        socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'guest-room-mismatch' });
         return;
       }
+      const rs = getRoomAdmin(room);
+      if (!rs.guestAllowlist?.has(guestId!)) {
+        // Not admitted yet — register (or refresh) the pending request and
+        // notify every admin currently connected to this room, then STOP:
+        // nothing below this block runs until an admin admits (see
+        // GUEST_JOIN_DECIDE further down), at which point the guest's own
+        // client re-emits this exact same JOIN_ROOM — same "ping + client
+        // retries" mechanic as ROOM_KNOCK_ADMITTED — and this time
+        // guestAllowlist.has(guestId) is true, so it falls through instead.
+        const guestName = (socket.data as { guestName?: string }).guestName || 'Guest';
+        if (!rs.pendingGuests) rs.pendingGuests = new Map();
+        const notifiedAdminSocketIds = getConnectedAdminSocketIds(room);
+        for (const sid of notifiedAdminSocketIds) {
+          io.to(sid).emit(SocketEvents.GUEST_JOIN_REQUESTED, { guestId: guestId!, name: guestName });
+        }
+        rs.pendingGuests.set(guestId!, { socketId: socket.id, name: guestName, requestedAt: Date.now(), notifiedAdminSocketIds });
+        socket.emit(SocketEvents.GUEST_JOIN_WAITING, { roomSlug: room });
+        console.log(`[room] guest ${guestName} (${guestId}) waiting to enter ${room} — ${notifiedAdminSocketIds.length} admin(s) notified`);
+        return;
+      }
+      // Admitted — fall through to the exact same join logic every member
+      // uses below, with a synthetic uid and every account-specific step
+      // (approval gate, RoomMember upsert) skipped entirely.
+      socket.join(room);
+      currentRoom = room;
+    } else {
+      // Approval gate — BEFORE socket.join, or a rejected user still lands in
+      // the socket.io room and keeps receiving everything broadcast to it. The
+      // REST routes alone would be theatre: this is the door.
+      //
+      // socket.data.userId only (never the `userId` param, which the client
+      // supplies and can lie about — the comment further down explains why that
+      // distinction already mattered here).
+      const enteringUid = (socket.data as { userId?: string }).userId;
+      const prisma = getPrisma();
+
+      // Two lookups, two different failure policies — deliberately not one
+      // try/catch around both. A single catch that denied on any error would
+      // fail closed for the ~191 walk-in rooms too, so a DB blip would lock
+      // everyone out of rooms that never asked to be gated.
+      let approvalRoom: { id: string; ownerId: string; requiresApproval: boolean; slug: string } | null = null;
       try {
-        const entry = await resolveEntry(prisma, approvalRoom, enteringUid);
-        if (!entry.allowed) {
-          socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: entry.reason });
+        approvalRoom = await prisma.room.findUnique({ where: { slug: room } });
+      } catch (e) {
+        // Can't tell whether this room is gated. Unknown slugs (DEFAULT_ROOM,
+        // ad-hoc rooms) have always been walk-in, and this lookup is the only
+        // thing that distinguishes them, so treat an unreadable answer the same
+        // way — matching pre-existing behaviour rather than inventing a lockout.
+        console.error('[room] could not read room for approval check:', e);
+      }
+
+      if (approvalRoom?.requiresApproval) {
+        // Past this point the room HAS asked to be gated, so errors fail closed:
+        // an unverifiable entry into an approval-required room is exactly what
+        // the gate exists to prevent.
+        if (!enteringUid) {
+          socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'needs-request' });
           return;
         }
-      } catch (e) {
-        console.error('[room] approval check failed:', e);
-        socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'error' });
-        return;
+        try {
+          const entry = await resolveEntry(prisma, approvalRoom, enteringUid);
+          if (!entry.allowed) {
+            socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: entry.reason });
+            return;
+          }
+        } catch (e) {
+          console.error('[room] approval check failed:', e);
+          socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'error' });
+          return;
+        }
       }
-    }
 
-    // Entering a walk-in room records membership. Without this, nobody who
-    // ever walked into an open room has a RoomMember row — so the moment an
-    // admin switches that room to require approval, every single person in it
-    // is re-classified as a stranger and locked out on their next join. The
-    // gate is meant to filter who comes in NEXT, not evict the office.
-    //
-    // Fire-and-forget: this is bookkeeping, and a failed write must never stop
-    // someone entering a room that has no gate on it.
-    if (approvalRoom && !approvalRoom.requiresApproval && enteringUid) {
-      prisma.roomMember
-        .upsert({
-          where: { userId_roomId: { userId: enteringUid, roomId: approvalRoom.id } },
-          create: { userId: enteringUid, roomId: approvalRoom.id, status: 'active', role: 'member' },
-          // Never touches role or an existing status — a 'rejected' row must
-          // not be laundered into 'active' just by the room being open today.
-          update: {},
-        })
-        .catch((e) => console.error('[room] failed to record membership:', e));
-    }
+      // Entering a walk-in room records membership. Without this, nobody who
+      // ever walked into an open room has a RoomMember row — so the moment an
+      // admin switches that room to require approval, every single person in it
+      // is re-classified as a stranger and locked out on their next join. The
+      // gate is meant to filter who comes in NEXT, not evict the office.
+      //
+      // Fire-and-forget: this is bookkeeping, and a failed write must never stop
+      // someone entering a room that has no gate on it.
+      if (approvalRoom && !approvalRoom.requiresApproval && enteringUid) {
+        prisma.roomMember
+          .upsert({
+            where: { userId_roomId: { userId: enteringUid, roomId: approvalRoom.id } },
+            create: { userId: enteringUid, roomId: approvalRoom.id, status: 'active', role: 'member' },
+            // Never touches role or an existing status — a 'rejected' row must
+            // not be laundered into 'active' just by the room being open today.
+            update: {},
+          })
+          .catch((e) => console.error('[room] failed to record membership:', e));
+      }
 
-    socket.join(room);
-    currentRoom = room;
+      socket.join(room);
+      currentRoom = room;
+    }
 
     if (playerName && !playerNames.has(socket.id)) {
       playerNames.set(socket.id, playerName);
@@ -393,8 +464,10 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // io.use handshake middleware) and always wins over the client-supplied
     // `userId` param — trusting the raw param let anyone claim to be a
     // room's owner (learned via the public GET /api/rooms/:slug response)
-    // and grant themselves master-admin.
-    const uid = (socket.data as { userId?: string }).userId || userId || socket.id;
+    // and grant themselves master-admin. A guest's uid is synthetic
+    // (guestUid) — never derived from anything client-supplied either
+    // (guestId comes from the server-verified guest JWT, same trust level).
+    const uid = isGuest ? guestUid(guestId!) : ((socket.data as { userId?: string }).userId || userId || socket.id);
     userSocketMap.set(uid, socket.id);
 
     // A fresh JOIN_ROOM for the same account within the grace window IS the
@@ -411,7 +484,11 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
     // Load master admin from database (ownerId), not first socket
     const rs = await initRoomAdminFromDb(room);
-    if (!rs.masterAdminUserId) {
+    // A guest must never become master admin — the ONLY reason this branch
+    // exists is to bootstrap a brand-new room's very first-ever joiner, and
+    // an external, unauthenticated visitor landing on an empty room before
+    // any real member ever has must not be crowned its owner.
+    if (!rs.masterAdminUserId && !isGuest) {
       rs.masterAdminUserId = uid;
       rs.adminUserIds.add(uid);
     }
@@ -424,9 +501,14 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // extra branching there. Checked per-join (not cached in RoomAdminState
     // like the DB-backed grants) since accountRole can change between
     // sessions and this is a one-time cost per connection, not per action.
+    // Skipped for guests — uid isn't a real User.id, so this would just be a
+    // wasted lookup (and getRole's own isGuestUid check already forces
+    // 'guest' regardless of anything this could add to adminUserIds).
     try {
-      const account = await getPrisma().user.findUnique({ where: { id: uid }, select: { accountRole: true } });
-      if (account?.accountRole === 'admin') rs.adminUserIds.add(uid);
+      if (!isGuest) {
+        const account = await getPrisma().user.findUnique({ where: { id: uid }, select: { accountRole: true } });
+        if (account?.accountRole === 'admin') rs.adminUserIds.add(uid);
+      }
     } catch (e) {
       console.warn('[room] failed to check global admin status:', e);
     }
@@ -546,7 +628,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       id: socket.id, name: name || avatarConfig?.name || 'Player',
       x: spawn.x, y: spawn.y, direction: (remembered?.direction as Avatar['direction']) || 'down',
       color, isMoving: false, avatarConfig: avatarConfig || undefined,
-      isAdmin, userId: uid,
+      isAdmin, userId: uid, isGuest: isGuest || undefined,
     };
 
     console.log(`[room] ${newPlayer.name} (${socket.id}) uid=${uid} ${isAdmin ? isMasterAdmin ? '⭐' : '👑' : ''} joined ${room}`);
@@ -914,6 +996,38 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const knockerSocketId = userSocketMap.get(data.userId);
     if (knockerSocketId) io.to(knockerSocketId).emit(SocketEvents.ROOM_KNOCK_ADMITTED, { roomId: room });
     console.log(`[room] uid=${data.userId} admitted to ${room} by uid=${senderUid}`);
+  });
+
+  // Guest Link & Ruang Tunggu — admin decides a pending guest request (see
+  // JOIN_ROOM's guest branch above). admit adds the guestId to
+  // guestAllowlist and pings the guest's own socket to retry JOIN_ROOM
+  // (identical mechanic to ROOM_KNOCK_ADMIT/ADMITTED above); reject just
+  // tells the guest's socket why, with no allowlist entry created.
+  socket.on(SocketEvents.GUEST_JOIN_DECIDE, (data: { guestId: string; admit: boolean }) => {
+    const room = currentRoom; if (!room) return;
+    const senderUid = findUserIdBySocket(socket.id);
+    const rs = getRoomAdmin(room);
+    if (!canAccess(rs, senderUid, 'guest:manage')) {
+      socket.emit('admin:error', { message: 'Only admins can decide on guest requests' });
+      return;
+    }
+    if (typeof data?.guestId !== 'string') return;
+    const pending = rs.pendingGuests?.get(data.guestId);
+    if (!pending) {
+      socket.emit('admin:error', { message: 'Permintaan tamu ini sudah tidak berlaku' });
+      return;
+    }
+    rs.pendingGuests!.delete(data.guestId);
+    const guestSocket = io.sockets.sockets.get(pending.socketId);
+    if (data.admit) {
+      if (!rs.guestAllowlist) rs.guestAllowlist = new Set();
+      rs.guestAllowlist.add(data.guestId);
+      if (guestSocket) guestSocket.emit(SocketEvents.GUEST_JOIN_ADMITTED, { roomSlug: room });
+      console.log(`[room] guest ${data.guestId} admitted to ${room} by uid=${senderUid}`);
+    } else {
+      if (guestSocket) guestSocket.emit(SocketEvents.GUEST_JOIN_REJECTED, { roomSlug: room });
+      console.log(`[room] guest ${data.guestId} rejected from ${room} by uid=${senderUid}`);
+    }
   });
 
   socket.on(SocketEvents.ADMIN_GRANT, (data: { targetUserId: string }) => {
@@ -1527,6 +1641,26 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   });
 
   socket.on(SocketEvents.DISCONNECT, () => {
+    // Guest Link & Ruang Tunggu — a guest still waiting on an admin decision
+    // never got past JOIN_ROOM's early return (currentRoom stays null the
+    // whole time they wait), so the `if (!room) return` below would
+    // otherwise skip cleanup entirely and leave a stale pending entry +
+    // notified-admins-that-never-get-told-it's-moot forever. Uses
+    // socket.data.guestRoomSlug (set once at the handshake, independent of
+    // currentRoom) rather than the closure var, specifically so this runs
+    // even though the guest was never actually joined to anything.
+    const pendingGuestId = (socket.data as { guestId?: string }).guestId;
+    const pendingGuestRoom = (socket.data as { guestRoomSlug?: string }).guestRoomSlug;
+    if (pendingGuestId && pendingGuestRoom) {
+      const rs = getRoomAdmin(pendingGuestRoom);
+      const pending = rs.pendingGuests?.get(pendingGuestId);
+      if (pending) {
+        rs.pendingGuests!.delete(pendingGuestId);
+        for (const sid of pending.notifiedAdminSocketIds) {
+          io.to(sid).emit(SocketEvents.GUEST_JOIN_CANCELLED, { guestId: pendingGuestId });
+        }
+      }
+    }
     const room = currentRoom;
     if (!room) return;
     // No stable identity to reconnect AS (shouldn't happen — login is
@@ -1565,6 +1699,11 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
     // JOIN_ROOM gate's own `!isAdmin` check), so this never affects them.
     const rs = getRoomAdmin(room);
     rs.knockAllowlist?.delete(leavingUid);
+    // Same one-time-pass rule for a guest's admission — leaving revokes it,
+    // so a returning guest (even the same guestId, if their JWT is still
+    // valid) is re-vetted through the waiting room every visit rather than
+    // silently walking back in.
+    if (isGuestUid(leavingUid)) rs.guestAllowlist?.delete(leavingUid.slice(GUEST_UID_PREFIX.length));
   }
   // Same "revoke the instant they leave" rule as the knock allowlist above —
   // a password door isn't a permanent pass, it's good for this visit only.

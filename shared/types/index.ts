@@ -109,6 +109,11 @@ export interface Avatar {
   // all untouched, so this is "don't show my avatar to regular members",
   // not a full stealth/incognito mode.
   hidden?: boolean;
+  // Guest Link & Ruang Tunggu — true for a socket admitted via a room
+  // invite link rather than a real account (see roomHandler.ts's JOIN_ROOM
+  // guest branch). Drives the "Guest" badge in ParticipantPanel and hides
+  // the DM/Message button for them (a guest has no real userId to DM).
+  isGuest?: boolean;
 }
 
 // A11 — presence status. 'in_meeting' + 'focus' are auto-set from the zone
@@ -351,6 +356,23 @@ export enum SocketEvents {
   ROOM_KNOCK_CANCELLED = 'room:knock_cancelled',
   ROOM_KNOCK_ADMIT = 'room:knock_admit',
   ROOM_KNOCK_ADMITTED = 'room:knock_admitted',
+
+  // Guest Link & Ruang Tunggu — a guest socket's JOIN_ROOM (see roomHandler.ts)
+  // either lands them in this waiting room (GUEST_JOIN_WAITING, fans
+  // GUEST_JOIN_REQUESTED out to every admin currently connected to the room,
+  // same "only currently-connected admins" posture as ROOM_KNOCK_REQUEST
+  // above) or — if already on the room's in-memory guestAllowlist from a
+  // prior GUEST_JOIN_DECIDE admit — proceeds straight through like a normal
+  // member join. GUEST_JOIN_ADMITTED pings the waiting guest's own socket to
+  // retry JOIN_ROOM (identical mechanic to ROOM_KNOCK_ADMITTED),
+  // GUEST_JOIN_REJECTED ends it with a reason, GUEST_JOIN_CANCELLED tells
+  // notified admins the guest left/disconnected before a decision was made.
+  GUEST_JOIN_WAITING = 'guest:join_waiting',
+  GUEST_JOIN_REQUESTED = 'guest:join_requested',
+  GUEST_JOIN_DECIDE = 'guest:join_decide',
+  GUEST_JOIN_ADMITTED = 'guest:join_admitted',
+  GUEST_JOIN_REJECTED = 'guest:join_rejected',
+  GUEST_JOIN_CANCELLED = 'guest:join_cancelled',
 
   PLAYER_SIT = 'player:sit',
   PLAYER_SAT = 'player:sat',
@@ -1278,6 +1300,11 @@ export interface ZoneKnockRequest {
   userId: string;
   playerId: string;
   playerName: string;
+}
+
+export interface GuestJoinRequest {
+  guestId: string;
+  name: string;
 }
 
 export interface Zone {

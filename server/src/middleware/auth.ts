@@ -167,3 +167,40 @@ export function verifyTokenClaims(token: string): { userId: string; exp: number;
     return null;
   }
 }
+
+// Guest Link & Ruang Tunggu — a deliberately DIFFERENT claims shape from the
+// real-account token above: `guestId` (a synthetic id, never a User.id) and
+// `roomSlug` (the ONE room this token may ever join — see roomHandler.ts's
+// JOIN_ROOM guest branch, which rejects any other slug outright), no
+// `userId`/`sessionId` at all. Same JWT_SECRET (no separate secret needed —
+// the claims shape itself is what makes this structurally impossible to
+// route through authenticateToken/verifyTokenClaims: `decoded.userId` would
+// just be undefined, and every consumer of req.userId does a real DB
+// lookup/FK-write keyed on it). Short-lived on purpose (12h, vs accounts'
+// 30d) — a guest session isn't meant to outlive the visit it was minted for.
+export function signGuestToken(payload: { guestId: string; name: string; roomSlug: string }): string {
+  const config = getConfig();
+  return jwt.sign(
+    { guestId: payload.guestId, name: payload.name, roomSlug: payload.roomSlug },
+    config.JWT_SECRET,
+    { expiresIn: '12h' },
+  );
+}
+
+export interface GuestTokenClaims {
+  guestId: string;
+  name: string;
+  roomSlug: string;
+  exp: number;
+}
+
+export function verifyGuestTokenClaims(token: string): GuestTokenClaims | null {
+  try {
+    const config = getConfig();
+    const decoded = jwt.verify(token, config.JWT_SECRET) as { guestId?: string; name?: string; roomSlug?: string; exp: number };
+    if (!decoded.guestId || !decoded.roomSlug) return null;
+    return { guestId: decoded.guestId, name: decoded.name || 'Guest', roomSlug: decoded.roomSlug, exp: decoded.exp };
+  } catch {
+    return null;
+  }
+}

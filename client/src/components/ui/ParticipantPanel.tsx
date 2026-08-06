@@ -203,7 +203,8 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest,
                 onSlap={() => emitSlap(p.name)}
                 isMuted={!!p.userId && mutedUserIds.has(p.userId)}
                 onToggleMute={p.userId ? () => (mutedUserIds.has(p.userId!) ? unmuteUser(p.userId!) : muteUser(p.userId!)) : undefined}
-                onMessage={p.userId && onStartDm ? () => onStartDm(p.userId!) : undefined}
+                onMessage={p.userId && !p.isGuest && onStartDm ? () => onStartDm(p.userId!) : undefined}
+                isGuest={p.isGuest}
                 onKick={canKick && p.userId && emitKick ? () => emitKick(p.userId!) : undefined}
                 onSpotlight={canSpotlight && p.userId && emitSpotlight ? () => emitSpotlight(p.userId!, !p.spotlightActive) : undefined}
                 onLocate={() => handleLocate(p.id)}
@@ -240,6 +241,7 @@ function ParticipantRow({
   onKick,
   onSpotlight,
   onLocate,
+  isGuest,
 }: {
   name: string;
   color: string;
@@ -301,6 +303,11 @@ function ParticipantRow({
   // everyone, like Summon/Slap — finding a coworker's current desk isn't a
   // privileged action.
   onLocate?: () => void;
+  // Guest Link & Ruang Tunggu — renders a "Guest" badge and, since a guest
+  // has no real userId to DM (see Avatar.isGuest's own doc comment),
+  // suppresses onMessage at the CALL SITE (not here — see p.userId &&
+  // !p.isGuest && onStartDm below) rather than duplicating that guard.
+  isGuest?: boolean;
 }) {
   // Menu coordinates in viewport space, measured from the trigger when it
   // opens. null = closed.
@@ -364,6 +371,11 @@ function ParticipantRow({
             {role === 'owner' && <span title="Room owner" className="shrink-0">👑</span>}
             {role === 'admin' && <span title="Admin" className="shrink-0">🛡️</span>}
             <span className="truncate">{name}</span>
+            {isGuest && (
+              <span title="Tamu (guest link)" className="shrink-0 px-1 py-px rounded text-[9px] font-semibold uppercase tracking-wide bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-300">
+                Guest
+              </span>
+            )}
           </span>
           {workMode === 'away' && awayReason && (
             <span className="text-gray-400 dark:text-gray-500 text-[10px] truncate block">Away · {awayReason}</span>

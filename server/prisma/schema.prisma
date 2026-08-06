@@ -680,6 +680,31 @@ model Room {
   // adaptor. mapFormatVersion tracks the schema of layerData.
   layerData         Json?
   mapFormatVersion  Int?
+  invites           RoomInvite[]
+}
+
+// Guest Link & Ruang Tunggu — a room-scoped invite token an admin generates
+// (POST /rooms/:slug/guest-invites) and hands out to an external person, who
+// exchanges it (POST /guest/join, no auth) for a short-lived guest JWT — see
+// server/src/routes/guestInvite.ts. Mirrors DocShareLink's token+expiresAt
+// shape (the closest existing precedent), plus maxUses/useCount for
+// one-time-use links. Never grants a real account — the guest identity lives
+// entirely in the JWT (guestId, not a User row), so this table only tracks
+// the LINK's own lifecycle, never who used it.
+model RoomInvite {
+  id            String    @id @default(cuid())
+  token         String    @unique
+  roomId        String
+  room          Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdById   String
+  createdByName String
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime?
+  maxUses       Int?
+  useCount      Int       @default(0)
+  revoked       Boolean   @default(false)
+
+  @@index([roomId])
 }
 
 model RoomMember {
