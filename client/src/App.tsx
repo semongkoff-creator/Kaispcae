@@ -152,6 +152,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     isCameraOn,
     isScreenSharing,
     mediaError,
+    failedPeers,
     setManualVolume,
     destroy,
   } = useWebRTC({ socketRef });
@@ -199,6 +200,25 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const roomStateReceived = useGameStore((s) => s.roomStateReceived);
+  const isSocketConnected = useGameStore((s) => s.isConnected);
+  // QA (Fallback checklist item 9, "Server down: status jelas, auto-retry,
+  // tak hang") — before this, an unreachable server (down, or a network
+  // that can't complete the handshake at all) left the user staring at a
+  // bare "Joining room…" string FOREVER: socket.io's own reconnection is
+  // infinite by default (never fires 'reconnect_failed'), so nothing ever
+  // flipped this into a terminal state. This timer is purely a UI decision,
+  // not a real give-up — the underlying socket keeps retrying regardless —
+  // it just stops pretending "almost there" past a point where that's
+  // clearly no longer true, and gives an actual way out (reload) instead of
+  // an indefinite spinner. Resets whenever roomStateReceived flips true or
+  // the room being joined changes (see the effect below).
+  const [joinTimedOut, setJoinTimedOut] = useState(false);
+  useEffect(() => {
+    if (roomStateReceived) { setJoinTimedOut(false); return; }
+    const JOIN_TIMEOUT_MS = 12000;
+    const timer = setTimeout(() => setJoinTimedOut(true), JOIN_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [roomStateReceived, roomSlug]);
   const guestWaitState = useGameStore((s) => s.guestWaitState);
   const pendingGuests = useGameStore((s) => s.pendingGuests);
   const zones = useGameStore((s) => s.zones);
@@ -1259,8 +1279,27 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
               Tutup
             </button>
           </div>
+        ) : joinTimedOut ? (
+          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
+            <p className="text-2xl mb-1">⚠️</p>
+            <p className="text-gray-900 dark:text-gray-100 text-sm font-medium mb-1">Gagal terhubung ke server.</p>
+            <p className="text-gray-400 dark:text-gray-500 text-xs mb-3">
+              {isSocketConnected ? 'Server merespons tapi room tidak kunjung siap.' : 'Periksa koneksi internet kamu, lalu coba lagi.'}
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium cursor-pointer"
+            >
+              Coba lagi
+            </button>
+          </div>
         ) : (
-          <p className="text-gray-500 dark:text-gray-400 text-xl">Joining room…</p>
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-6 h-6 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />
+            <p className="text-gray-500 dark:text-gray-400 text-sm">
+              {isSocketConnected ? 'Menyiapkan room…' : 'Menghubungkan ke server…'}
+            </p>
+          </div>
         )}
         {lockedDeniedOverlay}
       </div>
@@ -1785,6 +1824,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
           onClose={closePanel}
           onEmote={handleEmoteSelect}
+          failedPeerIds={failedPeers}
         />
       ) : (
         <>
@@ -1799,6 +1839,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             onManualVolumeChange={setManualVolume}
             recordedTargetUserId={activeRecording?.targetUserId}
             isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
+            failedPeerIds={failedPeers}
           />
         </>
       )}

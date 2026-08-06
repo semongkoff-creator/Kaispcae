@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
-import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill } from 'react-bootstrap-icons';
+import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
@@ -53,6 +53,11 @@ interface VideoGridProps {
   // here from userId to socket id since that's how tiles are keyed.
   recordedTargetUserId?: string;
   isLocalBeingRecorded?: boolean;
+  // QA (Fallback checklist item 9) — ids whose WebRTC connection failed
+  // permanently (see useWebRTC's failedPeers). A peer in here still gets a
+  // tile (same as any other nearby player) but VideoTile shows a
+  // "connection lost" badge over it instead of a silently frozen picture.
+  failedPeerIds?: Set<string>;
 }
 
 // Shared with MeetingView.tsx (the "Dedicated Meeting View" full-screen
@@ -424,7 +429,7 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
   );
 }
 
-export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded }: VideoGridProps) {
+export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds }: VideoGridProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localHandRaised = localPlayer.handRaised;
@@ -549,6 +554,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
             handRaised={tile.handRaised}
             reaction={latestReaction(emoteEvents, tile.id, now)}
             onEnlarge={() => setFeaturedKey(`${tile.id}-camera`)}
+            connectionFailed={failedPeerIds?.has(tile.id)}
           />
         );
       })}
@@ -607,6 +613,7 @@ export function VideoTile({
   large,
   speaking,
   onEnlarge,
+  connectionFailed,
 }: {
   name: string;
   // The camera-off avatar draws from the person's REAL identity, not the
@@ -636,6 +643,12 @@ export function VideoTile({
   // actually a live picture to enlarge (!showAvatar) — an avatar placeholder
   // has nothing bigger to show.
   onEnlarge?: () => void;
+  // QA (Fallback checklist item 9, "Server/A-V down: status jelas") — this
+  // peer's WebRTC connection failed permanently (retried once, still
+  // failed — see webrtcService's onPeerConnectionStatus). Before this, a
+  // permanently-failed peer's tile just silently froze on its last frame
+  // with no indication anything was wrong.
+  connectionFailed?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [volume, setVolume] = useState(1);
@@ -736,6 +749,15 @@ export function VideoTile({
       {showAvatar && (
         <div className="absolute inset-0">
           <TileAvatar name={avatarName ?? name} photoUrl={photoUrl} large={large} />
+        </div>
+      )}
+      {/* QA (Fallback checklist item 9) — sits ON TOP of whatever the tile
+          would otherwise show (frozen video or the avatar placeholder), so
+          it's never mistaken for a normal connection that's merely quiet. */}
+      {connectionFailed && !isScreen && (
+        <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1 text-white">
+          <WifiOff size={large ? 22 : 14} />
+          {large && <span className="text-xs">Koneksi terputus</span>}
         </div>
       )}
       </div>

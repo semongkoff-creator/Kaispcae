@@ -25,6 +25,11 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // the UI explain why the mic/camera buttons aren't doing anything instead
   // of failing silently. Cleared on a successful (re)acquire.
   const [mediaError, setMediaError] = useState<string | null>(null);
+  // QA (Fallback checklist item 9) — ids of peers whose WebRTC connection
+  // has failed permanently (retried once, still failed) — see
+  // webrtcService's onPeerConnectionStatus. Consumed by VideoGrid to show a
+  // "connection lost" badge instead of a silently-frozen tile.
+  const [failedPeers, setFailedPeers] = useState<Set<string>>(new Set());
 
   // Guards against overlapping initLocalMedia() calls (e.g. mic and camera
   // buttons both clicked before the first request resolves) — NOT a
@@ -91,6 +96,15 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
       webrtcService.setOnRemoteStream((id, stream) => onRemoteStream(id, stream));
     }
     webrtcService.setOnScreenShareEnded(() => setIsScreenSharing(false));
+    webrtcService.setOnPeerConnectionStatus((id, failed) => {
+      setFailedPeers((prev) => {
+        const already = prev.has(id);
+        if (failed === already) return prev;
+        const next = new Set(prev);
+        if (failed) next.add(id); else next.delete(id);
+        return next;
+      });
+    });
   });
 
   // §6 — connect for both 'full_visible' and 'translucent' (still shown,
@@ -218,6 +232,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     connectedRef.current.clear();
     initRef.current = false;
     streamRef.current = null;
+    setFailedPeers(new Set());
   }, []);
 
   return {
@@ -230,6 +245,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     isCameraOn,
     isScreenSharing,
     mediaError,
+    failedPeers,
     setManualVolume,
     destroy,
     getLocalStream: () => webrtcService.getLocalStream(),

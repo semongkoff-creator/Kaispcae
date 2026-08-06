@@ -18,6 +18,10 @@ interface MeetingViewProps {
   isLocalBeingRecorded?: boolean;
   onClose: () => void;
   onEmote: (emote: EmoteType) => void;
+  // QA (Fallback checklist item 9) — same set VideoGrid.tsx takes; Meeting
+  // View is the other place VideoTile is used (via renderTile below), so it
+  // needs the same "connection lost" signal, not a second copy of the logic.
+  failedPeerIds?: Set<string>;
 }
 
 // One normalized descriptor per video surface (local cam, local screen, each
@@ -54,7 +58,7 @@ interface MTile {
 // leaving it drops you right back onto the map where you already are.
 export function MeetingView({
   nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams,
-  micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, onClose, onEmote,
+  micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, onClose, onEmote, failedPeerIds,
 }: MeetingViewProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localHandRaised = useGameStore((s) => s.localPlayer.handRaised);
@@ -146,6 +150,7 @@ export function MeetingView({
       speaking={t.speaking}
       reaction={t.reactionSourceId ? latestReaction(emoteEvents, t.reactionSourceId, now) : null}
       onVolumeChange={main && t.volumeTargetId ? (v) => onManualVolumeChange(t.volumeTargetId!, v) : undefined}
+      connectionFailed={!t.isLocal && !t.isScreen && !!t.reactionSourceId && failedPeerIds?.has(t.reactionSourceId)}
       large
     />
   );

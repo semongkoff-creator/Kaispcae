@@ -174,6 +174,15 @@ class WebRTCService {
   private onRemoteScreenEnded: ((id: string) => void) | null = null;
   private onSpeakingChange: ((id: string, speaking: boolean) => void) | null = null;
   private onScreenShareEnded: (() => void) | null = null;
+  // QA (Fallback checklist item 9, "Server/A-V down: status jelas") — fired
+  // once a peer's ICE connection fails PERMANENTLY (the single automatic
+  // retry in oniceconnectionstatechange below also failed), and again with
+  // recovered=true if it later reaches 'connected'/'completed' (self-heals)
+  // or the peer is torn down for any other reason (disconnectFromPlayer —
+  // no point showing "connection lost" for someone who just walked away).
+  // Before this, a permanently-failed peer had NO callback path at all —
+  // their video tile just silently froze on the last frame forever.
+  private onPeerConnectionStatus: ((id: string, failed: boolean) => void) | null = null;
   private analyserInterval: ReturnType<typeof setInterval> | null = null;
 
   setSocket(socket: Socket) {
@@ -205,6 +214,10 @@ class WebRTCService {
 
   setOnScreenShareEnded(cb: () => void) {
     this.onScreenShareEnded = cb;
+  }
+
+  setOnPeerConnectionStatus(cb: (id: string, failed: boolean) => void) {
+    this.onPeerConnectionStatus = cb;
   }
 
   async initLocalMedia(): Promise<{ success: boolean; error?: string }> {
@@ -842,12 +855,24 @@ class WebRTCService {
       // was never needed (so a successful call proves nothing about TURN).
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         void this.reportSelectedPath(remoteId, pc);
+        this.onPeerConnectionStatus?.(remoteId, false);
       }
-      if (pc.iceConnectionState === 'failed' && peer.retryCount < 1) {
-        peer.retryCount++;
-        console.log('[webrtc] retrying connection to', remoteId);
-        this.disconnectFromPlayer(remoteId);
-        setTimeout(() => this.connectToPlayer(remoteId), 1000);
+      if (pc.iceConnectionState === 'failed') {
+        if (peer.retryCount < 1) {
+          peer.retryCount++;
+          console.log('[webrtc] retrying connection to', remoteId);
+          this.disconnectFromPlayer(remoteId);
+          setTimeout(() => this.connectToPlayer(remoteId), 1000);
+        } else {
+          // The one automatic retry above already failed too — this is a
+          // permanent failure, not a transient blip. Nothing left to try on
+          // its own; the next proximity tick (if this player is still
+          // nearby) is what eventually gets a fresh attempt going, via the
+          // normal connectToPlayer() path — same as any other "not yet
+          // connected" peer.
+          console.warn('[webrtc] connection to', remoteId, 'failed permanently after retry');
+          this.onPeerConnectionStatus?.(remoteId, true);
+        }
       }
     };
 
@@ -1026,6 +1051,10 @@ class WebRTCService {
       this.peers.delete(id);
       this.audioDestNodes.get(id)?.disconnect();
       this.audioDestNodes.delete(id);
+      // Torn down for ANY reason (proximity left, retry-then-reconnect,
+      // explicit cleanup) — a stale "connection lost" badge from an earlier
+      // permanent failure must not linger once the peer itself is gone.
+      this.onPeerConnectionStatus?.(id, false);
       console.log('[webrtc] disconnected from', id);
     }
   }

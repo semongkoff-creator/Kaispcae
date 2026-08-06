@@ -13,11 +13,16 @@ export function ConnectionIndicator() {
       <div className="flex items-center gap-1.5">
         <span
           className={`inline-block w-2 h-2 rounded-full ${
-            isConnected ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]' : 'bg-red-500 shadow-[0_0_6px_#ef4444]'
+            isConnected ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]' : 'bg-red-500 shadow-[0_0_6px_#ef4444] animate-pulse'
           }`}
         />
+        {/* QA (Fallback checklist item 9) — "Disconnected" read as a dead
+            end, but socket.io's reconnection here is left at its library
+            default (infinite retries, see useSocket.ts) — the honest state
+            while red is "still trying", not "gave up". Pulsing dot + this
+            copy communicate that instead of implying nothing is happening. */}
         <span className="text-gray-700 dark:text-gray-300 text-xs font-medium">
-          {isConnected ? 'Connected' : 'Disconnected'}
+          {isConnected ? 'Connected' : 'Menyambung ulang…'}
         </span>
       </div>
       <div className="w-px h-4 bg-purple-100" />
