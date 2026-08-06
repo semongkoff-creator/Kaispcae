@@ -158,6 +158,9 @@ export interface AreaEffect {
   // See Zone.capacity. Only ever set on 'privateArea' (prompted at creation
   // time in RoomEditorPage.tsx); absent/0 = unlimited.
   capacity?: number;
+  // See Zone.memberOnly (QA #8). Only ever set on 'privateArea' (prompted at
+  // creation time, same as capacity above); absent/false = open to guests.
+  memberOnly?: boolean;
 }
 
 export interface LayerData {
@@ -383,6 +386,7 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     if (a.audioIsolated != null) z.audioIsolated = a.audioIsolated;
     else if (a.effect === 'mapLocation') z.audioIsolated = false;
     if (a.capacity != null) z.capacity = a.capacity;
+    if (a.memberOnly) z.memberOnly = true;
     return z;
   });
 

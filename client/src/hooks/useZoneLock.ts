@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Socket } from 'socket.io-client';
-import { SocketEvents, ZoneLockState, ZoneKnockRequest } from '@virtualmeet/shared';
+import { SocketEvents, ZoneLockState, ZoneKnockRequest, ZoneApprovalRequest } from '@virtualmeet/shared';
 
 // Client state for per-zone locks. The server is authoritative for every
 // decision here — this hook only mirrors what it broadcasts and sends intents.
@@ -22,6 +22,18 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
   // state a user needs to be able to see and back out of, not just glimpse
   // for 3.5 seconds.
   const [pendingKnock, setPendingKnock] = useState<{ zoneId: string; zoneName: string } | null>(null);
+  // QA #8 — which kind of denial deniedZoneId represents: a manual lock
+  // (offer "Ketuk pintu", emits ZONE_KNOCK) or a member-only zone (offer
+  // "Minta izin masuk", emits ZONE_APPROVAL_REQUEST instead) — same
+  // deniedZoneId/card, different action underneath since a member-only zone
+  // has no keyholder to knock on.
+  const [deniedReason, setDeniedReason] = useState<'locked' | 'member_only' | null>(null);
+  // Mirrors pendingKnock above, but for the no-keyholder member-only flow.
+  const [pendingApproval, setPendingApproval] = useState<{ zoneId: string; zoneName: string } | null>(null);
+  // Every admin's own view of guests currently waiting on THEM to decide —
+  // populated only for sockets that are actually admins (the server only
+  // ever emits ZONE_APPROVAL_REQUESTED to getConnectedAdminSocketIds).
+  const [approvalRequests, setApprovalRequests] = useState<ZoneApprovalRequest[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -59,7 +71,10 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
       // knock on: just a toast, same as the two reasons above, never the
       // deniedZoneId "knock?" prompt (which is lock-specific).
       if (msg.reason === 'zone_full') { flash('Zona ini penuh.'); return; }
+      // QA #8 — same card as a manual lock (deniedZoneId), tagged with WHICH
+      // kind so requestEntry below knows whether to knock or ask for approval.
       setDeniedZoneId(msg.zoneId);
+      setDeniedReason(msg.reason === 'member_only' ? 'member_only' : 'locked');
     };
     const onKnock = (msg: ZoneKnockRequest) => {
       // De-dupe: someone mashing the knock button shouldn't stack popups.
@@ -80,16 +95,39 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
       setKnocks((k) => k.filter((x) => !(x.userId === msg.userId && x.zoneId === msg.zoneId)));
     };
 
+    // QA #8 — admin-side incoming request; every connected admin gets this
+    // independently (no single keyholder), so de-dupe the same way onKnock does.
+    const onApprovalRequested = (msg: ZoneApprovalRequest) => {
+      setApprovalRequests((r) => (r.some((x) => x.guestId === msg.guestId && x.zoneId === msg.zoneId) ? r : [...r, msg]));
+    };
+    const onApprovalDecided = (msg: { zoneId: string; admitted: boolean; byName?: string }) => {
+      setDeniedZoneId(msg.admitted ? null : msg.zoneId);
+      setPendingApproval((p) => (p && p.zoneId === msg.zoneId ? null : p));
+      // Same admittedZoneIds Set a knock-admission uses — either kind of
+      // approval means the same thing to App.tsx's entry check: "let me in".
+      if (msg.admitted) setAdmittedZoneIds((s) => new Set(s).add(msg.zoneId));
+      flash(msg.admitted ? `${msg.byName ?? 'Admin'} mengizinkan kamu masuk.` : `${msg.byName ?? 'Admin'} menolak permintaanmu.`);
+    };
+    const onApprovalCancelled = (msg: { zoneId: string; guestId: string }) => {
+      setApprovalRequests((r) => r.filter((x) => !(x.guestId === msg.guestId && x.zoneId === msg.zoneId)));
+    };
+
     socket.on(SocketEvents.ZONE_LOCK_UPDATED, onUpdated);
     socket.on(SocketEvents.ZONE_LOCKED_DENIED, onDenied);
     socket.on(SocketEvents.ZONE_KNOCK_REQUEST, onKnock);
     socket.on(SocketEvents.ZONE_KNOCK_DECIDED, onDecided);
     socket.on(SocketEvents.ZONE_KNOCK_CANCELLED, onCancelled);
+    socket.on(SocketEvents.ZONE_APPROVAL_REQUESTED, onApprovalRequested);
+    socket.on(SocketEvents.ZONE_APPROVAL_DECIDED, onApprovalDecided);
+    socket.on(SocketEvents.ZONE_APPROVAL_CANCELLED, onApprovalCancelled);
     return () => {
       socket.off(SocketEvents.ZONE_LOCK_UPDATED, onUpdated);
       socket.off(SocketEvents.ZONE_LOCKED_DENIED, onDenied);
       socket.off(SocketEvents.ZONE_KNOCK_REQUEST, onKnock);
       socket.off(SocketEvents.ZONE_KNOCK_DECIDED, onDecided);
+      socket.off(SocketEvents.ZONE_APPROVAL_REQUESTED, onApprovalRequested);
+      socket.off(SocketEvents.ZONE_APPROVAL_DECIDED, onApprovalDecided);
+      socket.off(SocketEvents.ZONE_APPROVAL_CANCELLED, onApprovalCancelled);
       socket.off(SocketEvents.ZONE_KNOCK_CANCELLED, onCancelled);
     };
   }, [socketRef, flash]);
@@ -123,6 +161,31 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     setKnocks((list) => list.filter((x) => !(x.userId === k.userId && x.zoneId === k.zoneId)));
   }, [socketRef]);
 
+  // QA #8 — the ZoneLockBar's single "ask to get in" button calls this
+  // regardless of WHY entry was denied; it picks the right event/pending
+  // state off deniedReason so the caller doesn't need to know the
+  // lock-vs-member-only distinction at all.
+  const requestEntry = useCallback((zoneId: string, zoneName?: string) => {
+    if (deniedReason === 'member_only') {
+      socketRef.current?.emit(SocketEvents.ZONE_APPROVAL_REQUEST, { zoneId, zoneName });
+      setPendingApproval({ zoneId, zoneName: zoneName ?? zoneId });
+    } else {
+      knock(zoneId, zoneName);
+    }
+  }, [socketRef, deniedReason, knock]);
+
+  const cancelApproval = useCallback(() => {
+    setPendingApproval((p) => {
+      if (p) socketRef.current?.emit(SocketEvents.ZONE_APPROVAL_CANCEL, { zoneId: p.zoneId });
+      return null;
+    });
+  }, [socketRef]);
+
+  const decideApproval = useCallback((req: ZoneApprovalRequest, admit: boolean) => {
+    socketRef.current?.emit(SocketEvents.ZONE_APPROVAL_DECIDE, { zoneId: req.zoneId, guestId: req.guestId, admit });
+    setApprovalRequests((list) => list.filter((x) => !(x.guestId === req.guestId && x.zoneId === req.zoneId)));
+  }, [socketRef]);
+
   const isKeyholder = useCallback((zoneId: string | null) => {
     const l = lockOf(zoneId);
     return !!l && l.lockedByUserId === myUserId;
@@ -131,11 +194,17 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
   const isAdmitted = useCallback((zoneId: string | null) => !!zoneId && admittedZoneIds.has(zoneId), [admittedZoneIds]);
 
   return {
-    zoneLocks, knocks, deniedZoneId, pendingKnock, toast, lockOf, setLock, knock, cancelKnock, decide, isKeyholder, isAdmitted,
+    zoneLocks, knocks, deniedZoneId, deniedReason, pendingKnock, pendingApproval, approvalRequests, toast,
+    lockOf, setLock, knock, cancelKnock, decide, isKeyholder, isAdmitted, requestEntry, cancelApproval, decideApproval,
     clearDenied: () => setDeniedZoneId(null),
     // App.tsx's client-side entry check calls this directly (no server round
     // trip needed — the physical block already happened locally) to surface
-    // the same "knock to enter" prompt a server-side denial would show.
-    denyEntry: (zoneId: string) => setDeniedZoneId(zoneId),
+    // the same "knock to enter" prompt a server-side denial would show. Only
+    // ever used for a zone already known to be manually locked (mirrored
+    // zoneLocks state) — member_only has no local pre-check, it always goes
+    // through the server round trip (onDenied above) — so 'locked' here is
+    // never wrong, and importantly overwrites any stale reason left over
+    // from an earlier, different denial.
+    denyEntry: (zoneId: string) => { setDeniedZoneId(zoneId); setDeniedReason('locked'); },
   };
 }

@@ -135,6 +135,11 @@ export const FEATURE_MIN_ROLE = {
   // broadcast"), the text counterpart to 'presence:spotlight' (voice) above
   // — same admin tier, same "PA announcement" posture.
   'broadcast:text': 'admin',
+  // QA #8 — decide a guest's request to enter a Zone.memberOnly zone
+  // (ZONE_APPROVAL_DECIDE). Same tier as 'guest:manage' (the room-wide
+  // waiting-room equivalent this mirrors) — a guest's access is the
+  // highest-risk category in this permission map either way.
+  'zone:approve_guest': 'admin',
 } as const satisfies Record<string, Role>;
 
 export type FeatureKey = keyof typeof FEATURE_MIN_ROLE;

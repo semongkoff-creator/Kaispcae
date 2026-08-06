@@ -216,6 +216,17 @@ function canAccess(rs: RoomAdminState, uid: string | undefined, feature: Feature
   return hasFeatureAccess(getRole(rs, uid), feature);
 }
 
+// QA #8 — the one piece of this file's role machinery zoneHandler.ts needs
+// (to gate ZONE_APPROVAL_DECIDE to admins, and to recognize a guest at
+// ZONE_ENTER) without exposing getRole/getRoomAdmin/RoomAdminState
+// themselves. undefined uid → 'guest', same floor getRole would reach
+// anyway via isGuestUid's own "no userId" reasoning, just without needing a
+// real (or synthetic guest:) uid to get there.
+export function getRoleInRoom(room: string, uid: string | undefined): Role {
+  if (!uid) return 'guest';
+  return getRole(getRoomAdmin(room), uid);
+}
+
 // One pinned Notice per room (see shared/types/index.ts's Notice doc
 // comment) — in-memory, same convention as roomAdminMap above.
 const roomNoticeMap = new Map<string, Notice>();

@@ -761,7 +761,11 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
       // a glance which areas actually cut off audio at their boundary.
       const isolated = a.audioIsolated ?? isPriv;
       const label = isPriv ? `${a.name || 'Private'}${a.areaId ? ` #${a.areaId}` : ''}` : (a.name || 'Lokasi');
-      ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px sans-serif'; ctx.fillText(`${isolated ? '🔇' : '🔊'} ${label}`, zx + 4, zy + 14);
+      // QA #8 — 🔒 marks a member-only Private Area (guest needs admin
+      // approval to enter) so this is visible at a glance while browsing
+      // the map in the editor, same "don't have to click in to know" bar
+      // the isolate/capacity indicators already set.
+      ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px sans-serif'; ctx.fillText(`${isolated ? '🔇' : '🔊'}${a.memberOnly ? ' 🔒' : ''} ${label}`, zx + 4, zy + 14);
     }
     for (const e of ld.tileEffects) {
       const sx = e.x * TILE_SIZE, sy = e.y * TILE_SIZE, c = TILE_SIZE / 2;
@@ -1477,7 +1481,13 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             const capacityRaw = (window.prompt('Kapasitas maksimal orang di area ini (kosongkan = tanpa batas):', '') ?? '').trim();
             const capacityNum = capacityRaw ? parseInt(capacityRaw, 10) : NaN;
             const capacity = Number.isInteger(capacityNum) && capacityNum > 0 ? capacityNum : undefined;
-            s.addArea('privateArea', sel, name || 'Private', areaId || undefined, isolate, capacity);
+            // QA #8 — "ODOO/AI TEAM hanya anggota; terkunci bagi guest." Default
+            // Batal = tidak member-only, matching every other toggle here
+            // ("no new restriction" is always the safe default for an area
+            // authored before this existed, or for an admin who just wants a
+            // private room with no guest-gating at all).
+            const memberOnly = window.confirm('Area ini KHUSUS ANGGOTA (tidak untuk guest)?\n\nOK = ya — guest yang coba masuk butuh persetujuan admin dulu.\nBatal = tidak — guest bebas masuk seperti member biasa.');
+            s.addArea('privateArea', sel, name || 'Private', areaId || undefined, isolate, capacity, memberOnly);
           } else if (s.selectedEffect === 'mapLocation') {
             const name = (window.prompt('Nama lokasi:', '') ?? '').trim();
             // Default Batal = TIDAK kedap suara — Map Location is just a named

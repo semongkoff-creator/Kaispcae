@@ -496,6 +496,23 @@ export enum SocketEvents {
   ZONE_KNOCK_CANCEL = 'zone:knock_cancel',
   ZONE_KNOCK_CANCELLED = 'zone:knock_cancelled',
 
+  // QA #8 — Zone.memberOnly zones (e.g. "ODOO TEAM"/"AI TEAM") auto-gate a
+  // GUEST specifically, no manual lock needed — ZONE_LOCKED_DENIED's
+  // `reason` gets a new 'member_only' value for this case. Structurally
+  // mirrors the ZONE_KNOCK/DECIDE pair above, but a member-only zone has no
+  // keyholder to notify/decide, so every connected admin is notified
+  // (getConnectedAdminSocketIds, same fan-out roomHandler.ts's Guest Link
+  // waiting-room already uses) and any of them may decide — not "whoever
+  // locked it", since nobody did. ZONE_APPROVAL_CANCEL/CANCELLED mirror
+  // ZONE_KNOCK_CANCEL/CANCELLED's same three trigger cases (requester
+  // backs out, disconnects, or the zone stops being member-only under them).
+  ZONE_APPROVAL_REQUEST = 'zone:approval_request',
+  ZONE_APPROVAL_REQUESTED = 'zone:approval_requested',
+  ZONE_APPROVAL_DECIDE = 'zone:approval_decide',
+  ZONE_APPROVAL_DECIDED = 'zone:approval_decided',
+  ZONE_APPROVAL_CANCEL = 'zone:approval_cancel',
+  ZONE_APPROVAL_CANCELLED = 'zone:approval_cancelled',
+
   // Claimable seat markers (Room Editor's 'claimableSeat' tile effect —
   // mapLayers.ts). Ownership is in-memory only (server/src/socket/
   // seatClaim.ts), exactly like the zone lock above: "right now, in this
@@ -1393,6 +1410,18 @@ export interface GuestJoinRequest {
   name: string;
 }
 
+// QA #8 — a guest asking to enter a Zone.memberOnly zone. guestId is the
+// synthetic uid (see server's roomHandler.ts guestUid()), playerId their
+// live socket id (needed to route ZONE_APPROVAL_DECIDED back to them, same
+// role playerId plays in ZoneKnockRequest above).
+export interface ZoneApprovalRequest {
+  zoneId: string;
+  zoneName: string;
+  guestId: string;
+  playerId: string;
+  guestName: string;
+}
+
 export interface Zone {
   id: string;
   name: string;
@@ -1419,6 +1448,15 @@ export interface Zone {
   // counts current occupants itself (getSocketIdsInZone), never trusting a
   // client-reported count.
   capacity?: number;
+  // QA #8 — "ODOO/AI TEAM hanya anggota; terkunci bagi guest." A GUEST
+  // (Role: 'guest', reachable only via a Guest Link) needs admin approval
+  // to enter this zone; member/staff/admin/owner enter freely, exactly like
+  // any other zone. Undefined/false = every zone before this field existed
+  // (open to guests, same as a member). Enforced server-side in
+  // zoneHandler.ts's ZONE_ENTER, alongside (not instead of) the manual lock
+  // and capacity checks above — a zone can be member-only AND separately
+  // locked/capacity-limited at the same time.
+  memberOnly?: boolean;
 }
 
 // Chat. When zoneId is set, the message is private to that zone — the

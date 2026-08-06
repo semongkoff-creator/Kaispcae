@@ -1,8 +1,9 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents } from '@virtualmeet/shared';
+import { SocketEvents, hasFeatureAccess } from '@virtualmeet/shared';
 import { mayEnterZone, isZoneLocked, isSealedIn } from './zoneLock';
 import { sendMusicStateToSocket } from './musicHandler';
 import { getCachedZones } from '../store/roomStore';
+import { getConnectedAdminSocketIds, getRoleInRoom, getPlayerName } from './roomHandler';
 
 // Actual A/V zone restriction is computed client-side (see useProximity.ts —
 // every client already knows every player's position and the room's zones,
@@ -37,6 +38,37 @@ export function isSocketInZone(room: string, socketId: string, zoneId: string): 
   return !!loc && loc.room === room && loc.zoneId === zoneId;
 }
 
+// QA #8 — Zone.memberOnly guest-approval bookkeeping. Two maps, same
+// "room → keyed by X" nesting zoneLock.ts's own locks/pendingKnocks use:
+// pendingZoneApprovals is one in-flight request per guest (a guest can only
+// ever be waiting on one thing at a time, mirrors roomHandler.ts's
+// pendingGuests); approvedGuestZones is the durable-for-the-session grant,
+// keyed by `${zoneId}:${guestId}` so one guest can be approved into several
+// different member-only zones independently. Neither is cleared on the
+// GUEST's disconnect except the pending one (see the DISCONNECT handler
+// below) — an approval should survive a reconnect, a pending request
+// shouldn't leave a stale card on some admin's screen forever.
+interface PendingZoneApproval {
+  zoneId: string;
+  zoneName: string;
+  guestId: string;
+  socketId: string;
+  guestName: string;
+  notifiedAdminSocketIds: string[];
+}
+const pendingZoneApprovals = new Map<string, Map<string, PendingZoneApproval>>();
+const approvedGuestZones = new Map<string, Set<string>>();
+
+function roomPendingApprovals(room: string): Map<string, PendingZoneApproval> {
+  let m = pendingZoneApprovals.get(room);
+  if (!m) { m = new Map(); pendingZoneApprovals.set(room, m); }
+  return m;
+}
+
+function isGuestApprovedForZone(room: string, zoneId: string, guestId: string): boolean {
+  return !!approvedGuestZones.get(room)?.has(`${zoneId}:${guestId}`);
+}
+
 export function registerZoneHandlers(io: Server, socket: Socket) {
   let currentRoom: string | null = null;
 
@@ -55,12 +87,22 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
       socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'locked' });
       return;
     }
+    const zone = getCachedZones(currentRoom).find((z) => z.id === zoneId);
+    // QA #8 — "ODOO/AI TEAM hanya anggota; terkunci bagi guest." A guest
+    // (never a member/staff/admin/owner — those have no guestId at all, see
+    // index.ts's io.use()) needs an admin's approval, tracked separately
+    // from the manual lock above (this zone was never locked by anyone —
+    // there's no keyholder to check against).
+    const guestId = (socket.data as { guestId?: string }).guestId;
+    if (guestId && zone?.memberOnly && !isGuestApprovedForZone(currentRoom, zoneId, guestId)) {
+      socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'member_only' });
+      return;
+    }
     // Item #14 — optional max-occupant cap (Room Editor's "Private area"
     // tool, Zone.capacity). Excludes this socket from the count so a
     // redundant ZONE_ENTER re-fired while already inside (e.g. walking
     // around within the same zone) never locks someone out of a zone
     // they're already standing in.
-    const zone = getCachedZones(currentRoom).find((z) => z.id === zoneId);
     if (zone?.capacity) {
       const others = getSocketIdsInZone(currentRoom, zoneId).filter((id) => id !== socket.id);
       if (others.length >= zone.capacity) {
@@ -89,7 +131,86 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
     socket.to(currentRoom).emit(SocketEvents.ZONE_EXIT, { playerId: socket.id, zoneId });
   });
 
+  // QA #8 — the guest asking for admin approval after being bounced by
+  // ZONE_ENTER's member_only denial above. Fans out to EVERY connected
+  // admin (getConnectedAdminSocketIds — same pattern roomHandler.ts's Guest
+  // Link waiting room already uses), not a single keyholder: a member-only
+  // zone was never locked by anyone, so there's no one person to ask.
+  socket.on(SocketEvents.ZONE_APPROVAL_REQUEST, (data: { zoneId: string }) => {
+    if (!currentRoom) return;
+    const guestId = (socket.data as { guestId?: string }).guestId;
+    if (!guestId) return; // members never need approval — nothing to request
+    const zoneId = data?.zoneId;
+    if (typeof zoneId !== 'string') return;
+    const zone = getCachedZones(currentRoom).find((z) => z.id === zoneId);
+    if (!zone?.memberOnly) return; // not (or no longer) a member-only zone
+    if (isGuestApprovedForZone(currentRoom, zoneId, guestId)) return; // already approved — client should just retry ZONE_ENTER
+    const guestName = (socket.data as { guestName?: string }).guestName || 'Guest';
+    const notifiedAdminSocketIds = getConnectedAdminSocketIds(currentRoom);
+    for (const sid of notifiedAdminSocketIds) {
+      io.to(sid).emit(SocketEvents.ZONE_APPROVAL_REQUESTED, { zoneId, zoneName: zone.name, guestId, playerId: socket.id, guestName });
+    }
+    roomPendingApprovals(currentRoom).set(guestId, { zoneId, zoneName: zone.name, guestId, socketId: socket.id, guestName, notifiedAdminSocketIds });
+  });
+
+  // Any admin who was notified may decide — re-verified server-side
+  // ('zone:approve_guest', shared/permissions.ts), never trusting that only
+  // admins received the ZONE_APPROVAL_REQUESTED broadcast in the first place.
+  socket.on(SocketEvents.ZONE_APPROVAL_DECIDE, (data: { zoneId: string; guestId: string; admit: boolean }) => {
+    if (!currentRoom) return;
+    const uid = socket.data.userId as string | undefined;
+    if (!hasFeatureAccess(getRoleInRoom(currentRoom, uid), 'zone:approve_guest')) {
+      socket.emit('admin:error', { message: 'Only admins can decide zone entry requests' });
+      return;
+    }
+    const guestId = data?.guestId;
+    if (typeof guestId !== 'string') return;
+    const pending = roomPendingApprovals(currentRoom).get(guestId);
+    if (!pending || pending.zoneId !== data?.zoneId) return;
+    roomPendingApprovals(currentRoom).delete(guestId);
+    if (data.admit) {
+      let set = approvedGuestZones.get(currentRoom);
+      if (!set) { set = new Set(); approvedGuestZones.set(currentRoom, set); }
+      set.add(`${pending.zoneId}:${guestId}`);
+    }
+    const guestSocket = io.sockets.sockets.get(pending.socketId);
+    guestSocket?.emit(SocketEvents.ZONE_APPROVAL_DECIDED, { zoneId: pending.zoneId, admitted: !!data.admit, byName: getPlayerName(socket.id) });
+  });
+
+  // The guest's own way out of a pending request before any admin decides —
+  // same shape as ZONE_KNOCK_CANCEL. No "notify every admin their card is
+  // gone" step needed beyond this broadcast: unlike a single-keyholder
+  // knock, several admins may have independently seen the request card, so
+  // ZONE_APPROVAL_CANCELLED reaches all of them via notifiedAdminSocketIds.
+  socket.on(SocketEvents.ZONE_APPROVAL_CANCEL, (data: { zoneId: string }) => {
+    if (!currentRoom) return;
+    const guestId = (socket.data as { guestId?: string }).guestId;
+    if (!guestId) return;
+    const pending = roomPendingApprovals(currentRoom).get(guestId);
+    if (!pending || pending.zoneId !== data?.zoneId) return;
+    roomPendingApprovals(currentRoom).delete(guestId);
+    for (const sid of pending.notifiedAdminSocketIds) {
+      io.to(sid).emit(SocketEvents.ZONE_APPROVAL_CANCELLED, { zoneId: pending.zoneId, guestId });
+    }
+  });
+
   socket.on(SocketEvents.DISCONNECT, () => {
     socketZone.delete(socket.id);
+    // A guest who disconnects while waiting shouldn't leave a stale request
+    // card on every admin's screen forever — approvedGuestZones is
+    // deliberately left untouched here (see its own doc comment above): an
+    // already-granted approval should survive a reconnect.
+    if (currentRoom) {
+      const guestId = (socket.data as { guestId?: string }).guestId;
+      if (guestId) {
+        const pending = roomPendingApprovals(currentRoom).get(guestId);
+        if (pending) {
+          roomPendingApprovals(currentRoom).delete(guestId);
+          for (const sid of pending.notifiedAdminSocketIds) {
+            io.to(sid).emit(SocketEvents.ZONE_APPROVAL_CANCELLED, { zoneId: pending.zoneId, guestId });
+          }
+        }
+      }
+    }
   });
 }

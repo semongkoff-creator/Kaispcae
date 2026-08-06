@@ -1940,11 +1940,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           knocks={zoneLock.knocks}
           deniedZoneId={zoneLock.deniedZoneId}
           deniedZoneName={zones.find((z) => z.id === zoneLock.deniedZoneId)?.name ?? null}
+          deniedReason={zoneLock.deniedReason}
           pendingKnock={zoneLock.pendingKnock}
+          pendingApproval={zoneLock.pendingApproval}
+          approvalRequests={zoneLock.approvalRequests}
           toast={zoneLock.toast}
-          onKnock={() => zoneLock.deniedZoneId && zoneLock.knock(zoneLock.deniedZoneId, zones.find((z) => z.id === zoneLock.deniedZoneId)?.name)}
+          onKnock={() => zoneLock.deniedZoneId && zoneLock.requestEntry(zoneLock.deniedZoneId, zones.find((z) => z.id === zoneLock.deniedZoneId)?.name)}
           onCancelKnock={zoneLock.cancelKnock}
           onDecide={zoneLock.decide}
+          onCancelApproval={zoneLock.cancelApproval}
+          onDecideApproval={zoneLock.decideApproval}
         />
       )}
 
