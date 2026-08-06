@@ -34,14 +34,52 @@ function roomClaims(room: string): Map<string, SeatClaim> {
 // collision — no DB round-trip, and it can't be spoofed by a client
 // inventing an id that was never stamped in the editor.
 function seatExists(room: string, seatId: string): boolean {
+  return allSeatMarkers(room).some((m) => m.seatId === seatId);
+}
+
+interface SeatMarker { seatId: string; x: number; y: number }
+
+function allSeatMarkers(room: string): SeatMarker[] {
   const tiles = getCachedTiles(room);
-  if (!tiles) return false;
-  for (const row of tiles) {
-    for (const tile of row) {
-      if (tile?.claimableSeatId === seatId) return true;
+  if (!tiles) return [];
+  const out: SeatMarker[] = [];
+  for (let y = 0; y < tiles.length; y++) {
+    const row = tiles[y];
+    for (let x = 0; x < (row?.length ?? 0); x++) {
+      const id = row[x]?.claimableSeatId;
+      if (id) out.push({ seatId: id, x, y });
     }
   }
-  return false;
+  return out;
+}
+
+// Nearest UNCLAIMED seat to the one someone just tried (and failed) to
+// claim — used so a taken desk redirects to the next-best one instead of a
+// dead-end "sudah diklaim" toast. Distance is plain tile distance; there's
+// no table/desk-cluster grouping in this marker system (see the doc comment
+// above), so "physically nearest" is the closest thing to "same area".
+function nearestFreeSeat(room: string, fromSeatId: string): string | null {
+  const markers = allSeatMarkers(room);
+  const from = markers.find((m) => m.seatId === fromSeatId);
+  if (!from) return null;
+  const taken = roomClaims(room);
+  let best: SeatMarker | null = null;
+  let bestDist = Infinity;
+  for (const m of markers) {
+    if (m.seatId === fromSeatId || taken.has(m.seatId)) continue;
+    const d = Math.hypot(m.x - from.x, m.y - from.y);
+    if (d < bestDist) { bestDist = d; best = m; }
+  }
+  return best?.seatId ?? null;
+}
+
+function assignSeat(room: string, seatId: string, uid: string, socketId: string, name: string): void {
+  const m = roomClaims(room);
+  // One seat per user: claiming a new one frees whichever one they held.
+  for (const [sid, c] of m) {
+    if (c.userId === uid) m.delete(sid);
+  }
+  m.set(seatId, { userId: uid, name, socketId });
 }
 
 function claimStates(room: string): SeatClaimState[] {
@@ -70,16 +108,24 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
 
     const m = roomClaims(currentRoom);
     const existing = m.get(data.seatId);
+    const name = getPlayerName(socket.id) ?? 'Seseorang';
+
     if (existing && existing.userId !== uid) {
-      socket.emit(SocketEvents.SEAT_CLAIM_DENIED, { seatId: data.seatId, byName: existing.name });
+      // Taken — redirect to the nearest free desk instead of a dead end.
+      // Only a genuinely full room (no free seat anywhere) falls back to a
+      // plain denial with no fallbackSeatId.
+      const fallbackSeatId = nearestFreeSeat(currentRoom, data.seatId);
+      if (!fallbackSeatId) {
+        socket.emit(SocketEvents.SEAT_CLAIM_DENIED, { seatId: data.seatId, byName: existing.name });
+        return;
+      }
+      assignSeat(currentRoom, fallbackSeatId, uid, socket.id, name);
+      socket.emit(SocketEvents.SEAT_CLAIM_DENIED, { seatId: data.seatId, byName: existing.name, fallbackSeatId });
+      io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
       return;
     }
 
-    // One seat per user: claiming a new one frees whichever one they held.
-    for (const [seatId, c] of m) {
-      if (c.userId === uid) m.delete(seatId);
-    }
-    m.set(data.seatId, { userId: uid, name: getPlayerName(socket.id) ?? 'Seseorang', socketId: socket.id });
+    assignSeat(currentRoom, data.seatId, uid, socket.id, name);
     io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
   });
 

@@ -447,8 +447,15 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socket.on(SocketEvents.SEAT_CLAIMS_UPDATED, (data: { claims: { seatId: string; userId: string; name: string }[] }) => {
       useGameStore.getState().setSeatClaims(data?.claims ?? []);
     });
-    socket.on(SocketEvents.SEAT_CLAIM_DENIED, (data: { seatId: string; byName?: string }) => {
-      useGameStore.getState().setSitNotice(`Kursi ini sudah diklaim ${data.byName ?? 'orang lain'}.`);
+    socket.on(SocketEvents.SEAT_CLAIM_DENIED, (data: { seatId: string; byName?: string; fallbackSeatId?: string }) => {
+      const byName = data.byName ?? 'orang lain';
+      // Server already redirected the claim to the nearest free desk (see
+      // seatClaim.ts's nearestFreeSeat) — SEAT_CLAIMS_UPDATED right before
+      // this reflects the new ownership; this toast just explains why.
+      const msg = data.fallbackSeatId
+        ? `Kursi ini sudah diklaim ${byName} — kamu dipindah ke kursi kosong terdekat.`
+        : `Kursi ini sudah diklaim ${byName}.`;
+      useGameStore.getState().setSitNotice(msg);
     });
 
     // Zone-private chat only now — the old whole-room broadcast case is

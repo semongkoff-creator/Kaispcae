@@ -99,6 +99,21 @@ let colorIndex = 0;
 
 const userSocketMap = new Map<string, string>();
 
+// Reconnect grace period — a bare network drop (wifi blip, tab backgrounded,
+// laptop sleep) fires the socket's 'disconnect' event just like a real
+// leave, but the audit's own complaint was exactly this: a brief outage
+// made the avatar visibly vanish for everyone else even though the user
+// was back within seconds. Delaying the actual handleLeave() cleanup by
+// this window means a reconnect that lands before it fires never sees
+// PLAYER_LEFT broadcast at all for the old session — JOIN_ROOM's existing
+// stale-entry eviction (below) cancels the pending timer first, so the two
+// paths can never both run for the same disconnect. LEAVE_ROOM (explicit)
+// and PLAYER_KICKED are NOT delayed — only a bare 'disconnect' is graced.
+// Keyed by uid (not socket.id) since that's what a reconnect's fresh
+// JOIN_ROOM has to look the pending entry up by.
+const RECONNECT_GRACE_MS = 15000;
+const pendingDisconnects = new Map<string, { socketId: string; room: string; timer: NodeJS.Timeout }>();
+
 interface RoomAdminState {
   masterAdminUserId: string;
   adminUserIds: Set<string>;
@@ -367,6 +382,18 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // and grant themselves master-admin.
     const uid = (socket.data as { userId?: string }).userId || userId || socket.id;
     userSocketMap.set(uid, socket.id);
+
+    // A fresh JOIN_ROOM for the same account within the grace window IS the
+    // reconnect the timer below was waiting for — cancel it so handleLeave()
+    // never fires for the old socket. The stale-entry eviction further down
+    // still runs and removes that old (now-defunct) entry as it always did;
+    // this only stops the SEPARATE, redundant cleanup the grace timer would
+    // otherwise also attempt a few seconds from now.
+    const pending = pendingDisconnects.get(uid);
+    if (pending && pending.room === room) {
+      clearTimeout(pending.timer);
+      pendingDisconnects.delete(uid);
+    }
 
     // Load master admin from database (ownerId), not first socket
     const rs = await initRoomAdminFromDb(room);
@@ -1441,7 +1468,17 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   });
 
   socket.on(SocketEvents.DISCONNECT, () => {
-    handleLeave(io, socket, currentRoom);
+    const room = currentRoom;
+    if (!room) return;
+    // No stable identity to reconnect AS (shouldn't happen — login is
+    // mandatory — but fall back to the old immediate behavior if it ever is).
+    const uid = findUserIdBySocket(socket.id);
+    if (!uid) { handleLeave(io, socket, room); return; }
+    const timer = setTimeout(() => {
+      pendingDisconnects.delete(uid);
+      handleLeave(io, socket, room);
+    }, RECONNECT_GRACE_MS);
+    pendingDisconnects.set(uid, { socketId: socket.id, room, timer });
   });
 }
 
