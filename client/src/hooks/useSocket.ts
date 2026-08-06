@@ -975,6 +975,26 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socket.connect();
 
     return () => {
+      // QA (LiveKit checklist item 11, "Buat/join/leave bersih; tak ada
+      // hantu") — this cleanup fires on every INTENTIONAL leave (back to
+      // Lobby, portal travel remounting Game with a new roomSlug, logout —
+      // anything that's a real React unmount/dep-change, as opposed to a
+      // hard network drop/tab close, which never runs cleanup at all and
+      // correctly still falls through to the disconnect+grace-period path
+      // below). Before this fix, EVERY leave — deliberate or not — went
+      // through bare socket.disconnect(), which server-side always takes
+      // roomHandler.ts's graced path (RECONNECT_GRACE_MS = 4s) rather than
+      // the immediate one LEAVE_ROOM triggers — so even clicking "back to
+      // lobby" left your avatar and everyone's live WebRTC connection to
+      // you lingering for up to ~4.5s after you'd already torn everything
+      // down locally. Emitting this first (synchronous, before disconnect())
+      // lets socket.io flush it over the still-open connection — same
+      // "notify then disconnect" ordering used by SocketEvents.PLAYER_KICK
+      // server-side. Safe to call even when the server already ran
+      // handleLeave for this socket via another path (kick, room deleted,
+      // session superseded) — the server's own LEAVE_ROOM handler no-ops
+      // once `currentRoom` is already null.
+      if (socket.connected) socket.emit(SocketEvents.LEAVE_ROOM);
       socket.removeAllListeners();
       socket.disconnect();
     };

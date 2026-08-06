@@ -51,6 +51,27 @@ import { startAttendanceSweep } from './socket/attendanceSweep';
 loadConfig();
 const config = getConfig();
 
+// QA (Integrasi checklist item 13, "Kegagalan anggun") — without these, an
+// error that escapes every route/handler's own try/catch (a missed .catch()
+// on a fire-and-forget call, a bug in a rarely-hit code path) doesn't just
+// fail that one request — Node 20's default behaviour is to terminate the
+// ENTIRE process on an unhandled promise rejection, and Express 4 (unlike 5)
+// never forwards an async handler's thrown/rejected error to error-handling
+// middleware in the first place, so it has nowhere else to go. That means a
+// single bug in, say, one Lark sub-feature could take down every room's
+// live socket connections along with it — the opposite of "1 integrasi down
+// → space tetap jalan". These are a last-resort safety net, not a
+// substitute for the try/catch each integration module already does at its
+// own boundary (see lib/lark*.ts) — just log loudly enough to actually
+// find and fix the gap, and keep the space running for everyone already
+// connected instead of dropping every live socket over one stray error.
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] unhandled promise rejection (process kept alive):', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[fatal] uncaught exception (process kept alive):', err);
+});
+
 const app = express();
 
 // 512kb (up from the 100kb default) so profile-photo data-URLs fit — the
