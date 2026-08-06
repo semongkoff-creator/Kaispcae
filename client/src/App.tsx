@@ -1557,6 +1557,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onEditAvatar={() => setShowEditor(true)}
         onOpenTutorial={() => setShowTutorial(true)}
         onOpenMemberList={() => setShowMemberList(true)}
+        localRole={localRole}
         manualStatus={manualStatus}
         onPickPresence={handlePresencePick}
         isAdmin={isAdmin}

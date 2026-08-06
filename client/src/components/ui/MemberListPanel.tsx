@@ -43,6 +43,10 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
       return a.displayName.localeCompare(b.displayName);
     });
   const onlineCount = rows.filter((r) => r.presence).length;
+  // The local user is included in their own ROSTER_SNAPSHOT/_UPDATED entries
+  // (server records every non-guest join, not just other people's), so this
+  // is the same live data other rows use — not a special case.
+  const myRoomName = roster[localUserId]?.roomName ?? currentRoomSlug;
 
   return (
     <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onMouseDown={onClose}>
@@ -54,6 +58,11 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
           <div>
             <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Member</h2>
             <p className="text-xs text-gray-500 dark:text-gray-400">{people ? `${onlineCount} online dari ${people.length}` : 'Memuat…'}</p>
+            {/* Bug report follow-up — makes it obvious at a glance whether
+                "(room kamu)" tags below are plausible: if this says the same
+                room as everyone else online, that's not the panel failing
+                to differentiate, it's genuinely the only populated room. */}
+            <p className="text-[10px] text-gray-400 dark:text-gray-500">Kamu di room: {myRoomName}</p>
           </div>
           <button onClick={onClose} title="Tutup" className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer">
             <X size={18} />

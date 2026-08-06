@@ -6,6 +6,7 @@ import { RecordingControl } from './RecordingControl';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { Theme } from '@/hooks/useTheme';
 import { ManualStatus } from '@/data/presence';
+import { Role } from '@virtualmeet/shared';
 
 // A2 — the MeetKai-native attendance UI is retired in favour of automatic Lark
 // Attendance check-in (see server lib/larkAttendance.ts). Flip to true only to
@@ -23,6 +24,9 @@ interface SidebarProps {
   // guests (see the row's own isGuest gate below) — they have no User row
   // and can't appear in that roster themselves either.
   onOpenMemberList: () => void;
+  // TEMPORARY — only for the debug line at the bottom of this menu, see its
+  // own comment. Remove alongside it.
+  localRole: Role;
   // Fitur 3B / A11 — manual presence picker (Available/WFH/Focus/In a
   // meeting/Lunch/Break/Away). 'away' opens the Away-reason popup upstream
   // (see App.tsx's handlePresencePick) rather than applying immediately,
@@ -184,6 +188,7 @@ export function Sidebar({
   onEditAvatar,
   onOpenTutorial,
   onOpenMemberList,
+  localRole,
   manualStatus,
   onPickPresence,
   isAdmin,
@@ -459,6 +464,21 @@ export function Sidebar({
                 </div>
               </div>
             )}
+
+            {/* TEMPORARY DIAGNOSTIC — remove once the "guest still sees
+                Member" report (reported 3x, unreproduced from code review —
+                both isGuest-only and the isGuest||localRole==='guest'
+                hardening were independently verified present in the
+                deployed bundle) is root-caused. Shows exactly what THIS
+                client believes about its own session so a screenshot from
+                whoever's still seeing the bug tells us immediately whether
+                it's a real client-side desync (isGuest=false, role=guest
+                would be the smoking gun) or a test-methodology mismatch
+                (isGuest=false, role=member — not actually a guest session
+                by this feature's definition). */}
+            <p className="px-2 py-1 mt-1 text-[9px] text-gray-300 dark:text-gray-600 border-t border-gray-100 dark:border-gray-800">
+              debug: isGuest={String(isGuest)} role={localRole}
+            </p>
           </div>
         )}
       </div>
