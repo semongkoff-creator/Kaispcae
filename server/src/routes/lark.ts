@@ -148,9 +148,16 @@ lark.get('/auth/lark/callback', async (req: Request, res: Response) => {
       });
     } else {
       // Existing account — always refresh the stored tokens on each Lark login
-      // (they rotate), and backfill user_id for accounts created before A2.
+      // (they rotate), backfill user_id for accounts created before A2, and
+      // re-sync name/avatar from Lark on EVERY login (previously this only
+      // ever happened once, at account creation — a name/photo change in
+      // Lark afterward never reached KaiSpace). Lark wins whenever it
+      // actually returns a value; a transient empty response from user_info
+      // must never blank out what's already stored.
       const updateData: Record<string, unknown> = { ...larkTokenFields };
       if (larkUserId && !user.larkUserId) updateData.larkUserId = larkUserId;
+      if (name) updateData.displayName = name;
+      if (avatar) updateData.profilePhoto = avatar;
       if (Object.keys(updateData).length > 0) {
         user = await prisma.user.update({ where: { id: user.id }, data: updateData });
       }
