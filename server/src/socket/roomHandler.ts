@@ -1129,20 +1129,27 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // requester is standing in (verified HERE, server-side, via
     // zoneKeyholderOf — never taken on the client's word: a modified client
     // claiming "I was summoned" can't forge this, since it depends on the
-    // REQUESTER's own tracked zone and that zone's real lock record).
+    // REQUESTER's own tracked zone and that zone's real lock record) — OR
+    // from an admin+, same trust tier that can already lock/unlock any
+    // room's zones outright ('room:lock'), so being able to override entry
+    // via summon too is the same permission, not a new one. A non-keyholder,
+    // non-admin summoner still can't bypass anything.
     // Admits the target into that zone's allowedUserIds — the exact
     // mechanism ZONE_KNOCK_DECIDE already uses for a granted knock — then
     // tells the target's own client BEFORE the teleport below, so its
     // zone-entry effect (App.tsx) already sees them as admitted and doesn't
     // bounce them back out the instant they land. Summons into an unlocked
-    // zone, or from anyone other than that zone's keyholder, are unaffected
-    // — mayEnterZone/the client bounce still apply exactly as before.
+    // zone, or from anyone without either of these, are unaffected —
+    // mayEnterZone/the client bounce still apply exactly as before.
     const requesterUid = findUserIdBySocket(pending.fromSocketId);
     const targetUid = findUserIdBySocket(socket.id);
     const requesterZoneId = zoneIdOfSocket(pending.fromSocketId);
-    if (requesterZoneId && requesterUid && targetUid && zoneKeyholderOf(room, requesterZoneId) === requesterUid) {
-      admitUserToZone(room, requesterZoneId, targetUid);
-      socket.emit(SocketEvents.ZONE_KNOCK_DECIDED, { zoneId: requesterZoneId, admitted: true, byName: stillRequester.name });
+    if (requesterZoneId && requesterUid && targetUid) {
+      const rs = getRoomAdmin(room);
+      if (zoneKeyholderOf(room, requesterZoneId) === requesterUid || canAccess(rs, requesterUid, 'room:lock')) {
+        admitUserToZone(room, requesterZoneId, targetUid);
+        socket.emit(SocketEvents.ZONE_KNOCK_DECIDED, { zoneId: requesterZoneId, admitted: true, byName: stillRequester.name });
+      }
     }
 
     updatePlayerPosition(room, socket.id, landX, landY, stillRequester.direction);

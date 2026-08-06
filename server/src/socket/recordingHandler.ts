@@ -63,6 +63,20 @@ export function registerRecordingHandlers(io: Server, socket: Socket): void {
         return;
       }
 
+      // Self-only, enforced server-side — the shipped UI only ever offers
+      // "Myself" as a target (see App.tsx's recordingTargets; a picker for
+      // recording someone ELSE was deliberately removed), but that alone
+      // was never backed by a matching check here: nothing stopped a
+      // hand-crafted RECORDING_START from naming any other userId, which
+      // would capture that person's camera/mic/screen over the existing
+      // WebRTC connection with no consent prompt of any kind on their end.
+      // Recording someone without their knowledge isn't a gap to fill in —
+      // it's a line this app doesn't cross.
+      if (data.targetUserId !== uid) {
+        socket.emit('admin:error', { message: 'You can only record yourself' });
+        return;
+      }
+
       const targetSocketId = findSocketByUserId(io, room, data.targetUserId);
       if (!targetSocketId) {
         socket.emit('admin:error', { message: 'Recording target is not currently in this room' });
