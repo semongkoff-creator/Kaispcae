@@ -570,13 +570,15 @@ export function ChatPanel({
                   </button>
                 </div>
               )}
-              <button
-                onClick={() => onPinMessage?.(currentPin.id, false)}
-                title="Lepas sematan"
-                className="w-4 h-4 shrink-0 inline-flex items-center justify-center text-gray-400 hover:text-red-500 cursor-pointer"
-              >
-                <XLg size={9} />
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => onPinMessage?.(currentPin.id, false)}
+                  title="Lepas sematan"
+                  className="w-4 h-4 shrink-0 inline-flex items-center justify-center text-gray-400 hover:text-red-500 cursor-pointer"
+                >
+                  <XLg size={9} />
+                </button>
+              )}
             </div>
           )}
 
@@ -934,13 +936,15 @@ export function ChatPanel({
             style={{ position: 'fixed', left: Math.min(msgMenu.x, window.innerWidth - 220), top: Math.min(msgMenu.y, window.innerHeight - 260) }}
             className="z-[1001] w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 text-xs"
           >
-            <button
-              onClick={() => { onPinMessage?.(msgMenu.message.id, !msgMenu.message.isPinned); setMsgMenu(null); }}
-              className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
-            >
-              {msgMenu.message.isPinned ? <PinAngleFill size={11} className="text-indigo-500" /> : <PinAngle size={11} />}
-              {msgMenu.message.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
-            </button>
+            {isAdmin && onPinMessage && (
+              <button
+                onClick={() => { onPinMessage(msgMenu.message.id, !msgMenu.message.isPinned); setMsgMenu(null); }}
+                className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
+              >
+                {msgMenu.message.isPinned ? <PinAngleFill size={11} className="text-indigo-500" /> : <PinAngle size={11} />}
+                {msgMenu.message.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
+              </button>
+            )}
             {isAdmin && onPinNotice && (
               <button
                 onClick={() => { onPinNotice(msgMenu.message); setMsgMenu(null); }}

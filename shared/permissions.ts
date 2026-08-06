@@ -125,6 +125,12 @@ export const FEATURE_MIN_ROLE = {
   // regular member never gets a war-room-style view of people who
   // deliberately hid themselves from regular members specifically.
   'presence:full_view': 'admin',
+  // Pin/unpin a channel/DM message (MESSAGE_PIN) — originally open to
+  // anyone in the thread ("curating important messages isn't modifying
+  // someone else's content"), but that let any member pin/unpin anyone
+  // else's messages too, not just their own. Narrowed to admin+ per
+  // explicit request, same tier as the room-management gates above.
+  'message:pin': 'admin',
 } as const satisfies Record<string, Role>;
 
 export type FeatureKey = keyof typeof FEATURE_MIN_ROLE;

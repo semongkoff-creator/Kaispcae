@@ -1,12 +1,13 @@
 import { Server, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, ChannelMessage, ChatReadEntry } from '@virtualmeet/shared';
+import { SocketEvents, ChannelMessage, ChatReadEntry, hasFeatureAccess } from '@virtualmeet/shared';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { sanitizeChat } from '../middleware/validate';
 import { ensureGroupConversation, ensureDmConversation } from '../lib/conversations';
 import { canAccessRoomChat } from '../lib/chatAccess';
 import { relayChannelMessageToLark } from '../lib/larkChatSync';
+import { resolveRoomRole } from '../lib/roles';
 
 
 // Keyed by userId, not socket.id — a per-connection key means disconnecting
@@ -256,11 +257,11 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
     }
   });
 
-  // Pin/unpin — open to anyone who can access this channel/DM (re-checked
-  // here, same as CHANNEL_JOIN/DM_JOIN do at join time), NOT limited to the
-  // sender the way MESSAGE_DELETE/MESSAGE_EDIT are. Curating important
-  // messages for the whole thread isn't modifying someone else's content —
-  // it's the same "anyone can do it" posture as Slack/Discord's own pin.
+  // Pin/unpin — admin+ only (see shared/permissions.ts's 'message:pin' —
+  // originally open to anyone in the thread, narrowed to admin+ per explicit
+  // request). Still re-checks the sender can even SEE this channel/DM first
+  // (same as CHANNEL_JOIN/DM_JOIN do at join time) before bothering to
+  // resolve their room role.
   socket.on(SocketEvents.MESSAGE_PIN, async (payload: { messageId: string; pinned: boolean }) => {
     const userId = socket.data.userId as string | undefined;
     if (!userId || typeof payload?.messageId !== 'string') return;
@@ -268,14 +269,25 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
       const prisma = getPrisma();
       const msg = await prisma.chatMessage.findUnique({ where: { id: payload.messageId } });
       if (!msg) return;
+      let dbRoom: { id: string; ownerId: string };
       if (msg.channelId) {
         const channel = await prisma.channel.findUnique({ where: { id: msg.channelId }, include: { room: true } });
         if (!channel || !(await canAccessRoomChat(prisma, channel.room, userId))) return;
+        dbRoom = channel.room;
       } else if (msg.conversationId) {
-        if (!(await canAccessDm(prisma, msg.conversationId, userId))) return;
+        // ChatMessage.conversationId is a real FK straight to
+        // DirectConversation.id (see schema.prisma) — never the newer
+        // dm:<uid>:<uid> form, so no need for canAccessDm's
+        // ConversationParticipant fallback (that's only for a
+        // client-supplied conversationId, e.g. DM_JOIN's).
+        const dm = await prisma.directConversation.findUnique({ where: { id: msg.conversationId }, include: { room: true } });
+        if (!dm || (dm.userAId !== userId && dm.userBId !== userId)) return;
+        dbRoom = dm.room;
       } else {
         return; // orphaned message (shouldn't happen) — nothing to authorize against
       }
+      const role = await resolveRoomRole(prisma, userId, dbRoom.id, dbRoom.ownerId);
+      if (!hasFeatureAccess(role, 'message:pin')) return;
       const pinned = !!payload.pinned;
       await prisma.chatMessage.update({ where: { id: msg.id }, data: { isPinned: pinned } });
       const room = msg.channelId ? `channel:${msg.channelId}` : `dm:${msg.conversationId}`;

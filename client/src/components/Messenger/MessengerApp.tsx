@@ -622,19 +622,22 @@ export function MessengerApp({
                           )}
                           {editingId !== m.id && (
                             <div className={`absolute top-1/2 -translate-y-1/2 ${own ? 'right-full mr-1.5' : 'left-full ml-1.5'} hidden group-hover:flex gap-0.5`}>
-                              {/* Pin — open to anyone in the thread, unlike
-                                  Edit/Delete below which stay sender-only. */}
-                              <button
-                                onClick={() => onPinMessage?.(m.id, !m.isPinned)}
-                                title={m.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
-                                className={`w-6 h-6 rounded inline-flex items-center justify-center ${
-                                  m.isPinned
-                                    ? 'text-indigo-500 hover:bg-indigo-100 dark:hover:bg-indigo-900/40'
-                                    : 'text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
-                                }`}
-                              >
-                                {m.isPinned ? <PinAngleFill size={10} /> : <PinAngle size={10} />}
-                              </button>
+                              {/* Pin — admin+ only (see shared/permissions.ts's
+                                  'message:pin'), unlike Edit/Delete below
+                                  which stay sender-only regardless of role. */}
+                              {isAdmin && (
+                                <button
+                                  onClick={() => onPinMessage?.(m.id, !m.isPinned)}
+                                  title={m.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
+                                  className={`w-6 h-6 rounded inline-flex items-center justify-center ${
+                                    m.isPinned
+                                      ? 'text-indigo-500 hover:bg-indigo-100 dark:hover:bg-indigo-900/40'
+                                      : 'text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                                  }`}
+                                >
+                                  {m.isPinned ? <PinAngleFill size={10} /> : <PinAngle size={10} />}
+                                </button>
+                              )}
                               {own && m.text && (
                                 <button
                                   onClick={() => { setEditingId(m.id); setEditText(m.text); }}
@@ -775,13 +778,15 @@ export function MessengerApp({
                     <p className="text-xs text-gray-700 dark:text-gray-200 break-words line-clamp-3">
                       {m.text || (m.attachmentName ? `📎 ${m.attachmentName}` : '')}
                     </p>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onPinMessage?.(m.id, false); }}
-                      title="Lepas sematan"
-                      className="absolute top-1.5 right-1.5 w-5 h-5 rounded hover:bg-red-100 dark:hover:bg-red-900/40 inline-flex items-center justify-center text-gray-400 hover:text-red-500 opacity-0 group-hover/pin:opacity-100 transition-opacity"
-                    >
-                      <XLg size={9} />
-                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onPinMessage?.(m.id, false); }}
+                        title="Lepas sematan"
+                        className="absolute top-1.5 right-1.5 w-5 h-5 rounded hover:bg-red-100 dark:hover:bg-red-900/40 inline-flex items-center justify-center text-gray-400 hover:text-red-500 opacity-0 group-hover/pin:opacity-100 transition-opacity"
+                      >
+                        <XLg size={9} />
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -805,13 +810,15 @@ export function MessengerApp({
             style={{ position: 'fixed', left: Math.min(msgMenu.x, window.innerWidth - 220), top: Math.min(msgMenu.y, window.innerHeight - 260) }}
             className="z-[1001] w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 text-xs"
           >
-            <button
-              onClick={() => { onPinMessage?.(msgMenu.message.id, !msgMenu.message.isPinned); setMsgMenu(null); }}
-              className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
-            >
-              {msgMenu.message.isPinned ? <PinAngleFill size={11} className="text-indigo-500" /> : <PinAngle size={11} />}
-              {msgMenu.message.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => { onPinMessage?.(msgMenu.message.id, !msgMenu.message.isPinned); setMsgMenu(null); }}
+                className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
+              >
+                {msgMenu.message.isPinned ? <PinAngleFill size={11} className="text-indigo-500" /> : <PinAngle size={11} />}
+                {msgMenu.message.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
+              </button>
+            )}
             <div className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700 mt-1">
               Dibaca oleh
             </div>
