@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, hasFeatureAccess } from '@virtualmeet/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 
@@ -21,7 +21,10 @@ export const MIN_MAP_ZOOM = 0.3;
 export const MAX_MAP_ZOOM = 2;
 // Below this, GameCanvas.tsx swaps the whole rendering to Overview mode —
 // now the same value as MIN_MAP_ZOOM, so hitting the zoom floor by any path
-// (button, wheel, trackpad) always lands in Overview mode.
+// (button, wheel, trackpad) always lands in Overview mode. This is only the
+// TRIGGER now, not the actual render zoom while Overview is active — the
+// draw loop replaces it with a dynamically fit-to-viewport value so the
+// whole map actually fills the screen (see GameCanvas.tsx's draw loop).
 export const OVERVIEW_ZOOM_THRESHOLD = 0.3;
 // Sharpness follow-up — mapZoom used to be fully continuous (each +/-
 // click or wheel notch multiplied it by 1.2/1.1), so `mapZoom * dpr`
@@ -43,8 +46,16 @@ const ZOOM_STEP = 0.1;
 // actually supposed to trigger at. Every real step here is exact to 1
 // decimal place, so rounding the result to 2 decimals is a safe way to
 // kill the float dust without touching the actual snapped values.
-const clampMapZoom = (z: number) => {
-  const snapped = Math.max(MIN_MAP_ZOOM, Math.min(MAX_MAP_ZOOM, Math.round(z / ZOOM_STEP) * ZOOM_STEP));
+// QA items (Full Office view — Batas hak full-view) — Overview mode (see
+// OVERVIEW_ZOOM_THRESHOLD above) shows everyone in the office at once,
+// including anyone hidden from regular members — so reaching it is gated
+// the same admin+ tier as hidden-avatar visibility itself
+// ('presence:full_view', shared/permissions.ts). A non-admin's zoom floor
+// is clamped one grid step ABOVE the threshold, so they can still zoom out
+// generously, just never far enough to trigger Overview.
+const clampMapZoom = (z: number, role: Role) => {
+  const floor = hasFeatureAccess(role, 'presence:full_view') ? MIN_MAP_ZOOM : MIN_MAP_ZOOM + ZOOM_STEP;
+  const snapped = Math.max(floor, Math.min(MAX_MAP_ZOOM, Math.round(z / ZOOM_STEP) * ZOOM_STEP));
   return Math.round(snapped * 100) / 100;
 };
 
@@ -815,10 +826,10 @@ export const useGameStore = create<GameState>((set, get) => ({
   setMusicSessionState: (state) =>
     set((s) => ({ musicSessionsByZone: { ...s.musicSessionsByZone, [state.zoneId]: state } })),
   mapZoom: 1,
-  setMapZoom: (zoom) => set({ mapZoom: clampMapZoom(zoom) }),
+  setMapZoom: (zoom) => set((s) => ({ mapZoom: clampMapZoom(zoom, s.localRole) })),
   stepMapZoom: (steps) => set((s) => {
     const currentStep = Math.round(s.mapZoom / ZOOM_STEP);
-    return { mapZoom: clampMapZoom((currentStep + steps) * ZOOM_STEP) };
+    return { mapZoom: clampMapZoom((currentStep + steps) * ZOOM_STEP, s.localRole) };
   }),
   speakingPlayers: new Set<string>(),
   setPlayerSpeaking: (id, speaking) =>

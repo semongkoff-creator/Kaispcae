@@ -110,6 +110,14 @@ export const FEATURE_MIN_ROLE = {
   // staff+) since this is external-people access, the highest-risk category
   // in the whole permission map.
   'guest:manage': 'admin',
+  // "Full Office" / Overview — zooming out past OVERVIEW_ZOOM_THRESHOLD
+  // (GameCanvas.tsx) shows the whole map + everyone in it at once,
+  // including anyone who's toggled "Sembunyikan diri" (Avatar.hidden) —
+  // the same admin+ tier that hidden-avatar visibility already uses
+  // (roleAtLeast(..., 'admin') in GameCanvas.tsx/Minimap.tsx), so a
+  // regular member never gets a war-room-style view of people who
+  // deliberately hid themselves from regular members specifically.
+  'presence:full_view': 'admin',
 } as const satisfies Record<string, Role>;
 
 export type FeatureKey = keyof typeof FEATURE_MIN_ROLE;

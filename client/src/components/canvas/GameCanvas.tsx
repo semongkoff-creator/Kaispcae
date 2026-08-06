@@ -491,6 +491,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const hoverTileRef = useRef<{ x: number; y: number } | null>(null);
   const cameraXRef = useRef(0);
   const cameraYRef = useRef(0);
+  // The zoom actually used to render the last frame — equals mapZoom
+  // outside Overview, but Overview's dynamically-computed fit-to-viewport
+  // value while active (see the draw loop). Click/dblclick handlers read
+  // this instead of raw mapZoom so their coordinate math matches the screen.
+  const effectiveZoomRef = useRef(1);
 
   const zoneDrawModeRef = useRef(zoneDrawMode); zoneDrawModeRef.current = zoneDrawMode;
   const onZoneDrawCompleteRef = useRef(onZoneDrawComplete); onZoneDrawCompleteRef.current = onZoneDrawComplete;
@@ -609,7 +614,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const store = useGameStore.getState();
       if (store.localPlayer.isSitting) return; // stand up first (movement is frozen)
       const rect = canvas.getBoundingClientRect();
-      const zoom = store.mapZoom;
+      const zoom = effectiveZoomRef.current;
       const worldX = (e.clientX - rect.left) / zoom + cameraXRef.current;
       const worldY = (e.clientY - rect.top) / zoom + cameraYRef.current;
       const tileX = Math.floor(worldX / TILE_SIZE);
@@ -896,21 +901,42 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // "logical" pixels and needs no change; this one setTransform call is
     // the only thing that actually scales them to the zoomed-in/out size.
     const dpr = window.devicePixelRatio || 1;
-    const zoom = useGameStore.getState().mapZoom;
-    ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, 0, 0);
+    const rawZoom = useGameStore.getState().mapZoom;
+    const logicalW = canvas.width / dpr;
+    const logicalH = canvas.height / dpr;
     // Overview mode — zoomed out past this, the detailed pixel-art tile/
     // furniture/sprite rendering below gives way to a simplified floor-plan
     // view (rooms as flat colored blocks, players as initial bubbles) —
     // see the isOverview branches further down.
-    const isOverview = zoom <= OVERVIEW_ZOOM_THRESHOLD;
+    const isOverview = rawZoom <= OVERVIEW_ZOOM_THRESHOLD;
+    // QA (Full-office view) — Overview used to render at the raw, FIXED
+    // OVERVIEW_ZOOM_THRESHOLD (0.3) regardless of actual screen size. That
+    // value only guarantees the map is never BIGGER than the viewport; on
+    // any typical desktop window it's far smaller than needed, leaving most
+    // of the screen empty lavender background around a small chunk of the
+    // office instead of the "whole office at a glance" the feature is
+    // supposed to be. While in Overview, replace the raw zoom with one
+    // computed to fit the WHOLE map exactly into THIS viewport (recomputed
+    // every frame, so it also self-corrects on window resize) — the normal,
+    // non-overview zoom range (the +/- control, wheel/trackpad) is
+    // untouched, still driven by the raw mapZoom value.
+    const zoom = isOverview
+      ? Math.min(logicalW / (MAP_WIDTH * TILE_SIZE), logicalH / (MAP_HEIGHT * TILE_SIZE))
+      : rawZoom;
+    ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, 0, 0);
+    // Read by the double-click-to-move and click-to-teleport handlers
+    // (outside this render loop) so their screen→world coordinate math
+    // matches whatever's actually on screen right now, Overview's computed
+    // fit-zoom included — otherwise a click while zoomed out to Overview
+    // would resolve against the wrong (raw mapZoom) scale and land on the
+    // wrong tile.
+    effectiveZoomRef.current = zoom;
 
     if (prevTimeRef.current === 0) prevTimeRef.current = timestamp;
     const rawDt = (timestamp - prevTimeRef.current) / 1000;
     const dt = Math.min(rawDt, 0.05);
     prevTimeRef.current = timestamp;
 
-    const logicalW = canvas.width / (window.devicePixelRatio || 1);
-    const logicalH = canvas.height / (window.devicePixelRatio || 1);
     // World-space extent actually visible on screen at the current zoom —
     // MORE world becomes visible when zoomed out (zoom<1), less when zoomed
     // in (zoom>1). Camera centering, background fill, and tile/avatar
@@ -1145,9 +1171,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // player-centered camera still crops one side or the other whenever
     // they're standing anywhere off-center, which defeated a full-office
     // view for exactly the players it matters most for (someone tucked in a
-    // corner room). worldViewW/H at OVERVIEW_ZOOM_THRESHOLD comfortably
-    // exceeds MAP_WIDTH/HEIGHT*TILE_SIZE on any reasonable screen, so this
-    // puts the entire map in view regardless of where the local player is.
+    // corner room). worldViewW/H is now derived from the fit-computed zoom
+    // above, so it matches the viewport almost exactly (not just "bigger
+    // than the map on any reasonable screen" like the old fixed-threshold
+    // version) — this puts the entire map in view, filling the screen,
+    // regardless of where the local player is.
     const centerX = isOverview ? (MAP_WIDTH * TILE_SIZE) / 2 : playerX;
     const centerY = isOverview ? (MAP_HEIGHT * TILE_SIZE) / 2 : playerY;
     const cameraX = Math.round(centerX - worldViewW / 2);
