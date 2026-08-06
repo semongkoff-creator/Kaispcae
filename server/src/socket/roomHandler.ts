@@ -133,6 +133,13 @@ interface RoomAdminState {
   // SocketEvents.ROOM_KNOCK_ADMIT). Cleared whenever the room is unlocked, so
   // a re-lock requires knocking again.
   knockAllowlist?: Set<string>;
+  // Akses & Password Pintu audit item #9 — emergency door override (see
+  // SocketEvents.DOOR_OVERRIDE_SET). When true, movementHandler.ts's
+  // isBlockedForSocket lets EVERY password door through regardless of
+  // doorLock.ts's per-socket unlock state. In-memory only, same "resets on
+  // restart" posture as `locked` above — an emergency mode isn't config that
+  // should silently survive a redeploy.
+  doorOverride?: boolean;
 }
 
 const roomAdminMap = new Map<string, RoomAdminState>();
@@ -268,6 +275,13 @@ export function getPlayerColor(id: string): string {
 // with no in-memory state has never been locked, so treat missing as false.
 export function isRoomLocked(slug: string): boolean {
   return roomAdminMap.get(slug)?.locked === true;
+}
+
+// Read-only check for movementHandler.ts's isBlockedForSocket — same
+// missing-means-false posture as isRoomLocked above (a room with no
+// in-memory admin state has never had its emergency override turned on).
+export function isDoorOverrideActive(slug: string): boolean {
+  return roomAdminMap.get(slug)?.doorOverride === true;
 }
 
 // Item #5 — live admin sockets currently connected to a room, so a REST route
@@ -592,6 +606,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId, staffUserIds: Array.from(rs.staffUserIds), theme, template,
         notice: roomNoticeMap.get(room) ?? null,
         locked: !!rs.locked,
+        doorOverride: !!rs.doorOverride,
         role: getRole(rs, uid),
         // Fitur 15 — this room's custom Floor/Wall/Object uploads. Every
         // joining player needs these registered into PALETTE_BY_ID (see
@@ -648,6 +663,23 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // the playerCount/removed lobby events already use (see Lobby.tsx).
     io.emit('lobby:room_lock', { roomId: room, locked: rs.locked });
     console.log(`[room] ${room} ${rs.locked ? 'LOCKED' : 'unlocked'} by uid=${senderUid}`);
+  });
+
+  // Akses & Password Pintu audit item #9 — emergency door override. Same
+  // shape as ROOM_LOCK_SET above: admin+ only, broadcasts the new state to
+  // everyone in the room (including the toggler) so the banner + the
+  // admin's own toggle control stay in sync.
+  socket.on(SocketEvents.DOOR_OVERRIDE_SET, (data: { active: boolean }) => {
+    const room = currentRoom; if (!room) return;
+    const senderUid = findUserIdBySocket(socket.id);
+    const rs = getRoomAdmin(room);
+    if (!canAccess(rs, senderUid, 'door:override')) {
+      socket.emit('admin:error', { message: 'Only admins can override door locks' });
+      return;
+    }
+    rs.doorOverride = !!data?.active;
+    io.to(room).emit(SocketEvents.DOOR_OVERRIDE_UPDATED, { active: rs.doorOverride });
+    console.log(`[room] ${room} door override ${rs.doorOverride ? 'ON' : 'off'} by uid=${senderUid}`);
   });
 
   // Fitur 15B — Password prompt verification. The attempt is compared

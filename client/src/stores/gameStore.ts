@@ -222,6 +222,13 @@ export interface GameState {
   roomLockedNotice: string | null;
   setRoomLockedNotice: (notice: string | null) => void;
 
+  // Akses & Password Pintu audit item #9 — emergency door override (see
+  // shared SocketEvents.DOOR_OVERRIDE_SET). When true, every password door
+  // in the room is treated as unlocked client-side too (GameCanvas.tsx's
+  // isBlocked prediction), matching what the server independently enforces.
+  doorOverride: boolean;
+  setDoorOverride: (active: boolean) => void;
+
   // Sitting — localPlayer.isSitting/x/y/direction (Avatar fields, already
   // synced to other players) hold the visible state; these two are local
   // bookkeeping only, never broadcast. sittingFurnitureId names which chair
@@ -737,6 +744,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   setRoomLocked: (locked) => set({ roomLocked: locked }),
   roomLockedNotice: null,
   setRoomLockedNotice: (notice) => set({ roomLockedNotice: notice }),
+
+  doorOverride: false,
+  setDoorOverride: (active) => set({ doorOverride: active }),
 
   sittingFurnitureId: null,
   setSittingFurnitureId: (id) => set({ sittingFurnitureId: id }),
@@ -1354,6 +1364,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       masterAdminUserId: roomState.masterAdminUserId ?? prev.masterAdminUserId,
       notice: roomState.notice !== undefined ? roomState.notice : prev.notice,
       roomLocked: roomState.locked ?? false,
+      doorOverride: roomState.doorOverride ?? false,
       liveReferenceImage: roomState.referenceImage ?? null,
       avatarScale: roomState.avatarScale ?? 1,
     }));

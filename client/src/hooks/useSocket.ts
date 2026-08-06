@@ -744,6 +744,14 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().addActivity(data.locked ? '🔒 Room locked' : '🔓 Room unlocked');
     });
 
+    // Item #9 — emergency door override toggled by an admin; everyone in the
+    // room (including the toggler) gets this so the banner + the admin's own
+    // control stay in sync.
+    socket.on(SocketEvents.DOOR_OVERRIDE_UPDATED, (data: { active: boolean }) => {
+      useGameStore.getState().setDoorOverride(!!data.active);
+      useGameStore.getState().addActivity(data.active ? '🚨 Semua pintu dibuka (mode darurat)' : '🔒 Mode darurat pintu dimatikan');
+    });
+
     socket.on(SocketEvents.ROOM_LOCKED_DENIED, () => {
       // Unlike roomDeletedNotice/kickedNotice, this does NOT auto-bounce — the
       // denied overlay (App.tsx) offers "Knock to enter" as well as leaving,
@@ -1052,6 +1060,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.ROOM_LOCK_SET, { locked });
   }, []);
 
+  const emitDoorOverride = useCallback((active: boolean) => {
+    socketRef.current?.emit(SocketEvents.DOOR_OVERRIDE_SET, { active });
+  }, []);
+
   const emitKnock = useCallback((roomId: string) => {
     socketRef.current?.emit(SocketEvents.ROOM_KNOCK, { roomId });
   }, []);
@@ -1145,5 +1157,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight };
+  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight };
 }

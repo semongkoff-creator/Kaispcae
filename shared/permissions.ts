@@ -92,6 +92,15 @@ export const FEATURE_MIN_ROLE = {
   // least as disruptive as removing someone, so it isn't left at Summon's
   // lower staff+ bar.
   'presence:spotlight': 'admin',
+  // Akses & Password Pintu audit item #9 — an admin toggles EVERY
+  // password-protected door in the room open at once (emergency override),
+  // bypassing doorLock.ts's normal per-socket/per-door unlock entirely.
+  // Deliberately its own key rather than reusing 'room:lock' — that gate is
+  // specifically about ROOM ENTRY (Zoom-style "Lock Meeting"), a different
+  // concept from door passwords, and every other room-wide admin action in
+  // this map already gets its own dedicated key even when several share the
+  // 'admin' tier (room:kick, presence:spotlight, room:lock itself, etc.).
+  'door:override': 'admin',
 } as const satisfies Record<string, Role>;
 
 export type FeatureKey = keyof typeof FEATURE_MIN_ROLE;

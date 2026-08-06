@@ -330,6 +330,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // which the collision check (running every frame during active movement)
   // needs read fresh, not stale until an unrelated re-render.
   const unlockedDoors = useGameStore((s) => s.unlockedDoors);
+  // Item #9 — emergency door override; same reactive-for-collision reasoning
+  // as unlockedDoors above.
+  const doorOverride = useGameStore((s) => s.doorOverride);
 
   const tilesRef = useRef(tiles);
   const impassableAreaRectsRef = useRef(impassableAreaRects);
@@ -357,6 +360,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const emotesRef = useRef(useGameStore.getState().emoteEvents);
   const jumpingPlayersRef = useRef(jumpingPlayers);
   const unlockedDoorsRef = useRef(unlockedDoors);
+  const doorOverrideRef = useRef(doorOverride);
   // Re-arm the auto-trigger on leaving/re-entering range, same as
   // autoTriggeredIdsRef below for 'automatic' Interactive Objects.
   const doorAutoTriggeredRef = useRef(new Set<string>());
@@ -462,6 +466,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     emotesRef.current = useGameStore.getState().emoteEvents;
     jumpingPlayersRef.current = jumpingPlayers;
     unlockedDoorsRef.current = unlockedDoors;
+    doorOverrideRef.current = doorOverride;
     nudgedPlayersRef.current = nudgedPlayers;
     nudgerPlayersRef.current = nudgerPlayers;
     playingSoundboardRef.current = playingSoundboard;
@@ -511,6 +516,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // unsolved one as impassable.
     const tile = t[tileY]?.[tileX];
     if (tile?.type === 'door' && tile.doorPasswordEnabled) {
+      // Item #9 — emergency override mirrors the server's own bypass.
+      if (doorOverrideRef.current) return false;
       return !unlockedDoorsRef.current.has(`${tileX},${tileY}`);
     }
     return false;
@@ -1101,7 +1108,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       for (let ty = baseTileY - 1; ty <= baseTileY + 1; ty++) {
         for (let tx = baseTileX - 1; tx <= baseTileX + 1; tx++) {
           const dt = doorTiles[ty]?.[tx];
-          if (dt?.type !== 'door' || !dt.doorPasswordEnabled) continue;
+          // Item #9 — emergency override means there's nothing to prompt for.
+          if (dt?.type !== 'door' || !dt.doorPasswordEnabled || doorOverrideRef.current) continue;
           const doorKey = `${tx},${ty}`;
           if (unlockedDoorsRef.current.has(doorKey)) continue;
           stillNearDoor.add(doorKey);

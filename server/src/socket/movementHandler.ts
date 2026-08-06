@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointInImpassableArea, RoomTile, JumpEvent, NudgeEvent } from '@virtualmeet/shared';
 import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas } from '../store/roomStore';
 import { isDoorUnlocked, clearUnlockedDoors } from './doorLock';
+import { isDoorOverrideActive } from './roomHandler';
 
 // Rate limiting: max 20 updates per second per player
 const rateLimitMap = new Map<string, number>();
@@ -32,6 +33,9 @@ function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string,
   if (isPointInImpassableArea(getCachedImpassableAreas(room), pixelX, pixelY)) return true;
   const tile = tiles[tileY]?.[tileX];
   if (tile?.type === 'door' && tile.doorPasswordEnabled && tile.doorPassword) {
+    // Item #9 — emergency override lets everyone through every door in this
+    // room, bypassing the normal per-socket unlock entirely.
+    if (isDoorOverrideActive(room)) return false;
     return !isDoorUnlocked(socketId, room, tileX, tileY);
   }
   return false;

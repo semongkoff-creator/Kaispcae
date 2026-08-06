@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight } from 'react-bootstrap-icons';
+import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -49,6 +49,13 @@ interface SidebarProps {
   roomLocked: boolean;
   canLock: boolean;
   onToggleLock: () => void;
+
+  // Akses & Password Pintu audit item #9 — emergency door override, same
+  // shape as the Room Lock row above (canDoorOverride gates it to
+  // admins/owner; doorOverride reflects the current state).
+  doorOverride: boolean;
+  canDoorOverride: boolean;
+  onToggleDoorOverride: () => void;
 
   // Zone-aware lock: while you're standing inside a zone, this same row locks
   // THAT zone instead of the whole room — "Lock Room" means the room you're
@@ -162,6 +169,9 @@ export function Sidebar({
   roomLocked,
   canLock,
   onToggleLock,
+  doorOverride,
+  canDoorOverride,
+  onToggleDoorOverride,
   currentZoneName,
   zoneLocked,
   zoneLockedByName,
@@ -333,6 +343,19 @@ export function Sidebar({
                 active={roomLocked}
                 onClick={closeAnd(onToggleLock)}
                 title={roomLocked ? 'Buka room ini supaya siapa pun bisa bergabung lagi' : 'Kunci room ini — orang baru tidak bisa bergabung sampai dibuka lagi'}
+              />
+            )}
+            {/* Akses & Password Pintu audit item #9 — emergency override:
+                unlocks EVERY password door in the room at once, bypassing
+                doorLock.ts's normal per-socket unlock entirely. Same
+                admin-gated toggle shape as Lock Room above. */}
+            {canDoorOverride && (
+              <MenuRow
+                icon={doorOverride ? <DoorOpenFill size={15} /> : <DoorClosedFill size={15} />}
+                label={doorOverride ? 'Matikan Mode Darurat Pintu' : 'Buka Semua Pintu (Darurat)'}
+                active={doorOverride}
+                onClick={closeAnd(onToggleDoorOverride)}
+                title={doorOverride ? 'Matikan override — pintu berpassword kembali terkunci seperti biasa' : 'Buka semua pintu berpassword di room ini untuk semua orang (keadaan darurat)'}
               />
             )}
             {isAdmin && (

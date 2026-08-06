@@ -237,6 +237,10 @@ export interface RoomState {
   // new non-admin can join. In-memory server state, sent so a joining
   // client's UI shows the 🔒 indicator immediately.
   locked?: boolean;
+  // Emergency door override (see SocketEvents.DOOR_OVERRIDE_SET) — true means
+  // every password door in the room is currently open for everyone. Same
+  // "resend on join" precedent as `locked` above.
+  doorOverride?: boolean;
   // The RECEIVING socket's own resolved role in this room (see
   // shared/permissions.ts) — computed server-side per-socket, not
   // broadcast, so a client always gets its own current tier without
@@ -322,6 +326,16 @@ export enum SocketEvents {
   ROOM_LOCK_SET = 'room:lock_set',
   ROOM_LOCK_UPDATED = 'room:lock_updated',
   ROOM_LOCKED_DENIED = 'room:locked_denied',
+
+  // Akses & Password Pintu audit item #9 — emergency override: an admin
+  // toggles EVERY password door in the room open at once, bypassing
+  // doorLock.ts's normal per-socket unlock entirely (see movementHandler.ts's
+  // isBlockedForSocket). Same broadcast shape as ROOM_LOCK_SET/UPDATED above
+  // (everyone in the room, including the toggler, gets the new state so a
+  // banner + the admin's own toggle control stay in sync) and resent fresh
+  // in ROOM_STATE on join, same precedent as `locked`.
+  DOOR_OVERRIDE_SET = 'door:override_set',
+  DOOR_OVERRIDE_UPDATED = 'door:override_updated',
 
   // "Knock to enter": a denied joiner can knock (ROOM_KNOCK) — admins in the
   // room get ROOM_KNOCK_REQUEST and may admit (ROOM_KNOCK_ADMIT), which
