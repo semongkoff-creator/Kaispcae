@@ -1,7 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, ChannelMessage } from '@virtualmeet/shared';
+import { SocketEvents, ChannelMessage, ChatReadEntry } from '@virtualmeet/shared';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { sanitizeChat } from '../middleware/validate';
 import { ensureGroupConversation, ensureDmConversation } from '../lib/conversations';
@@ -122,6 +122,15 @@ async function createMessageDeduped(
   }
 }
 
+// Fetch every ChatRead row for a channel/DM and shape it into the
+// ChatReadEntry[] the client expects — used both for the initial sync sent
+// right after CHANNEL_JOIN/DM_JOIN and could be reused anywhere else that
+// needs the full read-state snapshot.
+async function loadReadState(prisma: PrismaClient, where: { channelId: string } | { conversationId: string }): Promise<ChatReadEntry[]> {
+  const rows = await prisma.chatRead.findMany({ where, select: { userId: true, lastReadAt: true } });
+  return rows.map((r) => ({ userId: r.userId, lastReadAt: r.lastReadAt.getTime() }));
+}
+
 // Persisted Channel/DM/Thread chat. Self-contained, like followHandler.ts's
 // own uid/socket tracking — doesn't reach into chatHandler.ts's or
 // roomHandler.ts's private maps, just trusts socket.data.userId (set at
@@ -138,6 +147,10 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
       const channel = await prisma.channel.findUnique({ where: { id: channelId }, include: { room: true } });
       if (!channel || !(await canAccessRoomChat(prisma, channel.room, userId))) return;
       socket.join(`channel:${channelId}`);
+      socket.emit(SocketEvents.CHAT_READ_STATE_SYNC, {
+        channelId,
+        entries: await loadReadState(prisma, { channelId }),
+      });
     } catch (e) {
       console.error('[channelChat] failed to authorize channel join:', e);
     }
@@ -166,6 +179,10 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
       const prisma = getPrisma();
       if (!(await canAccessDm(prisma, conversationId, userId))) return;
       socket.join(`dm:${conversationId}`);
+      socket.emit(SocketEvents.CHAT_READ_STATE_SYNC, {
+        conversationId,
+        entries: await loadReadState(prisma, { conversationId }),
+      });
     } catch (e) {
       console.error('[channelChat] failed to authorize DM join:', e);
     }
@@ -270,6 +287,49 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
       });
     } catch (e) {
       console.error('[channelChat] failed to pin/unpin message:', e);
+    }
+  });
+
+  // Mark read — "I've read up to now" for a channel/DM. One upserted row per
+  // (user, thread), not one insert per message (see ChatRead's own doc
+  // comment in schema.prisma for why). Re-authorizes exactly like
+  // CHANNEL_JOIN/DM_JOIN/MESSAGE_PIN above — never trust the client's claim
+  // that it belongs in this thread just because it has the id.
+  socket.on(SocketEvents.CHAT_MARK_READ, async (payload: { channelId?: string; conversationId?: string }) => {
+    const userId = socket.data.userId as string | undefined;
+    if (!userId) return;
+    const channelId = typeof payload?.channelId === 'string' ? payload.channelId : null;
+    const conversationId = typeof payload?.conversationId === 'string' ? payload.conversationId : null;
+    if (!channelId && !conversationId) return;
+    try {
+      const prisma = getPrisma();
+      let room: string;
+      if (channelId) {
+        const channel = await prisma.channel.findUnique({ where: { id: channelId }, include: { room: true } });
+        if (!channel || !(await canAccessRoomChat(prisma, channel.room, userId))) return;
+        room = `channel:${channelId}`;
+      } else {
+        if (!(await canAccessDm(prisma, conversationId as string, userId))) return;
+        room = `dm:${conversationId}`;
+      }
+
+      const lastReadAt = new Date();
+      await prisma.chatRead.upsert({
+        where: channelId
+          ? { userId_channelId: { userId, channelId } }
+          : { userId_conversationId: { userId, conversationId: conversationId as string } },
+        create: { userId, channelId, conversationId, lastReadAt },
+        update: { lastReadAt },
+      });
+
+      io.to(room).emit(SocketEvents.CHAT_READ_UPDATED, {
+        channelId: channelId ?? undefined,
+        conversationId: conversationId ?? undefined,
+        userId,
+        lastReadAt: lastReadAt.getTime(),
+      });
+    } catch (e) {
+      console.error('[channelChat] failed to mark read:', e);
     }
   });
 

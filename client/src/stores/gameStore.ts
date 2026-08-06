@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, hasFeatureAccess } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, hasFeatureAccess } from '@virtualmeet/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 
@@ -377,6 +377,14 @@ export interface GameState {
   messagesByTarget: Record<string, ChannelMessage[]>;
   setTargetMessages: (key: string, messages: ChannelMessage[]) => void;
   prependTargetMessages: (key: string, messages: ChannelMessage[]) => void;
+  // Read receipts — who has read up to where, per chat target ("channel:<id>"
+  // /"dm:<id>"), keyed further by userId so a single CHAT_READ_UPDATED patches
+  // one entry without touching the rest. setReadState replaces the whole map
+  // for a target (the CHAT_READ_STATE_SYNC sent right after joining);
+  // updateReadEntry patches one user's entry live.
+  readStateByTarget: Record<string, Record<string, number>>;
+  setReadState: (key: string, entries: ChatReadEntry[]) => void;
+  updateReadEntry: (key: string, userId: string, lastReadAt: number) => void;
   appendTargetMessage: (key: string, message: ChannelMessage) => void;
   // Bug 6 — optimistic send. addPendingMessage shows the bubble the instant
   // Send is clicked (id === clientId, a temp id, status:'pending'), before any
@@ -902,6 +910,21 @@ export const useGameStore = create<GameState>((set, get) => ({
       typingByTarget: {
         ...state.typingByTarget,
         [key]: { ...(state.typingByTarget[key] ?? {}), [userId]: Date.now() + 3500 },
+      },
+    })),
+  readStateByTarget: {},
+  setReadState: (key, entries) =>
+    set((state) => ({
+      readStateByTarget: {
+        ...state.readStateByTarget,
+        [key]: Object.fromEntries(entries.map((e) => [e.userId, e.lastReadAt])),
+      },
+    })),
+  updateReadEntry: (key, userId, lastReadAt) =>
+    set((state) => ({
+      readStateByTarget: {
+        ...state.readStateByTarget,
+        [key]: { ...(state.readStateByTarget[key] ?? {}), [userId]: lastReadAt },
       },
     })),
   messagesByTarget: {},

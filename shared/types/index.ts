@@ -711,6 +711,19 @@ export enum SocketEvents {
   MESSAGE_PIN = 'message:pin',
   MESSAGE_PINNED = 'message:pinned',
 
+  // Read receipts ("dibaca oleh X, Y, Z") — CHAT_MARK_READ tells the server
+  // "I've read up to now" for a channel/DM (one row per user per thread, see
+  // ChatRead — not one row per message). CHAT_READ_STATE_SYNC is the current
+  // read-state of everyone who's ever read this thread, sent once right
+  // after CHANNEL_JOIN/DM_JOIN (mirrors how MEDIA_LIST arrives right after
+  // ROOM_STATE); CHAT_READ_UPDATED is the live update broadcast to the
+  // thread's room whenever anyone marks read. A message is "seen by" whoever
+  // in that map has a lastReadAt >= the message's own createdAt — derived
+  // client-side, never sent per-message.
+  CHAT_MARK_READ = 'chat:mark_read',
+  CHAT_READ_STATE_SYNC = 'chat:read_state_sync',
+  CHAT_READ_UPDATED = 'chat:read_updated',
+
   // Temporary removal from the room by an admin+ user (see
   // shared/permissions.ts's 'room:kick') — not a ban, the target can rejoin
   // any time. PLAYER_KICK is the admin's request; PLAYER_KICKED is sent only
@@ -1516,6 +1529,15 @@ export interface ChannelMessage {
   // Prisma schema), open to anyone in the thread, not just the sender —
   // curating important messages for the group isn't a privileged action.
   isPinned?: boolean;
+}
+
+// Read receipts — one entry per user who has ever read a given channel/DM,
+// not one per message (see server's ChatRead model). A message is "seen by"
+// whoever's lastReadAt is >= that message's own createdAt, computed
+// client-side from this small per-thread list.
+export interface ChatReadEntry {
+  userId: string;
+  lastReadAt: number;
 }
 
 // Emotes

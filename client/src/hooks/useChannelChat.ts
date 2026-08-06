@@ -24,6 +24,7 @@ interface ChannelChatEmitters {
   emitDeleteMessage: (messageId: string) => void;
   emitEditMessage: (messageId: string, text: string) => void;
   emitPinMessage: (messageId: string, pinned: boolean) => void;
+  emitMarkRead: (target: { type: 'channel' | 'dm'; id: string }) => void;
 }
 
 function targetKey(target: { type: 'channel' | 'dm'; id: string }): string {
@@ -109,9 +110,13 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
   // the panel is open and showing it, the user is reading it live, so any
   // count for it should stay at zero (including messages arriving as they
   // watch). Runs on open, on target switch, and on each new active message.
+  // Also tells the server "I've read up to now" (CHAT_MARK_READ) at the same
+  // moments, for the same reason — this IS the moment the user has actually
+  // seen whatever's currently on screen.
   useEffect(() => {
     if (!chatPanelOpen || !activeChatTarget) return;
     clearUnread(targetKey(activeChatTarget));
+    emitters.emitMarkRead(activeChatTarget);
   }, [chatPanelOpen, activeChatTarget?.type, activeChatTarget?.id, messagesByTarget]);
 
   // Leave whatever's open when the whole room/component unmounts.

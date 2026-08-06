@@ -118,6 +118,7 @@ model User {
   roomMembers             RoomMember[]
   ownedRooms              Room[]
   sentChatMessages        ChatMessage[]
+  chatReads               ChatRead[]
   dmConversationsAsA      DirectConversation[]      @relation("DMUserA")
   dmConversationsAsB      DirectConversation[]      @relation("DMUserB")
   // Messenger migration step 2 — replaces the As-A/As-B pair above with one
@@ -881,6 +882,7 @@ model Channel {
   isDefault Boolean       @default(false)
   createdAt DateTime      @default(now())
   messages  ChatMessage[]
+  reads     ChatRead[]
 
   @@unique([roomId, name])
 }
@@ -900,8 +902,32 @@ model DirectConversation {
   userB     User          @relation("DMUserB", fields: [userBId], references: [id], onDelete: Cascade)
   createdAt DateTime      @default(now())
   messages  ChatMessage[]
+  reads     ChatRead[]
 
   @@unique([roomId, userAId, userBId])
+}
+
+// Read receipts ("dibaca oleh X, Y, Z") — ONE row per (user, channel) or
+// (user, DM), tracking how far they've read, not one row per message. A
+// message is "seen by" whoever's lastReadAt is >= that message's createdAt —
+// derived client-side from this one small per-thread map, rather than
+// writing/shipping a row per message per reader (which would be the same
+// user-visible result at a much heavier write/bandwidth cost — opening a
+// 50-message channel would otherwise mean 50 writes instead of 1).
+// Belongs to exactly one of Channel or DirectConversation, same convention
+// as ChatMessage below — enforced in channelChatHandler.ts, not the DB.
+model ChatRead {
+  id             String              @id @default(cuid())
+  userId         String
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channelId      String?
+  channel        Channel?            @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversationId String?
+  conversation   DirectConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  lastReadAt     DateTime            @default(now())
+
+  @@unique([userId, channelId])
+  @@unique([userId, conversationId])
 }
 
 // Belongs to exactly one of Channel or DirectConversation (never both).

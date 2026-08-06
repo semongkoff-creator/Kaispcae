@@ -159,6 +159,7 @@ export function MessengerApp({
   const unreadByTarget = useGameStore((s) => s.unreadByTarget);
   const typingByTarget = useGameStore((s) => s.typingByTarget);
   const playerRecords = useGameStore((s) => s.playerRecords);
+  const readStateByTarget = useGameStore((s) => s.readStateByTarget);
 
   // Bug 8 — resolve each sender's CURRENT name/photo by senderId (one batched,
   // per-session-cached lookup) so old messages show the sender's latest
@@ -309,6 +310,26 @@ export function MessengerApp({
   // demand fetch), so pinning is scoped to the main thread view, same as
   // where the pin button itself renders below.
   const pinnedMessages = messages.filter((m) => m.isPinned);
+
+  // Read receipts — "Dibaca oleh X, Y" shown once, under the LATEST message
+  // each OTHER participant has reached (standard Slack/WhatsApp convention:
+  // per-message avatars would just be noise). For every reader, find the
+  // newest message whose createdAt is still <= their lastReadAt, and group
+  // readers by that message's id.
+  const readersByMessageId = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    if (!activeChatTarget) return map;
+    const state = readStateByTarget[`${activeChatTarget.type}:${activeChatTarget.id}`] ?? {};
+    for (const [uid, lastReadAt] of Object.entries(state)) {
+      if (uid === localUserId) continue;
+      let target: ChannelMessage | undefined;
+      for (const m of messages) {
+        if (m.createdAt <= lastReadAt && (!target || m.createdAt > target.createdAt)) target = m;
+      }
+      if (target) (map[target.id] ??= []).push(uid);
+    }
+    return map;
+  }, [activeChatTarget, readStateByTarget, messages, localUserId]);
 
   return (
     // Docked to the left edge as a sidebar, NOT a full-screen overlay like
@@ -603,6 +624,11 @@ export function MessengerApp({
                             </div>
                           )}
                         </div>
+                        {readersByMessageId[m.id] && (
+                          <span className={`text-[10px] text-gray-400 mt-0.5 px-1 ${own ? 'text-right' : ''}`}>
+                            Dibaca oleh {readersByMessageId[m.id].map((uid) => playerRecords[uid]?.name ?? 'Seseorang').join(', ')}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
