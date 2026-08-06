@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone, zoneKeyholderOf, admitUserToZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, findSpawnPixel, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, findSpawnPixel, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH, RosterEntry, RosterUpdate } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerMic, updatePlayerHidden, updatePlayerWorkMode, updatePlayerSpotlight, updatePlayerSitting,
   setCachedTiles, getCachedTiles, setCachedImpassableAreas, setCachedZones, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -122,6 +122,17 @@ const playerColors = new Map<string, string>();
 let colorIndex = 0;
 
 const userSocketMap = new Map<string, string>();
+
+// QA (Presence checklist item #8, "Member list akurat") — workspace-wide
+// "which room is this (real, non-guest) user currently in" registry,
+// maintained alongside userSocketMap above (same set/delete call sites:
+// JOIN_ROOM success and handleLeave). Guests are never entered here — they
+// have no User row, so they don't belong in a workspace member roster.
+const userRoomMap = new Map<string, { roomSlug: string; roomName: string }>();
+
+function broadcastRosterUpdate(io: Server, update: RosterUpdate) {
+  io.emit(SocketEvents.ROSTER_UPDATED, update);
+}
 
 // Reconnect grace period — a bare network drop (wifi blip, tab backgrounded,
 // laptop sleep) fires the socket's 'disconnect' event just like a real
@@ -592,10 +603,25 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
     // Fetch the saved room once — reused for spawn point lookup below and
     // for the tiles/furniture/zones sent in room:state once player data is ready.
-    let dbRoom: { id: string; tilemapData: unknown; furniture: unknown; zones: unknown; theme?: string | null; template?: string | null; layerData?: unknown } | null = null;
+    let dbRoom: { id: string; name?: string; tilemapData: unknown; furniture: unknown; zones: unknown; theme?: string | null; template?: string | null; layerData?: unknown } | null = null;
     try {
       dbRoom = await getPrisma().room.findUnique({ where: { slug: room } });
     } catch (e) { console.warn('[room] failed to load room from db:', e); }
+
+    // QA (Presence checklist item #8, "Member list akurat") — record this
+    // (real, non-guest) account as online in `room`, and tell everyone else
+    // connected (not just this room) so an open member-list panel anywhere
+    // updates immediately. Reuses the dbRoom fetch just above — no extra
+    // query. Deliberately AFTER the lock/approval checks above (a denied
+    // join must never appear "online in this room"), but the userSocketMap
+    // registration above already ran regardless — matches its own posture
+    // (that map isn't gated on room admission either, it's single-session
+    // bookkeeping for the account as a whole).
+    if (!isGuest) {
+      const roomName = dbRoom?.name || room;
+      userRoomMap.set(uid, { roomSlug: room, roomName });
+      broadcastRosterUpdate(io, { userId: uid, online: true, roomSlug: room, roomName });
+    }
 
     // Resolve the room's actual tile grid NOW (it used to happen later, only
     // for the room:state payload) — the spawn rescue below needs it. Hoisted,
@@ -1602,7 +1628,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   // clients update the badge and room:state carries it for late joiners.
   socket.on(SocketEvents.WORK_MODE_CHANGE, (data: { mode: WorkMode; zoneId?: string; reason?: string }) => {
     const room = currentRoom; if (!room) return;
-    const VALID: WorkMode[] = ['available', 'in_meeting', 'focus', 'lunch', 'away', 'wfh', 'break'];
+    const VALID: WorkMode[] = ['available', 'in_meeting', 'focus', 'lunch', 'away', 'wfh', 'wfo', 'wfa', 'cuti', 'break'];
     const mode: WorkMode = VALID.includes(data?.mode) ? data.mode : 'available';
     // Fitur 3B — a reason only ever makes sense alongside 'away' (the popup
     // that produces it only ever fires for that transition); never trust the
@@ -1888,6 +1914,22 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     }, RECONNECT_GRACE_MS);
     pendingDisconnects.set(uid, { socketId: socket.id, room, timer });
   });
+
+  // QA (Presence checklist item #8, "Member list akurat") — one-time
+  // snapshot for a member-list panel that just opened, answered ONLY to the
+  // requester (not broadcast) — ongoing changes after this arrive via the
+  // ROSTER_UPDATED deltas both JOIN_ROOM and handleLeave already broadcast
+  // above. Deliberately not gated to any particular room — this is the
+  // workspace-wide roster, callable from any connected (non-guest) socket.
+  socket.on(SocketEvents.ROSTER_LIST_REQUEST, () => {
+    // A guest has no business seeing which real accounts are online across
+    // OTHER rooms they were never invited to — the UI already never offers
+    // this (Sidebar hides the "Member" row for isGuest), this is the
+    // server-side backstop in case a guest client fakes the request anyway.
+    if ((socket.data as { guestId?: string }).guestId) return;
+    const snapshot: RosterEntry[] = Array.from(userRoomMap, ([userId, v]) => ({ userId, roomSlug: v.roomSlug, roomName: v.roomName }));
+    socket.emit(SocketEvents.ROSTER_SNAPSHOT, snapshot);
+  });
 }
 
 // QA item #4 — extracted so both the immediate on-disconnect save (above)
@@ -1945,7 +1987,20 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
   broadcastRoomCount(io, room);
   playerNames.delete(socket.id);
   playerColors.delete(socket.id);
-  for (const [uid, sid] of userSocketMap) { if (sid === socket.id) { userSocketMap.delete(uid); break; } }
+  for (const [uid, sid] of userSocketMap) {
+    if (sid === socket.id) {
+      userSocketMap.delete(uid);
+      // QA (Presence checklist item #8, "Member list akurat") — same
+      // "only if THIS socket is still the authoritative one for uid" guard
+      // as the userSocketMap delete just above (that's exactly what this
+      // loop's `sid === socket.id` condition already establishes): a
+      // superseded tab's OLD socket calling handleLeave after the NEW tab
+      // already re-registered this uid must NOT wipe the new tab's roster
+      // entry / broadcast a false "offline" for a user who's still online.
+      if (userRoomMap.delete(uid)) broadcastRosterUpdate(io, { userId: uid, online: false });
+      break;
+    }
+  }
 
   // A pending Summon request involving this socket (either side) can never
   // be answered/fulfilled correctly anymore — drop it rather than leaving a

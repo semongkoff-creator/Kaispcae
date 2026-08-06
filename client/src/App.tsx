@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill, PersonPlusFill, DoorOpenFill, VolumeUpFill } from 'react-bootstrap-icons';
 import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
@@ -40,6 +40,8 @@ import { MediaViewerModal } from './components/ui/MediaViewerModal';
 import { InteractiveObjectModal } from './components/ui/InteractiveObjectModal';
 import { NoteModal } from './components/ui/NoteModal';
 import { TutorialModal } from './components/ui/TutorialModal';
+import { StatusPickModal } from './components/ui/StatusPickModal';
+import { MemberListPanel } from './components/ui/MemberListPanel';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
 import { SoundboardPanel } from './components/ui/SoundboardPanel';
 import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
@@ -119,7 +121,7 @@ const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', 
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
   const [showEditor, setShowEditor] = useState(false);
   // QA #1/#6/#7 — reopen the first-run walkthrough on demand (Sidebar's
@@ -128,6 +130,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // shows it before <Game> ever mounts — this is a plain overlay on top of
   // the already-running room, same pattern as showEditor/AvatarSetup above.
   const [showTutorial, setShowTutorial] = useState(false);
+  // QA (Presence checklist item #8, "Member list akurat") — workspace-wide
+  // member list, opened from Sidebar's "Member" row. Same plain-overlay-state
+  // pattern as showEditor/showTutorial above.
+  const [showMemberList, setShowMemberList] = useState(false);
 
   // Media state from store
   const localSpeaking = useGameStore((s) => s.localSpeaking);
@@ -1511,6 +1517,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       <Sidebar
         onEditAvatar={() => setShowEditor(true)}
         onOpenTutorial={() => setShowTutorial(true)}
+        onOpenMemberList={() => setShowMemberList(true)}
         manualStatus={manualStatus}
         onPickPresence={handlePresencePick}
         isAdmin={isAdmin}
@@ -1744,6 +1751,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       )}
 
       {showTutorial && <TutorialModal onFinish={() => setShowTutorial(false)} dismissible />}
+
+      {showMemberList && (
+        <MemberListPanel
+          localUserId={authUserId}
+          currentRoomSlug={roomSlug}
+          emitRosterListRequest={emitRosterListRequest}
+          onClose={() => setShowMemberList(false)}
+        />
+      )}
 
       {meetingViewActive ? (
         <MeetingView
@@ -2119,6 +2135,25 @@ function storeGuestSession(session: GuestSession | null): void {
 // a guest link is normally reused from the same browser by the same person.
 const GUEST_TUTORIAL_SEEN_KEY = 'vm_tutorial_seen_guest';
 
+// QA #1 — "set status saat login": unlike the tutorial (once ever), a work
+// status is a daily thing, so the gate re-shows once per calendar day rather
+// than once per account lifetime. gameStore.manualStatus is ephemeral —
+// resets to 'available' on every reload (it's only broadcast/kept
+// server-side per live socket session, see roomStore.ts's updatePlayerWorkMode
+// — nothing persists it past a disconnect) — so this localStorage entry is
+// the ONLY thing that remembers today's pick across a refresh; when the gate
+// is skipped for "already picked today" the remembered status still has to
+// be silently re-applied (see the effect below), or a same-day refresh would
+// quietly drop the user back to 'available' despite never re-asking. Local
+// (browser) date, not server timezone — fine for a UI nag, not a compliance
+// record. Guests are excluded entirely (see the render-gate below) — WFO/
+// WFH/Cuti describe a workspace employee's day, not an external visitor's.
+function todayKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+const STATUS_PICKED_PREFIX = 'vm_status_picked:';
+
 function MainApp() {
   const { user, loading, error, sessionExpiredMessage, login, register, logout, markTutorialSeen } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -2134,6 +2169,33 @@ function MainApp() {
     localStorage.setItem(GUEST_TUTORIAL_SEEN_KEY, '1');
     setGuestTutorialSeen(true);
   }, []);
+  // QA #1 — has THIS account already picked a status today? Keyed per user
+  // id (not a single shared key) so a shared browser with multiple accounts
+  // doesn't cross-contaminate. `user` is still null on the very first render
+  // (useAuth's session restore is async), so this re-reads once `user.id`
+  // actually becomes available rather than trusting a lazy useState
+  // initializer that would've only ever seen `null`. If today's pick is
+  // already on record, it's re-applied to the (freshly-reset) store right
+  // here instead of just skipping the gate — see STATUS_PICKED_PREFIX's own
+  // comment for why that matters. useLayoutEffect (not useEffect) so this
+  // resolves BEFORE the browser paints the frame where `user` just became
+  // truthy — otherwise an already-picked-today user would see the picker
+  // flash for one frame before flipping back to <Game>.
+  const [statusPickedDate, setStatusPickedDate] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (!user) return;
+    const raw = localStorage.getItem(STATUS_PICKED_PREFIX + user.id);
+    const saved = raw ? (JSON.parse(raw) as { date: string; status: ManualStatus }) : null;
+    if (saved?.date === todayKey()) useGameStore.getState().setManualStatus(saved.status);
+    setStatusPickedDate(saved?.date ?? null);
+  }, [user?.id]);
+  const finishStatusPick = useCallback((status: ManualStatus) => {
+    if (!user) return;
+    useGameStore.getState().setManualStatus(status);
+    const today = todayKey();
+    localStorage.setItem(STATUS_PICKED_PREFIX + user.id, JSON.stringify({ date: today, status }));
+    setStatusPickedDate(today);
+  }, [user]);
   const [roomSlug, setRoomSlug] = useState<string | null>(null);
 
   // ?guest=<token> — the invite link itself. Read once at mount, same
@@ -2399,6 +2461,17 @@ function MainApp() {
   // <Game> itself rather than overlaying on top of it.
   if (!user.tutorialCompletedAt) {
     return <TutorialModal onFinish={markTutorialSeen} />;
+  }
+
+  // QA #1 — "set status saat login": re-asked once per calendar day (see
+  // todayKey/STATUS_PICKED_DATE_PREFIX above), after the tutorial gate so a
+  // brand-new account meets the walkthrough first. `statusPickedDate` starts
+  // null until the effect above resolves it from localStorage — treated as
+  // "not picked yet today" rather than flashing the picker for a tick on
+  // every load, which is why this sits after (not before) the tutorial gate:
+  // by this point `user` has been stable for at least one render already.
+  if (statusPickedDate !== todayKey()) {
+    return <StatusPickModal onPick={finishStatusPick} />;
   }
 
   // key={roomSlug} — portal travel (handlePortalEnter -> onPortalTravel ->

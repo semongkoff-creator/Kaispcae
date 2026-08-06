@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill } from 'react-bootstrap-icons';
+import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -18,6 +18,11 @@ interface SidebarProps {
   // QA #1/#6/#7 — reopens the first-run walkthrough (App.tsx's TutorialModal,
   // shown once automatically on entry) on demand.
   onOpenTutorial: () => void;
+  // QA (Presence checklist item #8, "Member list akurat") — opens the
+  // workspace-wide member list (App.tsx's MemberListPanel). Not offered to
+  // guests (see the row's own isGuest gate below) — they have no User row
+  // and can't appear in that roster themselves either.
+  onOpenMemberList: () => void;
   // Fitur 3B / A11 — manual presence picker (Available/WFH/Focus/In a
   // meeting/Lunch/Break/Away). 'away' opens the Away-reason popup upstream
   // (see App.tsx's handlePresencePick) rather than applying immediately,
@@ -178,6 +183,7 @@ interface SidebarProps {
 export function Sidebar({
   onEditAvatar,
   onOpenTutorial,
+  onOpenMemberList,
   manualStatus,
   onPickPresence,
   isAdmin,
@@ -292,6 +298,13 @@ export function Sidebar({
                 isAdmin gate) — this is the one thing anyone stuck should be
                 able to find without already knowing where anything else is. */}
             <MenuRow icon={<QuestionCircleFill size={15} />} label="Panduan" onClick={closeAnd(onOpenTutorial)} />
+            {/* QA (Presence checklist item #8, "Member list akurat") — a
+                guest has no User row (see server/src/routes/guestInvite.ts),
+                so they can't appear in api.getWorkspacePeople() and gain
+                nothing from opening this either. */}
+            {!isGuest && (
+              <MenuRow icon={<PeopleFill size={15} />} label="Member" onClick={closeAnd(onOpenMemberList)} />
+            )}
             <MenuDivider />
             {/* Always available, even with camera/mic off — MeetingView
                 itself shows a friendly "nobody's on camera" placeholder

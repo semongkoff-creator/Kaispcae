@@ -5,6 +5,9 @@ import type { WorkMode } from '@virtualmeet/shared';
 export const PRESENCE_LABEL: Record<WorkMode, string> = {
   available: 'Available',
   wfh: 'WFH',
+  wfo: 'WFO',
+  wfa: 'WFA',
+  cuti: 'Cuti',
   in_meeting: 'In a meeting',
   focus: 'Focus',
   lunch: 'Lunch',
@@ -15,6 +18,9 @@ export const PRESENCE_LABEL: Record<WorkMode, string> = {
 // Emoji badge per status. 'available' has none (no badge — a plain online dot).
 export const PRESENCE_EMOJI: Record<Exclude<WorkMode, 'available'>, string> = {
   wfh: '🏠',
+  wfo: '🏢',
+  wfa: '🧳',
+  cuti: '🌴',
   in_meeting: '🎥',
   focus: '🎧',
   lunch: '🍽️',
@@ -27,5 +33,12 @@ export const PRESENCE_EMOJI: Record<Exclude<WorkMode, 'available'>, string> = {
 // pickable here — same WorkMode value either way, so picking one manually
 // gets the exact same DND behaviour a zone-triggered one does. wfh/break
 // replace the old free-text Custom Status feature's quick-pick chips.
-export const MANUAL_STATUSES = ['available', 'wfh', 'focus', 'in_meeting', 'lunch', 'break', 'away'] as const;
+// wfo/wfa/cuti (QA #1) added for the login-time status picker.
+export const MANUAL_STATUSES = ['available', 'wfo', 'wfh', 'wfa', 'cuti', 'focus', 'in_meeting', 'lunch', 'break', 'away'] as const;
 export type ManualStatus = (typeof MANUAL_STATUSES)[number];
+
+// QA #1 — exactly the 5 statuses the login-time gate offers (StatusPickModal),
+// a deliberately narrower set than the full MANUAL_STATUSES dropdown above
+// (which still has all 10, including this same 5, reachable any time via
+// PresenceButton).
+export const LOGIN_STATUSES = ['wfo', 'wfh', 'wfa', 'cuti', 'in_meeting'] as const;

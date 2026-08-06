@@ -308,6 +308,14 @@ export const api = {
       `/users/profile-photos?ids=${encodeURIComponent(ids.join(','))}`,
     ),
 
+  // QA (Presence checklist item #8, "Member list akurat") — full workspace
+  // roster (id + name only, active accounts, capped 500 — see
+  // server/src/routes/admin.ts's GET /workspace/people). Any authenticated
+  // user, not admin-only. The client cross-references this against the
+  // live online/room state delivered over the socket (ROSTER_SNAPSHOT/
+  // ROSTER_UPDATED) — this REST call alone doesn't know who's online.
+  getWorkspacePeople: () => request<{ people: { id: string; displayName: string }[] }>('/workspace/people'),
+
   // A12 — Lark attendance status (source of truth = Lark) + checkout.
   getAttendanceStatus: () => request<AttendanceStatus>('/attendance/status'),
   checkOutAttendance: () => request<AttendanceStatus>('/attendance/checkout', { method: 'POST' }),

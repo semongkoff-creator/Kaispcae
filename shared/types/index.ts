@@ -125,7 +125,12 @@ export interface Avatar {
 // display-only labels. 'wfh'/'break' replace the old free-text custom-status
 // field (Avatar.status, removed) — those were just unstructured strings for
 // the same "what am I doing" signal this enum already covers.
-export type WorkMode = 'available' | 'in_meeting' | 'focus' | 'lunch' | 'away' | 'wfh' | 'break';
+// QA #1 (Status) — 'wfo'/'wfa'/'cuti' added so the login-time status picker
+// (App.tsx's StatusPickModal) can offer the full WFO/WFH/WFA/Cuti/Meeting
+// set the checklist asks for. 'cuti' is display-only here — it does NOT
+// create or check a real Lark leave approval (see routes/leave.ts for that);
+// this is purely the same-shape badge every other WorkMode value already is.
+export type WorkMode = 'available' | 'in_meeting' | 'focus' | 'lunch' | 'away' | 'wfh' | 'wfo' | 'wfa' | 'cuti' | 'break';
 
 // Away-reason popup (idle-AFK or manual "Away" pick, see App.tsx) — how long
 // to wait for the user to pick a reason before defaulting to a plain 'away'
@@ -290,6 +295,24 @@ export interface DeskNoteData {
   text: string;
   updatedAt: number;
 }
+
+// QA (Presence checklist item #8, "Member list akurat") — one entry per currently-ONLINE user, workspace-wide (not
+// room-scoped — see roomHandler.ts's userRoomMap and SocketEvents.ROSTER_*
+// above). Absent from the snapshot/never delta'd in means offline; the
+// client cross-references this against the full user roster (GET
+// /api/workspace/people) to know who's offline too.
+export interface RosterEntry {
+  userId: string;
+  roomSlug: string;
+  roomName: string;
+}
+
+// The live delta broadcast (ROSTER_UPDATED) — `online: false` entries omit
+// roomSlug/roomName (there's nothing to report), `online: true` always
+// carries them.
+export type RosterUpdate =
+  | { userId: string; online: true; roomSlug: string; roomName: string }
+  | { userId: string; online: false };
 
 // All socket event names used between client and server
 export enum SocketEvents {
@@ -805,6 +828,23 @@ export enum SocketEvents {
   // reuses handleLeave's exact same cleanup.
   PLAYER_KICK = 'player:kick',
   PLAYER_KICKED = 'player:kicked',
+
+  // QA (Presence checklist item #8, "Member list akurat") — workspace-wide "who's online + which room" roster (NOT the
+  // in-room ParticipantPanel, which only ever sees people standing in the
+  // SAME room). Named `roster:` rather than reusing the existing `presence:`
+  // prefix on purpose — that prefix already means the Spotlight moderation
+  // feature (SPOTLIGHT_TOGGLE/_CHANGED above) in this codebase, a totally
+  // different concept from online/offline status. ROSTER_LIST_REQUEST asks
+  // for a one-time full snapshot of everyone currently online (sent back to
+  // the requester only, via ROSTER_SNAPSHOT); ROSTER_UPDATED is the ongoing
+  // live delta broadcast to literally every connected socket (io.emit, not
+  // room-scoped) whenever any one user's online/room state changes, so a
+  // member-list panel open in Room A learns the instant someone in Room B
+  // goes online/offline/switches rooms too. Global by design — see
+  // roomHandler.ts's userRoomMap.
+  ROSTER_LIST_REQUEST = 'roster:list_request',
+  ROSTER_SNAPSHOT = 'roster:snapshot',
+  ROSTER_UPDATED = 'roster:updated',
 }
 
 // Sent only to the removed player's own socket — see PLAYER_KICKED above.

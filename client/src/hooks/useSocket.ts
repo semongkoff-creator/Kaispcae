@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, RoomBroadcast, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, GuestJoinRequest, PlayerMovedPayload, PlayerStoppedPayload, DeskNoteData } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, RoomBroadcast, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, GuestJoinRequest, PlayerMovedPayload, PlayerStoppedPayload, DeskNoteData, RosterEntry, RosterUpdate } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
@@ -523,6 +523,17 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     });
     socket.on(SocketEvents.NOTE_DELETED, (data: { id: string }) => {
       useGameStore.getState().removeNoteById(data.id);
+    });
+
+    // QA (Presence checklist item #8, "Member list akurat") — workspace-wide
+    // roster: a one-time snapshot answered only to us (requested when
+    // MemberListPanel opens), plus live deltas from then on for every
+    // connected socket, not just this room.
+    socket.on(SocketEvents.ROSTER_SNAPSHOT, (entries: RosterEntry[]) => {
+      useGameStore.getState().setRosterSnapshot(entries ?? []);
+    });
+    socket.on(SocketEvents.ROSTER_UPDATED, (update: RosterUpdate) => {
+      useGameStore.getState().applyRosterUpdate(update);
     });
 
     // Claimable-seat markers (Room Editor's 'claimableSeat' tile effect) —
@@ -1056,6 +1067,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.NOTE_DELETE, { id });
   }, []);
 
+  // QA (Presence checklist item #8, "Member list akurat") — one-time roster
+  // snapshot request, fired when MemberListPanel opens (see its own effect).
+  const emitRosterListRequest = useCallback(() => {
+    socketRef.current?.emit(SocketEvents.ROSTER_LIST_REQUEST);
+  }, []);
+
   const emitClaimSeat = useCallback((seatId: string) => {
     socketRef.current?.emit(SocketEvents.CLAIM_SEAT, { seatId });
   }, []);
@@ -1314,5 +1331,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
+  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
 }

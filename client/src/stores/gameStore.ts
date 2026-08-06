@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, hasFeatureAccess } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@virtualmeet/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 import { appendMovementSnapshot, MovementSnapshot, sampleMovementSnapshots } from './movementSmoothing';
@@ -532,6 +532,17 @@ export interface GameState {
   addNote: (note: DeskNoteData) => void;
   updateNote: (note: DeskNoteData) => void;
   removeNoteById: (id: string) => void;
+
+  // QA (Presence checklist item #8, "Member list akurat") — workspace-wide
+  // online/room registry, userId -> where they currently are. Absent from
+  // this map means offline (cross-referenced against the full roster from
+  // api.getWorkspacePeople() in MemberListPanel, not stored here). Filled
+  // once from ROSTER_SNAPSHOT (requested when the panel opens — see
+  // useSocket's emitRosterListRequest) and kept live via ROSTER_UPDATED
+  // deltas from then on, same "snapshot then live patches" shape as notes.
+  roster: Record<string, { roomSlug: string; roomName: string }>;
+  setRosterSnapshot: (entries: RosterEntry[]) => void;
+  applyRosterUpdate: (update: RosterUpdate) => void;
 
   // Emotes
   emoteEvents: EmoteEvent[];
@@ -1224,6 +1235,17 @@ export const useGameStore = create<GameState>((set, get) => ({
   addNote: (note) => set((state) => ({ notes: [...state.notes, note] })),
   updateNote: (note) => set((state) => ({ notes: state.notes.map((n) => (n.id === note.id ? note : n)) })),
   removeNoteById: (id) => set((state) => ({ notes: state.notes.filter((n) => n.id !== id) })),
+
+  roster: {},
+  setRosterSnapshot: (entries) => set({
+    roster: Object.fromEntries(entries.map((e) => [e.userId, { roomSlug: e.roomSlug, roomName: e.roomName }])),
+  }),
+  applyRosterUpdate: (update) => set((state) => {
+    const next = { ...state.roster };
+    if (update.online) next[update.userId] = { roomSlug: update.roomSlug, roomName: update.roomName };
+    else delete next[update.userId];
+    return { roster: next };
+  }),
 
   emoteEvents: [],
   addEmote: (event) =>
