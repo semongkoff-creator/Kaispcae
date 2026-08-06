@@ -3,21 +3,25 @@ import { SocketEvents, SeatClaimState } from '@virtualmeet/shared';
 import { getPlayerName } from './roomHandler';
 import { getCachedTiles } from '../store/roomStore';
 
-// Claimable-seat ownership — "this seat is mine right now".
+// Claimable-seat ownership — "this seat is mine".
 //
 // The seat MARKER itself (id, position) is admin-authored data living in
 // Room.layerData (see mapLayers.ts's TileEffect 'claimableSeat', edited via
 // the Room Editor). This file is the OTHER half: who currently owns each
-// marker during play. Exactly like zoneLock.ts's zone locks, this is
-// in-memory only — "right now, in this session" — and is never written to
-// the DB. A claim must not outlive a restart, matching the spec's own
-// "owner disconnects → seat auto-releases" requirement: if this were
-// persisted, a restart would leave every seat looking permanently taken.
-
+// marker. In-memory only (never written to the DB, so it doesn't outlive a
+// server restart — same caveat as every other in-memory admin/lock state in
+// this codebase), but WITHIN a server's lifetime a claim is a standing
+// grant, not a session-scoped lock: it survives disconnects, reconnects,
+// and leaving/re-entering the room entirely. QA item #6 — this used to
+// auto-release on disconnect ("owner disconnects → seat auto-releases"),
+// but that meant a brief wifi drop or even just walking out of the room
+// silently lost someone their claimed desk. The only way to free a seat now
+// is the owner explicitly releasing it (RELEASE_SEAT) — someone else can't
+// bump them out either; CLAIM_SEAT only ever redirects a blocked claimant
+// to the nearest free seat, never displaces the existing owner.
 interface SeatClaim {
   userId: string;
   name: string;
-  socketId: string;
 }
 
 // room slug → seatId → claim
@@ -73,13 +77,13 @@ function nearestFreeSeat(room: string, fromSeatId: string): string | null {
   return best?.seatId ?? null;
 }
 
-function assignSeat(room: string, seatId: string, uid: string, socketId: string, name: string): void {
+function assignSeat(room: string, seatId: string, uid: string, name: string): void {
   const m = roomClaims(room);
   // One seat per user: claiming a new one frees whichever one they held.
   for (const [sid, c] of m) {
     if (c.userId === uid) m.delete(sid);
   }
-  m.set(seatId, { userId: uid, name, socketId });
+  m.set(seatId, { userId: uid, name });
 }
 
 function claimStates(room: string): SeatClaimState[] {
@@ -100,8 +104,7 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
     if (!currentRoom || typeof data?.seatId !== 'string') return;
     const uid = userId();
     // Anonymous sockets can't own a seat: ownership keyed by nothing would
-    // let anyone through after a reconnect, and disconnect cleanup below
-    // relies on a real userId.
+    // let anyone through after a reconnect.
     if (!uid) return;
 
     if (!seatExists(currentRoom, data.seatId)) return; // spoofed/stale id — ignore
@@ -119,13 +122,13 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
         socket.emit(SocketEvents.SEAT_CLAIM_DENIED, { seatId: data.seatId, byName: existing.name });
         return;
       }
-      assignSeat(currentRoom, fallbackSeatId, uid, socket.id, name);
+      assignSeat(currentRoom, fallbackSeatId, uid, name);
       socket.emit(SocketEvents.SEAT_CLAIM_DENIED, { seatId: data.seatId, byName: existing.name, fallbackSeatId });
       io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
       return;
     }
 
-    assignSeat(currentRoom, data.seatId, uid, socket.id, name);
+    assignSeat(currentRoom, data.seatId, uid, name);
     io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
   });
 
@@ -142,14 +145,9 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
     io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
   });
 
-  socket.on(SocketEvents.DISCONNECT, () => {
-    if (!currentRoom) return;
-    // No "ghost" seats: whatever this socket held is freed for everyone else.
-    const m = roomClaims(currentRoom);
-    let changed = false;
-    for (const [seatId, c] of m) {
-      if (c.socketId === socket.id) { m.delete(seatId); changed = true; }
-    }
-    if (changed) io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
-  });
+  // QA item #6 — deliberately no DISCONNECT handler here anymore. A claim
+  // is a standing grant (see this file's top doc comment); it used to be
+  // released automatically here on every disconnect, which silently cost
+  // someone their claimed desk on a brief wifi drop. Only RELEASE_SEAT
+  // above ever clears one now.
 }

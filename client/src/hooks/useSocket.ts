@@ -745,6 +745,18 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().setKickedNotice(`You were removed from this room by ${data.byName}.`);
     });
 
+    // QA items #9/#10 (multi-tab) — a NEWER tab/connection took over this
+    // account (or guest token) and this specific socket was force-
+    // disconnected server-side. Deliberately does NOT touch vm_token —
+    // unlike SESSION_SUPERSEDED (a real new login elsewhere, which DOES
+    // clear it), this tab's token is still perfectly valid; clearing it
+    // here would also log the OTHER (winning) tab out, since localStorage
+    // is shared across every tab of this origin.
+    socket.on(SocketEvents.SESSION_TAKEN_OVER, () => {
+      console.warn('[socket] session taken over by a newer tab/connection');
+      useGameStore.getState().setSessionTakenOverNotice('Sesi ini diambil alih oleh tab atau perangkat lain.');
+    });
+
     socket.on(SocketEvents.ROOM_LOCK_UPDATED, (data: { locked: boolean }) => {
       useGameStore.getState().setRoomLocked(!!data.locked);
       useGameStore.getState().addActivity(data.locked ? '🔒 Room locked' : '🔓 Room unlocked');

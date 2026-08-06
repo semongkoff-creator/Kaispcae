@@ -374,6 +374,17 @@ export enum SocketEvents {
   GUEST_JOIN_REJECTED = 'guest:join_rejected',
   GUEST_JOIN_CANCELLED = 'guest:join_cancelled',
 
+  // QA items #9/#10 (multi-tab) — sent to a socket right before it's force-
+  // disconnected because a NEWER tab/connection joined with the same
+  // account (or guest token). Distinct from SESSION_SUPERSEDED (a raw
+  // string, not in this enum — that one fires when a totally NEW LOGIN
+  // elsewhere rotated the account's session and invalidated this token
+  // everywhere). This one doesn't touch the token/session at all — the
+  // token is still valid, this specific TAB's connection just lost to a
+  // newer one, so the client must NOT clear vm_token (shared localStorage
+  // would also log the winning tab out) — just show a notice and stop.
+  SESSION_TAKEN_OVER = 'session:taken_over',
+
   PLAYER_SIT = 'player:sit',
   PLAYER_SAT = 'player:sat',
 

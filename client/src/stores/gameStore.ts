@@ -213,6 +213,16 @@ export interface GameState {
   kickedNotice: string | null;
   setKickedNotice: (notice: string | null) => void;
 
+  // QA items #9/#10 (multi-tab) — this specific TAB's connection lost to a
+  // newer one for the same account/guest token (see shared
+  // SocketEvents.SESSION_TAKEN_OVER). Same "show a notice, then leave"
+  // pattern as kickedNotice above, but deliberately its own flag: unlike a
+  // real kick/room-lock denial, the token itself is still valid — the
+  // handler must NOT clear vm_token (see App.tsx, shared localStorage would
+  // also log the winning tab out).
+  sessionTakenOverNotice: string | null;
+  setSessionTakenOverNotice: (notice: string | null) => void;
+
   // Zoom-style "Lock Meeting" (see shared SocketEvents.ROOM_LOCK_SET).
   // roomLocked drives the 🔒 indicator + the owner's Lock/Unlock control;
   // roomLockedNotice bounces a denied joiner back to the Lobby, same
@@ -749,6 +759,9 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   kickedNotice: null,
   setKickedNotice: (notice) => set({ kickedNotice: notice }),
+
+  sessionTakenOverNotice: null,
+  setSessionTakenOverNotice: (notice) => set({ sessionTakenOverNotice: notice }),
 
   roomLocked: false,
   setRoomLocked: (locked) => set({ roomLocked: locked }),

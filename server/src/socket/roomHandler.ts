@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone, zoneKeyholderOf, admitUserToZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, findSpawnPixel, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerMic, updatePlayerHidden, updatePlayerWorkMode, updatePlayerSpotlight, updatePlayerSitting,
   setCachedTiles, getCachedTiles, setCachedImpassableAreas, setCachedZones, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -120,7 +120,16 @@ const userSocketMap = new Map<string, string>();
 // and PLAYER_KICKED are NOT delayed — only a bare 'disconnect' is graced.
 // Keyed by uid (not socket.id) since that's what a reconnect's fresh
 // JOIN_ROOM has to look the pending entry up by.
-const RECONNECT_GRACE_MS = 15000;
+//
+// QA item #8 (Ghost hilang) — was 15s (observed as ~15-20s including
+// socket.io's own ping-timeout detection latency before 'disconnect' even
+// fires), which meant a genuine hard disconnect (closed laptop, crashed
+// tab, network gone for good) left a ghost avatar visible to everyone else
+// for that whole window. Shortened to 4s — still enough slack to absorb a
+// brief wifi blip or tab-backgrounding without the original flicker bug
+// this grace period was built to fix, but far less stale-ghost time for a
+// disconnect that was never coming back.
+const RECONNECT_GRACE_MS = 4000;
 const pendingDisconnects = new Map<string, { socketId: string; room: string; timer: NodeJS.Timeout }>();
 
 interface RoomAdminState {
@@ -259,22 +268,6 @@ function findUserIdBySocket(socketId: string): string | undefined {
   for (const [uid, sid] of userSocketMap) {
     if (sid === socketId) return uid;
   }
-}
-
-// Scans a saved tilemap for a tile of type 'spawn' and returns its pixel
-// center. Falls back to null (caller uses the hardcoded default) if there's
-// no saved map yet, or no spawn tile was placed in it.
-function findSpawnPixel(tilemapData: unknown): { x: number; y: number } | null {
-  if (!Array.isArray(tilemapData)) return null;
-  for (const row of tilemapData as any[]) {
-    if (!Array.isArray(row)) continue;
-    for (const tile of row) {
-      if (tile?.type === 'spawn' && typeof tile.x === 'number' && typeof tile.y === 'number') {
-        return { x: tile.x * TILE_SIZE + TILE_SIZE / 2, y: tile.y * TILE_SIZE + TILE_SIZE / 2 };
-      }
-    }
-  }
-  return null;
 }
 
 function broadcastAdmin(io: Server, room: string, rs: RoomAdminState) {
@@ -468,6 +461,27 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // (guestUid) — never derived from anything client-supplied either
     // (guestId comes from the server-verified guest JWT, same trust level).
     const uid = isGuest ? guestUid(guestId!) : ((socket.data as { userId?: string }).userId || userId || socket.id);
+
+    // QA items #9/#10 (multi-tab: duplicating a tab shares the same session/
+    // guest token and could join as a second, simultaneous connection for
+    // the SAME account) — the newest connection wins. If a DIFFERENT,
+    // still-live socket already holds this uid (in any room, not just this
+    // one — one account should only ever have one live connection), force it to
+    // disconnect immediately rather than letting two sockets for the same
+    // uid coexist (which the room's own stale-entry eviction below is only
+    // a best-effort, non-atomic defense against — see its own comment).
+    // supersededByNewerTab tells that socket's own DISCONNECT handler to
+    // skip the reconnect grace period entirely: this one truly isn't coming
+    // back, a replacement already exists.
+    const previousSocketId = userSocketMap.get(uid);
+    if (previousSocketId && previousSocketId !== socket.id) {
+      const previousSocket = io.sockets.sockets.get(previousSocketId);
+      if (previousSocket) {
+        previousSocket.data.supersededByNewerTab = true;
+        previousSocket.emit(SocketEvents.SESSION_TAKEN_OVER);
+        previousSocket.disconnect(true);
+      }
+    }
     userSocketMap.set(uid, socket.id);
 
     // A fresh JOIN_ROOM for the same account within the grace window IS the
@@ -596,8 +610,20 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // never match a previous entry — without this, refreshing/reconnecting
     // always reset the player back to spawn regardless of where they'd
     // walked to, which the "Move" spec explicitly calls out as wrong.
+    //
+    // QA item #4 — this used to call a LOCAL findSpawnPixel that scanned
+    // the raw, stale `dbRoom.tilemapData` column, which the ZEP Room Editor
+    // save path (routes/rooms.ts) never writes to (only `layerData` is
+    // saved) — so an admin's placed "Starting Point" marker was silently
+    // never consulted; every join fell through to the hardcoded (3,3)
+    // fallback. Now uses the SHARED findSpawnPixel (defaultRoomLayout.ts,
+    // also used by routes/rooms.ts's own on-resize spawn rescue) against
+    // `tiles` — the already-resolved array that DOES include Starting
+    // Point markers via layerDataToLegacy's kind:'startingPoint' → 'spawn'
+    // conversion. It also already returns its own (3,3) fallback, so the
+    // old hardcoded `?? {...}` here is redundant and dropped.
     const remembered = getLastKnownPosition(uid, room);
-    let spawn = remembered ?? findSpawnPixel(dbRoom?.tilemapData) ?? { x: 3 * TILE_SIZE + TILE_SIZE / 2, y: 3 * TILE_SIZE + TILE_SIZE / 2 };
+    let spawn = remembered ?? findSpawnPixel(tiles);
 
     // Bug 8 — the remembered position can be INSIDE a blocked tile: sitting
     // puts the avatar on the chair's own tile (chair is in BLOCKED_TILES),
@@ -1667,12 +1693,46 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // mandatory — but fall back to the old immediate behavior if it ever is).
     const uid = findUserIdBySocket(socket.id);
     if (!uid) { handleLeave(io, socket, room); return; }
+
+    // QA item #4 (Reconnect: posisi berubah) — save the position NOW, not
+    // only if/when handleLeave eventually runs. It previously ONLY saved
+    // inside handleLeave, which a reconnect landing inside the grace window
+    // below skips entirely (JOIN_ROOM's stale-entry eviction cancels this
+    // very timer before it ever fires) — so any reconnect that happened
+    // WITHIN the grace period silently never got its position recorded,
+    // and fell back to the spawn tile instead of where they actually were.
+    // Only reconnects slower than the grace period (where handleLeave had
+    // already run for real) were ever restored correctly — backwards from
+    // what "auto-reconnect, posisi kembali" requires.
+    savePositionForReconnect(room, socket).catch((e) => console.warn('[room] failed to save disconnect position:', e));
+
+    // QA items #9/#10 (multi-tab duplicate) — this socket was just replaced
+    // by a newer tab/connection for the same account (see JOIN_ROOM's
+    // eviction below) and is never coming back as itself; skip the grace
+    // period entirely, same as the explicit LEAVE_ROOM/PLAYER_KICKED paths.
+    if ((socket.data as { supersededByNewerTab?: boolean }).supersededByNewerTab) {
+      handleLeave(io, socket, room);
+      return;
+    }
+
     const timer = setTimeout(() => {
       pendingDisconnects.delete(uid);
       handleLeave(io, socket, room);
     }, RECONNECT_GRACE_MS);
     pendingDisconnects.set(uid, { socketId: socket.id, room, timer });
   });
+}
+
+// QA item #4 — extracted so both the immediate on-disconnect save (above)
+// and handleLeave's own save (below, for the LEAVE_ROOM/PLAYER_KICKED paths
+// that bypass the grace period and never go through DISCONNECT at all) share
+// one implementation.
+async function savePositionForReconnect(room: string, socket: Socket): Promise<void> {
+  const uid = findUserIdBySocket(socket.id);
+  if (!uid) return;
+  const players = await getPlayers(room);
+  const player = players.find((p) => p.id === socket.id);
+  if (player) saveLastKnownPosition(uid, room, player.x, player.y, player.direction);
 }
 
 async function handleLeave(io: Server, socket: Socket, room: string | null) {
@@ -1682,12 +1742,15 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
   // Remember where they were, keyed by their real account id — see
   // roomStore.ts's lastKnownPosition doc comment and JOIN_ROOM's use of
   // getLastKnownPosition above. Must run before removePlayer() below,
-  // which deletes this same player entry.
+  // which deletes this same player entry. Harmless redundancy on the
+  // DISCONNECT→grace-timer-expiry path (savePositionForReconnect already
+  // ran when the disconnect first fired, and the position can't have
+  // changed since — the socket's been dead); the only path that actually
+  // NEEDS this call is LEAVE_ROOM/PLAYER_KICKED, which never goes through
+  // DISCONNECT at all.
   const leavingUid = findUserIdBySocket(socket.id);
   if (leavingUid) {
-    const players = await getPlayers(room);
-    const player = players.find((p) => p.id === socket.id);
-    if (player) saveLastKnownPosition(leavingUid, room, player.x, player.y, player.direction);
+    await savePositionForReconnect(room, socket);
 
     // A knock-admitted user's allowlist entry is a one-time entry pass, not
     // a standing grant — otherwise once let in, they (and anyone reading

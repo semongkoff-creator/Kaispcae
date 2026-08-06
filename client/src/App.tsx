@@ -547,6 +547,19 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     return () => clearTimeout(timer);
   }, [kickedNotice, onLeave]);
 
+  // QA items #9/#10 (multi-tab) — same "show it, then leave" shape as
+  // kickedNotice above, but its own state slot (see SESSION_TAKEN_OVER's
+  // doc comment — must never touch vm_token/logout, only leave this room).
+  const sessionTakenOverNotice = useGameStore((s) => s.sessionTakenOverNotice);
+  useEffect(() => {
+    if (!sessionTakenOverNotice) return;
+    const timer = setTimeout(() => {
+      useGameStore.getState().setSessionTakenOverNotice(null);
+      onLeave();
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [sessionTakenOverNotice, onLeave]);
+
   // Join denied because the room is locked (Zoom-style "Lock Meeting", see
   // shared SocketEvents.ROOM_LOCKED_DENIED). Unlike the deleted/kicked
   // notices this does NOT auto-bounce — the overlay lets the user "Knock to
@@ -1849,6 +1862,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
             <p className="text-gray-900 dark:text-gray-100 text-sm font-medium mb-1">{kickedNotice}</p>
             <p className="text-gray-400 dark:text-gray-500 text-xs">Returning to the Lobby...</p>
+          </div>
+        </div>
+      )}
+
+      {sessionTakenOverNotice && (
+        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
+            <p className="text-gray-900 dark:text-gray-100 text-sm font-medium mb-1">{sessionTakenOverNotice}</p>
+            <p className="text-gray-400 dark:text-gray-500 text-xs">Tab/perangkat lain sekarang mengendalikan avatar Anda.</p>
           </div>
         </div>
       )}
