@@ -30,6 +30,8 @@ test('login page uses the KaiSpace favicon mark, not the Kaitech horizontal logo
 
   assert.match(loginPage, /src="\/assets\/img\/favico\.png"/);
   assert.match(loginPage, /alt="KaiSpace"/);
+  assert.match(loginPage, />\s*KaiSpace\s*</);
+  assert.doesNotMatch(loginPage, /inline-flex bg-white rounded-xl p-2/);
   assert.doesNotMatch(loginPage, /Kaitech-Logo-Horizontal\.png/);
 });
 
