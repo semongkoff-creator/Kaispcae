@@ -194,6 +194,10 @@ const YT_EMBED_RADIUS = 2;
 // bit after the shake itself has settled.
 const NUDGE_FX_DURATION_MS = 600;
 const NUDGE_SPARK_COUNT = 8;
+// Locate ("Temukan") — how long the pulsing ring stays over a searched-for
+// player's avatar, giving the searcher time to actually spot them while
+// their own avatar walks over.
+const LOCATE_HIGHLIGHT_DURATION_MS = 3000;
 
 // Bug 3 — how forgiving the "walk up to interact" hitbox is, in tiles
 // (Chebyshev). The old chair logic demanded the player stand on the exact
@@ -294,6 +298,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const theme = useGameStore((s) => s.theme);
   const followInfo = useGameStore((s) => s.followInfo);
+  // Reactive for the same reason as nudgedPlayers below — a Locate click
+  // fired while the local player is standing still (nothing else forcing a
+  // re-render) still needs to be picked up promptly by the frame loop.
+  const locateRequest = useGameStore((s) => s.locateRequest);
   // Reactive (not just useGameStore.getState()) so a nudge landing while
   // nothing else on screen happens to be re-rendering still triggers one —
   // otherwise the ref below (and the shake/pop effect it drives) can go
@@ -328,6 +336,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const wallAreaRectsRef = useRef(wallAreaRects);
   const themeRef = useRef(theme);
   const followInfoRef = useRef(followInfo);
+  const locateRequestRef = useRef(locateRequest);
+  // Guards against re-processing the SAME locate request every frame while
+  // it sits in the store — only the arrival of a NEW requestId should
+  // trigger a fresh pathfind + highlight.
+  const handledLocateRequestIdRef = useRef<number | null>(null);
+  // Pulsing ring drawn over the located player's avatar for a few seconds
+  // (see the draw loop below) — purely a "look, it's them" visual cue, no
+  // gameplay effect.
+  const locateHighlightRef = useRef<{ playerId: string; start: number } | null>(null);
   const playerRecordsRef = useRef(useGameStore.getState().playerRecords);
   const localPlayerRef = useRef(localPlayer);
   const localPlayerIdRef = useRef(localPlayerId);
@@ -436,6 +453,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     wallAreaRectsRef.current = wallAreaRects;
     themeRef.current = theme;
     followInfoRef.current = followInfo;
+    locateRequestRef.current = locateRequest;
     playerRecordsRef.current = useGameStore.getState().playerRecords;
     localPlayerRef.current = localPlayer;
     localPlayerIdRef.current = localPlayerId;
@@ -548,6 +566,34 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // shifted off on arrival).
   const walkTargetRef = useRef<{ x: number; y: number }[] | null>(null);
 
+  // Shared by double-click-to-move AND Locate (ParticipantPanel's "Temukan"
+  // action, driven by locateRequestRef further down) — both ultimately just
+  // need "a waypoint route from here to this tile", so there's one A* call
+  // site, not two copies that could drift apart on what counts as blocked.
+  // Same walkability real movement collision uses — isBlocked (tile grid +
+  // door-password state) PLUS furniture Impassable Area rects, which are
+  // sub-tile and never rasterized into the tile grid itself (see
+  // wouldCollide's own separate check in useMovement.ts).
+  const computeWalkWaypoints = useCallback((targetTileX: number, targetTileY: number) => {
+    const areas = impassableAreaRectsRef.current;
+    const pathBlocked = (tx: number, ty: number) => {
+      if (isBlocked(tx, ty)) return true;
+      if (areas.length === 0) return false;
+      const left = tx * TILE_SIZE;
+      const top = ty * TILE_SIZE;
+      return doesRectOverlapImpassableArea(areas, left, top, left + TILE_SIZE, top + TILE_SIZE);
+    };
+    const startTileX = Math.floor(localPlayerRef.current.x / TILE_SIZE);
+    const startTileY = Math.floor(localPlayerRef.current.y / TILE_SIZE);
+    const tilePath = findTilePath(startTileX, startTileY, targetTileX, targetTileY, pathBlocked, MAP_WIDTH, MAP_HEIGHT);
+    if (!tilePath) return null; // no route exists
+    const waypoints = simplifyPath(tilePath).map((n) => ({
+      x: n.x * TILE_SIZE + TILE_SIZE / 2,
+      y: n.y * TILE_SIZE + TILE_SIZE / 2,
+    }));
+    return waypoints.length > 0 ? waypoints : null;
+  }, [isBlocked]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -563,34 +609,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const tileY = Math.floor(worldY / TILE_SIZE);
       if (tileX < 0 || tileY < 0) return;
       if (isBlocked(tileX, tileY)) return; // can't walk onto a wall/desk
-
-      // Same walkability real movement collision uses — isBlocked (tile
-      // grid + door-password state) PLUS furniture Impassable Area rects,
-      // which are sub-tile and never rasterized into the tile grid itself
-      // (see wouldCollide's own separate check in useMovement.ts).
-      const areas = impassableAreaRectsRef.current;
-      const pathBlocked = (tx: number, ty: number) => {
-        if (isBlocked(tx, ty)) return true;
-        if (areas.length === 0) return false;
-        const left = tx * TILE_SIZE;
-        const top = ty * TILE_SIZE;
-        return doesRectOverlapImpassableArea(areas, left, top, left + TILE_SIZE, top + TILE_SIZE);
-      };
-
-      const startTileX = Math.floor(localPlayerRef.current.x / TILE_SIZE);
-      const startTileY = Math.floor(localPlayerRef.current.y / TILE_SIZE);
-      const tilePath = findTilePath(startTileX, startTileY, tileX, tileY, pathBlocked, MAP_WIDTH, MAP_HEIGHT);
-      if (!tilePath) return; // no route exists — same no-op as clicking a blocked tile
-
-      const waypoints = simplifyPath(tilePath).map((n) => ({
-        x: n.x * TILE_SIZE + TILE_SIZE / 2,
-        y: n.y * TILE_SIZE + TILE_SIZE / 2,
-      }));
-      walkTargetRef.current = waypoints.length > 0 ? waypoints : null;
+      walkTargetRef.current = computeWalkWaypoints(tileX, tileY);
     };
     canvas.addEventListener('dblclick', onDblClick);
     return () => canvas.removeEventListener('dblclick', onDblClick);
-  }, [isBlocked]);
+  }, [isBlocked, computeWalkWaypoints]);
 
   // Mouse wheel / trackpad zoom — same factor-per-notch convention as the
   // Room Editor's own wheel handler. preventDefault stops the page itself
@@ -911,6 +934,22 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           const desiredY = targetPlayer.y + offset.dy * TILE_SIZE;
           effectiveMoveResult = updateFollow(desiredX, desiredY, dt);
         }
+      }
+    }
+
+    // Locate ("Temukan") — ParticipantPanel's search-by-name action (see
+    // gameStore's locateRequest doc comment). A fresh requestId feeds the
+    // exact same pathfinding walkTargetRef below drives, plus a brief
+    // highlight ring on the target's avatar (drawn further down the loop).
+    const lr = locateRequestRef.current;
+    if (lr && handledLocateRequestIdRef.current !== lr.requestId) {
+      handledLocateRequestIdRef.current = lr.requestId;
+      const target = playerRecordsRef.current[lr.playerId];
+      if (target) {
+        const targetTileX = Math.floor(target.x / TILE_SIZE);
+        const targetTileY = Math.floor(target.y / TILE_SIZE);
+        walkTargetRef.current = computeWalkWaypoints(targetTileX, targetTileY);
+        locateHighlightRef.current = { playerId: lr.playerId, start: performance.now() };
       }
     }
 
@@ -1545,6 +1584,26 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         walkAnimOffset: bobOffset + jumpOffset,
         scale: avatarScaleRef.current,
       });
+
+      // Locate ("Temukan") highlight — a pulsing ring so the searcher can
+      // visually confirm who they're walking toward, same finite-lifetime
+      // pattern as the nudge burst below.
+      const locateHl = locateHighlightRef.current;
+      if (locateHl && locateHl.playerId === avatar.id) {
+        const locateElapsed = performance.now() - locateHl.start;
+        if (locateElapsed >= 0 && locateElapsed <= LOCATE_HIGHLIGHT_DURATION_MS) {
+          const t = locateElapsed / LOCATE_HIGHLIGHT_DURATION_MS;
+          const pulse = (Math.sin(locateElapsed * 0.006) + 1) / 2;
+          ctx.save();
+          ctx.globalAlpha = 1 - t;
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(sx, sy, AVATAR_RADIUS + 6 + pulse * 6, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
 
       // Nudge ("senggol") impact effect — a burst of small orange sparks
       // radiating outward AROUND the target (not a single icon floating

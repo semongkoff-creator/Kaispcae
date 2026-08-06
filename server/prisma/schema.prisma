@@ -923,6 +923,12 @@ model ChatMessage {
   // NULLs under a UNIQUE, so those rows don't collide with each other.
   clientId String?
 
+  // Slack/Discord-style per-thread pin (SocketEvents.MESSAGE_PIN) — distinct
+  // from the room-wide Notice board's own pin, a totally separate
+  // admin-announcement feature. Open to anyone in the thread, not gated to
+  // admins or the sender.
+  isPinned Boolean @default(false)
+
   @@unique([conversationId2, clientId])
   @@index([channelId, createdAt])
   @@index([conversationId, createdAt])

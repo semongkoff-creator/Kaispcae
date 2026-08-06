@@ -632,6 +632,13 @@ export enum SocketEvents {
   MESSAGE_EDIT = 'message:edit',
   MESSAGE_EDITED = 'message:edited',
 
+  // Pin/unpin a persisted channel/DM message (MESSAGE_PIN, toggle via the
+  // `pinned` flag) — open to anyone in that channel/DM, not just the
+  // sender. Distinct from NOTICE_PIN (an admin-only room-wide announcement
+  // board, unrelated feature that happens to share the word "pin").
+  MESSAGE_PIN = 'message:pin',
+  MESSAGE_PINNED = 'message:pinned',
+
   // Temporary removal from the room by an admin+ user (see
   // shared/permissions.ts's 'room:kick') — not a ban, the target can rejoin
   // any time. PLAYER_KICK is the admin's request; PLAYER_KICKED is sent only
@@ -1413,6 +1420,13 @@ export interface ChannelMessage {
   // absent once the real server-confirmed message has replaced it.
   clientId?: string;
   status?: 'pending' | 'failed';
+  // Slack/Discord-style per-thread pin — distinct from the room Notice
+  // board's own pin (SocketEvents.NOTICE_PIN), which is a totally separate
+  // admin-announcement feature reusing the word "pin" for something else.
+  // This one lives on the message itself (ChatMessage.isPinned in the
+  // Prisma schema), open to anyone in the thread, not just the sender —
+  // curating important messages for the group isn't a privileged action.
+  isPinned?: boolean;
 }
 
 // Emotes

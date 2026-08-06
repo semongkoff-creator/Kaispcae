@@ -42,6 +42,7 @@ function toMessageDto(m: {
   attachmentName: string | null;
   createdAt: Date;
   clientId?: string | null;
+  isPinned?: boolean;
 }): ChannelMessage {
   return {
     id: m.id,
@@ -60,6 +61,7 @@ function toMessageDto(m: {
     // place instead of appending a duplicate. Meaningless to anyone else —
     // clientId is the sender's own dedup key, harmless to expose.
     clientId: m.clientId ?? undefined,
+    isPinned: m.isPinned || undefined,
   };
 }
 
@@ -234,6 +236,40 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
       });
     } catch (e) {
       console.error('[channelChat] failed to edit message:', e);
+    }
+  });
+
+  // Pin/unpin — open to anyone who can access this channel/DM (re-checked
+  // here, same as CHANNEL_JOIN/DM_JOIN do at join time), NOT limited to the
+  // sender the way MESSAGE_DELETE/MESSAGE_EDIT are. Curating important
+  // messages for the whole thread isn't modifying someone else's content —
+  // it's the same "anyone can do it" posture as Slack/Discord's own pin.
+  socket.on(SocketEvents.MESSAGE_PIN, async (payload: { messageId: string; pinned: boolean }) => {
+    const userId = socket.data.userId as string | undefined;
+    if (!userId || typeof payload?.messageId !== 'string') return;
+    try {
+      const prisma = getPrisma();
+      const msg = await prisma.chatMessage.findUnique({ where: { id: payload.messageId } });
+      if (!msg) return;
+      if (msg.channelId) {
+        const channel = await prisma.channel.findUnique({ where: { id: msg.channelId }, include: { room: true } });
+        if (!channel || !(await canAccessRoomChat(prisma, channel.room, userId))) return;
+      } else if (msg.conversationId) {
+        if (!(await canAccessDm(prisma, msg.conversationId, userId))) return;
+      } else {
+        return; // orphaned message (shouldn't happen) — nothing to authorize against
+      }
+      const pinned = !!payload.pinned;
+      await prisma.chatMessage.update({ where: { id: msg.id }, data: { isPinned: pinned } });
+      const room = msg.channelId ? `channel:${msg.channelId}` : `dm:${msg.conversationId}`;
+      io.to(room).emit(SocketEvents.MESSAGE_PINNED, {
+        messageId: msg.id,
+        channelId: msg.channelId ?? undefined,
+        conversationId: msg.conversationId ?? undefined,
+        pinned,
+      });
+    } catch (e) {
+      console.error('[channelChat] failed to pin/unpin message:', e);
     }
   });
 

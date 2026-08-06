@@ -364,6 +364,10 @@ export interface GameState {
   // Rewrite a message's text live (see shared MESSAGE_EDITED) + flag it
   // edited. parentId set → a thread reply; otherwise a top-level message.
   editTargetMessage: (key: string, messageId: string, text: string, parentId?: string) => void;
+  // Set a message's pinned state live (see shared MESSAGE_PINNED). parentId
+  // set → a thread reply; otherwise a top-level message. Same shape as
+  // editTargetMessage above, one field instead of two.
+  setMessagePinned: (key: string, messageId: string, pinned: boolean, parentId?: string) => void;
   // Bumps a top-level message's cached replyCount when a reply to it
   // arrives live — without this, "N replies" on the parent goes stale the
   // instant anyone (including the sender) replies, and never recovers
@@ -393,6 +397,15 @@ export interface GameState {
   setFollowInfo: (info: FollowInfo | null) => void;
   followerUserIds: string[];
   setFollowerUserIds: (ids: string[]) => void;
+  // Locate ("Temukan") — ParticipantPanel's search-by-name action. A
+  // one-shot signal, not persistent state like followInfo: GameCanvas's
+  // frame loop picks it up, walks the local player toward that player's
+  // CURRENT position via the same A* pathfinding double-click-to-move
+  // uses, and highlights their avatar briefly. requestId (not just the
+  // playerId) so locating the SAME person twice in a row still re-fires —
+  // otherwise setting an unchanged value wouldn't even re-render.
+  locateRequest: { playerId: string; requestId: number } | null;
+  setLocateRequest: (playerId: string | null) => void;
 
   // Follow/Summon consent requests — see PendingRequestToast.tsx. Both
   // "incoming" (someone else wants to do this to ME, needs Accept/Decline)
@@ -927,6 +940,32 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
       return patch;
     }),
+  setMessagePinned: (key, messageId, pinned, parentId) =>
+    set((state) => {
+      const patch: Partial<GameState> = {};
+      if (parentId) {
+        const replies = state.repliesByParent[parentId];
+        if (replies) {
+          const idx = replies.findIndex((r) => r.id === messageId);
+          if (idx !== -1) {
+            const updated = [...replies];
+            updated[idx] = { ...updated[idx], isPinned: pinned || undefined };
+            patch.repliesByParent = { ...state.repliesByParent, [parentId]: updated };
+          }
+        }
+      } else {
+        const list = state.messagesByTarget[key];
+        if (list) {
+          const idx = list.findIndex((m) => m.id === messageId);
+          if (idx !== -1) {
+            const updated = [...list];
+            updated[idx] = { ...updated[idx], isPinned: pinned || undefined };
+            patch.messagesByTarget = { ...state.messagesByTarget, [key]: updated };
+          }
+        }
+      }
+      return patch;
+    }),
   removeTargetMessage: (key, messageId, parentId) =>
     set((state) => {
       const patch: Partial<GameState> = {};
@@ -1024,6 +1063,8 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   followerUserIds: [],
   setFollowerUserIds: (ids) => set({ followerUserIds: ids }),
+  locateRequest: null,
+  setLocateRequest: (playerId) => set({ locateRequest: playerId ? { playerId, requestId: Date.now() } : null }),
 
   mediaObjects: [],
   setMediaObjects: (objects) => set({ mediaObjects: objects }),

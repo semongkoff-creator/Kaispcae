@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill, MegaphoneFill, MicMuteFill } from 'react-bootstrap-icons';
+import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill, MegaphoneFill, MicMuteFill, GeoAltFill, Search } from 'react-bootstrap-icons';
 import { roleAtLeast, Role, WorkMode } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
@@ -86,6 +86,21 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest,
   const remotePlayers = Object.values(playerRecords);
   const totalOnline = remotePlayers.length + 1;
 
+  // Locate ("Temukan") — search by name, then walk the local player toward
+  // them (real A* pathfinding, see GameCanvas.tsx's locateRequestRef).
+  // Closes the panel afterward so the searcher can actually watch the map
+  // while their avatar walks over, same as any action that changes what's
+  // happening on the map (Follow/Summon don't close it since those don't
+  // move YOUR avatar).
+  const [query, setQuery] = useState('');
+  const filteredRemotePlayers = query.trim()
+    ? remotePlayers.filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase()))
+    : remotePlayers;
+  const handleLocate = useCallback((playerId: string) => {
+    useGameStore.getState().setLocateRequest(playerId);
+    onClose();
+  }, [onClose]);
+
   const videoActive = remotePlayers.filter((p) => remoteStreams.has(p.id));
   const videoThumbs = videoActive.slice(0, MAX_VIDEO_THUMBS);
   const videoOverflowCount = videoActive.length - videoThumbs.length;
@@ -120,6 +135,19 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest,
             </div>
           </div>
 
+          {remotePlayers.length > 0 && (
+            <div className="px-3 pt-2 pb-1 relative">
+              <Search size={11} className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Cari nama..."
+                className="w-full pl-6 pr-2 py-1 rounded-md bg-purple-50 dark:bg-gray-800 border border-purple-100 dark:border-gray-700 text-xs outline-none focus:border-purple-400 dark:focus:border-purple-500 text-gray-700 dark:text-gray-200 placeholder:text-gray-400"
+              />
+            </div>
+          )}
+
           {videoThumbs.length > 0 && (
             <div className="p-2 border-b border-purple-100 dark:border-gray-700 flex gap-1.5 flex-wrap">
               {videoThumbs.map((p) => (
@@ -148,7 +176,10 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest,
               inCall={false}
               followerCount={followerUserIds.length}
             />
-            {remotePlayers.map((p) => (
+            {filteredRemotePlayers.length === 0 && query.trim() && (
+              <p className="px-2 py-3 text-xs text-gray-400 text-center">Tidak ada yang cocok dengan "{query.trim()}".</p>
+            )}
+            {filteredRemotePlayers.map((p) => (
               <ParticipantRow
                 key={p.id}
                 name={p.name}
@@ -170,6 +201,7 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest,
                 onMessage={p.userId && onStartDm ? () => onStartDm(p.userId!) : undefined}
                 onKick={canKick && p.userId && emitKick ? () => emitKick(p.userId!) : undefined}
                 onSpotlight={canSpotlight && p.userId && emitSpotlight ? () => emitSpotlight(p.userId!, !p.spotlightActive) : undefined}
+                onLocate={() => handleLocate(p.id)}
               />
             ))}
           </div>
@@ -200,6 +232,7 @@ function ParticipantRow({
   onMessage,
   onKick,
   onSpotlight,
+  onLocate,
 }: {
   name: string;
   color: string;
@@ -251,6 +284,11 @@ function ParticipantRow({
   // no-op) below admin, same convention as onKick. Never present on the
   // local row (isLocal never gets action props, only the badge above).
   onSpotlight?: () => void;
+  // Locate ("Temukan") — walks the LOCAL player toward this row's player
+  // via real pathfinding (see GameCanvas.tsx's locateRequestRef). Open to
+  // everyone, like Summon/Slap — finding a coworker's current desk isn't a
+  // privileged action.
+  onLocate?: () => void;
 }) {
   // Menu coordinates in viewport space, measured from the trigger when it
   // opens. null = closed.
@@ -303,7 +341,7 @@ function ParticipantRow({
   // leaving it open over a row whose state just changed reads as if the
   // click didn't register.
   const pick = (fn?: () => void) => () => { closeMenu(); fn?.(); };
-  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onMessage || onKick || onSpotlight);
+  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onMessage || onKick || onSpotlight || onLocate);
 
   return (
     <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50 dark:bg-gray-700/50">
@@ -378,6 +416,9 @@ function ParticipantRow({
                 style={{ top: menuPos.top, right: menuPos.right }}
                 className="fixed z-[60] w-44 py-1 rounded-lg bg-white dark:bg-gray-800 border border-purple-200 dark:border-gray-600 shadow-xl overflow-hidden"
               >
+                {onLocate && (
+                  <MenuItem icon={<GeoAltFill size={12} />} label="Temukan" onClick={pick(onLocate)} />
+                )}
                 {!isFollowingThem && onFollow && (
                   <MenuItem icon={<PersonWalking size={12} />} label="Ikuti" onClick={pick(onFollow)} />
                 )}

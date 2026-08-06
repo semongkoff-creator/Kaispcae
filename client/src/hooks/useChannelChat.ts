@@ -23,6 +23,7 @@ interface ChannelChatEmitters {
   emitDmTyping: (conversationId: string) => void;
   emitDeleteMessage: (messageId: string) => void;
   emitEditMessage: (messageId: string, text: string) => void;
+  emitPinMessage: (messageId: string, pinned: boolean) => void;
 }
 
 function targetKey(target: { type: 'channel' | 'dm'; id: string }): string {
@@ -297,6 +298,10 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
     emitters.emitEditMessage(messageId, text);
   }, [emitters]);
 
+  const pinMessage = useCallback((messageId: string, pinned: boolean) => {
+    emitters.emitPinMessage(messageId, pinned);
+  }, [emitters]);
+
   const loadOlder = useCallback(async () => {
     if (!activeChatTarget) return 0;
     const key = targetKey(activeChatTarget);
@@ -351,6 +356,7 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
     notifyTyping,
     deleteMessage,
     editMessage,
+    pinMessage,
     loadOlder,
     createChannel,
     startDm,

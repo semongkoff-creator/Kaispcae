@@ -84,6 +84,7 @@ function toMessageDto(m: {
   attachmentName?: string | null;
   createdAt: Date;
   _count?: { replies: number };
+  isPinned?: boolean;
 }): ChannelMessage {
   return {
     id: m.id,
@@ -97,6 +98,7 @@ function toMessageDto(m: {
     attachmentName: m.attachmentName ?? undefined,
     createdAt: m.createdAt.getTime(),
     replyCount: m._count?.replies,
+    isPinned: m.isPinned || undefined,
   };
 }
 

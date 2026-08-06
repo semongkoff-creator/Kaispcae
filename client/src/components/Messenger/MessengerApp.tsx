@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise } from 'react-bootstrap-icons';
+import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle } from 'react-bootstrap-icons';
 import { ChannelMessage, Channel, DirectConversationSummary } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -128,6 +128,10 @@ interface MessengerAppProps {
   onTyping?: () => void;
   onDeleteMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string, text: string) => void;
+  // Pin/unpin — open to anyone in the thread, not gated to the sender the
+  // way onEditMessage/onDeleteMessage are (see MESSAGE_PIN's doc comment,
+  // server/src/socket/channelChatHandler.ts).
+  onPinMessage?: (messageId: string, pinned: boolean) => void;
   onLoadOlder: () => Promise<number>;
   onCreateChannel: (name: string) => Promise<Channel>;
 }
@@ -148,6 +152,7 @@ export function MessengerApp({
   onTyping,
   onDeleteMessage,
   onEditMessage,
+  onPinMessage,
   onLoadOlder,
   onCreateChannel,
 }: MessengerAppProps) {
@@ -175,6 +180,7 @@ export function MessengerApp({
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [showMembers, setShowMembers] = useState(false);
+  const [showPinned, setShowPinned] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // 1s tick so typing indicators lapse on their own — there's no explicit
@@ -298,6 +304,12 @@ export function MessengerApp({
         .map(([uid]) => playerRecords[uid]?.name ?? 'Seseorang')
     : [];
 
+  // Only top-level messages carry isPinned meaningfully here — thread
+  // replies aren't in this list at all (they live in a separate expand-on-
+  // demand fetch), so pinning is scoped to the main thread view, same as
+  // where the pin button itself renders below.
+  const pinnedMessages = messages.filter((m) => m.isPinned);
+
   return (
     // Docked to the left edge as a sidebar, NOT a full-screen overlay like
     // DocsApp/BasesLauncher/AttendanceApp — the map/HUD stay visible and
@@ -414,6 +426,19 @@ export function MessengerApp({
             <h2 className="font-semibold text-sm text-gray-400">Pilih percakapan</h2>
           )}
           <div className="ml-auto flex items-center gap-1">
+            {activeRow && pinnedMessages.length > 0 && (
+              <button
+                onClick={() => setShowPinned((v) => !v)}
+                title="Pesan disematkan"
+                className={`text-xs inline-flex items-center gap-1 px-2 py-1 rounded-md mr-1 ${
+                  showPinned
+                    ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300'
+                    : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+              >
+                <PinAngleFill size={12} /> {pinnedMessages.length}
+              </button>
+            )}
             {activeRow?.isChannel && (
               <button
                 onClick={() => setShowMembers((v) => !v)}
@@ -484,8 +509,9 @@ export function MessengerApp({
                       </div>
                       <div className={`max-w-[min(560px,70%)] min-w-0 ${own ? 'items-end' : 'items-start'} flex flex-col`}>
                         {!grouped && (
-                          <span className={`text-[11px] text-gray-400 mb-1 px-1 ${own ? 'text-right' : ''}`}>
+                          <span className={`text-[11px] text-gray-400 mb-1 px-1 inline-flex items-center gap-1 ${own ? 'text-right' : ''}`}>
                             {own ? 'Kamu' : senderName} · {new Date(m.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                            {m.isPinned && <PinAngleFill size={9} className="text-indigo-500" title="Disematkan" />}
                           </span>
                         )}
                         <div className="group relative">
@@ -541,9 +567,22 @@ export function MessengerApp({
                               <ExclamationTriangleFill size={10} /> Gagal terkirim — coba lagi <ArrowClockwise size={10} />
                             </button>
                           )}
-                          {own && editingId !== m.id && (
+                          {editingId !== m.id && (
                             <div className={`absolute top-1/2 -translate-y-1/2 ${own ? 'right-full mr-1.5' : 'left-full ml-1.5'} hidden group-hover:flex gap-0.5`}>
-                              {m.text && (
+                              {/* Pin — open to anyone in the thread, unlike
+                                  Edit/Delete below which stay sender-only. */}
+                              <button
+                                onClick={() => onPinMessage?.(m.id, !m.isPinned)}
+                                title={m.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
+                                className={`w-6 h-6 rounded inline-flex items-center justify-center ${
+                                  m.isPinned
+                                    ? 'text-indigo-500 hover:bg-indigo-100 dark:hover:bg-indigo-900/40'
+                                    : 'text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                                }`}
+                              >
+                                {m.isPinned ? <PinAngleFill size={10} /> : <PinAngle size={10} />}
+                              </button>
+                              {own && m.text && (
                                 <button
                                   onClick={() => { setEditingId(m.id); setEditText(m.text); }}
                                   title="Edit"
@@ -552,13 +591,15 @@ export function MessengerApp({
                                   <PencilFill size={10} />
                                 </button>
                               )}
-                              <button
-                                onClick={() => onDeleteMessage?.(m.id)}
-                                title="Hapus"
-                                className="w-6 h-6 rounded hover:bg-red-100 dark:hover:bg-red-900/40 inline-flex items-center justify-center text-gray-400 hover:text-red-500"
-                              >
-                                <TrashFill size={10} />
-                              </button>
+                              {own && (
+                                <button
+                                  onClick={() => onDeleteMessage?.(m.id)}
+                                  title="Hapus"
+                                  className="w-6 h-6 rounded hover:bg-red-100 dark:hover:bg-red-900/40 inline-flex items-center justify-center text-gray-400 hover:text-red-500"
+                                >
+                                  <TrashFill size={10} />
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -634,6 +675,52 @@ export function MessengerApp({
             canManage={!!isAdmin}
             onClose={() => setShowMembers(false)}
           />
+        )}
+        {showPinned && (
+          <div className="absolute inset-y-0 right-0 w-80 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col z-10">
+            <div className="h-14 shrink-0 px-4 flex items-center justify-between border-b border-gray-200 dark:border-gray-700">
+              <span className="font-semibold text-sm inline-flex items-center gap-1.5">
+                <PinAngleFill size={13} className="text-indigo-500" /> Pesan Disematkan
+              </span>
+              <button
+                onClick={() => setShowPinned(false)}
+                title="Tutup"
+                className="w-7 h-7 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 inline-flex items-center justify-center text-gray-400"
+              >
+                <XLg size={13} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {pinnedMessages.length === 0 && (
+                <p className="text-xs text-gray-400 text-center py-6">Belum ada pesan yang disematkan.</p>
+              )}
+              {pinnedMessages.map((m) => {
+                const senderProfile = profileByUser.get(m.senderId);
+                const senderName = senderProfile?.name || m.senderName;
+                return (
+                  <div key={m.id} className="group/pin relative p-2.5 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Avatar name={senderName} seed={m.senderId} size={16} photoUrl={senderProfile?.photo ?? undefined} />
+                      <span className="text-[11px] font-medium truncate">{senderName}</span>
+                      <span className="text-[10px] text-gray-400 shrink-0">
+                        {new Date(m.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-700 dark:text-gray-200 break-words line-clamp-3">
+                      {m.text || (m.attachmentName ? `📎 ${m.attachmentName}` : '')}
+                    </p>
+                    <button
+                      onClick={() => onPinMessage?.(m.id, false)}
+                      title="Lepas sematan"
+                      className="absolute top-1.5 right-1.5 w-5 h-5 rounded hover:bg-red-100 dark:hover:bg-red-900/40 inline-flex items-center justify-center text-gray-400 hover:text-red-500 opacity-0 group-hover/pin:opacity-100 transition-opacity"
+                    >
+                      <XLg size={9} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         )}
       </section>
       {lightbox && <AttachmentLightbox target={lightbox} onClose={() => setLightbox(null)} />}
