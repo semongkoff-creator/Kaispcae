@@ -17,6 +17,7 @@ import {
   NUDGE_SHAKE_PX,
   ReferenceImageData,
   Zone,
+  doesRectOverlapImpassableArea,
 } from '@virtualmeet/shared';
 import { useGameStore, OVERVIEW_ZOOM_THRESHOLD } from '@/stores/gameStore';
 import { useMovement } from '@/hooks/useMovement';
@@ -25,6 +26,7 @@ import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
 import { PALETTE_BY_ID } from '@/data/themeAssets';
 import { isTileBlocked, isDoorTile } from '@/utils/createDefaultRoom';
+import { findTilePath, simplifyPath } from '@/utils/pathfinding';
 import { avatarColor } from '@/components/ui/ChatAvatar';
 // Bug 16-project (Room Editor) — these map-draw helpers were moved verbatim to
 // mapRender.ts so the editor can render the map identically. GameCanvas's usage
@@ -535,7 +537,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // followInfoRef. Cleared on arrival, on getting stuck (tryMoveToward stops
   // reporting movement either way), or the instant a REAL movement key is
   // pressed — same "manual input always wins" rule Follow already uses.
-  const walkTargetRef = useRef<{ x: number; y: number } | null>(null);
+  //
+  // A real waypoint QUEUE now, not a single point — see findTilePath
+  // (utils/pathfinding.ts). Straight-line-toward-a-single-target used to
+  // just stop dead the moment a desk sat between the player and the click,
+  // rather than routing around it; the click handler below now runs A* over
+  // the tile grid once and hands back a list of waypoints tracing an actual
+  // route, walked one at a time (front of the array = current sub-target,
+  // shifted off on arrival).
+  const walkTargetRef = useRef<{ x: number; y: number }[] | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -552,9 +562,30 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const tileY = Math.floor(worldY / TILE_SIZE);
       if (tileX < 0 || tileY < 0) return;
       if (isBlocked(tileX, tileY)) return; // can't walk onto a wall/desk
-      const cx = tileX * TILE_SIZE + TILE_SIZE / 2;
-      const cy = tileY * TILE_SIZE + TILE_SIZE / 2;
-      walkTargetRef.current = { x: cx, y: cy };
+
+      // Same walkability real movement collision uses — isBlocked (tile
+      // grid + door-password state) PLUS furniture Impassable Area rects,
+      // which are sub-tile and never rasterized into the tile grid itself
+      // (see wouldCollide's own separate check in useMovement.ts).
+      const areas = impassableAreaRectsRef.current;
+      const pathBlocked = (tx: number, ty: number) => {
+        if (isBlocked(tx, ty)) return true;
+        if (areas.length === 0) return false;
+        const left = tx * TILE_SIZE;
+        const top = ty * TILE_SIZE;
+        return doesRectOverlapImpassableArea(areas, left, top, left + TILE_SIZE, top + TILE_SIZE);
+      };
+
+      const startTileX = Math.floor(localPlayerRef.current.x / TILE_SIZE);
+      const startTileY = Math.floor(localPlayerRef.current.y / TILE_SIZE);
+      const tilePath = findTilePath(startTileX, startTileY, tileX, tileY, pathBlocked, MAP_WIDTH, MAP_HEIGHT);
+      if (!tilePath) return; // no route exists — same no-op as clicking a blocked tile
+
+      const waypoints = simplifyPath(tilePath).map((n) => ({
+        x: n.x * TILE_SIZE + TILE_SIZE / 2,
+        y: n.y * TILE_SIZE + TILE_SIZE / 2,
+      }));
+      walkTargetRef.current = waypoints.length > 0 ? waypoints : null;
     };
     canvas.addEventListener('dblclick', onDblClick);
     return () => canvas.removeEventListener('dblclick', onDblClick);
@@ -883,10 +914,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     }
 
     // Follow-up — double-click-to-walk, reusing the exact same "approach an
-    // arbitrary point" primitive as Follow above (tryMoveToward/updateFollow):
-    // straight-line with the normal per-axis collision slide, not real
-    // pathfinding — getting fully blocked just stops it, same as walking into
-    // a wall manually would. A real key press ALWAYS wins and cancels it
+    // arbitrary point" primitive as Follow above (tryMoveToward/updateFollow)
+    // to walk toward the CURRENT waypoint (front of the A*-computed queue —
+    // see findTilePath in utils/pathfinding.ts and the double-click handler
+    // above). A real key press ALWAYS wins and cancels the whole route
     // outright (checked against the RAW keyboard result, not
     // effectiveMoveResult, so this can't be left half-cancelled by Follow
     // happening to be active too). Skipped for a frame Follow is already
@@ -895,12 +926,19 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       if (moveResult.isMoving) {
         walkTargetRef.current = null;
       } else if (!activeFollow || !effectiveMoveResult.isMoving) {
-        const wt = walkTargetRef.current;
+        const path = walkTargetRef.current;
+        const wt = path[0];
         const walkResult = updateFollow(wt.x, wt.y, dt);
         if (walkResult.isMoving) {
           effectiveMoveResult = walkResult;
+        } else if (path.length > 1 && Math.hypot(wt.x - walkResult.x, wt.y - walkResult.y) < 4) {
+          // Reached this waypoint (not stuck — see the distance check) with
+          // more still queued: advance to the next one. One frame's pause
+          // at a route corner is imperceptible at 60fps; next frame picks
+          // the new sub-target straight back up.
+          walkTargetRef.current = path.slice(1);
         } else {
-          walkTargetRef.current = null; // arrived, or stuck — either way, done
+          walkTargetRef.current = null; // arrived at the final waypoint, or genuinely stuck
         }
       }
     }
@@ -1053,8 +1091,19 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // on worldViewW/H (not logicalW/H) so the player stays exactly centered
     // regardless of zoom — more/less world is visible, but always the same
     // amount to either side of the player.
-    const cameraX = Math.round(playerX - worldViewW / 2);
-    const cameraY = Math.round(playerY - worldViewH / 2);
+    //
+    // Overview is the one exception: centering on the MAP instead of the
+    // player is the whole point of "zoom out to see the whole office" — a
+    // player-centered camera still crops one side or the other whenever
+    // they're standing anywhere off-center, which defeated a full-office
+    // view for exactly the players it matters most for (someone tucked in a
+    // corner room). worldViewW/H at OVERVIEW_ZOOM_THRESHOLD comfortably
+    // exceeds MAP_WIDTH/HEIGHT*TILE_SIZE on any reasonable screen, so this
+    // puts the entire map in view regardless of where the local player is.
+    const centerX = isOverview ? (MAP_WIDTH * TILE_SIZE) / 2 : playerX;
+    const centerY = isOverview ? (MAP_HEIGHT * TILE_SIZE) / 2 : playerY;
+    const cameraX = Math.round(centerX - worldViewW / 2);
+    const cameraY = Math.round(centerY - worldViewH / 2);
 
     cameraXRef.current = cameraX;
     cameraYRef.current = cameraY;
@@ -1439,8 +1488,14 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     for (const avatar of allAvatars) {
       const sx = avatar.x - cameraX;
       const sy = avatar.y - cameraY;
-      if (sx < -AVATAR_RADIUS - 30 || sx > worldViewW + AVATAR_RADIUS + 30 ||
-          sy < -AVATAR_RADIUS - 40 || sy > worldViewH + AVATAR_RADIUS + 30) continue;
+      // Never culled in Overview — "see the whole office + everyone in it"
+      // means literally everyone, not just whoever the ordinary in-game
+      // viewport cull would have kept on an edge case (a screen smaller
+      // than the map even at max zoom-out). The map-centered camera above
+      // already keeps the map itself fully in frame; this keeps every
+      // player in frame right along with it.
+      if (!isOverview && (sx < -AVATAR_RADIUS - 30 || sx > worldViewW + AVATAR_RADIUS + 30 ||
+          sy < -AVATAR_RADIUS - 40 || sy > worldViewH + AVATAR_RADIUS + 30)) continue;
 
       if (isOverview) {
         // Overview mode — a colored initial bubble instead of the full
