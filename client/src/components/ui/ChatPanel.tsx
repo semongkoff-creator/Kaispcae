@@ -953,10 +953,12 @@ export function ChatPanel({
                 <MegaphoneFill size={11} /> Jadikan pengumuman
               </button>
             )}
-            {/* Admin-only per explicit request — a regular member can send
-                and read messages, just not pull up who's read any given
-                message on demand. */}
-            {isAdmin && (
+            {/* Full "who's read this" list — admin sees it on ANY message;
+                a regular member only on their OWN ("cuma bisa inspek diri
+                kita sendiri" — inspecting yourself means seeing who's read
+                what YOU sent, not just a count). Nothing shown at all for
+                someone else's message if you're not admin. */}
+            {(isAdmin || msgMenu.message.senderId === localUserId) && (
               <>
                 <div className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700 mt-1">
                   Dibaca oleh
@@ -973,14 +975,6 @@ export function ChatPanel({
                   })()}
                 </div>
               </>
-            )}
-            {/* Non-admin self-check — "cuma bisa inspek diri kita sendiri":
-                count only, on your OWN message only, never names or anyone
-                else's. */}
-            {!isAdmin && msgMenu.message.senderId === localUserId && (
-              <div className="px-3 pt-1.5 pb-1.5 text-[10px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700 mt-1">
-                {readersOf(msgMenu.message).length > 0 ? `Sudah dibaca oleh ${readersOf(msgMenu.message).length} orang` : 'Belum ada yang membaca'}
-              </div>
             )}
           </div>
         </div>,

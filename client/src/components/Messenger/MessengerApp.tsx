@@ -659,10 +659,10 @@ export function MessengerApp({
                             </div>
                           )}
                         </div>
-                        {/* Admin-only per explicit request — a regular
-                            member sends and reads messages, but doesn't get
-                            to see who else has read any given one. */}
-                        {isAdmin && readersByMessageId[m.id] && (
+                        {/* Admin sees this on any message; a regular member
+                            only on their OWN ("cuma bisa inspek diri kita
+                            sendiri" — checking who's read what YOU sent). */}
+                        {(isAdmin || m.senderId === localUserId) && readersByMessageId[m.id] && (
                           <span className={`text-[10px] text-gray-400 mt-0.5 px-1 ${own ? 'text-right' : ''}`}>
                             Dibaca oleh {readersByMessageId[m.id].map((uid) => playerRecords[uid]?.name ?? 'Seseorang').join(', ')}
                           </span>
@@ -822,9 +822,10 @@ export function MessengerApp({
                 {msgMenu.message.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
               </button>
             )}
-            {/* Admin-only per explicit request — see the passive hint's own
-                comment above for why. */}
-            {isAdmin && (
+            {/* Full "who's read this" list — admin sees it on ANY message; a
+                regular member only on their OWN. Nothing shown at all for
+                someone else's message if you're not admin. */}
+            {(isAdmin || msgMenu.message.senderId === localUserId) && (
               <>
                 <div className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700 mt-1">
                   Dibaca oleh
@@ -841,14 +842,6 @@ export function MessengerApp({
                   })()}
                 </div>
               </>
-            )}
-            {/* Non-admin self-check — "cuma bisa inspek diri kita sendiri":
-                count only, on your OWN message only, never names or anyone
-                else's. */}
-            {!isAdmin && msgMenu.message.senderId === localUserId && (
-              <div className="px-3 pt-1.5 pb-1.5 text-[10px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700 mt-1">
-                {readersOf(msgMenu.message).length > 0 ? `Sudah dibaca oleh ${readersOf(msgMenu.message).length} orang` : 'Belum ada yang membaca'}
-              </div>
             )}
           </div>
         </div>,
