@@ -31,17 +31,31 @@ const canNudge = socketRateLimit(3);
 // because Impassable Area rectangles are checked at sub-tile precision, not
 // against the tile grid (see mapLayers.ts's getImpassableAreaRects doc
 // comment for why they're never rasterized into it).
+// TEMP DIAGNOSTIC (QA "jalan ke selatan snap balik" repro, 2026-08-06) —
+// logs exactly which check rejects a move, so the real cause can be
+// confirmed from server logs instead of guessed. Remove once root-caused.
 function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string, tileX: number, tileY: number, pixelX: number, pixelY: number): boolean {
-  if (isTileBlocked(tiles, tileX, tileY)) return true;
-  if (isPointInImpassableArea(getCachedImpassableAreas(room), pixelX, pixelY)) return true;
+  if (isTileBlocked(tiles, tileX, tileY)) {
+    console.log('[collision-diag] tile-blocked', { room, socketId, tileX, tileY, tileType: tiles[tileY]?.[tileX]?.type });
+    return true;
+  }
+  if (isPointInImpassableArea(getCachedImpassableAreas(room), pixelX, pixelY)) {
+    console.log('[collision-diag] impassable-area', { room, socketId, pixelX, pixelY });
+    return true;
+  }
   const tile = tiles[tileY]?.[tileX];
   if (tile?.type === 'door' && tile.doorPasswordEnabled && tile.doorPassword) {
     // Item #9 — emergency override lets everyone through every door in this
     // room, bypassing the normal per-socket unlock entirely.
     if (isDoorOverrideActive(room)) return false;
-    return !isDoorUnlocked(socketId, room, tileX, tileY);
+    const locked = !isDoorUnlocked(socketId, room, tileX, tileY);
+    if (locked) console.log('[collision-diag] door-locked', { room, socketId, tileX, tileY });
+    return locked;
   }
-  if (isTileOccupiedInCapacityZone(room, tileX, tileY, socketId)) return true;
+  if (isTileOccupiedInCapacityZone(room, tileX, tileY, socketId)) {
+    console.log('[collision-diag] capacity-zone-occupied', { room, socketId, tileX, tileY });
+    return true;
+  }
   return false;
 }
 
@@ -89,7 +103,10 @@ function getMapBounds(tiles: RoomTile[][] | undefined): { mapWidth: number; mapH
 
 export function registerMovementHandlers(io: Server, socket: Socket) {
   socket.on(SocketEvents.PLAYER_MOVE, (data: PlayerMovePayload) => {
-    if (!shouldAcceptMoveSequence(socket.id, data?.seq)) return;
+    if (!shouldAcceptMoveSequence(socket.id, data?.seq)) {
+      console.log('[collision-diag] seq-rejected', { socketId: socket.id, seq: data?.seq });
+      return;
+    }
     if (typeof data?.x !== 'number' || typeof data?.y !== 'number') return;
     if (!Number.isFinite(data.x) || !Number.isFinite(data.y)) return;
 
@@ -117,6 +134,9 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
       const { mapWidth, mapHeight } = getMapBounds(tiles);
       const clampedX = Math.max(TILE_SIZE / 2, Math.min(mapWidth * TILE_SIZE - TILE_SIZE / 2, data.x));
       const clampedY = Math.max(TILE_SIZE / 2, Math.min(mapHeight * TILE_SIZE - TILE_SIZE / 2, data.y));
+      if (clampedY !== data.y) {
+        console.log('[collision-diag] y-clamped', { room: gameRoom, socketId: socket.id, requestedY: data.y, clampedY, mapHeight, hadTiles: !!tiles });
+      }
       if (tiles) {
         const tileX = Math.floor(clampedX / TILE_SIZE);
         const tileY = Math.floor(clampedY / TILE_SIZE);
