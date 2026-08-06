@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle } from 'react-bootstrap-icons';
 import { ChannelMessage, Channel, DirectConversationSummary } from '@virtualmeet/shared';
 import { api } from '@/services/api';
@@ -766,16 +767,20 @@ export function MessengerApp({
         )}
       </section>
       {lightbox && <AttachmentLightbox target={lightbox} onClose={() => setLightbox(null)} />}
-      {msgMenu && (
+      {/* Portaled to document.body — same reasoning as ChatPanel.tsx's own
+          message menu: a `position: fixed` descendant of any ancestor that
+          later grows a filter/backdrop-filter/transform would otherwise be
+          positioned relative to THAT ancestor instead of the real viewport. */}
+      {msgMenu && createPortal(
         <div
-          className="fixed inset-0 z-40"
+          className="fixed inset-0 z-[1000]"
           onClick={() => setMsgMenu(null)}
           onContextMenu={(e) => { e.preventDefault(); setMsgMenu(null); }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
             style={{ position: 'fixed', left: Math.min(msgMenu.x, window.innerWidth - 220), top: Math.min(msgMenu.y, window.innerHeight - 260) }}
-            className="z-50 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 text-xs"
+            className="z-[1001] w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 text-xs"
           >
             <button
               onClick={() => { onPinMessage?.(msgMenu.message.id, !msgMenu.message.isPinned); setMsgMenu(null); }}
@@ -799,7 +804,8 @@ export function MessengerApp({
               })()}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

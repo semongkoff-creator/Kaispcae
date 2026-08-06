@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode, type MouseEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, MegaphoneFill } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@virtualmeet/shared';
 import { api } from '@/services/api';
@@ -847,16 +848,23 @@ export function ChatPanel({
           (admin only, same action as the old bare right-click), and see
           exactly who has read this message. A full-screen backdrop closes it
           on any outside click/right-click. */}
-      {msgMenu && (
+      {/* Portaled straight to document.body — ChatPanel's own root has
+          backdrop-blur-md (line ~430), and CSS filter/backdrop-filter
+          establishes a new containing block for `position: fixed`
+          descendants. Left un-portaled, this menu's "fixed" coordinates
+          would be measured from the panel's own corner instead of the
+          actual viewport, landing it off-screen or visually stuck behind
+          the panel instead of on top of everything. */}
+      {msgMenu && createPortal(
         <div
-          className="fixed inset-0 z-40"
+          className="fixed inset-0 z-[1000]"
           onClick={() => setMsgMenu(null)}
           onContextMenu={(e) => { e.preventDefault(); setMsgMenu(null); }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
             style={{ position: 'fixed', left: Math.min(msgMenu.x, window.innerWidth - 220), top: Math.min(msgMenu.y, window.innerHeight - 260) }}
-            className="z-50 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 text-xs"
+            className="z-[1001] w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 text-xs"
           >
             <button
               onClick={() => { onPinMessage?.(msgMenu.message.id, !msgMenu.message.isPinned); setMsgMenu(null); }}
@@ -888,7 +896,8 @@ export function ChatPanel({
               })()}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
