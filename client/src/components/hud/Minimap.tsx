@@ -12,8 +12,6 @@ interface MinimapProps {
 
 const MM_W = 150;
 const MM_H = 100;
-const SCALE_X = MM_W / (MAP_WIDTH * TILE_SIZE);
-const SCALE_Y = MM_H / (MAP_HEIGHT * TILE_SIZE);
 
 export function Minimap({ players, localPlayerId, onTeleport, visible }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -22,6 +20,18 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
   const wallAreaRects = useGameStore((s) => s.wallAreaRects);
   const zones = useGameStore((s) => s.zones);
   const localRole = useGameStore((s) => s.localRole);
+  // QA follow-up — MAP_WIDTH/MAP_HEIGHT are only the default grid size; a
+  // resized room (Room Editor's Resize tool, up to 200x200) is bigger than
+  // that. These used to be MODULE-level constants derived from the fixed
+  // default, so a resized room's floor plan drew at the wrong scale
+  // (overflowing this fixed 150x100 canvas) AND click-to-teleport could
+  // never target anywhere past the old default edge — same root cause as
+  // GameCanvas.tsx's Overview/pathfinding fixes. Now derived per-render from
+  // the actually-loaded `tiles` array, the same source of truth used there.
+  const mapCols = tiles[0]?.length || MAP_WIDTH;
+  const mapRows = tiles.length || MAP_HEIGHT;
+  const scaleX = MM_W / (mapCols * TILE_SIZE);
+  const scaleY = MM_H / (mapRows * TILE_SIZE);
   // Faded out (just a subtle presence) until hovered, then fades in to full
   // opacity — a permanently-opaque floor plan sitting over the game world
   // reads as visual clutter once you're not actively using it to navigate.
@@ -49,8 +59,8 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
     ctx.fillStyle = 'rgba(237,233,254,0.9)';
     ctx.fillRect(0, 0, MM_W, MM_H);
 
-    const cellW = MM_W / MAP_WIDTH;
-    const cellH = MM_H / MAP_HEIGHT;
+    const cellW = MM_W / mapCols;
+    const cellH = MM_H / mapRows;
 
     // Per-zone background tint, drawn first so rooms read as visually
     // distinct areas (Gather.town-style) instead of one flat color —
@@ -84,10 +94,10 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
     }
 
     // Room Editor's "Wall Area" tool — pixel-space rects, scaled with the
-    // same SCALE_X/SCALE_Y the player dots below already use.
+    // same scaleX/scaleY the player dots below already use.
     for (const rect of wallAreaRects) {
       ctx.fillStyle = MINI_WALL_AREA;
-      ctx.fillRect(rect.x * SCALE_X, rect.y * SCALE_Y, rect.w * SCALE_X, rect.h * SCALE_Y);
+      ctx.fillRect(rect.x * scaleX, rect.y * scaleY, rect.w * scaleX, rect.h * scaleY);
     }
 
     ctx.strokeStyle = 'rgba(124,58,237,0.5)';
@@ -99,8 +109,8 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
     const canSeeHidden = roleAtLeast(localRole, 'admin');
     for (const p of players) {
       if (p.hidden && p.id !== localPlayerId && !canSeeHidden) continue;
-      const mx = p.x * SCALE_X;
-      const my = p.y * SCALE_Y;
+      const mx = p.x * scaleX;
+      const my = p.y * scaleY;
       const isLocal = p.id === localPlayerId;
 
       ctx.beginPath();
@@ -113,7 +123,7 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
         ctx.stroke();
       }
     }
-  }, [players, localPlayerId, tiles, furniture, wallAreaRects, zones, localRole]);
+  }, [players, localPlayerId, tiles, furniture, wallAreaRects, zones, localRole, mapCols, mapRows, scaleX, scaleY]);
 
   const handleClick = (e: React.MouseEvent) => {
     // Belt-and-suspenders — you can't actually click this without the mouse
@@ -125,7 +135,7 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
     if (!rect) return;
     const clickX = (e.clientX - rect.left) / rect.width * MM_W;
     const clickY = (e.clientY - rect.top) / rect.height * MM_H;
-    onTeleport(clickX / SCALE_X, clickY / SCALE_Y);
+    onTeleport(clickX / scaleX, clickY / scaleY);
   };
 
   if (!visible) return null;

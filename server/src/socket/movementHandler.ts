@@ -42,6 +42,29 @@ function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string,
   return false;
 }
 
+// QA follow-up ("jalan ke selatan snap balik") — MAP_WIDTH/MAP_HEIGHT (50x36)
+// are only the DEFAULT room grid; the Room Editor's Resize tool lets an
+// admin grow a room up to 200x200 (see GameCanvas.tsx's matching client-side
+// fix for the Overview-mode version of this exact bug). Every bounds clamp
+// below used to clamp against the fixed constants regardless of the actual
+// room size — so in a resized room, walking/teleporting past the OLD
+// boundary got silently clamped back by the server, most visibly via
+// PLAYER_STOP: it broadcasts (via io.to, which includes the sender) the
+// server-clamped position back to the mover's OWN client the instant they
+// stop, snapping them back to the old edge even though they'd walked
+// further. Deriving real bounds from the room's cached tile grid — already
+// fetched for the collision check right after — fixes every one of these
+// the same way. Falls back to the fixed defaults when tiles aren't cached
+// yet for this room (same fail-open posture the collision check already
+// has below), which is exactly the existing behavior for a never-resized
+// room anyway.
+function getMapBounds(tiles: RoomTile[][] | undefined): { mapWidth: number; mapHeight: number } {
+  return {
+    mapWidth: tiles?.[0]?.length || MAP_WIDTH,
+    mapHeight: tiles?.length || MAP_HEIGHT,
+  };
+}
+
 export function registerMovementHandlers(io: Server, socket: Socket) {
   socket.on(SocketEvents.PLAYER_MOVE, (data: MoveData) => {
     // Rate limit: skip if too many updates
@@ -49,10 +72,6 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     const lastUpdate = rateLimitMap.get(socket.id) || 0;
     if (now - lastUpdate < MIN_UPDATE_INTERVAL) return;
     rateLimitMap.set(socket.id, now);
-
-    // Server-side bounds validation
-    const clampedX = Math.max(TILE_SIZE / 2, Math.min(MAP_WIDTH * TILE_SIZE - TILE_SIZE / 2, data.x));
-    const clampedY = Math.max(TILE_SIZE / 2, Math.min(MAP_HEIGHT * TILE_SIZE - TILE_SIZE / 2, data.y));
 
     // Broadcast to all others in the socket's game room only — a plain
     // socket.broadcast.emit would leak positions to every room on the server.
@@ -69,6 +88,9 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
       // (e.g. a stray move racing the initial ROOM_STATE), fail open rather
       // than silently dropping legitimate early input.
       const tiles = getCachedTiles(gameRoom);
+      const { mapWidth, mapHeight } = getMapBounds(tiles);
+      const clampedX = Math.max(TILE_SIZE / 2, Math.min(mapWidth * TILE_SIZE - TILE_SIZE / 2, data.x));
+      const clampedY = Math.max(TILE_SIZE / 2, Math.min(mapHeight * TILE_SIZE - TILE_SIZE / 2, data.y));
       if (tiles) {
         const tileX = Math.floor(clampedX / TILE_SIZE);
         const tileY = Math.floor(clampedY / TILE_SIZE);
@@ -91,12 +113,13 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
   // every client SNAPS instead of interpolating a slide across the map.
   socket.on(SocketEvents.PLAYER_TELEPORT_TO, (data: { x: number; y: number; direction?: string }) => {
     if (typeof data?.x !== 'number' || typeof data?.y !== 'number') return;
-    const clampedX = Math.max(TILE_SIZE / 2, Math.min(MAP_WIDTH * TILE_SIZE - TILE_SIZE / 2, data.x));
-    const clampedY = Math.max(TILE_SIZE / 2, Math.min(MAP_HEIGHT * TILE_SIZE - TILE_SIZE / 2, data.y));
     const rooms = Array.from(socket.rooms);
     const gameRoom = rooms.find((r) => r !== socket.id);
     if (!gameRoom) return;
     const tiles = getCachedTiles(gameRoom);
+    const { mapWidth, mapHeight } = getMapBounds(tiles);
+    const clampedX = Math.max(TILE_SIZE / 2, Math.min(mapWidth * TILE_SIZE - TILE_SIZE / 2, data.x));
+    const clampedY = Math.max(TILE_SIZE / 2, Math.min(mapHeight * TILE_SIZE - TILE_SIZE / 2, data.y));
     if (tiles) {
       const tileX = Math.floor(clampedX / TILE_SIZE);
       const tileY = Math.floor(clampedY / TILE_SIZE);
@@ -111,7 +134,9 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     const rooms = Array.from(socket.rooms);
     const gameRoom = rooms.find((r) => r !== socket.id);
     if (gameRoom) {
-      const stopped = createStoppedPayload(socket.id, data, { mapWidth: MAP_WIDTH, mapHeight: MAP_HEIGHT, tileSize: TILE_SIZE });
+      const tiles = getCachedTiles(gameRoom);
+      const { mapWidth, mapHeight } = getMapBounds(tiles);
+      const stopped = createStoppedPayload(socket.id, data, { mapWidth, mapHeight, tileSize: TILE_SIZE });
       if (!stopped) {
         socket.to(gameRoom).emit(SocketEvents.PLAYER_STOPPED, {
           id: socket.id,
@@ -121,7 +146,6 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
         return;
       }
 
-      const tiles = getCachedTiles(gameRoom);
       if (tiles) {
         const tileX = Math.floor(stopped.x / TILE_SIZE);
         const tileY = Math.floor(stopped.y / TILE_SIZE);

@@ -597,7 +597,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     };
     const startTileX = Math.floor(localPlayerRef.current.x / TILE_SIZE);
     const startTileY = Math.floor(localPlayerRef.current.y / TILE_SIZE);
-    const tilePath = findTilePath(startTileX, startTileY, targetTileX, targetTileY, pathBlocked, MAP_WIDTH, MAP_HEIGHT);
+    // QA follow-up — MAP_WIDTH/MAP_HEIGHT are only the default grid size; a
+    // resized room (Room Editor's Resize tool, up to 200x200) is bigger than
+    // that, so bounding the pathfind to the fixed constants made any
+    // double-click/Locate target past the old edge unreachable (findTilePath
+    // rejects any out-of-bounds target outright) even though it's real,
+    // walkable floor. Same real-size derivation as the Overview-mode fix.
+    const cols = tilesRef.current[0]?.length || MAP_WIDTH;
+    const rows = tilesRef.current.length || MAP_HEIGHT;
+    const tilePath = findTilePath(startTileX, startTileY, targetTileX, targetTileY, pathBlocked, cols, rows);
     if (!tilePath) return null; // no route exists
     const waypoints = simplifyPath(tilePath).map((n) => ({
       x: n.x * TILE_SIZE + TILE_SIZE / 2,
