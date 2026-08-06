@@ -1,4 +1,4 @@
-// Grid-based A* for double-click-to-move (see GameCanvas.tsx's
+// Grid-based A* for click-to-move (see GameCanvas.tsx's
 // walkTargetRef). That feature used to just walk in a straight line toward
 // the clicked tile with the normal per-axis collision slide — fine on open
 // floor, but a desk sitting between the player and the target just stopped
@@ -47,7 +47,7 @@ function manhattanHeuristic(ax: number, ay: number, bx: number, by: number): num
 // then reject on arrival.
 //
 // Grid is small (a typical office map is a few thousand tiles at most) and
-// this only ever runs once per double-click, not per frame — a plain
+// this only ever runs once per click, not per frame — a plain
 // linear scan for the lowest f-score each iteration is simpler than a
 // binary heap and still comfortably fast enough at this scale.
 export function findTilePath(

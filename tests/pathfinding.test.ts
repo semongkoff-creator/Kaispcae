@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { findTilePath, getCardinalWaypointTarget, simplifyPath, TileNode } from '../client/src/utils/pathfinding';
 
 let passed = 0;
@@ -42,6 +43,14 @@ test('click-to-move targets one waypoint axis at a time', () => {
     getCardinalWaypointTarget(34, 117, { x: 24, y: 120 }),
     { x: 24, y: 117 },
   );
+});
+
+test('click-to-move starts from a single canvas click', () => {
+  const gameCanvas = readFileSync('client/src/components/canvas/GameCanvas.tsx', 'utf8');
+
+  assert.match(gameCanvas, /addEventListener\('click', onCanvasClick\)/);
+  assert.match(gameCanvas, /removeEventListener\('click', onCanvasClick\)/);
+  assert.doesNotMatch(gameCanvas, /addEventListener\('dblclick'/);
 });
 
 if (process.exitCode) {
