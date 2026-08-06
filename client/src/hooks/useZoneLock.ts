@@ -55,6 +55,10 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     const onDenied = (msg: { zoneId: string; reason?: string; lockedByName?: string }) => {
       if (msg.reason === 'already_locked') { flash(`Zona ini sudah dikunci ${msg.lockedByName ?? 'orang lain'}.`); return; }
       if (msg.reason === 'not_keyholder') { flash(`Hanya ${msg.lockedByName ?? 'yang mengunci'} yang bisa membuka zona ini.`); return; }
+      // Item #14 — capacity denial isn't a lock, so there's no keyholder to
+      // knock on: just a toast, same as the two reasons above, never the
+      // deniedZoneId "knock?" prompt (which is lock-specific).
+      if (msg.reason === 'zone_full') { flash('Zona ini penuh.'); return; }
       setDeniedZoneId(msg.zoneId);
     };
     const onKnock = (msg: ZoneKnockRequest) => {

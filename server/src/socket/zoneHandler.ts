@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { SocketEvents } from '@virtualmeet/shared';
 import { mayEnterZone, isZoneLocked, isSealedIn } from './zoneLock';
 import { sendMusicStateToSocket } from './musicHandler';
+import { getCachedZones } from '../store/roomStore';
 
 // Actual A/V zone restriction is computed client-side (see useProximity.ts —
 // every client already knows every player's position and the room's zones,
@@ -53,6 +54,19 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
     if (isZoneLocked(currentRoom, zoneId) && !mayEnterZone(currentRoom, zoneId, uid)) {
       socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'locked' });
       return;
+    }
+    // Item #14 — optional max-occupant cap (Room Editor's "Private area"
+    // tool, Zone.capacity). Excludes this socket from the count so a
+    // redundant ZONE_ENTER re-fired while already inside (e.g. walking
+    // around within the same zone) never locks someone out of a zone
+    // they're already standing in.
+    const zone = getCachedZones(currentRoom).find((z) => z.id === zoneId);
+    if (zone?.capacity) {
+      const others = getSocketIdsInZone(currentRoom, zoneId).filter((id) => id !== socket.id);
+      if (others.length >= zone.capacity) {
+        socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'zone_full' });
+        return;
+      }
     }
     socketZone.set(socket.id, { room: currentRoom, zoneId });
     socket.to(currentRoom).emit(SocketEvents.ZONE_ENTER, { playerId: socket.id, zoneId });

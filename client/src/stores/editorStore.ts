@@ -205,7 +205,7 @@ interface EditorState {
   // effect it actually means, same principle as zones already not being
   // hit-testable by the point-effect tools.
   areaAt: (x: number, y: number, effect?: AreaEffect['effect']) => AreaEffect | null;
-  addArea: (effect: 'mapLocation' | 'privateArea' | 'impassable' | 'focusArea' | 'wallArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean) => string;
+  addArea: (effect: 'mapLocation' | 'privateArea' | 'impassable' | 'focusArea' | 'wallArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean, capacity?: number) => string;
   removeAreaAt: (x: number, y: number, effect?: AreaEffect['effect']) => void;
   // Item #9 — select/move/resize/delete an EXISTING Impassable Area rectangle
   // (RoomEditorPage.tsx's drag-body / drag-handle / Delete-key interactions).
@@ -609,7 +609,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
       return null;
     },
-    addArea: (effect, rect, name, areaId, audioIsolated) => {
+    addArea: (effect, rect, name, areaId, audioIsolated, capacity) => {
       const d = get().doc; if (!d) return '';
       const snap = snapshot();
       // zoneType 'desk' → the game shows a name PILL and (when audioIsolated)
@@ -627,7 +627,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       // for 'impassable' (Item #9, excluded from the zones list entirely).
       const id = crypto.randomUUID();
       const zoneType = effect === 'focusArea' ? 'focus' : 'desk';
-      d.areas.push({ id, effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, zoneType, areaId, audioIsolated });
+      d.areas.push({ id, effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, zoneType, areaId, audioIsolated, capacity });
       areasDirty = true; pushHistory(snap); commit();
       return id;
     },

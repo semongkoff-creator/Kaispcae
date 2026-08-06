@@ -5,7 +5,7 @@ import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerMic, updatePlayerHidden, updatePlayerWorkMode, updatePlayerSpotlight, updatePlayerSitting,
-  setCachedTiles, getCachedTiles, setCachedImpassableAreas, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
+  setCachedTiles, getCachedTiles, setCachedImpassableAreas, setCachedZones, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
 } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';
 import { resolveEntry } from '../lib/roomMembership';
@@ -583,6 +583,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       // comment there).
       setCachedTiles(room, tiles);
       setCachedImpassableAreas(room, savedImpassableAreaRects);
+      setCachedZones(room, savedZones || fallback!.zones);
 
       socket.emit(SocketEvents.ROOM_STATE, {
         ...state, tiles: redactDoorPasswords(tiles), furniture: redactInteractiveSecrets(savedFurniture || fallback!.furniture), zones: savedZones || fallback!.zones, players: playersWithMeta,
@@ -808,6 +809,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         const derived = layerDataToLegacy(ld);
         setCachedTiles(room, derived.tiles);
         setCachedImpassableAreas(room, derived.impassableAreaRects);
+        setCachedZones(room, derived.zones);
         io.to(room).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones, impassableAreaRects: derived.impassableAreaRects, wallAreaRects: derived.wallAreaRects });
       }
     } catch (e) {
@@ -1366,6 +1368,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // wouldn't take effect for server-side movement validation until the
     // next full room rejoin.
     setCachedTiles(room, payload.tiles);
+    setCachedZones(room, payload.zones ?? []);
     try {
       getPrisma().room.update({
         where: { slug: room },

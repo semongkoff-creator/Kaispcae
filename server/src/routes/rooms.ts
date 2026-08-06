@@ -12,7 +12,7 @@ import { isRoomLocked } from '../socket/roomHandler';
 import { isValidMediaPayload, isUploadUrl } from '../socket/mediaHandler';
 import { redactInteractiveSecrets, redactDoorPasswords } from '../lib/redactFurniture';
 import { deleteUploadedFile, storage as uploadStorage } from './uploads';
-import { setCachedTiles, setCachedImpassableAreas, getPlayers, updatePlayerPosition } from '../store/roomStore';
+import { setCachedTiles, setCachedImpassableAreas, setCachedZones, getPlayers, updatePlayerPosition } from '../store/roomStore';
 
 // Client shape for a MapMediaObject row (mirrors mediaHandler.toClientShape).
 function mediaShape(r: { id: string; roomId: string; type: string; x: number; y: number; createdBy: string; createdByName: string; createdAt: Date; expiresAt: Date | null; payload: unknown }) {
@@ -291,6 +291,14 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
       const isPositiveFinite = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v > 0;
       layerData.areas = body.areas
         .filter((a: unknown) => a && typeof a === 'object' && typeof (a as { id?: unknown }).id === 'string' && isPositiveFinite((a as { width?: unknown }).width) && isPositiveFinite((a as { height?: unknown }).height))
+        .map((a: { capacity?: unknown }) => {
+          // Item #14 — capacity is optional; strip anything that isn't a
+          // positive integer instead of rejecting the whole area, same
+          // fail-soft posture as the interactiveConfig sanitizers above.
+          if (a.capacity == null) return a;
+          if (Number.isInteger(a.capacity) && (a.capacity as number) > 0) return a;
+          return { ...a, capacity: undefined };
+        })
         .slice(0, 500) as LayerData['areas'];
     }
 
@@ -355,6 +363,7 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
     const derived = layerDataToLegacy(layerData);
     setCachedTiles(room.slug, derived.tiles);
     setCachedImpassableAreas(room.slug, derived.impassableAreaRects);
+    setCachedZones(room.slug, derived.zones);
     ioRef?.to(room.slug).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones, impassableAreaRects: derived.impassableAreaRects, wallAreaRects: derived.wallAreaRects });
 
     // Focus area — the first time an admin saves a room with at least one

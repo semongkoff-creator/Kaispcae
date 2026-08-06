@@ -155,6 +155,9 @@ export interface AreaEffect {
   // area authored before this field existed gets the right behavior without
   // needing to be re-drawn.
   audioIsolated?: boolean;
+  // See Zone.capacity. Only ever set on 'privateArea' (prompted at creation
+  // time in RoomEditorPage.tsx); absent/0 = unlimited.
+  capacity?: number;
 }
 
 export interface LayerData {
@@ -379,6 +382,7 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     // existed.
     if (a.audioIsolated != null) z.audioIsolated = a.audioIsolated;
     else if (a.effect === 'mapLocation') z.audioIsolated = false;
+    if (a.capacity != null) z.capacity = a.capacity;
     return z;
   });
 

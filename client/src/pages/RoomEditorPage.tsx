@@ -1462,7 +1462,10 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             // grouped audio room split across a boundary that shouldn't also
             // go silent against its own neighbors".
             const isolate = window.confirm('Area ini KEDAP SUARA?\n\nOK = ya — orang di luar area ini tidak akan saling dengar dengan yang di dalam (perilaku normal Private Area).\nBatal = tidak — cuma jarak biasa yang menentukan siapa dengar siapa.');
-            s.addArea('privateArea', sel, name || 'Private', areaId || undefined, isolate);
+            const capacityRaw = (window.prompt('Kapasitas maksimal orang di area ini (kosongkan = tanpa batas):', '') ?? '').trim();
+            const capacityNum = capacityRaw ? parseInt(capacityRaw, 10) : NaN;
+            const capacity = Number.isInteger(capacityNum) && capacityNum > 0 ? capacityNum : undefined;
+            s.addArea('privateArea', sel, name || 'Private', areaId || undefined, isolate, capacity);
           } else if (s.selectedEffect === 'mapLocation') {
             const name = (window.prompt('Nama lokasi:', '') ?? '').trim();
             // Default Batal = TIDAK kedap suara — Map Location is just a named

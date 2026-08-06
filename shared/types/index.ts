@@ -1271,6 +1271,13 @@ export interface Zone {
   // Editor's 'Map location' tool, whose whole purpose is a named pin with
   // no audio effect (unlike 'Private area', which IS meant to isolate).
   audioIsolated?: boolean;
+  // Optional max-occupant cap for this zone (Room Editor's "Private area"
+  // tool, set once at creation via prompt — see RoomEditorPage.tsx).
+  // Undefined/0 = unlimited, matching every zone before this field existed.
+  // Enforced server-side in zoneHandler.ts's ZONE_ENTER — the server
+  // counts current occupants itself (getSocketIdsInZone), never trusting a
+  // client-reported count.
+  capacity?: number;
 }
 
 // Chat. When zoneId is set, the message is private to that zone — the

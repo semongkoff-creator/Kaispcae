@@ -1,4 +1,4 @@
-import { Avatar, RoomState, AvatarConfig, RoomTile, WorkMode, ImpassableAreaRect } from '@virtualmeet/shared';
+import { Avatar, RoomState, AvatarConfig, RoomTile, WorkMode, ImpassableAreaRect, Zone } from '@virtualmeet/shared';
 import { Redis } from 'ioredis';
 
 // In-memory fallback storage — always works, zero dependencies
@@ -321,6 +321,21 @@ export function setCachedImpassableAreas(roomId: string, rects: ImpassableAreaRe
 
 export function getCachedImpassableAreas(roomId: string): ImpassableAreaRect[] {
   return impassableAreaCache.get(roomId) ?? [];
+}
+
+// Zones — same populate-on-join/refresh-on-save lifecycle, in-memory-only
+// caveat as the caches above. zoneHandler.ts's ZONE_ENTER needs this to
+// enforce a zone's optional capacity limit (Zone.capacity) server-side —
+// it only ever tracked socket↔zoneId membership before, never the zones'
+// own data, so there was nowhere to look up a capacity to check against.
+const zoneCache = new Map<string, Zone[]>();
+
+export function setCachedZones(roomId: string, zones: Zone[]): void {
+  zoneCache.set(roomId, zones);
+}
+
+export function getCachedZones(roomId: string): Zone[] {
+  return zoneCache.get(roomId) ?? [];
 }
 
 // ─── Last known position (reconnect persistence) ─────────────────────
