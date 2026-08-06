@@ -698,7 +698,13 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       const eff = ld.tileEffects.find((e) => e.x === x && e.y === y && e.kind === 'door');
       if (!eff?.doorPasswordEnabled) return;
       const correct = (eff.doorPassword ?? '') === attempt;
-      if (correct) unlockDoor(socket.id, room, x, y);
+      if (correct) {
+        unlockDoor(socket.id, room, x, y);
+        // Item #6 follow-up — let everyone else in the room know this door
+        // just got opened (no visual door state to sync yet, so this is a
+        // notice only; see DOOR_UNLOCKED_NOTICE's doc comment).
+        socket.to(room).emit(SocketEvents.DOOR_UNLOCKED_NOTICE, { x, y, byName: getPlayerName(socket.id) });
+      }
       socket.emit(SocketEvents.INTERACTIVE_DOOR_PASSWORD_RESULT, {
         x, y, correct,
         failureMessage: correct ? undefined : (eff.doorFailureMessage || 'Password salah.'),

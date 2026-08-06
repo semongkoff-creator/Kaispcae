@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
@@ -353,6 +353,14 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socket.on(SocketEvents.INTERACTIVE_DOOR_PASSWORD_RESULT, (data: InteractiveDoorPasswordResultPayload) => {
       useGameStore.getState().setInteractiveDoorPasswordResult(data);
       if (data.correct) useGameStore.getState().unlockDoorClientSide(data.x, data.y);
+    });
+
+    // Item #6 (Akses & Password Pintu audit) follow-up — someone ELSE in the
+    // room just solved a door password; only they got INTERACTIVE_DOOR_PASSWORD_RESULT
+    // above, so without this the rest of the room would have no idea a door
+    // opened at all. No visual door state to update yet — just a notice.
+    socket.on(SocketEvents.DOOR_UNLOCKED_NOTICE, (data: DoorUnlockedNoticePayload) => {
+      useGameStore.getState().addActivity(`${data.byName} membuka pintu.`);
     });
 
     // Fitur 15B — reply to MY OWN INTERACTIVE_API_CALL. No modal to feed —

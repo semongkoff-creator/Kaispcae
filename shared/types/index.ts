@@ -540,6 +540,15 @@ export enum SocketEvents {
   // "movement past that tile now succeeds", not a further event.
   INTERACTIVE_DOOR_PASSWORD_CHECK = 'interactive:door_password_check',
   INTERACTIVE_DOOR_PASSWORD_RESULT = 'interactive:door_password_result',
+  // Item #6 (Akses & Password Pintu audit) follow-up — a correct door
+  // password only ever told the SOLVER their own door opened; everyone else
+  // in the room had no idea it happened. This is a one-way notice broadcast
+  // to the rest of the room (never to the solver, who already has their own
+  // INTERACTIVE_DOOR_PASSWORD_RESULT) so a toast can show "X membuka pintu".
+  // No open/close visual state exists yet (see the door-open-animation item,
+  // still deferred), so this is a notification only — not a synced door
+  // sprite/state.
+  DOOR_UNLOCKED_NOTICE = 'door:unlocked_notice',
   // Fitur 15B — same request/reply shape as the password pair above, for
   // Multiple choice pop-up's isCorrect flags.
   INTERACTIVE_CHOICE_CHECK = 'interactive:choice_check',
@@ -1184,6 +1193,11 @@ export interface InteractiveDoorPasswordCheckPayload {
   x: number;
   y: number;
   attempt: string;
+}
+export interface DoorUnlockedNoticePayload {
+  x: number;
+  y: number;
+  byName: string;
 }
 export interface InteractiveDoorPasswordResultPayload {
   x: number;
