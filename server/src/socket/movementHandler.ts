@@ -31,31 +31,17 @@ const canNudge = socketRateLimit(3);
 // because Impassable Area rectangles are checked at sub-tile precision, not
 // against the tile grid (see mapLayers.ts's getImpassableAreaRects doc
 // comment for why they're never rasterized into it).
-// TEMP DIAGNOSTIC (QA "jalan ke selatan snap balik" repro, 2026-08-06) —
-// logs exactly which check rejects a move, so the real cause can be
-// confirmed from server logs instead of guessed. Remove once root-caused.
 function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string, tileX: number, tileY: number, pixelX: number, pixelY: number): boolean {
-  if (isTileBlocked(tiles, tileX, tileY)) {
-    console.log('[collision-diag] tile-blocked', { room, socketId, tileX, tileY, tileType: tiles[tileY]?.[tileX]?.type });
-    return true;
-  }
-  if (isPointInImpassableArea(getCachedImpassableAreas(room), pixelX, pixelY)) {
-    console.log('[collision-diag] impassable-area', { room, socketId, pixelX, pixelY });
-    return true;
-  }
+  if (isTileBlocked(tiles, tileX, tileY)) return true;
+  if (isPointInImpassableArea(getCachedImpassableAreas(room), pixelX, pixelY)) return true;
   const tile = tiles[tileY]?.[tileX];
   if (tile?.type === 'door' && tile.doorPasswordEnabled && tile.doorPassword) {
     // Item #9 — emergency override lets everyone through every door in this
     // room, bypassing the normal per-socket unlock entirely.
     if (isDoorOverrideActive(room)) return false;
-    const locked = !isDoorUnlocked(socketId, room, tileX, tileY);
-    if (locked) console.log('[collision-diag] door-locked', { room, socketId, tileX, tileY });
-    return locked;
+    return !isDoorUnlocked(socketId, room, tileX, tileY);
   }
-  if (isTileOccupiedInPrivateArea(room, tileX, tileY, socketId)) {
-    console.log('[collision-diag] private-area-occupied', { room, socketId, tileX, tileY });
-    return true;
-  }
+  if (isTileOccupiedInPrivateArea(room, tileX, tileY, socketId)) return true;
   return false;
 }
 
@@ -70,9 +56,9 @@ function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string,
 // is the best available proxy: Private Area's whole point is isolating
 // audio (defaults to isolate=true), Map Location's is a plain name pin
 // (defaults to isolate=false) — matching the exact same inference
-// RoomEditorPage.tsx's own preview already uses to tell them apart. Meeting
-// Meeting/Focus areas (zoneType 'meeting'/'focus') are naturally excluded by the
-// zoneType==='desk' check — this was never asked to extend to those. A
+// RoomEditorPage.tsx's own preview already uses to tell them apart.
+// Meeting/Focus areas (zoneType 'meeting'/'focus') are naturally excluded by
+// the zoneType==='desk' check — this was never asked to extend to those. A
 // player is never blocked by their OWN current tile — this only stops
 // walking ONTO someone else, not standing still.
 function isTileOccupiedInPrivateArea(room: string, tileX: number, tileY: number, selfId: string): boolean {
@@ -110,11 +96,34 @@ function getMapBounds(tiles: RoomTile[][] | undefined): { mapWidth: number; mapH
 }
 
 export function registerMovementHandlers(io: Server, socket: Socket) {
+  // Root cause of "jalan ke selatan snap balik" (walking south/diagonal
+  // snapping back straight) — every handler below used to derive the game
+  // room by picking the first entry in socket.rooms that wasn't the
+  // socket's own id room. That's unsafe the moment a socket is ALSO a
+  // member of any other room — which channel/DM chat (CHANNEL_JOIN/DM_JOIN,
+  // see channelChatHandler.ts) makes routine, and which a reconnect makes
+  // into an outright RACE: JOIN_ROOM's handler does real DB work before it
+  // ever calls socket.join(gameRoomSlug), while CHANNEL_JOIN's handler can
+  // finish faster and call socket.join('channel:<id>') first — landing the
+  // CHANNEL room ahead of the actual game room in socket.rooms' insertion
+  // order. `gameRoom` then silently resolved to a chat channel id instead
+  // of the room slug: getCachedTiles(gameRoom) found nothing for it, so
+  // every bounds/collision check below fell back to the OLD default 50x36
+  // map size regardless of the room's real (possibly much larger) size,
+  // clamping/rejecting moves that were actually fine — confirmed via
+  // diagnostic logging showing exactly this (room: 'channel:...', hadTiles:
+  // false) in production.
+  //
+  // Fix: track the game room explicitly from JOIN_ROOM itself, the same
+  // pattern zoneHandler.ts/roomHandler.ts already use for the exact same
+  // reason, instead of ever guessing from socket.rooms again.
+  let currentRoom: string | null = null;
+  socket.on(SocketEvents.JOIN_ROOM, (roomId: string) => {
+    currentRoom = roomId || null;
+  });
+
   socket.on(SocketEvents.PLAYER_MOVE, (data: PlayerMovePayload) => {
-    if (!shouldAcceptMoveSequence(socket.id, data?.seq)) {
-      console.log('[collision-diag] seq-rejected', { socketId: socket.id, seq: data?.seq });
-      return;
-    }
+    if (!shouldAcceptMoveSequence(socket.id, data?.seq)) return;
     if (typeof data?.x !== 'number' || typeof data?.y !== 'number') return;
     if (!Number.isFinite(data.x) || !Number.isFinite(data.y)) return;
 
@@ -124,10 +133,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     if (now - lastUpdate < MIN_UPDATE_INTERVAL) return;
     rateLimitMap.set(socket.id, now);
 
-    // Broadcast to all others in the socket's game room only — a plain
-    // socket.broadcast.emit would leak positions to every room on the server.
-    const rooms = Array.from(socket.rooms);
-    const gameRoom = rooms.find((r) => r !== socket.id);
+    const gameRoom = currentRoom;
     if (gameRoom) {
       // Server-authoritative collision check: previously this handler only
       // clamped to the map's outer rectangle and otherwise broadcast
@@ -142,9 +148,6 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
       const { mapWidth, mapHeight } = getMapBounds(tiles);
       const clampedX = Math.max(TILE_SIZE / 2, Math.min(mapWidth * TILE_SIZE - TILE_SIZE / 2, data.x));
       const clampedY = Math.max(TILE_SIZE / 2, Math.min(mapHeight * TILE_SIZE - TILE_SIZE / 2, data.y));
-      if (clampedY !== data.y) {
-        console.log('[collision-diag] y-clamped', { room: gameRoom, socketId: socket.id, requestedY: data.y, clampedY, mapHeight, hadTiles: !!tiles });
-      }
       if (tiles) {
         const tileX = Math.floor(clampedX / TILE_SIZE);
         const tileY = Math.floor(clampedY / TILE_SIZE);
@@ -170,8 +173,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
   // every client SNAPS instead of interpolating a slide across the map.
   socket.on(SocketEvents.PLAYER_TELEPORT_TO, (data: { x: number; y: number; direction?: string }) => {
     if (typeof data?.x !== 'number' || typeof data?.y !== 'number') return;
-    const rooms = Array.from(socket.rooms);
-    const gameRoom = rooms.find((r) => r !== socket.id);
+    const gameRoom = currentRoom;
     if (!gameRoom) return;
     const tiles = getCachedTiles(gameRoom);
     const { mapWidth, mapHeight } = getMapBounds(tiles);
@@ -188,8 +190,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
   });
 
   socket.on(SocketEvents.PLAYER_STOP, (data: { x?: number; y?: number; direction: string }) => {
-    const rooms = Array.from(socket.rooms);
-    const gameRoom = rooms.find((r) => r !== socket.id);
+    const gameRoom = currentRoom;
     if (gameRoom) {
       const serverTime = Date.now();
       const tiles = getCachedTiles(gameRoom);
@@ -229,8 +230,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
   // Jump — cosmetic, fire-and-forget (same shape/spirit as emoteHandler.ts's
   // EMOTE_PLAY relay), so no rate limit / position validation needed here.
   socket.on(SocketEvents.PLAYER_JUMP, () => {
-    const rooms = Array.from(socket.rooms);
-    const gameRoom = rooms.find((r) => r !== socket.id);
+    const gameRoom = currentRoom;
     if (!gameRoom) return;
     const event: JumpEvent = { playerId: socket.id, timestamp: Date.now() };
     socket.to(gameRoom).emit(SocketEvents.PLAYER_JUMP, event);
@@ -257,9 +257,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     if (!canNudge(socket.id)) return;
     const targetId = data?.targetId;
     if (!targetId || targetId === socket.id) return;
-    const rooms = Array.from(socket.rooms);
-    const gameRoom = rooms.find((r) => r !== socket.id);
-    if (!gameRoom) return;
+    if (!currentRoom) return;
     const event: NudgeEvent = { fromId: socket.id, targetId, timestamp: Date.now() };
     io.to(targetId).emit(SocketEvents.PLAYER_NUDGE, event);
     socket.emit(SocketEvents.PLAYER_NUDGE, event);
