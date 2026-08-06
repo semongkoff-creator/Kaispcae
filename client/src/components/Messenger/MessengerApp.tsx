@@ -184,6 +184,7 @@ export function MessengerApp({
   const [showMembers, setShowMembers] = useState(false);
   const [showPinned, setShowPinned] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   // 1s tick so typing indicators lapse on their own — there's no explicit
   // "stopped typing" event, entries just pass their expiry.
@@ -311,6 +312,20 @@ export function MessengerApp({
   // demand fetch), so pinning is scoped to the main thread view, same as
   // where the pin button itself renders below.
   const pinnedMessages = messages.filter((m) => m.isPinned);
+
+  // Jump-to-message — clicking an entry in the "Pesan Disematkan" panel
+  // scrolls the already-loaded message into view and flashes it briefly,
+  // same behavior as ChatPanel.tsx's own pinned bar. Only reaches messages
+  // already in `messages` (the loaded window); an older one outside that
+  // window won't be found — Load Older first.
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const scrollToMessage = useCallback((messageId: string) => {
+    const el = scrollRef.current?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedId(messageId);
+    setTimeout(() => setHighlightedId((cur) => (cur === messageId ? null : cur)), 1500);
+  }, []);
 
   // Read receipts — "Dibaca oleh X, Y" shown once, under the LATEST message
   // each OTHER participant has reached (standard Slack/WhatsApp convention:
@@ -504,7 +519,7 @@ export function MessengerApp({
           </div>
         ) : (
           <>
-            <div className="flex-1 overflow-y-auto px-6 py-4 bg-gray-50/60 dark:bg-gray-900">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4 bg-gray-50/60 dark:bg-gray-900">
               {hasMoreOlder && messages.length > 0 && (
                 <div className="text-center mb-4">
                   <button
@@ -531,7 +546,7 @@ export function MessengerApp({
                 const senderProfile = profileByUser.get(m.senderId);
                 const senderName = senderProfile?.name || m.senderName;
                 return (
-                  <div key={m.id}>
+                  <div key={m.id} data-message-id={m.id} className={`rounded-lg transition-colors duration-500 ${highlightedId === m.id ? 'bg-amber-200/50 dark:bg-amber-500/10' : ''}`}>
                     {newDay && (
                       <div className="flex items-center justify-center my-4">
                         <span className="text-[11px] text-gray-400 bg-gray-100 dark:bg-gray-800 px-2.5 py-1 rounded-full">
@@ -741,7 +756,15 @@ export function MessengerApp({
                 const senderProfile = profileByUser.get(m.senderId);
                 const senderName = senderProfile?.name || m.senderName;
                 return (
-                  <div key={m.id} className="group/pin relative p-2.5 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700">
+                  // A <button> wrapper here would nest the unpin <button>
+                  // below inside it — invalid HTML — so this stays a div
+                  // with onClick instead.
+                  <div
+                    key={m.id}
+                    onClick={() => { scrollToMessage(m.id); setShowPinned(false); }}
+                    title="Lompat ke pesan ini"
+                    className="group/pin relative p-2.5 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-700 cursor-pointer"
+                  >
                     <div className="flex items-center gap-1.5 mb-1">
                       <Avatar name={senderName} seed={m.senderId} size={16} photoUrl={senderProfile?.photo ?? undefined} />
                       <span className="text-[11px] font-medium truncate">{senderName}</span>
@@ -753,7 +776,7 @@ export function MessengerApp({
                       {m.text || (m.attachmentName ? `📎 ${m.attachmentName}` : '')}
                     </p>
                     <button
-                      onClick={() => onPinMessage?.(m.id, false)}
+                      onClick={(e) => { e.stopPropagation(); onPinMessage?.(m.id, false); }}
                       title="Lepas sematan"
                       className="absolute top-1.5 right-1.5 w-5 h-5 rounded hover:bg-red-100 dark:hover:bg-red-900/40 inline-flex items-center justify-center text-gray-400 hover:text-red-500 opacity-0 group-hover/pin:opacity-100 transition-opacity"
                     >

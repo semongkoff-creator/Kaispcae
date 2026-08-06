@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, MegaphoneFill } from 'react-bootstrap-icons';
+import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, MegaphoneFill, ChevronLeft, ChevronRight, XLg } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -251,6 +251,35 @@ export function ChatPanel({
   }, [currentZone, viewingZone]);
 
   const visibleMessages = viewingZone ? zoneMessages : messages;
+
+  // Pinned-message bar — zone chat has no pin concept (ephemeral, no
+  // isPinned field), so this only ever shows for the channel/DM tabs.
+  // Telegram-style: one at a time, with a counter to step through the rest
+  // if there's more than one pinned in this thread.
+  const pinnedMessages = viewingZone ? [] : messages.filter((m) => m.isPinned);
+  const [pinCursor, setPinCursor] = useState(0);
+  useEffect(() => {
+    setPinCursor(0);
+  }, [activeChatTarget?.type, activeChatTarget?.id]);
+  // JS's % keeps the sign of the dividend, so a plain `pinCursor % length`
+  // stays negative after stepping "previous" past index 0 — this wraps it
+  // back into [0, length) both directions.
+  const pinIndex = pinnedMessages.length > 0 ? ((pinCursor % pinnedMessages.length) + pinnedMessages.length) % pinnedMessages.length : 0;
+  const currentPin = pinnedMessages[pinIndex];
+
+  // Jump-to-message — scrolls the already-loaded message into view and
+  // flashes it briefly, so clicking a pinned message actually lands you on
+  // it in the real conversation instead of just naming it. Only reaches
+  // messages already in `messages` (the loaded window); an older pinned
+  // message outside that window won't be found — Load Older first.
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const scrollToMessage = useCallback((messageId: string) => {
+    const el = scrollRef.current?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedId(messageId);
+    setTimeout(() => setHighlightedId((cur) => (cur === messageId ? null : cur)), 1500);
+  }, []);
 
   // Current identity (name + photo) for the channel/DM senders in view —
   // including any expanded thread replies — resolved by senderId in one batched
@@ -516,6 +545,41 @@ export function ChatPanel({
             </div>
           )}
 
+          {/* Telegram-style pinned bar — one message at a time, chevrons to
+              step through the rest if more than one is pinned. Clicking the
+              text jumps straight to that message in the conversation below
+              (see scrollToMessage) instead of just naming it. */}
+          {currentPin && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-purple-100 dark:border-gray-700 bg-purple-50/50 dark:bg-gray-800/50">
+              <PinAngleFill size={11} className="text-purple-500 shrink-0" />
+              <button
+                onClick={() => scrollToMessage(currentPin.id)}
+                className="flex-1 min-w-0 text-left text-[11px] text-gray-600 dark:text-gray-300 truncate cursor-pointer hover:text-purple-700 dark:hover:text-purple-300"
+                title="Lompat ke pesan ini"
+              >
+                {currentPin.text || (currentPin.attachmentName ? `📎 ${currentPin.attachmentName}` : 'Pesan disematkan')}
+              </button>
+              {pinnedMessages.length > 1 && (
+                <div className="flex items-center gap-0.5 shrink-0 text-gray-400">
+                  <button onClick={() => setPinCursor((c) => c - 1)} title="Sebelumnya" className="w-4 h-4 inline-flex items-center justify-center hover:text-purple-600 cursor-pointer">
+                    <ChevronLeft size={9} />
+                  </button>
+                  <span className="text-[9px]">{pinIndex + 1}/{pinnedMessages.length}</span>
+                  <button onClick={() => setPinCursor((c) => c + 1)} title="Berikutnya" className="w-4 h-4 inline-flex items-center justify-center hover:text-purple-600 cursor-pointer">
+                    <ChevronRight size={9} />
+                  </button>
+                </div>
+              )}
+              <button
+                onClick={() => onPinMessage?.(currentPin.id, false)}
+                title="Lepas sematan"
+                className="w-4 h-4 shrink-0 inline-flex items-center justify-center text-gray-400 hover:text-red-500 cursor-pointer"
+              >
+                <XLg size={9} />
+              </button>
+            </div>
+          )}
+
           <div className="relative flex-1 min-h-0 flex flex-col">
           <div
             ref={scrollRef}
@@ -571,7 +635,11 @@ export function ChatPanel({
                   const isOwn = m.senderId === localUserId;
                   const isMentioned = textMentionsUser(m.text, localUserId);
                   return (
-                    <div key={m.id}>
+                    <div
+                      key={m.id}
+                      data-message-id={m.id}
+                      className={`rounded-lg transition-colors duration-500 ${highlightedId === m.id ? 'bg-amber-200/60 dark:bg-amber-500/20' : ''}`}
+                    >
                       <MessageBubble
                         isOwn={isOwn}
                         name={profileByUser.get(m.senderId)?.name || m.senderName}
