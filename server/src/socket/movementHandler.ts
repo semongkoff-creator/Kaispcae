@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointInImpassableArea, RoomTile, JumpEvent, NudgeEvent, PlayerMovePayload, PlayerMovedPayload, PlayerStoppedPayload } from '@virtualmeet/shared';
-import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas } from '../store/roomStore';
+import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas, getCachedZones, getCachedPlayers } from '../store/roomStore';
 import { isDoorUnlocked, clearUnlockedDoors } from './doorLock';
 import { isDoorOverrideActive } from './roomHandler';
 import { createStoppedPayload } from './movementPayload';
@@ -41,7 +41,27 @@ function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string,
     if (isDoorOverrideActive(room)) return false;
     return !isDoorUnlocked(socketId, room, tileX, tileY);
   }
+  if (isTileOccupiedInCapacityZone(room, tileX, tileY, socketId)) return true;
   return false;
+}
+
+// QA #2's own note — "karakter gabisa numpuk jika dalam private area"
+// (characters can't stack while inside a private area). Only enforced for
+// zones with an explicit seat capacity (Zone.capacity) — exactly the same
+// zones zoneHandler.ts's ZONE_ENTER already caps ENTRY to (a private area
+// left at "unlimited" capacity, or plain floor outside any zone, still
+// allows stacking exactly like before this existed). A player is never
+// blocked by their OWN current tile — this only stops walking ONTO someone
+// else, not standing still.
+function isTileOccupiedInCapacityZone(room: string, tileX: number, tileY: number, selfId: string): boolean {
+  const zone = getCachedZones(room).find(
+    (z) => z.capacity != null && z.capacity > 0 && tileX >= z.x && tileX < z.x + z.width && tileY >= z.y && tileY < z.y + z.height,
+  );
+  if (!zone) return false;
+  return getCachedPlayers(room).some((p) => {
+    if (p.id === selfId) return false;
+    return Math.floor(p.x / TILE_SIZE) === tileX && Math.floor(p.y / TILE_SIZE) === tileY;
+  });
 }
 
 // QA follow-up ("jalan ke selatan snap balik") — MAP_WIDTH/MAP_HEIGHT (50x36)

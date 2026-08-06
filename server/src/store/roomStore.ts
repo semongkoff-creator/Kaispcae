@@ -106,6 +106,19 @@ export async function getPlayers(roomId: string): Promise<Avatar[]> {
   return mergeLivePlayerMovement(roomId, memoryStore[key] || []);
 }
 
+// Synchronous "who's here right now" snapshot for server-authoritative
+// per-move checks (e.g. movementHandler.ts's private-area anti-stacking
+// guard) that can't afford an async Redis round trip on every PLAYER_MOVE.
+// Mirrors getPlayers' own merge (memoryStore + the live in-flight-movement
+// overlay from playerLiveState.ts) but skips the Redis fetch — memoryStore
+// is kept in sync with Redis on every read/write already (getPlayers writes
+// it back at line ~98, setPlayers at ~119), so it's only stale in the
+// multi-instance case right after another instance's write, same caveat
+// already documented for tileCache/impassableAreaCache/zoneCache below.
+export function getCachedPlayers(roomId: string): Avatar[] {
+  return mergeLivePlayerMovement(roomId, memoryStore[memoryKey(roomId)] || []);
+}
+
 export async function setPlayers(roomId: string, players: Avatar[]): Promise<void> {
   const r = await getRedis();
   if (r) {
