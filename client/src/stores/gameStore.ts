@@ -522,14 +522,16 @@ export interface GameState {
   activeRecording: ActiveRecordingInfo | null;
   setActiveRecording: (info: ActiveRecordingInfo | null) => void;
 
-  // QA #7/#8/#9 — desk notes, keyed by furnitureId (one per piece). Full map
-  // synced from ROOM_STATE.notes on join, kept live via NOTE_UPDATED/
-  // NOTE_DELETED — same "full sync then live patches" shape as mediaObjects
-  // above.
-  notesByFurnitureId: Record<string, DeskNoteData>;
+  // QA #7/#8/#9 — desk notes, placed freeform like mediaObjects (not tied to
+  // furniture — see DeskNote's own doc comment in schema.prisma). Full list
+  // synced from ROOM_STATE.notes on join, kept live via NOTE_ADDED/
+  // NOTE_UPDATED/NOTE_DELETED — same "full sync then live patches" shape as
+  // mediaObjects above.
+  notes: DeskNoteData[];
   setNotes: (notes: DeskNoteData[]) => void;
-  upsertNote: (note: DeskNoteData) => void;
-  removeNote: (furnitureId: string) => void;
+  addNote: (note: DeskNoteData) => void;
+  updateNote: (note: DeskNoteData) => void;
+  removeNoteById: (id: string) => void;
 
   // Emotes
   emoteEvents: EmoteEvent[];
@@ -1217,15 +1219,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   activeRecording: null,
   setActiveRecording: (info) => set({ activeRecording: info }),
 
-  notesByFurnitureId: {},
-  setNotes: (notes) => set({ notesByFurnitureId: Object.fromEntries(notes.map((n) => [n.furnitureId, n])) }),
-  upsertNote: (note) => set((state) => ({ notesByFurnitureId: { ...state.notesByFurnitureId, [note.furnitureId]: note } })),
-  removeNote: (furnitureId) => set((state) => {
-    if (!(furnitureId in state.notesByFurnitureId)) return {};
-    const next = { ...state.notesByFurnitureId };
-    delete next[furnitureId];
-    return { notesByFurnitureId: next };
-  }),
+  notes: [],
+  setNotes: (notes) => set({ notes }),
+  addNote: (note) => set((state) => ({ notes: [...state.notes, note] })),
+  updateNote: (note) => set((state) => ({ notes: state.notes.map((n) => (n.id === note.id ? note : n)) })),
+  removeNoteById: (id) => set((state) => ({ notes: state.notes.filter((n) => n.id !== id) })),
 
   emoteEvents: [],
   addEmote: (event) =>
@@ -1478,7 +1476,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       doorOverride: roomState.doorOverride ?? false,
       liveReferenceImage: roomState.referenceImage ?? null,
       avatarScale: roomState.avatarScale ?? 1,
-      notesByFurnitureId: roomState.notes ? Object.fromEntries(roomState.notes.map((n) => [n.furnitureId, n])) : prev.notesByFurnitureId,
+      notes: roomState.notes ?? prev.notes,
     }));
 
     console.log('[store] setRoomState — adminPlayerIds:', Array.from(adminIds), 'masterAdminUserId:', roomState.masterAdminUserId, 'localIsAdmin:', localIsAdmin);

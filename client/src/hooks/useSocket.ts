@@ -515,11 +515,14 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     });
 
     // QA #7/#8/#9 — desk notes, live create/edit/delete.
-    socket.on(SocketEvents.NOTE_UPDATED, (note: DeskNoteData) => {
-      useGameStore.getState().upsertNote(note);
+    socket.on(SocketEvents.NOTE_ADDED, (note: DeskNoteData) => {
+      useGameStore.getState().addNote(note);
     });
-    socket.on(SocketEvents.NOTE_DELETED, (data: { furnitureId: string }) => {
-      useGameStore.getState().removeNote(data.furnitureId);
+    socket.on(SocketEvents.NOTE_UPDATED, (note: DeskNoteData) => {
+      useGameStore.getState().updateNote(note);
+    });
+    socket.on(SocketEvents.NOTE_DELETED, (data: { id: string }) => {
+      useGameStore.getState().removeNoteById(data.id);
     });
 
     // Claimable-seat markers (Room Editor's 'claimableSeat' tile effect) —
@@ -1041,12 +1044,16 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.FURNITURE_UNASSIGN, { furnitureId });
   }, []);
 
-  const emitNoteSet = useCallback((furnitureId: string, text: string) => {
-    socketRef.current?.emit(SocketEvents.NOTE_SET, { furnitureId, text });
+  const emitNoteAdd = useCallback((x: number, y: number, text: string) => {
+    socketRef.current?.emit(SocketEvents.NOTE_ADD, { x, y, text });
   }, []);
 
-  const emitNoteDelete = useCallback((furnitureId: string) => {
-    socketRef.current?.emit(SocketEvents.NOTE_DELETE, { furnitureId });
+  const emitNoteEdit = useCallback((id: string, text: string) => {
+    socketRef.current?.emit(SocketEvents.NOTE_EDIT, { id, text });
+  }, []);
+
+  const emitNoteDelete = useCallback((id: string) => {
+    socketRef.current?.emit(SocketEvents.NOTE_DELETE, { id });
   }, []);
 
   const emitClaimSeat = useCallback((seatId: string) => {
@@ -1307,5 +1314,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteSet, emitNoteDelete, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
+  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
 }

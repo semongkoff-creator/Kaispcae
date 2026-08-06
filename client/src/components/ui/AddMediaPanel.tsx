@@ -1,12 +1,15 @@
 import { useRef, useState } from 'react';
-import { Image, PlayBtnFill, StickyFill, Paperclip, CameraFill } from 'react-bootstrap-icons';
+import { Image, PlayBtnFill, StickyFill, Paperclip, CameraFill, JournalText } from 'react-bootstrap-icons';
 import { MediaType, MediaPayload, TILE_SIZE } from '@virtualmeet/shared';
 import { api, ApiError } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { parseYouTubeId } from '@/utils/youtube';
 
+const NOTE_MAX_LENGTH = 300;
+
 interface AddMediaPanelProps {
   onAdd: (type: MediaType, x: number, y: number, payload?: MediaPayload) => void;
+  onAddNote: (x: number, y: number, text: string) => void;
   onScreenshot: () => void;
   onClose: () => void;
 }
@@ -15,10 +18,16 @@ interface AddMediaPanelProps {
 // same "add at current location" convention already established by
 // Teleport's "Add current location" (TeleportPanel.tsx) — simpler than a
 // separate click-to-place mode, and consistent within the app.
-export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelProps) {
+//
+// QA #7/#8/#9 — Note is placed the same way (current tile), not attached to
+// furniture. Unlike the other buttons it needs actual text first, so it
+// expands an inline compose box instead of firing immediately on click.
+export function AddMediaPanel({ onAdd, onAddNote, onScreenshot, onClose }: AddMediaPanelProps) {
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [composingNote, setComposingNote] = useState(false);
+  const [noteText, setNoteText] = useState('');
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -76,6 +85,14 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
     onClose();
   };
 
+  const handleNoteSubmit = () => {
+    const text = noteText.trim();
+    if (!text) return;
+    const { x, y } = currentTile();
+    onAddNote(x, y, text);
+    onClose();
+  };
+
   return (
     <div
       className="absolute top-20 left-16 z-50 w-72 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md rounded-xl border border-purple-100 dark:border-gray-700 shadow-2xl p-3 pointer-events-auto"
@@ -121,7 +138,37 @@ export function AddMediaPanel({ onAdd, onScreenshot, onClose }: AddMediaPanelPro
         >
           <CameraFill size={16} /> Screenshot
         </button>
+
+        <button
+          onClick={() => setComposingNote((v) => !v)}
+          className={`flex flex-col items-center gap-1 py-3 rounded-lg text-xs font-medium cursor-pointer ${composingNote ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' : 'bg-purple-50 dark:bg-gray-700 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-600'}`}
+        >
+          <JournalText size={16} /> Note
+        </button>
       </div>
+
+      {composingNote && (
+        <div className="mb-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-2">
+          <textarea
+            autoFocus
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value.slice(0, NOTE_MAX_LENGTH))}
+            placeholder="Tulis catatan di sini..."
+            rows={3}
+            className="w-full resize-none rounded-md border border-amber-200 dark:border-amber-800 bg-white dark:bg-gray-900 px-2 py-1.5 text-xs text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-amber-400"
+          />
+          <div className="flex items-center justify-between mt-1.5">
+            <span className="text-[10px] text-gray-400 dark:text-gray-500">{noteText.length}/{NOTE_MAX_LENGTH}</span>
+            <button
+              onClick={handleNoteSubmit}
+              disabled={!noteText.trim()}
+              className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium cursor-pointer disabled:opacity-50"
+            >
+              Taruh di sini
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center gap-1.5 mb-1">
         <PlayBtnFill size={12} className="text-purple-500 shrink-0" />

@@ -177,10 +177,10 @@ interface GameCanvasProps {
   // the Furniture by id (already has the full furniture list) to read its
   // interactiveType/interactiveConfig and show the right modal.
   onInteractiveTrigger: (furnitureId: string) => void;
-  // QA #7/#8/#9 — Press N in range of a furniture piece opens the note
-  // editor for it (parent looks up any existing note by furnitureId, same
-  // "id in, parent resolves the rest" shape as onInteractiveTrigger above).
-  onNoteOpen: (furnitureId: string) => void;
+  // QA #7/#8/#9 — clicking a note marker opens it for viewing/editing (same
+  // click-to-open convention as media markers below — a note is placed via
+  // Add Media, not tied to any furniture piece).
+  onNoteOpen: (noteId: string) => void;
   // ZEP-style door password — fires once per approach (same auto-trigger/
   // re-arm pattern as onInteractiveTrigger's 'automatic' pieces above) when
   // the local player gets adjacent to a password-protected door they
@@ -283,7 +283,6 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const emitNudgeRef = useRef(emitNudge); emitNudgeRef.current = emitNudge;
   const onMediaOpenRef = useRef(onMediaOpen); onMediaOpenRef.current = onMediaOpen;
   const onInteractiveTriggerRef = useRef(onInteractiveTrigger); onInteractiveTriggerRef.current = onInteractiveTrigger;
-  const onNoteOpenRef = useRef(onNoteOpen); onNoteOpenRef.current = onNoteOpen;
   const onDoorPasswordTriggerRef = useRef(onDoorPasswordTrigger); onDoorPasswordTriggerRef.current = onDoorPasswordTrigger;
   const emitSitRef = useRef(emitSit); emitSitRef.current = emitSit;
   const emitFollowUnfollowRef = useRef(emitFollowUnfollow); emitFollowUnfollowRef.current = emitFollowUnfollow;
@@ -386,10 +385,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const zoneBannerRefs = useRef(new Map<string, HTMLDivElement>());
   const furniture = useGameStore((s) => s.furniture);
   const furnitureRef = useRef(furniture);
-  // QA #7/#8/#9 — desk notes, same ref-mirroring pattern as furniture above
-  // so the draw loop reads a stable snapshot without re-subscribing every frame.
-  const notesByFurnitureId = useGameStore((s) => s.notesByFurnitureId);
-  const notesRef = useRef(notesByFurnitureId);
+  // QA #7/#8/#9 — desk notes, placed freeform via Add Media (not attached to
+  // furniture). Ref-mirrors `notes` the same way mediaObjects does below, so
+  // the per-frame position-sync loop reads a stable snapshot without
+  // re-subscribing every frame.
+  const notes = useGameStore((s) => s.notes);
+  const notesRef = useRef(notes);
+  const noteMarkerRefs = useRef(new Map<string, HTMLDivElement>());
   // Banner furniture (Furniture.kind === 'banner') renders as a DOM overlay
   // too, positioned the same imperative way as zone banners above.
   const bannerRefs = useRef(new Map<string, HTMLDivElement>());
@@ -481,7 +483,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     playingSoundboardRef.current = playingSoundboard;
     zonesRef.current = zones;
     furnitureRef.current = furniture;
-    notesRef.current = notesByFurnitureId;
+    notesRef.current = notes;
     mediaObjectsRef.current = mediaObjects;
     claimableSeatsRef.current = claimableSeats;
     liveReferenceImageRef.current = liveReferenceImage;
@@ -683,11 +685,6 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // per-piece — see the recompute below). Drives the "Press F" prompt;
   // KeyF fires it same as the portal branch does, whichever is present.
   const nearbyInteractiveRef = useRef<{ id: string; tileX: number; tileY: number } | null>(null);
-  // QA #7/#8/#9 — nearest furniture piece within INTERACT_TILE_RADIUS a note
-  // can be stuck to (any placed piece, not just chairs/interactive ones —
-  // "note meja" is meant to work on ordinary desks too). Drives the "Press N"
-  // prompt; KeyN opens the note editor same as F/X open their own modals.
-  const nearbyNoteableRef = useRef<{ id: string; tileX: number; tileY: number } | null>(null);
   // 'automatic' pieces fire once per range-ENTRY, not once ever and not every
   // frame while still inside — tracked as a set of currently-inside ids so
   // leaving and re-entering fires it again, matching "Automatically trigger"'s
@@ -829,15 +826,6 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         if (nearbyMediaRef.current) {
           e.preventDefault();
           onMediaOpenRef.current(nearbyMediaRef.current.id);
-        }
-        return;
-      }
-
-      // QA #7/#8/#9 — open the note editor for the nearest furniture piece.
-      if (e.code === 'KeyN') {
-        if (nearbyNoteableRef.current) {
-          e.preventDefault();
-          onNoteOpenRef.current(nearbyNoteableRef.current.id);
         }
         return;
       }
@@ -1173,18 +1161,6 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       // Drop ids that fell out of range, so re-entering fires 'automatic' again.
       for (const id of autoTriggeredIdsRef.current) if (!stillInRange.has(id)) autoTriggeredIdsRef.current.delete(id);
       nearbyInteractiveRef.current = bestInteractive;
-
-      // QA #7/#8/#9 — nearest noteable furniture, same fixed-radius shape as
-      // media above (any placed piece qualifies, not gated by isInteractable/
-      // interactiveType — a plain desk/chair/table is exactly the point).
-      let bestNoteable: { id: string; tileX: number; tileY: number } | null = null;
-      let bestNoteableDist = Infinity;
-      for (const f of furnitureRef.current) {
-        if (f.kind === 'banner') continue;
-        const d = Math.max(Math.abs(f.x - baseTileX), Math.abs(f.y - baseTileY));
-        if (d <= INTERACT_TILE_RADIUS && d < bestNoteableDist) { bestNoteableDist = d; bestNoteable = { id: f.id, tileX: f.x, tileY: f.y }; }
-      }
-      nearbyNoteableRef.current = bestNoteable;
 
       // ZEP-style door password — same auto-trigger/re-arm shape as
       // 'automatic' Interactive Objects above, checked over the 3x3
@@ -1545,6 +1521,17 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       el.style.opacity = isAvatarUnderLabel(item.x, item.y, item.tilesW) ? '0' : '1';
     }
 
+    // QA #7/#8/#9 — Note markers (DOM overlay), same imperative positioning
+    // as media markers below (notes are placed via Add Media, at whatever
+    // tile the player was standing on — no furniture involved).
+    for (const note of notesRef.current) {
+      const el = noteMarkerRefs.current.get(note.id);
+      if (!el) continue;
+      const nx = (note.x * TILE_SIZE - cameraX) * zoom;
+      const ny = (note.y * TILE_SIZE - cameraY) * zoom;
+      el.style.transform = `translate(${nx}px, ${ny}px) scale(${zoom})`;
+    }
+
     // §6 — Media markers (DOM overlay), same imperative positioning.
     // Staggered horizontally when multiple objects share a tile (e.g.
     // several added without moving in between) — otherwise they'd stack
@@ -1872,32 +1859,6 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         ctx.textBaseline = 'alphabetic';
       }
 
-      // QA #7/#8/#9 — "tersimpan & terlihat user lain": the note itself is
-      // always visible on the piece, the same way an assigned-seat label is
-      // — nobody should have to press N just to find out a desk already has
-      // a note on it. Truncated to keep a long note from swallowing the map;
-      // the full text is only in the N-triggered editor/viewer.
-      for (const item of furnitureList) {
-        const note = notesRef.current[item.id];
-        if (!note) continue;
-        if (item.x < startCol - 2 || item.x > endCol + 2 || item.y < startRow - 3 || item.y > endRow + 1) continue;
-        const nsx = item.x * TILE_SIZE - cameraX + TILE_SIZE / 2;
-        const nsy = item.y * TILE_SIZE - cameraY - (item.tilesH - 1) * TILE_SIZE - 24;
-        const preview = note.text.length > 22 ? `${note.text.slice(0, 22)}…` : note.text;
-        const label = `📝 ${preview}`;
-        ctx.font = '9px sans-serif';
-        ctx.textAlign = 'center';
-        const tw = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgba(253, 224, 71, 0.95)'; // sticky-note yellow
-        ctx.beginPath();
-        ctx.roundRect(nsx - tw / 2 - 5, nsy - 12, tw + 10, 15, 3);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(161, 98, 7, 0.4)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.fillStyle = '#713f12';
-        ctx.fillText(label, nsx, nsy - 1);
-      }
     }
 
     // Sit-in-chair prompt — a small floating chair icon + hint over the
@@ -1940,32 +1901,6 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       // "X" key cap + label
       ctx.fillStyle = '#ffffff';
       ctx.fillText(`${label}  Buka`, msx, by + 13);
-    }
-
-    // QA #7/#8/#9 — "Press N" prompt over the nearest noteable furniture.
-    // Offset higher than the chair/media prompts (-56 vs. their -22/-40) so
-    // a sittable desk showing BOTH doesn't stack them on top of each other.
-    if (nearbyNoteableRef.current) {
-      const { tileX, tileY, id } = nearbyNoteableRef.current;
-      const hasNote = !!notesRef.current[id];
-      const nx = tileX * TILE_SIZE - cameraX + TILE_SIZE / 2;
-      const bob = Math.sin(timestamp * 0.005) * 2;
-      const label = hasNote ? 'N — Lihat catatan' : 'N — Tulis catatan';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.textAlign = 'center';
-      const tw = ctx.measureText(label).width;
-      const bx = nx - tw / 2 - 8;
-      const by = tileY * TILE_SIZE - cameraY - 56 + bob;
-      ctx.fillStyle = 'rgba(161, 98, 7, 0.95)';
-      ctx.beginPath();
-      const bw = tw + 16, bh = 18, rr = 9;
-      ctx.moveTo(bx + rr, by); ctx.lineTo(bx + bw - rr, by);
-      ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + rr); ctx.lineTo(bx + bw, by + bh - rr);
-      ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - rr, by + bh); ctx.lineTo(bx + rr, by + bh);
-      ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - rr); ctx.lineTo(bx, by + rr);
-      ctx.quadraticCurveTo(bx, by, bx + rr, by); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(label, nx, by + 13);
     }
 
     // ZEP portal (Potong 5) — "Press F — <name>" prompt over the portal tile.
@@ -2374,6 +2309,35 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
             )}
           </div>
         ))}
+      </div>
+      {/* QA #7/#8/#9 — Note markers, same imperative-transform pattern as
+          the media markers below. A note is placed via Add Media at the
+          player's current tile (see AddMediaPanel.tsx) — not tied to any
+          furniture piece. Always visible to everyone in the room (delivered
+          via ROOM_STATE.notes); clicking opens NoteModal for the full text,
+          author-only edit/delete. */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {notes.map((note) => {
+          const preview = note.text.length > 40 ? `${note.text.slice(0, 40)}…` : note.text;
+          return (
+            <div
+              key={note.id}
+              ref={(el) => {
+                if (el) noteMarkerRefs.current.set(note.id, el);
+                else noteMarkerRefs.current.delete(note.id);
+              }}
+              className="absolute top-0 left-0 will-change-transform origin-top-left pointer-events-auto"
+            >
+              <button
+                onClick={() => onNoteOpen(note.id)}
+                title={`Catatan oleh ${note.authorName}`}
+                className="-mt-6 -ml-4 max-w-[140px] rounded-md border border-amber-700/30 bg-amber-300/95 px-2 py-1 text-left text-[10px] leading-tight text-amber-950 shadow-md cursor-pointer hover:scale-105 transition-transform"
+              >
+                📝 {preview}
+              </button>
+            </div>
+          );
+        })}
       </div>
       {/* §6 — Media markers, same imperative-transform pattern as the
           overlays above. Image/YouTube show their actual content directly

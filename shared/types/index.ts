@@ -277,11 +277,14 @@ export interface RoomState {
   notes?: DeskNoteData[];
 }
 
-// QA #7/#8/#9 — a sticky note on a furniture piece. One per (roomId,
-// furnitureId) — see DeskNote in schema.prisma for the full reasoning on
-// why this is its own persisted row rather than a Furniture field.
+// QA #7/#8/#9 — a sticky note placed on the map, same "place at my current
+// tile" convention as Add Media (see AddMediaPanel.tsx) rather than
+// attached to a specific furniture piece. x/y are TILE coordinates, same
+// units as MapMediaObject's own x/y.
 export interface DeskNoteData {
-  furnitureId: string;
+  id: string;
+  x: number;
+  y: number;
   authorUserId: string;
   authorName: string;
   text: string;
@@ -432,14 +435,16 @@ export enum SocketEvents {
   FURNITURE_UNASSIGN = 'furniture:unassign',
   FURNITURE_UNASSIGNED = 'furniture:unassigned',
 
-  // QA #7/#8/#9 — a sticky note "tempel" on a furniture piece (see
-  // DeskNoteData below). NOTE_SET both creates (no note there yet) and
-  // edits (sender is the existing author) — same single event either way,
-  // the server tells the difference by whether a row already exists. Only
-  // the author may NOTE_SET an existing note or NOTE_DELETE it; anyone who
-  // can see the room may read one (delivered via ROOM_STATE.notes on join,
-  // kept live via NOTE_UPDATED/NOTE_DELETED).
-  NOTE_SET = 'note:set',
+  // QA #7/#8/#9 — a sticky note placed on the map (see DeskNoteData below),
+  // same "Add Media, lands at your current tile" flow as image/whiteboard/
+  // file rather than tied to a furniture piece. NOTE_ADD creates a new one
+  // (any real user); NOTE_EDIT/NOTE_DELETE are author-only ("Pembuat
+  // edit/hapus; lain baca saja"), re-checked server-side. Delivered via
+  // ROOM_STATE.notes on join, kept live via NOTE_ADDED/NOTE_UPDATED/
+  // NOTE_DELETED.
+  NOTE_ADD = 'note:add',
+  NOTE_ADDED = 'note:added',
+  NOTE_EDIT = 'note:edit',
   NOTE_UPDATED = 'note:updated',
   NOTE_DELETE = 'note:delete',
   NOTE_DELETED = 'note:deleted',

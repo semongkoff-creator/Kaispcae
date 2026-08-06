@@ -791,7 +791,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // no opt-in gate (purely cosmetic, no privacy/content concern like
         // referenceImage above). Undefined in layerData means 1 (unchanged).
         avatarScale: (dbRoom?.layerData as unknown as LayerData | undefined)?.avatarScale,
-        notes: notes.map((n) => ({ furnitureId: n.furnitureId, authorUserId: n.authorUserId, authorName: n.authorName, text: n.text, updatedAt: n.updatedAt.getTime() })),
+        notes: notes.map((n) => ({ id: n.id, x: n.x, y: n.y, authorUserId: n.authorUserId, authorName: n.authorName, text: n.text, updatedAt: n.updatedAt.getTime() })),
       });
 
       // "Tarik Paksa" (Force-pull) — this join just consumed a queued
