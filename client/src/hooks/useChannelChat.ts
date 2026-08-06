@@ -50,6 +50,19 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
   const setTargetMessages = useGameStore((s) => s.setTargetMessages);
   const prependTargetMessages = useGameStore((s) => s.prependTargetMessages);
   const clearUnread = useGameStore((s) => s.clearUnread);
+  // A server redeploy (or any network blip) disconnects+reconnects the
+  // socket. socket.io rooms are per-connection — the new connection isn't
+  // in `channel:<id>`/`dm:<id>` until CHANNEL_JOIN/DM_JOIN is re-emitted,
+  // and nothing did that automatically before this: the join effect below
+  // only re-ran when activeChatTarget itself CHANGED. Silently missing your
+  // own room membership doesn't show up as an error — the send still
+  // persists+broadcasts to everyone else (and relays to Lark) — only YOUR
+  // OWN confirmation (CHANNEL_MESSAGE_NEW) never arrives, so the optimistic
+  // bubble just times out and shows "Gagal terkirim" for a message that
+  // actually went through. isConnected here as a join-effect dependency
+  // makes a reconnect re-run it exactly like an activeChatTarget switch
+  // does.
+  const isConnected = useGameStore((s) => s.isConnected);
 
   const prevTargetRef = useRef<{ type: 'channel' | 'dm'; id: string } | null>(null);
 
@@ -83,8 +96,12 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
 
   // Join the active target's socket room and lazily fetch its history;
   // leave whichever target was previously open. Only the currently-open tab
-  // needs live updates, mirroring zoneHandler.ts's enter/exit tracking.
+  // needs live updates, mirroring zoneHandler.ts's enter/exit tracking. Also
+  // re-runs on reconnect (isConnected — see its own comment above), which
+  // re-emits the SAME join for an unchanged target — a harmless leave+join
+  // pair on the new connection, not a real target switch.
   useEffect(() => {
+    if (!isConnected) return;
     const prev = prevTargetRef.current;
     if (prev) {
       if (prev.type === 'channel') emitters.emitChannelLeave(prev.id);
@@ -104,7 +121,7 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
           : api.getDMMessages(activeChatTarget.id);
       fetcher.then((res) => setTargetMessages(key, res.messages)).catch((e) => console.error('[chat] failed to load messages:', e));
     }
-  }, [activeChatTarget?.type, activeChatTarget?.id]);
+  }, [activeChatTarget?.type, activeChatTarget?.id, isConnected]);
 
   // Clear the unread badge for whatever target is currently on screen — while
   // the panel is open and showing it, the user is reading it live, so any
