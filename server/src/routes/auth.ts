@@ -96,7 +96,7 @@ auth.post('/register', authRateLimit, validate(registerSchema), async (req, res:
     setUploadSessionCookie(req, res, token);
 
     return res.status(201).json({
-      user: { id: user.id, email: user.email, displayName: user.displayName, accountRole: user.accountRole, workspaceRole: user.workspaceRole, timezone: user.timezone },
+      user: { id: user.id, email: user.email, displayName: user.displayName, accountRole: user.accountRole, workspaceRole: user.workspaceRole, timezone: user.timezone, tutorialCompletedAt: user.tutorialCompletedAt },
       token,
     });
   } catch (err) {
@@ -139,6 +139,7 @@ auth.post('/login', authRateLimit, validate(loginSchema), async (req, res: Respo
         accountRole: user.accountRole,
         workspaceRole: user.workspaceRole,
         timezone: user.timezone,
+        tutorialCompletedAt: user.tutorialCompletedAt,
       },
       token,
     });
@@ -168,6 +169,9 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
         larkOpenId: true,
         // Bug 1 — needed to preserve / adopt the single-session id below.
         currentSessionId: true,
+        // QA #1/#6 — gates the first-run tutorial (App.tsx); null means this
+        // account has never finished it.
+        tutorialCompletedAt: true,
       },
     });
     if (!user) {
@@ -246,6 +250,7 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
         accountRole: user.accountRole,
         workspaceRole: user.workspaceRole,
         timezone: user.timezone,
+        tutorialCompletedAt: user.tutorialCompletedAt,
       },
       ...(refreshedToken ? { token: refreshedToken } : {}),
     });

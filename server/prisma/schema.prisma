@@ -89,6 +89,10 @@ model User {
   // and rendered in this zone — Calendar and Attendance both depend on it.
   timezone                String                    @default("Asia/Jakarta")
   active                  Boolean                   @default(true)
+  // QA #1/#6 — set once this account finishes the first-run tutorial
+  // (App.tsx gates <Game> behind it while null). Never reset automatically —
+  // "seen once" is permanent, same as most onboarding flows elsewhere.
+  tutorialCompletedAt     DateTime?
   departmentId            String?
   department              Department?               @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   managerId               String?

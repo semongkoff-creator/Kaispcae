@@ -41,6 +41,20 @@ users.delete('/users/me/profile-photo', authenticateToken, async (req: AuthReque
   }
 });
 
+// POST /api/users/me/tutorial-completed — QA #1/#6: marks the first-run
+// tutorial (App.tsx's gate before Game mounts) as done for this account, so
+// it never shows again on future logins. Idempotent — fine to call more
+// than once (e.g. the reopen-from-Sidebar "Panduan" replay also calls this).
+users.post('/users/me/tutorial-completed', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    await getPrisma().user.update({ where: { id: req.userId }, data: { tutorialCompletedAt: new Date() } });
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('[users] mark tutorial completed failed:', e);
+    return res.status(500).json({ error: 'Gagal menyimpan status tutorial.' });
+  }
+});
+
 // GET /api/users/profile-photos?ids=a,b,c — batch identity lookup for chat.
 // Returns the CURRENT displayName + photo for each requested sender, so chat
 // always renders live identity (Bug 8: old messages must show the sender's

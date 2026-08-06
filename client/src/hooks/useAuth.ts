@@ -107,6 +107,17 @@ export function useAuth() {
     }
   }, []);
 
+  // QA #1/#6 — called once the first-run tutorial's last slide is dismissed.
+  // Updates local state immediately (so the gate in App.tsx doesn't need a
+  // round trip before letting the user into the room) and persists it
+  // server-side so it stays gone on future logins. Fire-and-forget on the
+  // network call: worst case (request fails) the tutorial just shows again
+  // next login, which is annoying but never blocking.
+  const markTutorialSeen = useCallback(() => {
+    setUser((prev) => (prev ? { ...prev, tutorialCompletedAt: new Date().toISOString() } : prev));
+    api.markTutorialCompleted().catch(() => {});
+  }, []);
+
   const logout = useCallback(() => {
     // Captured BEFORE removing it — the server needs the outgoing token to
     // know WHICH session to invalidate (see auth.ts's /logout), so it must
@@ -120,5 +131,5 @@ export function useAuth() {
     api.logout(token).catch(() => {});
   }, []);
 
-  return { user, loading, error, sessionExpiredMessage, login, register, logout, setError };
+  return { user, loading, error, sessionExpiredMessage, login, register, logout, setError, markTutorialSeen };
 }

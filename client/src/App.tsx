@@ -39,6 +39,7 @@ import { AddMediaPanel } from './components/ui/AddMediaPanel';
 import { MediaViewerModal } from './components/ui/MediaViewerModal';
 import { InteractiveObjectModal } from './components/ui/InteractiveObjectModal';
 import { NoteModal } from './components/ui/NoteModal';
+import { TutorialModal } from './components/ui/TutorialModal';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
 import { SoundboardPanel } from './components/ui/SoundboardPanel';
 import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
@@ -121,6 +122,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
   const [showEditor, setShowEditor] = useState(false);
+  // QA #1/#6/#7 — reopen the first-run walkthrough on demand (Sidebar's
+  // "Panduan" row), for anyone who skipped it, forgot it, or just wants the
+  // Gather/ZEP differences refresher. Independent of the MainApp gate that
+  // shows it before <Game> ever mounts — this is a plain overlay on top of
+  // the already-running room, same pattern as showEditor/AvatarSetup above.
+  const [showTutorial, setShowTutorial] = useState(false);
 
   // Media state from store
   const localSpeaking = useGameStore((s) => s.localSpeaking);
@@ -1503,6 +1510,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           one thing that must always stay reachable. */}
       <Sidebar
         onEditAvatar={() => setShowEditor(true)}
+        onOpenTutorial={() => setShowTutorial(true)}
         manualStatus={manualStatus}
         onPickPresence={handlePresencePick}
         isAdmin={isAdmin}
@@ -1734,6 +1742,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           localUserId={localUserId}
         />
       )}
+
+      {showTutorial && <TutorialModal onFinish={() => setShowTutorial(false)} dismissible />}
 
       {meetingViewActive ? (
         <MeetingView
@@ -2103,9 +2113,27 @@ function storeGuestSession(session: GuestSession | null): void {
   }
 }
 
+// QA #1/#6 — a guest has no persisted User row (see server/src/routes/guestInvite.ts's
+// doc comment — the token is a signed JWT, never a DB record), so unlike a real
+// account's `tutorialCompletedAt` this can only live client-side. Good enough:
+// a guest link is normally reused from the same browser by the same person.
+const GUEST_TUTORIAL_SEEN_KEY = 'vm_tutorial_seen_guest';
+
 function MainApp() {
-  const { user, loading, error, sessionExpiredMessage, login, register, logout } = useAuth();
+  const { user, loading, error, sessionExpiredMessage, login, register, logout, markTutorialSeen } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  // QA #1/#6 — "next-next sebelum masuk": gates <Game> itself, not just an
+  // overlay on top of it, so a first-time user never sees the canvas/HUD
+  // before finishing the walkthrough. Guests get their own client-only flag
+  // (see GUEST_TUTORIAL_SEEN_KEY above); real accounts use `user.tutorialCompletedAt`
+  // directly below, no separate state needed.
+  const [guestTutorialSeen, setGuestTutorialSeen] = useState(
+    () => localStorage.getItem(GUEST_TUTORIAL_SEEN_KEY) === '1',
+  );
+  const finishGuestTutorial = useCallback(() => {
+    localStorage.setItem(GUEST_TUTORIAL_SEEN_KEY, '1');
+    setGuestTutorialSeen(true);
+  }, []);
   const [roomSlug, setRoomSlug] = useState<string | null>(null);
 
   // ?guest=<token> — the invite link itself. Read once at mount, same
@@ -2287,6 +2315,9 @@ function MainApp() {
       />
     );
   }
+  if (guestSession && !guestTutorialSeen) {
+    return <TutorialModal onFinish={finishGuestTutorial} />;
+  }
   if (guestSession) {
     return (
       <Game
@@ -2360,6 +2391,14 @@ function MainApp() {
         <p className="text-gray-500 text-xl">Loading KaiSpace…</p>
       </div>
     );
+  }
+
+  // QA #1/#6 — "next-next sebelum masuk": a real account with a null
+  // `tutorialCompletedAt` (brand-new, or any pre-existing account from
+  // before this feature shipped) sees the walkthrough exactly once, gating
+  // <Game> itself rather than overlaying on top of it.
+  if (!user.tutorialCompletedAt) {
+    return <TutorialModal onFinish={markTutorialSeen} />;
   }
 
   // key={roomSlug} — portal travel (handlePortalEnter -> onPortalTravel ->

@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill } from 'react-bootstrap-icons';
+import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -15,6 +15,9 @@ const ATTENDANCE_MENU_ENABLED = false;
 
 interface SidebarProps {
   onEditAvatar: () => void;
+  // QA #1/#6/#7 — reopens the first-run walkthrough (App.tsx's TutorialModal,
+  // shown once automatically on entry) on demand.
+  onOpenTutorial: () => void;
   // Fitur 3B / A11 — manual presence picker (Available/WFH/Focus/In a
   // meeting/Lunch/Break/Away). 'away' opens the Away-reason popup upstream
   // (see App.tsx's handlePresencePick) rather than applying immediately,
@@ -174,6 +177,7 @@ interface SidebarProps {
 // there'd otherwise be no way to mute/exit without leaving that view first.
 export function Sidebar({
   onEditAvatar,
+  onOpenTutorial,
   manualStatus,
   onPickPresence,
   isAdmin,
@@ -282,6 +286,13 @@ export function Sidebar({
               </button>
             </div>
 
+            {/* QA #1/#6/#7 — reopens the first-run walkthrough (auto-shown
+                once before entering, see App.tsx's TutorialModal gate).
+                Always first in the list and always visible (no isGuest/
+                isAdmin gate) — this is the one thing anyone stuck should be
+                able to find without already knowing where anything else is. */}
+            <MenuRow icon={<QuestionCircleFill size={15} />} label="Panduan" onClick={closeAnd(onOpenTutorial)} />
+            <MenuDivider />
             {/* Always available, even with camera/mic off — MeetingView
                 itself shows a friendly "nobody's on camera" placeholder
                 rather than an empty/broken grid, so there's no need to hide

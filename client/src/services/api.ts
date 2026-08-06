@@ -230,6 +230,10 @@ export interface UserProfile {
   workspaceRole?: WorkspaceRole;
   // IANA zone, e.g. "Asia/Jakarta". Times are stored UTC and rendered here.
   timezone?: string;
+  // QA #1/#6 — first-run tutorial gate (App.tsx). Null/undefined = never
+  // completed, so a brand-new (or pre-existing, pre-feature) account still
+  // sees it once.
+  tutorialCompletedAt?: string | null;
 }
 
 export interface RoomInfo {
@@ -292,6 +296,9 @@ export const api = {
     request<{ ok: true }>('/users/me/profile-photo', { method: 'PUT', body: JSON.stringify({ photo }) }),
   deleteProfilePhoto: () =>
     request<{ ok: true }>('/users/me/profile-photo', { method: 'DELETE' }),
+  // QA #1/#6 — persist first-run tutorial completion so it never shows again.
+  markTutorialCompleted: () =>
+    request<{ ok: true }>('/users/me/tutorial-completed', { method: 'POST' }),
   // Batch identity lookup — one call for every sender currently in view, never
   // per-message (that would be an N+1 on scrollback). Returns each user's
   // CURRENT displayName + photo so chat renders live identity (Bug 8). `photo`
