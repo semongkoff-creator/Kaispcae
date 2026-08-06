@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData } from '@virtualmeet/shared';
 import type { ManualStatus } from '../data/presence';
+import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -406,6 +407,17 @@ export interface GameState {
   // otherwise setting an unchanged value wouldn't even re-render.
   locateRequest: { playerId: string; requestId: number } | null;
   setLocateRequest: (playerId: string | null) => void;
+
+  // Personal "mute a disruptive person" — see services/mutedUsers.ts's doc
+  // comment. Purely client-side (never broadcast — the muted person can't
+  // tell): filters THEIR chat messages/nudges/slaps out of MY OWN view
+  // only, everything else about them stays exactly the same. Keyed by
+  // stable account userId (not socket id), since a mute is meant to
+  // survive their reconnect. Persisted to localStorage on every change so
+  // it survives a reload too.
+  mutedUserIds: Set<string>;
+  muteUser: (userId: string) => void;
+  unmuteUser: (userId: string) => void;
 
   // Follow/Summon consent requests — see PendingRequestToast.tsx. Both
   // "incoming" (someone else wants to do this to ME, needs Accept/Decline)
@@ -1065,6 +1077,19 @@ export const useGameStore = create<GameState>((set, get) => ({
   setFollowerUserIds: (ids) => set({ followerUserIds: ids }),
   locateRequest: null,
   setLocateRequest: (playerId) => set({ locateRequest: playerId ? { playerId, requestId: Date.now() } : null }),
+  mutedUserIds: new Set(getMutedUserIds()),
+  muteUser: (userId) => set((state) => {
+    const next = new Set(state.mutedUserIds);
+    next.add(userId);
+    saveMutedUserIds([...next]);
+    return { mutedUserIds: next };
+  }),
+  unmuteUser: (userId) => set((state) => {
+    const next = new Set(state.mutedUserIds);
+    next.delete(userId);
+    saveMutedUserIds([...next]);
+    return { mutedUserIds: next };
+  }),
 
   mediaObjects: [],
   setMediaObjects: (objects) => set({ mediaObjects: objects }),

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill, MegaphoneFill, MicMuteFill, GeoAltFill, Search } from 'react-bootstrap-icons';
+import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill, MegaphoneFill, MicMuteFill, GeoAltFill, Search, VolumeMuteFill, VolumeUpFill } from 'react-bootstrap-icons';
 import { roleAtLeast, Role, WorkMode } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
@@ -69,6 +69,9 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest,
   const masterAdminUserId = useGameStore((s) => s.masterAdminUserId);
   const adminPlayerIds = useGameStore((s) => s.adminPlayerIds);
   const staffPlayerIds = useGameStore((s) => s.staffPlayerIds);
+  const mutedUserIds = useGameStore((s) => s.mutedUserIds);
+  const muteUser = useGameStore((s) => s.muteUser);
+  const unmuteUser = useGameStore((s) => s.unmuteUser);
 
   // A player's live room role (see gameStore's applyAdminChanged) — keyed by
   // account id, the authoritative source, rather than the per-record isAdmin
@@ -198,6 +201,8 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest,
                 onUnfollow={emitFollowUnfollow}
                 onSummon={() => emitSummonUser(p.name)}
                 onSlap={() => emitSlap(p.name)}
+                isMuted={!!p.userId && mutedUserIds.has(p.userId)}
+                onToggleMute={p.userId ? () => (mutedUserIds.has(p.userId!) ? unmuteUser(p.userId!) : muteUser(p.userId!)) : undefined}
                 onMessage={p.userId && onStartDm ? () => onStartDm(p.userId!) : undefined}
                 onKick={canKick && p.userId && emitKick ? () => emitKick(p.userId!) : undefined}
                 onSpotlight={canSpotlight && p.userId && emitSpotlight ? () => emitSpotlight(p.userId!, !p.spotlightActive) : undefined}
@@ -229,6 +234,8 @@ function ParticipantRow({
   onUnfollow,
   onSummon,
   onSlap,
+  isMuted,
+  onToggleMute,
   onMessage,
   onKick,
   onSpotlight,
@@ -275,6 +282,11 @@ function ParticipantRow({
   // A10 — "colek"/slap: a lightweight attention nudge (open to everyone, like
   // summon). Undefined for the local row.
   onSlap?: () => void;
+  // Personal mute (services/mutedUsers.ts) — purely local, never broadcast.
+  // isMuted drives both the row's badge and the toggle label; onToggleMute
+  // is undefined only when this row has no userId to key a mute by.
+  isMuted?: boolean;
+  onToggleMute?: () => void;
   // Opens a persisted 1:1 DM with this participant (see useChannelChat.ts).
   onMessage?: () => void;
   // Temporary removal from the room — undefined (not just a no-op) when I'm
@@ -341,7 +353,7 @@ function ParticipantRow({
   // leaving it open over a row whose state just changed reads as if the
   // click didn't register.
   const pick = (fn?: () => void) => () => { closeMenu(); fn?.(); };
-  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onMessage || onKick || onSpotlight || onLocate);
+  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onToggleMute || onMessage || onKick || onSpotlight || onLocate);
 
   return (
     <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50 dark:bg-gray-700/50">
@@ -371,6 +383,7 @@ function ParticipantRow({
         )}
         {speaking && <span title="Speaking" className="text-[11px] leading-none animate-pulse">🔊</span>}
         {micMuted && <MicMuteFill className="text-red-500" size={11} title={isLocal ? 'Mic Anda mati' : 'Mic mati'} />}
+        {isMuted && <VolumeMuteFill className="text-gray-400" size={11} title="Anda bisukan orang ini" />}
         {inCall && <CameraVideoFill className="text-purple-600" size={11} title="In call" />}
         {!!followerCount && (
           <span className="text-purple-500 text-[10px] inline-flex items-center gap-0.5" title={`Followed by ${followerCount}`}>
@@ -427,6 +440,13 @@ function ParticipantRow({
                 )}
                 {onSlap && (
                   <MenuItem icon={<HandIndexThumbFill size={12} />} label="Colek (sadarkan)" onClick={pick(onSlap)} />
+                )}
+                {onToggleMute && (
+                  <MenuItem
+                    icon={isMuted ? <VolumeUpFill size={12} /> : <VolumeMuteFill size={12} />}
+                    label={isMuted ? 'Batalkan bisukan' : 'Bisukan'}
+                    onClick={pick(onToggleMute)}
+                  />
                 )}
                 {onMessage && (
                   <MenuItem icon={<ChatDotsFill size={11} />} label="Kirim pesan" onClick={pick(onMessage)} />

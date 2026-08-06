@@ -632,6 +632,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
     socket.on(SocketEvents.PLAYER_NUDGE, (event: NudgeEvent) => {
       const state = useGameStore.getState();
+      // Personal mute (services/mutedUsers.ts) — a muted person's nudges
+      // are suppressed entirely on MY client, whether or not I'm the
+      // target; they have no way to tell, nothing changes for anyone else.
+      const nudgerUserId = state.playerRecords[event.fromId]?.userId;
+      if (nudgerUserId && state.mutedUserIds.has(nudgerUserId)) return;
       state.triggerNudge(event.targetId, event.timestamp, event.fromId);
       const isMe = event.targetId === state.localPlayerId;
       // Everyone in the room hears an ambient blip (so a nudge nearby is
@@ -659,6 +664,9 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // (reusing the nudge machinery), and a dedicated toast.
     socket.on(SocketEvents.SLAPPED, (data: { fromName: string; fromId?: string }) => {
       const state = useGameStore.getState();
+      // Personal mute — same suppression as PLAYER_NUDGE above.
+      const slapperUserId = data.fromId ? state.playerRecords[data.fromId]?.userId : undefined;
+      if (slapperUserId && state.mutedUserIds.has(slapperUserId)) return;
       navigator.vibrate?.(200);
       playNudgeSound(true);
       if (state.localPlayerId) state.triggerNudge(state.localPlayerId, Date.now(), data.fromId);

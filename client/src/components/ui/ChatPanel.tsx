@@ -117,6 +117,12 @@ export function ChatPanel({
 
   const typingByTarget = useGameStore((s) => s.typingByTarget);
   const playerRecords = useGameStore((s) => s.playerRecords);
+  const mutedUserIds = useGameStore((s) => s.mutedUserIds);
+  // Personal mute (services/mutedUsers.ts) — `id` is a stable userId for
+  // persisted channel messages, but a SOCKET id for ephemeral zone chat
+  // (ChatMessage.senderId — see chatHandler.ts); resolving through
+  // playerRecords handles both without the caller needing to know which.
+  const isMutedSender = (id: string) => mutedUserIds.has(playerRecords[id]?.userId ?? id);
   // 1s tick while open so typing entries lapse on their own (there's no
   // explicit "stopped typing" event — they just pass their expiry).
   const [, setTypingTick] = useState(0);
@@ -498,7 +504,7 @@ export function ChatPanel({
             )}
 
             {viewingZone
-              ? zoneMessages.map((m) => {
+              ? zoneMessages.filter((m) => m.isBot || !isMutedSender(m.senderId)).map((m) => {
                   const isOwn = !m.isBot && m.senderName === localPlayerName;
                   const isMentioned = !m.isBot && m.text.includes(`@${localPlayerName}`);
                   return (
@@ -532,7 +538,7 @@ export function ChatPanel({
                     </MessageBubble>
                   );
                 })
-              : messages.map((m) => {
+              : messages.filter((m) => !isMutedSender(m.senderId)).map((m) => {
                   const isOwn = m.senderId === localUserId;
                   const isMentioned = textMentionsUser(m.text, localUserId);
                   return (
