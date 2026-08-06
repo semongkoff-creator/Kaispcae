@@ -151,10 +151,13 @@ export async function updatePlayerPosition(
   return null;
 }
 
-export async function setPlayerStopped(roomId: string, playerId: string): Promise<void> {
+export async function setPlayerStopped(roomId: string, playerId: string, x?: number, y?: number, direction?: string): Promise<void> {
   const players = await getPlayers(roomId);
   const player = players.find((p) => p.id === playerId);
   if (player) {
+    if (typeof x === 'number' && Number.isFinite(x)) player.x = x;
+    if (typeof y === 'number' && Number.isFinite(y)) player.y = y;
+    if (typeof direction === 'string') player.direction = direction as Avatar['direction'];
     player.isMoving = false;
     player.isRunning = false;
     await setPlayers(roomId, players);

@@ -703,13 +703,18 @@ export const useGameStore = create<GameState>((set, get) => ({
   interpolatePlayers: () => {
     const state = get();
     const records = { ...state.playerRecords };
-    const targets = state.playerTargets;
-    let changed = false;
+    const targets = { ...state.playerTargets };
+    let recordsChanged = false;
+    let targetsChanged = false;
 
     for (const id of Object.keys(targets)) {
       const player = records[id];
       const target = targets[id];
-      if (!player || !target) continue;
+      if (!player || !target) {
+        delete targets[id];
+        targetsChanged = true;
+        continue;
+      }
 
       const newX = lerp(player.x, target.x, 0.2);
       const newY = lerp(player.y, target.y, 0.2);
@@ -717,14 +722,19 @@ export const useGameStore = create<GameState>((set, get) => ({
       // Snap if very close
       if (Math.abs(newX - target.x) < 0.5 && Math.abs(newY - target.y) < 0.5) {
         records[id] = { ...player, x: target.x, y: target.y };
+        delete targets[id];
+        targetsChanged = true;
       } else {
         records[id] = { ...player, x: newX, y: newY };
       }
-      changed = true;
+      recordsChanged = true;
     }
 
-    if (changed) {
-      set({ playerRecords: records });
+    if (recordsChanged || targetsChanged) {
+      set({
+        ...(recordsChanged ? { playerRecords: records } : {}),
+        ...(targetsChanged ? { playerTargets: targets } : {}),
+      });
     }
   },
 
