@@ -69,6 +69,40 @@ export async function sendAsUser(chatId: string, text: string, userAccessToken: 
   }
 }
 
+// "Tarik Paksa" (Force-pull) offline notification — a proactive 1:1 DM to a
+// specific person, AS THE BOT (there's no user-consent flow to attach a
+// user_access_token to, unlike sendAsUser above). Same endpoint as
+// sendGroupText, just `receive_id_type=open_id` targeting a single person's
+// Lark account instead of a group chat_id — requires the same im:message
+// scope, no extra permission needed. Null-graceful like every other
+// function here: the caller (roomHandler.ts) already treats this as
+// fire-and-forget best-effort, not something a force-pull should ever fail
+// on if Lark happens to be unreachable.
+export async function sendUserDm(openId: string, text: string): Promise<string | null> {
+  const token = await getTenantToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${LARK_OPENAPI_BASE}/im/v1/messages?receive_id_type=open_id`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({
+        receive_id: openId,
+        msg_type: 'text',
+        content: JSON.stringify({ text }),
+      }),
+    });
+    const j: any = await res.json();
+    if (j?.code !== 0) {
+      console.error('[larkIm] sendUserDm failed:', j?.code, j?.msg);
+      return null;
+    }
+    return j?.data?.message_id ?? null;
+  } catch (e) {
+    console.error('[larkIm] sendUserDm error:', e);
+    return null;
+  }
+}
+
 // List the group chats the bot belongs to — used to populate the admin mapping
 // dropdown so an admin picks from real chats instead of pasting a chat_id.
 // Requires scope im:chat:readonly. Paginates through all pages (chat counts are

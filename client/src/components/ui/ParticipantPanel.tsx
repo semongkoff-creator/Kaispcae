@@ -43,6 +43,10 @@ interface ParticipantPanelProps {
   // Temporary removal from the room, admin+ only (see shared/permissions.ts's
   // 'room:kick') — not a ban, the target can rejoin any time.
   emitKick?: (targetUserId: string) => void;
+  // "Tarik Paksa" (Force-pull) — admin+ only (see shared/permissions.ts's
+  // 'force_pull'). Unlike Summon (emitSummonUser above, open to everyone,
+  // consent-gated), this moves the target immediately with no accept step.
+  emitForcePull?: (targetUserId: string) => void;
   // ZEP-style Spotlight — admin+ only (see shared/permissions.ts's
   // 'presence:spotlight'). Reaches everyone in the room regardless of
   // distance/zone/DND once active.
@@ -57,7 +61,7 @@ interface ParticipantPanelProps {
 
 const MAX_VIDEO_THUMBS = 3;
 
-export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, emitKick, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
+export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, emitKick, emitForcePull, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
@@ -85,6 +89,7 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest,
   };
   const canKick = roleAtLeast(localRole, 'admin');
   const canSpotlight = roleAtLeast(localRole, 'admin');
+  const canForcePull = roleAtLeast(localRole, 'admin');
 
   const remotePlayers = Object.values(playerRecords);
   const totalOnline = remotePlayers.length + 1;
@@ -206,6 +211,7 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest,
                 onMessage={p.userId && !p.isGuest && onStartDm ? () => onStartDm(p.userId!) : undefined}
                 isGuest={p.isGuest}
                 onKick={canKick && p.userId && emitKick ? () => emitKick(p.userId!) : undefined}
+                onForcePull={canForcePull && p.userId && emitForcePull ? () => emitForcePull(p.userId!) : undefined}
                 onSpotlight={canSpotlight && p.userId && emitSpotlight ? () => emitSpotlight(p.userId!, !p.spotlightActive) : undefined}
                 onLocate={() => handleLocate(p.id)}
               />
@@ -239,6 +245,7 @@ function ParticipantRow({
   onToggleMute,
   onMessage,
   onKick,
+  onForcePull,
   onSpotlight,
   onLocate,
   isGuest,
@@ -294,6 +301,10 @@ function ParticipantRow({
   // Temporary removal from the room — undefined (not just a no-op) when I'm
   // below admin, same "hide, don't disable" convention as onSummon above.
   onKick?: () => void;
+  // "Tarik Paksa" (Force-pull) — moves this row's player here immediately,
+  // no consent. Undefined (not disabled) below admin, same convention as
+  // onKick — a plain member never sees this row's option exist at all.
+  onForcePull?: () => void;
   // Toggles Spotlight on/off for this row's player — undefined (not just a
   // no-op) below admin, same convention as onKick. Never present on the
   // local row (isLocal never gets action props, only the badge above).
@@ -360,7 +371,7 @@ function ParticipantRow({
   // leaving it open over a row whose state just changed reads as if the
   // click didn't register.
   const pick = (fn?: () => void) => () => { closeMenu(); fn?.(); };
-  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onToggleMute || onMessage || onKick || onSpotlight || onLocate);
+  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onToggleMute || onMessage || onKick || onForcePull || onSpotlight || onLocate);
 
   return (
     <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50 dark:bg-gray-700/50">
@@ -449,6 +460,14 @@ function ParticipantRow({
                 )}
                 {onSummon && (
                   <MenuItem icon={<MagnetFill size={12} />} label="Panggil ke sini" onClick={pick(onSummon)} />
+                )}
+                {onForcePull && (
+                  <MenuItem
+                    icon={<MagnetFill size={12} />}
+                    label="Tarik Paksa"
+                    danger
+                    onClick={pick(() => { if (window.confirm(`Tarik paksa ${name} ke sini? Tidak perlu persetujuan dia — beda dari "Panggil ke sini".`)) onForcePull(); })}
+                  />
                 )}
                 {onSlap && (
                   <MenuItem icon={<HandIndexThumbFill size={12} />} label="Colek (sadarkan)" onClick={pick(onSlap)} />

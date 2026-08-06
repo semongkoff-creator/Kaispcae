@@ -94,6 +94,13 @@ export const FEATURE_MIN_ROLE = {
   // least as disruptive as removing someone, so it isn't left at Summon's
   // lower staff+ bar.
   'presence:spotlight': 'admin',
+  // "Tarik Paksa" (Force-pull) — moves a target straight to the admin's
+  // location with NO consent step, unlike Summon (which is open to every
+  // role today but requires the target to accept). Force-pull skips that
+  // consent entirely, so it's gated a full tier above Summon's — same
+  // "more disruptive than a normal control" reasoning as Kick/Spotlight
+  // above, and anti-abuse was an explicit requirement, not just a default.
+  'force_pull': 'admin',
   // Akses & Password Pintu audit item #9 — an admin toggles EVERY
   // password-protected door in the room open at once (emergency override),
   // bypassing doorLock.ts's normal per-socket/per-door unlock entirely.

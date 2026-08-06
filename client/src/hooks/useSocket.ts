@@ -361,6 +361,21 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().setSummonResult(data);
     });
 
+    // "Tarik Paksa" (Force-pull) — FORCE_PULL_RESULT is feedback to the
+    // ADMIN who pulled (delivered now vs queued for the target's next
+    // join); FORCE_PULLED tells the TARGET's own client it happened to
+    // them, either right away (online) or on the join that consumes their
+    // queued landing spot (was offline) — see roomHandler.ts's JOIN_ROOM.
+    // Reuses the activity feed rather than a bespoke toast, same lightweight
+    // one-way-notice pattern as the door-unlock notice.
+    socket.on(SocketEvents.FORCE_PULL_RESULT, (data: { targetUserId: string; delivered: boolean }) => {
+      useGameStore.getState().addActivity(data.delivered ? '✅ Berhasil menarik paksa.' : '📨 Target sedang offline — diberitahu lewat Lark.');
+    });
+
+    socket.on(SocketEvents.FORCE_PULLED, (data: { byName: string }) => {
+      useGameStore.getState().addActivity(`📍 ${data.byName} menarik Anda ke sini.`);
+    });
+
     // Fitur 15B — reply to MY OWN INTERACTIVE_PASSWORD_CHECK.
     socket.on(SocketEvents.INTERACTIVE_PASSWORD_RESULT, (data: InteractivePasswordResultPayload) => {
       useGameStore.getState().setInteractivePasswordResult(data);
@@ -1174,6 +1189,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.SUMMON_USER, { nickname });
   }, []);
 
+  // "Tarik Paksa" (Force-pull) — by uid (like Kick), not nickname.
+  const emitForcePull = useCallback((targetUserId: string) => {
+    socketRef.current?.emit(SocketEvents.FORCE_PULL, { targetUserId });
+  }, []);
+
   // A10 — "colek" a participant (by nickname, like summon).
   const emitSlap = useCallback((nickname: string) => {
     socketRef.current?.emit(SocketEvents.SLAP, { nickname });
@@ -1233,5 +1253,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight };
+  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight };
 }

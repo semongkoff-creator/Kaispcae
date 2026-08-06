@@ -14,11 +14,13 @@ import { socketRateLimit } from '../middleware/rateLimit';
 import { redactInteractiveSecrets, redactDoorPasswords } from '../lib/redactFurniture';
 import { unlockDoor, clearUnlockedDoorsForRoom } from './doorLock';
 import { getNearbyRecipients } from './proximityBroadcast';
+import { sendUserDm } from '../lib/larkIm';
 
 const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec per socket
 const canTeleport = socketRateLimit(2); // max 2 teleport requests/sec per socket
 const canUpdateRoom = socketRateLimit(2); // max 2 room:update (DB write) calls/sec per socket
 const canSummonUser = socketRateLimit(3); // max 3 single-target summon requests/sec per socket
+const canForcePull = socketRateLimit(3); // "Tarik Paksa" — same burst guard as Summon above
 const canKnock = socketRateLimit(1); // max 1 knock/sec per socket — no spamming the host
 const canSlap = socketRateLimit(3); // A10 — burst guard; the real limit is the 30s/target cooldown below
 const canCheckInteractive = socketRateLimit(3); // Fitur 15B — throttle brute-force guessing of a password/multiple-choice prompt
@@ -57,6 +59,16 @@ interface PendingSummon {
   timeout: ReturnType<typeof setTimeout>;
 }
 const pendingSummons = new Map<string, PendingSummon>();
+
+// "Tarik Paksa" (Force-pull) — when the target is offline at pull time, their
+// landing spot is queued via saveLastKnownPosition (the exact slot a normal
+// reconnect already resumes from), but that alone gives them no explanation
+// for why they didn't spawn where they left off. Keyed by uid (unlike
+// pendingSummons above, which is keyed by socket id — an offline target has
+// no socket id yet), consumed the moment their next JOIN_ROOM to this same
+// room picks up the queued position, so FORCE_PULLED fires exactly once,
+// right after they actually land.
+const pendingForcePullNotices = new Map<string, string>(); // uid -> puller's display name
 
 function clearPendingSummon(targetSocketId: string) {
   const pending = pendingSummons.get(targetSocketId);
@@ -261,6 +273,25 @@ async function persistRoleGrant(roomSlug: string, userId: string, role: 'admin' 
     });
   } catch (e) {
     console.error('[room] failed to persist role grant:', e);
+  }
+}
+
+// "Tarik Paksa" (Force-pull) — best-effort Lark DM for a target who's
+// offline right now. Fire-and-forget from the caller's perspective: a Lark
+// outage or a user with no linked larkOpenId must never fail the force-pull
+// itself (the queued landing spot is already saved regardless).
+async function notifyForcePullOffline(targetUserId: string, actorName: string, roomSlug: string): Promise<void> {
+  try {
+    const prisma = getPrisma();
+    const [target, dbRoom] = await Promise.all([
+      prisma.user.findUnique({ where: { id: targetUserId }, select: { larkOpenId: true } }),
+      prisma.room.findUnique({ where: { slug: roomSlug }, select: { name: true } }),
+    ]);
+    if (!target?.larkOpenId) return; // no linked Lark account — nothing to send
+    const roomName = dbRoom?.name || roomSlug;
+    await sendUserDm(target.larkOpenId, `${actorName} menarik Anda ke room "${roomName}" di KaiSpace. Buka KaiSpace untuk bergabung.`);
+  } catch (e) {
+    console.error('[room] force-pull Lark notify failed:', e);
   }
 }
 
@@ -736,6 +767,19 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // referenceImage above). Undefined in layerData means 1 (unchanged).
         avatarScale: (dbRoom?.layerData as unknown as LayerData | undefined)?.avatarScale,
       });
+
+      // "Tarik Paksa" (Force-pull) — this join just consumed a queued
+      // landing spot from an offline force-pull (see saveLastKnownPosition
+      // in the FORCE_PULL handler above); tell the client now that
+      // ROOM_STATE has already given it a map/tiles to render against, so
+      // the toast doesn't fire before there's anything on screen yet.
+      // One-shot: deleted immediately so a later, unrelated reconnect to
+      // the same remembered position never re-fires it.
+      const forcePullNotice = pendingForcePullNotices.get(uid);
+      if (forcePullNotice) {
+        pendingForcePullNotices.delete(uid);
+        socket.emit(SocketEvents.FORCE_PULLED, { byName: forcePullNotice });
+      }
 
       // Soundboard — this room's custom sounds, sent once right after
       // ROOM_STATE (same "list arrives right after room:state" shape as
@@ -1335,6 +1379,74 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     updatePlayerPosition(room, socket.id, landX, landY, stillRequester.direction);
     io.to(room).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: landX, y: landY, direction: stillRequester.direction });
     io.to(pending.fromSocketId).emit(SocketEvents.SUMMON_RESULT, { targetName, accepted: true });
+  });
+
+  // "Tarik Paksa" (Force-pull) — admin+ only, NO consent step (that's the
+  // whole difference from Summon above): targets by uid (like Kick), not
+  // nickname, so there's no duplicate-name resolution to worry about.
+  socket.on(SocketEvents.FORCE_PULL, async (data: { targetUserId: string }) => {
+    if (!canForcePull(socket.id)) return;
+    const room = currentRoom; if (!room) return;
+    const senderUid = findUserIdBySocket(socket.id);
+    const rs = getRoomAdmin(room);
+    if (!canAccess(rs, senderUid, 'force_pull')) {
+      socket.emit('admin:error', { message: 'Only admins can force-pull' });
+      return;
+    }
+    const targetUserId = data?.targetUserId;
+    if (typeof targetUserId !== 'string' || targetUserId === senderUid) return;
+
+    const players = await getPlayers(room);
+    const actor = players.find((p) => p.id === socket.id);
+    if (!actor) return;
+    const actorName = getPlayerName(socket.id);
+
+    // Land BESIDE the admin, not on top of them — same reasoning as
+    // Summon's accept path above.
+    const tiles = getCachedTiles(room);
+    const tileX = Math.floor(actor.x / TILE_SIZE);
+    const tileY = Math.floor(actor.y / TILE_SIZE);
+    const spot = tiles && tiles.length > 0
+      ? findAdjacentFreeTile(tiles, tileX, tileY)
+      : { x: tileX, y: tileY + 1 };
+    const landX = spot.x * TILE_SIZE + TILE_SIZE / 2;
+    const landY = spot.y * TILE_SIZE + TILE_SIZE / 2;
+
+    const targetSocketId = userSocketMap.get(targetUserId);
+    const targetSocket = targetSocketId ? io.sockets.sockets.get(targetSocketId) : undefined;
+
+    if (!targetSocket) {
+      // Offline right now — queue the landing spot for their next join to
+      // THIS room (same slot a normal reconnect already resumes from, see
+      // getLastKnownPosition in JOIN_ROOM above) and best-effort notify via
+      // Lark since there's no live client to tell directly.
+      saveLastKnownPosition(targetUserId, room, landX, landY, 'down');
+      pendingForcePullNotices.set(targetUserId, actorName);
+      notifyForcePullOffline(targetUserId, actorName, room).catch((e) => console.error('[room] force-pull notify error:', e));
+      socket.emit(SocketEvents.FORCE_PULL_RESULT, { targetUserId, delivered: false });
+      console.log(`[room] uid=${targetUserId} force-pulled (queued, offline) in ${room} by uid=${senderUid}`);
+      return;
+    }
+
+    // Same locked-zone bypass Summon's accept path uses — an admin
+    // force-pulling always qualifies (force_pull and room:lock are both
+    // admin-tier, so canAccess(..., 'room:lock') is already true here),
+    // which is exactly the intent: "force" means it isn't stopped by a lock
+    // either. Admits the target into whatever zone the ADMIN is currently
+    // standing in (that's where they're landing), same admit-then-teleport
+    // ordering as Summon so the target's own client doesn't bounce them
+    // back out the instant they arrive.
+    const adminZoneId = zoneIdOfSocket(socket.id);
+    if (adminZoneId && senderUid && canAccess(rs, senderUid, 'room:lock')) {
+      admitUserToZone(room, adminZoneId, targetUserId);
+      targetSocket.emit(SocketEvents.ZONE_KNOCK_DECIDED, { zoneId: adminZoneId, admitted: true, byName: actorName });
+    }
+
+    updatePlayerPosition(room, targetSocket.id, landX, landY, 'down');
+    io.to(room).emit(SocketEvents.PLAYER_TELEPORTED, { id: targetSocket.id, x: landX, y: landY, direction: 'down' });
+    targetSocket.emit(SocketEvents.FORCE_PULLED, { byName: actorName });
+    socket.emit(SocketEvents.FORCE_PULL_RESULT, { targetUserId, delivered: true });
+    console.log(`[room] uid=${targetUserId} force-pulled in ${room} by uid=${senderUid}`);
   });
 
   // A10 — Slap/Tap ("colek"): a one-way, ephemeral attention nudge. Reuses

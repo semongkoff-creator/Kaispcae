@@ -549,6 +549,22 @@ export enum SocketEvents {
   SUMMON_RESPOND = 'summon:respond',
   SUMMON_RESULT = 'summon:result',
 
+  // "Tarik Paksa" (Force-pull) — admin+ only ('force_pull', shared/
+  // permissions.ts), deliberately NO consent step (that's what makes it
+  // "force" instead of a second Summon): FORCE_PULL moves the target
+  // straight away if they're online (same "land beside, not on top of"
+  // mechanic + locked-zone bypass as Summon's accept path), or queues their
+  // landing spot for their next join + sends a Lark DM if they're offline
+  // right now. FORCE_PULL_RESULT tells the ADMIN's own client what
+  // happened (delivered now vs queued); FORCE_PULLED tells the TARGET's
+  // client it happened to them (right away if online, or on the join that
+  // consumes the queued position if they were offline) so they can show a
+  // "X menarik Anda ke sini" toast instead of silently finding themselves
+  // moved.
+  FORCE_PULL = 'force_pull:pull',
+  FORCE_PULL_RESULT = 'force_pull:result',
+  FORCE_PULLED = 'force_pull:pulled',
+
   // A10 — Slap/Tap ("colek"): a lightweight, ephemeral attention-nudge to one
   // person (vibrate + soft sound + shake + toast). SLAP is the sender's request
   // (by nickname, like SUMMON_USER); the server relays SLAPPED only to the
