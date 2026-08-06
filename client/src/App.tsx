@@ -1944,6 +1944,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onTyping={channelChat.notifyTyping}
         onDeleteMessage={channelChat.deleteMessage}
         onEditMessage={channelChat.editMessage}
+        onPinMessage={channelChat.pinMessage}
         onLoadOlder={channelChat.loadOlder}
         onCreateChannel={channelChat.createChannel}
       />

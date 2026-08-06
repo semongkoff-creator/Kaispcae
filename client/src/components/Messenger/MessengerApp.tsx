@@ -331,6 +331,20 @@ export function MessengerApp({
     return map;
   }, [activeChatTarget, readStateByTarget, messages, localUserId]);
 
+  // Right-click a message to reach a menu with pin/unpin + this specific
+  // message's full read list (everyone whose lastReadAt is at or past its
+  // createdAt) — the passive "Dibaca oleh" line above only ever labels each
+  // reader's newest reached message, so an older message needs this to
+  // answer "did they see this one" on demand.
+  const [msgMenu, setMsgMenu] = useState<{ x: number; y: number; message: ChannelMessage } | null>(null);
+  const readersOf = useCallback((message: ChannelMessage): string[] => {
+    if (!activeChatTarget) return [];
+    const state = readStateByTarget[`${activeChatTarget.type}:${activeChatTarget.id}`] ?? {};
+    return Object.entries(state)
+      .filter(([uid, lastReadAt]) => uid !== localUserId && lastReadAt >= message.createdAt)
+      .map(([uid]) => playerRecords[uid]?.name ?? 'Seseorang');
+  }, [activeChatTarget, readStateByTarget, playerRecords, localUserId]);
+
   return (
     // Docked to the left edge as a sidebar, NOT a full-screen overlay like
     // DocsApp/BasesLauncher/AttendanceApp — the map/HUD stay visible and
@@ -558,7 +572,9 @@ export function MessengerApp({
                             </div>
                           ) : (
                             <div
-                              className={`px-3.5 py-2 rounded-2xl text-sm break-words whitespace-pre-wrap ${
+                              onContextMenu={(e) => { e.preventDefault(); setMsgMenu({ x: e.clientX, y: e.clientY, message: m }); }}
+                              title="Klik kanan untuk opsi (sematkan, lihat yang sudah baca)"
+                              className={`px-3.5 py-2 rounded-2xl text-sm break-words whitespace-pre-wrap cursor-context-menu ${
                                 own
                                   ? 'bg-indigo-500 text-white rounded-br-md'
                                   : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-bl-md'
@@ -750,6 +766,41 @@ export function MessengerApp({
         )}
       </section>
       {lightbox && <AttachmentLightbox target={lightbox} onClose={() => setLightbox(null)} />}
+      {msgMenu && (
+        <div
+          className="fixed inset-0 z-40"
+          onClick={() => setMsgMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setMsgMenu(null); }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ position: 'fixed', left: Math.min(msgMenu.x, window.innerWidth - 220), top: Math.min(msgMenu.y, window.innerHeight - 260) }}
+            className="z-50 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 text-xs"
+          >
+            <button
+              onClick={() => { onPinMessage?.(msgMenu.message.id, !msgMenu.message.isPinned); setMsgMenu(null); }}
+              className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
+            >
+              {msgMenu.message.isPinned ? <PinAngleFill size={11} className="text-indigo-500" /> : <PinAngle size={11} />}
+              {msgMenu.message.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
+            </button>
+            <div className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700 mt-1">
+              Dibaca oleh
+            </div>
+            <div className="max-h-32 overflow-y-auto">
+              {(() => {
+                const readers = readersOf(msgMenu.message);
+                if (readers.length === 0) {
+                  return <div className="px-3 py-1 text-gray-400 dark:text-gray-500">Belum ada yang membaca</div>;
+                }
+                return readers.map((n, i) => (
+                  <div key={i} className="px-3 py-1 text-gray-600 dark:text-gray-300">{n}</div>
+                ));
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

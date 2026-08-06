@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
-import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise } from 'react-bootstrap-icons';
+import { useState, useRef, useEffect, useCallback, type ReactNode, type MouseEvent } from 'react';
+import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, MegaphoneFill } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -69,6 +69,11 @@ interface ChatPanelProps {
   onDeleteMessage?: (messageId: string) => void;
   // Edit the text of one of your own messages (see MESSAGE_EDIT).
   onEditMessage?: (messageId: string, text: string) => void;
+  // Pin/unpin within the thread (see MESSAGE_PIN) — open to anyone in the
+  // channel/DM, not just admins. Right-click a message to reach it (see the
+  // context menu built below), distinct from onPinNotice above (admin-only,
+  // posts to the room's Notice board instead).
+  onPinMessage?: (messageId: string, pinned: boolean) => void;
   onLoadOlder: () => Promise<number>;
   onCreateChannel: (name: string) => Promise<Channel>;
 }
@@ -97,6 +102,7 @@ export function ChatPanel({
   onTyping,
   onDeleteMessage,
   onEditMessage,
+  onPinMessage,
   onLoadOlder,
   onCreateChannel,
 }: ChatPanelProps) {
@@ -117,12 +123,19 @@ export function ChatPanel({
 
   const typingByTarget = useGameStore((s) => s.typingByTarget);
   const playerRecords = useGameStore((s) => s.playerRecords);
+  const readStateByTarget = useGameStore((s) => s.readStateByTarget);
   const mutedUserIds = useGameStore((s) => s.mutedUserIds);
   // Personal mute (services/mutedUsers.ts) — `id` is a stable userId for
   // persisted channel messages, but a SOCKET id for ephemeral zone chat
   // (ChatMessage.senderId — see chatHandler.ts); resolving through
   // playerRecords handles both without the caller needing to know which.
   const isMutedSender = (id: string) => mutedUserIds.has(playerRecords[id]?.userId ?? id);
+
+  // Right-click on a persisted channel/DM message opens this menu (pin +
+  // read receipts) — see the render at the bottom of this component. Only
+  // one open at a time; a click anywhere else (or opening another) closes it.
+  const [msgMenu, setMsgMenu] = useState<{ x: number; y: number; message: ChannelMessage } | null>(null);
+
   // 1s tick while open so typing entries lapse on their own (there's no
   // explicit "stopped typing" event — they just pass their expiry).
   const [, setTypingTick] = useState(0);
@@ -250,6 +263,21 @@ export function ChatPanel({
       ...threadReplies.map((r) => r.senderId),
     ].filter(Boolean))),
   );
+
+  // Full "who has read THIS message" — everyone whose thread-wide lastReadAt
+  // is at or past this message's own createdAt (see ChatRead's doc comment,
+  // server/prisma/schema.prisma). Unlike MessengerApp's passive under-bubble
+  // hint (which only ever labels each reader's newest reached message), this
+  // is computed on demand for whichever message was right-clicked, so it
+  // also answers "did they see this OLDER one" correctly.
+  const readersOf = useCallback((message: ChannelMessage): string[] => {
+    if (!activeChatTarget) return [];
+    const key = `${activeChatTarget.type}:${activeChatTarget.id}`;
+    const state = readStateByTarget[key] ?? {};
+    return Object.entries(state)
+      .filter(([uid, lastReadAt]) => uid !== localUserId && lastReadAt >= message.createdAt)
+      .map(([uid]) => Object.values(playerRecords).find((p) => p.userId === uid)?.name ?? profileByUser.get(uid)?.name ?? 'Seseorang');
+  }, [activeChatTarget, readStateByTarget, playerRecords, profileByUser, localUserId]);
 
   // A new message arrived (or was sent). If the user is at the bottom, follow
   // it; if they've scrolled up to read history, DON'T yank them — flag it so
@@ -550,8 +578,8 @@ export function ChatPanel({
                         photoUrl={profileByUser.get(m.senderId)?.photo ?? undefined}
                         time={m.createdAt}
                         mentioned={isMentioned}
-                        pinnable={!!(isAdmin && onPinNotice)}
-                        onPin={() => onPinNotice?.(m)}
+                        pinned={m.isPinned}
+                        onContextMenu={(e) => { e.preventDefault(); setMsgMenu({ x: e.clientX, y: e.clientY, message: m }); }}
                         actions={
                           <>
                             <button
@@ -814,6 +842,54 @@ export function ChatPanel({
         </div>
       )}
       {lightbox && <AttachmentLightbox target={lightbox} onClose={() => setLightbox(null)} />}
+      {/* Right-click menu for a persisted channel/DM message — pin/unpin the
+          thread bookmark, optionally promote to the room's Notice board
+          (admin only, same action as the old bare right-click), and see
+          exactly who has read this message. A full-screen backdrop closes it
+          on any outside click/right-click. */}
+      {msgMenu && (
+        <div
+          className="fixed inset-0 z-40"
+          onClick={() => setMsgMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setMsgMenu(null); }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ position: 'fixed', left: Math.min(msgMenu.x, window.innerWidth - 220), top: Math.min(msgMenu.y, window.innerHeight - 260) }}
+            className="z-50 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 text-xs"
+          >
+            <button
+              onClick={() => { onPinMessage?.(msgMenu.message.id, !msgMenu.message.isPinned); setMsgMenu(null); }}
+              className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
+            >
+              {msgMenu.message.isPinned ? <PinAngleFill size={11} className="text-indigo-500" /> : <PinAngle size={11} />}
+              {msgMenu.message.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
+            </button>
+            {isAdmin && onPinNotice && (
+              <button
+                onClick={() => { onPinNotice(msgMenu.message); setMsgMenu(null); }}
+                className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
+              >
+                <MegaphoneFill size={11} /> Jadikan pengumuman
+              </button>
+            )}
+            <div className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700 mt-1">
+              Dibaca oleh
+            </div>
+            <div className="max-h-32 overflow-y-auto">
+              {(() => {
+                const readers = readersOf(msgMenu.message);
+                if (readers.length === 0) {
+                  return <div className="px-3 py-1 text-gray-400 dark:text-gray-500">Belum ada yang membaca</div>;
+                }
+                return readers.map((n, i) => (
+                  <div key={i} className="px-3 py-1 text-gray-600 dark:text-gray-300">{n}</div>
+                ));
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -834,6 +910,8 @@ function MessageBubble({
   isBot,
   pinnable,
   onPin,
+  pinned,
+  onContextMenu,
   children,
   actions,
 }: {
@@ -848,8 +926,15 @@ function MessageBubble({
   // titles. Never combined with isOwn/mentioned in practice (the bot is
   // never the local player, and its own name never matches @mentions).
   isBot?: boolean;
+  // Zone chat's own right-click shortcut: straight to "pin as Notice", no
+  // menu. Ignored when onContextMenu is passed (persisted channel/DM
+  // messages below use the fuller menu instead — see ChatMessageMenu).
   pinnable?: boolean;
   onPin?: () => void;
+  // Thread-pin indicator (ChatMessage.isPinned, see MESSAGE_PIN) — distinct
+  // from pinnable/onPin above, which is the room Notice board.
+  pinned?: boolean;
+  onContextMenu?: (e: MouseEvent) => void;
   children: ReactNode;
   actions?: ReactNode;
 }) {
@@ -861,9 +946,9 @@ function MessageBubble({
       {!isOwn && <ChatAvatar name={name} color={color} photoUrl={photoUrl} />}
       <div className={`flex flex-col min-w-0 max-w-[80%] ${isOwn ? 'items-end' : 'items-start'}`}>
         <div
-          onContextMenu={pinnable ? (e) => { e.preventDefault(); onPin?.(); } : undefined}
-          title={pinnable ? 'Right-click to pin as notice' : undefined}
-          className={`rounded-2xl px-2.5 py-1.5 ${isOwn ? 'rounded-br-sm' : 'rounded-bl-sm'} ${pinnable ? 'cursor-context-menu' : ''} ${bodyText} ${
+          onContextMenu={onContextMenu ?? (pinnable ? (e) => { e.preventDefault(); onPin?.(); } : undefined)}
+          title={onContextMenu ? 'Klik kanan untuk opsi (sematkan, lihat yang sudah baca)' : pinnable ? 'Right-click to pin as notice' : undefined}
+          className={`rounded-2xl px-2.5 py-1.5 ${isOwn ? 'rounded-br-sm' : 'rounded-bl-sm'} ${onContextMenu || pinnable ? 'cursor-context-menu' : ''} ${bodyText} ${
             isBot
               ? 'bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800'
               : mentioned ? 'bg-amber-100 dark:bg-amber-900/40' : isOwn ? 'bg-purple-600' : 'bg-gray-100 dark:bg-gray-700'
@@ -871,7 +956,8 @@ function MessageBubble({
         >
           {!isOwn && <div className="font-semibold text-[11px] mb-0.5 leading-tight" style={{ color }}>{name}</div>}
           {children}
-          <div className={`text-[9px] mt-0.5 ${isOwn ? 'text-purple-200 text-right' : 'text-gray-400 dark:text-gray-500'}`}>
+          <div className={`text-[9px] mt-0.5 flex items-center gap-1 ${isOwn ? 'text-purple-200 justify-end' : 'text-gray-400 dark:text-gray-500'}`}>
+            {pinned && <PinAngleFill size={8} className={isOwn ? 'text-purple-100' : 'text-indigo-500'} title="Disematkan" />}
             {new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>
         </div>
