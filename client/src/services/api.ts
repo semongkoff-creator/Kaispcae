@@ -274,8 +274,16 @@ export const api = {
 
   // Clears the HttpOnly upload-session cookie server-side — JS can't touch it
   // itself. Not routed through request(): the server answers 204 with no
-  // body, which res.json() would choke on.
-  logout: () => fetch(`${API_BASE}/auth/logout`, { method: 'POST' }),
+  // body, which res.json() would choke on. The token, if still available
+  // (see useAuth.ts's logout — it's captured before localStorage is
+  // cleared), lets the server also invalidate the session itself, not just
+  // the cookie, so a copied/leaked token stops working the instant someone
+  // actually logs out.
+  logout: (token?: string | null) =>
+    fetch(`${API_BASE}/auth/logout`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    }),
 
   // ── Profile photo (chat avatar) — stored base64-in-DB, see
   // server/src/routes/users.ts. The photo is a data-URL the caller has already

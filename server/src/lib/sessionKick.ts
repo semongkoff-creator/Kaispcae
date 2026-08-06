@@ -21,3 +21,16 @@ export function disconnectUserSockets(userId: string, keepSessionId?: string): v
     }
   }
 }
+
+// A voluntary logout (auth.ts's /auth/logout) also needs to kick this
+// user's live sockets — the token it just invalidated may still be sitting
+// in an open tab's memory — but WITHOUT the SESSION_SUPERSEDED message
+// above: that copy is specifically "you got logged in elsewhere", which
+// would read as a confusing non-sequitur on a logout the user asked for
+// themselves. Silent disconnect only.
+export function disconnectUserSocketsSilently(userId: string): void {
+  if (!ioRef) return;
+  for (const [, socket] of ioRef.sockets.sockets) {
+    if (socket.data?.userId === userId) socket.disconnect(true);
+  }
+}

@@ -4,11 +4,11 @@ import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
 import { getPrisma } from '../lib/prisma';
 import { getConfig } from '../config';
-import { authenticateToken, setUploadSessionCookie, clearUploadSessionCookie, AuthRequest } from '../middleware/auth';
+import { authenticateToken, setUploadSessionCookie, clearUploadSessionCookie, verifyTokenClaims, AuthRequest } from '../middleware/auth';
 import { validate, registerSchema, loginSchema } from '../middleware/validate';
 import { rateLimit } from '../middleware/rateLimit';
 import { ensureCheckedInToday } from '../lib/larkAttendance';
-import { disconnectUserSockets } from '../lib/sessionKick';
+import { disconnectUserSockets, disconnectUserSocketsSilently } from '../lib/sessionKick';
 
 const auth = Router();
 
@@ -35,6 +35,18 @@ async function startNewSession(userId: string): Promise<string> {
   await getPrisma().user.update({ where: { id: userId }, data: { currentSessionId: sessionId } });
   disconnectUserSockets(userId); // supersede every previously-connected device
   return sessionId;
+}
+
+// Logout's server-side half: rotate to a fresh (unguessable, never handed
+// out) sessionId so the token just presented — and any other still-valid
+// token for this account — immediately fails isSessionSuperseded, then
+// silently drop any live sockets still using it. Same rotation mechanic as
+// startNewSession above, but the kick must stay silent (see
+// disconnectUserSocketsSilently's doc comment) — this isn't a new device
+// taking over, it's the user themselves leaving on purpose.
+async function invalidateSession(userId: string): Promise<void> {
+  await getPrisma().user.update({ where: { id: userId }, data: { currentSessionId: randomUUID() } });
+  disconnectUserSocketsSilently(userId);
 }
 
 // How close to expiry (in seconds) a token has to be before GET /auth/me
@@ -246,11 +258,36 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
 // POST /auth/logout — the upload cookie is HttpOnly, so the client dropping
 // its localStorage token can't clear it; without this the cookie would
 // outlive the visible session and keep serving uploads to a "logged out"
-// browser. Deliberately not authenticated: clearing a cookie is safe to do
-// for anyone, and requiring a valid token would leave the cookie stranded in
-// exactly the case that matters most (an already-expired session).
-auth.post('/logout', (req, res: Response) => {
+// browser. Deliberately not REQUIRING authentication: clearing a cookie is
+// safe to do for anyone, and requiring a valid token would leave the cookie
+// stranded in exactly the case that matters most (an already-expired
+// session) — a missing/expired/invalid token still 204s, it just has
+// nothing left to invalidate server-side.
+//
+// A still-valid token, if presented (see client/src/services/api.ts's
+// logout — it's read before localStorage is cleared), also gets its
+// session invalidated server-side via invalidateSession() above: without
+// this, logout was purely cosmetic client-side — the JWT itself stayed
+// valid until its natural expiry (up to REFRESH_THRESHOLD_SECONDS' worth of
+// sliding refresh), so a token copied out of localStorage/history/an XSS
+// before logout would keep working long after the user believed they'd
+// logged out.
+auth.post('/logout', async (req, res: Response) => {
   clearUploadSessionCookie(req, res);
+
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const decoded = token ? verifyTokenClaims(token) : null;
+  if (decoded) {
+    try {
+      await invalidateSession(decoded.userId);
+    } catch (e) {
+      // The cookie is already cleared and the user is leaving regardless —
+      // a DB hiccup here must not turn a logout into a stuck/error screen.
+      console.error('[auth] logout session invalidation failed:', e);
+    }
+  }
+
   return res.status(204).end();
 });
 

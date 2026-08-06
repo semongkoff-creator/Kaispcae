@@ -108,12 +108,16 @@ export function useAuth() {
   }, []);
 
   const logout = useCallback(() => {
+    // Captured BEFORE removing it — the server needs the outgoing token to
+    // know WHICH session to invalidate (see auth.ts's /logout), so it must
+    // still be readable at the moment the request is built, not after.
+    const token = localStorage.getItem('vm_token');
     localStorage.removeItem('vm_token');
     setUser(null);
     // The upload-session cookie is HttpOnly, so only the server can clear it.
     // Fire-and-forget: a failed call must not keep the user on a screen they
     // just asked to leave, and the cookie expires with the token regardless.
-    api.logout().catch(() => {});
+    api.logout(token).catch(() => {});
   }, []);
 
   return { user, loading, error, sessionExpiredMessage, login, register, logout, setError };
