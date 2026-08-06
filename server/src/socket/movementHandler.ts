@@ -1,10 +1,11 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointInImpassableArea, RoomTile, JumpEvent, NudgeEvent } from '@virtualmeet/shared';
+import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointInImpassableArea, RoomTile, JumpEvent, NudgeEvent, PlayerMovePayload, PlayerMovedPayload, PlayerStoppedPayload } from '@virtualmeet/shared';
 import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas } from '../store/roomStore';
 import { isDoorUnlocked, clearUnlockedDoors } from './doorLock';
 import { isDoorOverrideActive } from './roomHandler';
 import { createStoppedPayload } from './movementPayload';
 import { socketRateLimit } from '../middleware/rateLimit';
+import { clearMovementSequence, shouldAcceptMoveSequence } from './movementSequence';
 
 // Rate limiting: max 20 updates per second per player
 const rateLimitMap = new Map<string, number>();
@@ -16,13 +17,6 @@ const MIN_UPDATE_INTERVAL = 1000 / 20; // 50ms
 // stays purely cosmetic (no toast/sound intensity like Slap's), so a bare
 // burst cap is enough to stop flooding without needing per-target tracking.
 const canNudge = socketRateLimit(3);
-
-interface MoveData {
-  x: number;
-  y: number;
-  direction: string;
-  isRunning?: boolean;
-}
 
 // ZEP-style door password — server-authoritative half of the gate (the
 // client also predicts this locally for responsive collision, see
@@ -74,7 +68,11 @@ function getMapBounds(tiles: RoomTile[][] | undefined): { mapWidth: number; mapH
 }
 
 export function registerMovementHandlers(io: Server, socket: Socket) {
-  socket.on(SocketEvents.PLAYER_MOVE, (data: MoveData) => {
+  socket.on(SocketEvents.PLAYER_MOVE, (data: PlayerMovePayload) => {
+    if (!shouldAcceptMoveSequence(socket.id, data?.seq)) return;
+    if (typeof data?.x !== 'number' || typeof data?.y !== 'number') return;
+    if (!Number.isFinite(data.x) || !Number.isFinite(data.y)) return;
+
     // Rate limit: skip if too many updates
     const now = Date.now();
     const lastUpdate = rateLimitMap.get(socket.id) || 0;
@@ -105,14 +103,17 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
         if (isBlockedForSocket(tiles, gameRoom, socket.id, tileX, tileY, clampedX, clampedY)) return;
       }
 
-      socket.to(gameRoom).emit(SocketEvents.PLAYER_MOVED, {
+      const moved: PlayerMovedPayload = {
         id: socket.id,
         x: clampedX,
         y: clampedY,
-        direction: data.direction,
+        direction: data.direction || 'down',
         isRunning: !!data.isRunning,
-      });
-      updatePlayerPosition(gameRoom, socket.id, clampedX, clampedY, data.direction, data.isRunning);
+        seq: data.seq,
+        serverTime: now,
+      };
+      socket.to(gameRoom).emit(SocketEvents.PLAYER_MOVED, moved);
+      updatePlayerPosition(gameRoom, socket.id, clampedX, clampedY, moved.direction, data.isRunning);
     }
   });
 
@@ -133,7 +134,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
       const tileY = Math.floor(clampedY / TILE_SIZE);
       if (isBlockedForSocket(tiles, gameRoom, socket.id, tileX, tileY, clampedX, clampedY)) return; // refuse teleport into a wall/desk/locked door
     }
-    const direction = (data.direction as MoveData['direction']) || 'down';
+    const direction = data.direction || 'down';
     socket.to(gameRoom).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: clampedX, y: clampedY, direction });
     updatePlayerPosition(gameRoom, socket.id, clampedX, clampedY, direction, false);
   });
@@ -142,14 +143,17 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     const rooms = Array.from(socket.rooms);
     const gameRoom = rooms.find((r) => r !== socket.id);
     if (gameRoom) {
+      const serverTime = Date.now();
       const tiles = getCachedTiles(gameRoom);
       const { mapWidth, mapHeight } = getMapBounds(tiles);
       const stopped = createStoppedPayload(socket.id, data, { mapWidth, mapHeight, tileSize: TILE_SIZE });
       if (!stopped) {
-        socket.to(gameRoom).emit(SocketEvents.PLAYER_STOPPED, {
+        const stoppedWithoutPosition: PlayerStoppedPayload = {
           id: socket.id,
-          direction: data.direction,
-        });
+          direction: (data.direction || 'down') as PlayerStoppedPayload['direction'],
+          serverTime,
+        };
+        socket.to(gameRoom).emit(SocketEvents.PLAYER_STOPPED, stoppedWithoutPosition);
         setPlayerStopped(gameRoom, socket.id);
         return;
       }
@@ -158,16 +162,18 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
         const tileX = Math.floor(stopped.x / TILE_SIZE);
         const tileY = Math.floor(stopped.y / TILE_SIZE);
         if (isBlockedForSocket(tiles, gameRoom, socket.id, tileX, tileY, stopped.x, stopped.y)) {
-          socket.to(gameRoom).emit(SocketEvents.PLAYER_STOPPED, {
+          const blockedStop: PlayerStoppedPayload = {
             id: socket.id,
-            direction: stopped.direction,
-          });
+            direction: stopped.direction as PlayerStoppedPayload['direction'],
+            serverTime,
+          };
+          socket.to(gameRoom).emit(SocketEvents.PLAYER_STOPPED, blockedStop);
           setPlayerStopped(gameRoom, socket.id);
           return;
         }
       }
 
-      io.to(gameRoom).emit(SocketEvents.PLAYER_STOPPED, stopped);
+      io.to(gameRoom).emit(SocketEvents.PLAYER_STOPPED, { ...stopped, serverTime });
       setPlayerStopped(gameRoom, socket.id, stopped.x, stopped.y, stopped.direction);
     }
   });
@@ -214,6 +220,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
   // Clean up rate limit map on disconnect
   socket.on('disconnect', () => {
     rateLimitMap.delete(socket.id);
+    clearMovementSequence(socket.id);
     clearUnlockedDoors(socket.id);
   });
 }

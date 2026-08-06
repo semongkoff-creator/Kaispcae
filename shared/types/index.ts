@@ -1004,6 +1004,29 @@ export interface NudgeEvent {
   timestamp: number;
 }
 
+export interface PlayerMovePayload {
+  x: number;
+  y: number;
+  direction: Direction;
+  isRunning?: boolean;
+  // Monotonic client-side sequence number. Receivers use this to drop stale
+  // movement packets that arrive after a newer position.
+  seq?: number;
+}
+
+export interface PlayerMovedPayload extends PlayerMovePayload {
+  id: string;
+  serverTime: number;
+}
+
+export interface PlayerStoppedPayload {
+  id: string;
+  x?: number;
+  y?: number;
+  direction: Direction;
+  serverTime?: number;
+}
+
 // Proximity / WebRTC constants
 export const PROXIMITY_THRESHOLD = 3; // tiles — within 3 tiles: full video + audio
 // Bug: this used to be a hardcoded `96` ("3 tiles × 32px") — a leftover from

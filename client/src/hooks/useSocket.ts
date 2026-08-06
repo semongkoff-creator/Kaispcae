@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, GuestJoinRequest } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, GuestJoinRequest, PlayerMovedPayload, PlayerStoppedPayload } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
@@ -40,6 +40,8 @@ function resolveSoundboardSound(soundId: string): SoundboardSoundData | undefine
 export function useSocket(authUserName: string = '', roomSlug: string = 'main-office', authUserId: string = '', guestToken?: string) {
   const socketRef = useRef<Socket | null>(null);
   const lastEmitRef = useRef<number>(0);
+  const moveSeqRef = useRef<number>(0);
+  const lastRemoteMoveSeqRef = useRef<Map<string, number>>(new Map());
 
   const setConnected = useGameStore((s) => s.setConnected);
   const setLocalPlayerId = useGameStore((s) => s.setLocalPlayerId);
@@ -102,6 +104,9 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // events mixed in with the new room's own (see clearActivity's doc
     // comment in gameStore.ts).
     useGameStore.getState().clearActivity();
+    lastEmitRef.current = 0;
+    moveSeqRef.current = 0;
+    lastRemoteMoveSeqRef.current.clear();
 
     // Connect directly to the game server — bypass Vite proxy entirely
     // to avoid WebSocket proxy ECONNABORTED issues. The JWT (if logged in)
@@ -161,8 +166,14 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().addActivity(`${player.name} joined the room`);
     });
 
-    socket.on(SocketEvents.PLAYER_MOVED, (data: { id: string; x: number; y: number; direction: string; isRunning?: boolean }) => {
-      setPlayerTarget(data.id, data.x, data.y);
+    socket.on(SocketEvents.PLAYER_MOVED, (data: PlayerMovedPayload) => {
+      const receivedAt = Date.now();
+      if (typeof data.seq === 'number') {
+        const lastSeq = lastRemoteMoveSeqRef.current.get(data.id);
+        if (lastSeq !== undefined && data.seq <= lastSeq) return;
+        lastRemoteMoveSeqRef.current.set(data.id, data.seq);
+      }
+      setPlayerTarget(data.id, data.x, data.y, receivedAt);
       upsertPlayer({
         id: data.id,
         direction: data.direction as Avatar['direction'],
@@ -171,11 +182,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       } as Avatar);
     });
 
-    socket.on(SocketEvents.PLAYER_STOPPED, (data: { id: string; x?: number; y?: number; direction: string }) => {
+    socket.on(SocketEvents.PLAYER_STOPPED, (data: PlayerStoppedPayload) => {
       const x = data.x;
       const y = data.y;
       const hasPosition = typeof x === 'number' && typeof y === 'number';
       if (hasPosition) {
+        const receivedAt = Date.now();
         const state = useGameStore.getState();
         if (data.id === state.localPlayerId) {
           setLocalPlayer({
@@ -187,7 +199,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
           });
           return;
         }
-        setPlayerTarget(data.id, x, y);
+        setPlayerTarget(data.id, x, y, receivedAt);
       }
       upsertPlayer({
         id: data.id,
@@ -947,8 +959,9 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       const now = Date.now();
       if (now - lastEmitRef.current < 50) return;
       lastEmitRef.current = now;
+      const seq = ++moveSeqRef.current;
 
-      socket.emit(SocketEvents.PLAYER_MOVE, { x, y, direction, isRunning });
+      socket.volatile.emit(SocketEvents.PLAYER_MOVE, { x, y, direction, isRunning, seq });
     },
     [],
   );

@@ -1,5 +1,6 @@
 import { Avatar, RoomState, AvatarConfig, RoomTile, WorkMode, ImpassableAreaRect, Zone } from '@virtualmeet/shared';
 import { Redis } from 'ioredis';
+import { clearLivePlayerMovement, mergeLivePlayerMovement, setLivePlayerMovement } from './playerLiveState';
 
 // In-memory fallback storage — always works, zero dependencies
 const memoryStore: Record<string, Avatar[]> = {};
@@ -93,14 +94,16 @@ export async function getPlayers(roomId: string): Promise<Avatar[]> {
   if (r) {
     try {
       const raw = await r.get(`room:${roomId}:players`);
-      return raw ? JSON.parse(raw) : [];
+      const players = raw ? JSON.parse(raw) : [];
+      memoryStore[memoryKey(roomId)] = players;
+      return mergeLivePlayerMovement(roomId, players);
     } catch {
       // Redis get failed — continue to in-memory
     }
   }
 
   const key = memoryKey(roomId);
-  return memoryStore[key] || [];
+  return mergeLivePlayerMovement(roomId, memoryStore[key] || []);
 }
 
 export async function setPlayers(roomId: string, players: Avatar[]): Promise<void> {
@@ -117,6 +120,7 @@ export async function setPlayers(roomId: string, players: Avatar[]): Promise<voi
 }
 
 export async function addPlayer(roomId: string, player: Avatar): Promise<void> {
+  clearLivePlayerMovement(roomId, player.id);
   const players = await getPlayers(roomId);
   const filtered = players.filter((p) => p.id !== player.id);
   filtered.push(player);
@@ -124,6 +128,7 @@ export async function addPlayer(roomId: string, player: Avatar): Promise<void> {
 }
 
 export async function removePlayer(roomId: string, playerId: string): Promise<void> {
+  clearLivePlayerMovement(roomId, playerId);
   const players = await getPlayers(roomId);
   const filtered = players.filter((p) => p.id !== playerId);
   await setPlayers(roomId, filtered);
@@ -137,16 +142,19 @@ export async function updatePlayerPosition(
   direction: string,
   isRunning?: boolean,
 ): Promise<Avatar | null> {
-  const players = await getPlayers(roomId);
+  const key = memoryKey(roomId);
+  const players = memoryStore[key] || (await getPlayers(roomId));
   const player = players.find((p) => p.id === playerId);
   if (player) {
-    player.x = x;
-    player.y = y;
-    player.direction = direction as Avatar['direction'];
-    player.isMoving = true;
-    player.isRunning = isRunning ?? false;
-    await setPlayers(roomId, players);
-    return player;
+    const movement = {
+      x,
+      y,
+      direction: direction as Avatar['direction'],
+      isMoving: true,
+      isRunning: isRunning ?? false,
+    };
+    setLivePlayerMovement(roomId, playerId, movement);
+    return { ...player, ...movement };
   }
   return null;
 }
@@ -161,6 +169,7 @@ export async function setPlayerStopped(roomId: string, playerId: string, x?: num
     player.isMoving = false;
     player.isRunning = false;
     await setPlayers(roomId, players);
+    clearLivePlayerMovement(roomId, playerId);
   }
 }
 
