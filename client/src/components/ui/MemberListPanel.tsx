@@ -82,9 +82,16 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
                   <p className="text-sm text-gray-900 dark:text-gray-100 truncate">
                     {r.displayName}{r.id === localUserId ? ' (kamu)' : ''}
                   </p>
+                  {/* Bug fix — this used to collapse to a plain "Di sini" for
+                      anyone sharing your room, which told you THAT they were
+                      nearby but never named the room itself — exactly the
+                      "lokasi ruang ga ketauan dimana" the checklist item
+                      ("lokasi ruang real-time") asks for. Always show the
+                      actual room name now; "(room kamu)" only adds the
+                      "that's where you are too" context on top of it. */}
                   <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                     {online
-                      ? here ? 'Di sini' : r.presence!.roomName
+                      ? `${r.presence!.roomName}${here ? ' (room kamu)' : ''}`
                       : 'Offline'}
                   </p>
                 </div>
