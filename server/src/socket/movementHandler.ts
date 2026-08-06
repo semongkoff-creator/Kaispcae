@@ -3,6 +3,7 @@ import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointI
 import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas } from '../store/roomStore';
 import { isDoorUnlocked, clearUnlockedDoors } from './doorLock';
 import { isDoorOverrideActive } from './roomHandler';
+import { createStoppedPayload } from './movementPayload';
 
 // Rate limiting: max 20 updates per second per player
 const rateLimitMap = new Map<string, number>();
@@ -106,15 +107,36 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     updatePlayerPosition(gameRoom, socket.id, clampedX, clampedY, direction, false);
   });
 
-  socket.on(SocketEvents.PLAYER_STOP, (data: { direction: string }) => {
+  socket.on(SocketEvents.PLAYER_STOP, (data: { x?: number; y?: number; direction: string }) => {
     const rooms = Array.from(socket.rooms);
     const gameRoom = rooms.find((r) => r !== socket.id);
     if (gameRoom) {
-      socket.to(gameRoom).emit(SocketEvents.PLAYER_STOPPED, {
-        id: socket.id,
-        direction: data.direction,
-      });
-      setPlayerStopped(gameRoom, socket.id);
+      const stopped = createStoppedPayload(socket.id, data, { mapWidth: MAP_WIDTH, mapHeight: MAP_HEIGHT, tileSize: TILE_SIZE });
+      if (!stopped) {
+        socket.to(gameRoom).emit(SocketEvents.PLAYER_STOPPED, {
+          id: socket.id,
+          direction: data.direction,
+        });
+        setPlayerStopped(gameRoom, socket.id);
+        return;
+      }
+
+      const tiles = getCachedTiles(gameRoom);
+      if (tiles) {
+        const tileX = Math.floor(stopped.x / TILE_SIZE);
+        const tileY = Math.floor(stopped.y / TILE_SIZE);
+        if (isBlockedForSocket(tiles, gameRoom, socket.id, tileX, tileY, stopped.x, stopped.y)) {
+          socket.to(gameRoom).emit(SocketEvents.PLAYER_STOPPED, {
+            id: socket.id,
+            direction: stopped.direction,
+          });
+          setPlayerStopped(gameRoom, socket.id);
+          return;
+        }
+      }
+
+      io.to(gameRoom).emit(SocketEvents.PLAYER_STOPPED, stopped);
+      setPlayerStopped(gameRoom, socket.id, stopped.x, stopped.y, stopped.direction);
     }
   });
 

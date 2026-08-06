@@ -171,11 +171,30 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       } as Avatar);
     });
 
-    socket.on(SocketEvents.PLAYER_STOPPED, (data: { id: string; direction: string }) => {
+    socket.on(SocketEvents.PLAYER_STOPPED, (data: { id: string; x?: number; y?: number; direction: string }) => {
+      const x = data.x;
+      const y = data.y;
+      const hasPosition = typeof x === 'number' && typeof y === 'number';
+      if (hasPosition) {
+        const state = useGameStore.getState();
+        if (data.id === state.localPlayerId) {
+          setLocalPlayer({
+            x,
+            y,
+            direction: data.direction as Avatar['direction'],
+            isMoving: false,
+            isRunning: false,
+          });
+          return;
+        }
+        setPlayerTarget(data.id, x, y);
+      }
       upsertPlayer({
         id: data.id,
+        ...(hasPosition ? { x, y } : {}),
         direction: data.direction as Avatar['direction'],
         isMoving: false,
+        isRunning: false,
       } as Avatar);
     });
 
@@ -910,10 +929,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   );
 
   const emitStop = useCallback(
-    (direction: string) => {
+    (x: number, y: number, direction: string) => {
       const socket = socketRef.current;
       if (!socket || !socket.connected) return;
-      socket.emit(SocketEvents.PLAYER_STOP, { direction });
+      socket.emit(SocketEvents.PLAYER_STOP, { x, y, direction });
     },
     [],
   );

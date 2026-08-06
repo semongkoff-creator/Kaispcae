@@ -141,7 +141,7 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
 
 interface GameCanvasProps {
   emitMove: (x: number, y: number, direction: string, isRunning?: boolean) => void;
-  emitStop: (direction: string) => void;
+  emitStop: (x: number, y: number, direction: string) => void;
   emitJump: () => void;
   emitNudge: (targetId: string) => void;
   proximityData: ProximityPlayer[];
@@ -1020,7 +1020,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       emitMoveRef.current(effectiveMoveResult.x, effectiveMoveResult.y, effectiveMoveResult.direction, effectiveMoveResult.isRunning);
       wasMovingRef.current = true;
     } else if (wasMovingRef.current) {
-      emitStopRef.current(effectiveMoveResult.direction);
+      emitStopRef.current(effectiveMoveResult.x, effectiveMoveResult.y, effectiveMoveResult.direction);
       useGameStore.getState().setLocalPlayer({ isMoving: false });
       wasMovingRef.current = false;
     }
