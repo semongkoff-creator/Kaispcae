@@ -4,10 +4,18 @@ import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpass
 import { isDoorUnlocked, clearUnlockedDoors } from './doorLock';
 import { isDoorOverrideActive } from './roomHandler';
 import { createStoppedPayload } from './movementPayload';
+import { socketRateLimit } from '../middleware/rateLimit';
 
 // Rate limiting: max 20 updates per second per player
 const rateLimitMap = new Map<string, number>();
 const MIN_UPDATE_INTERVAL = 1000 / 20; // 50ms
+
+// QA #16 (Anti-spam) — Nudge had no cap at all: a spoofed/scripted client
+// could fire PLAYER_NUDGE as fast as the socket allows. Same burst budget as
+// Slap's canSlap (roomHandler.ts) minus its 30s per-target cooldown — Nudge
+// stays purely cosmetic (no toast/sound intensity like Slap's), so a bare
+// burst cap is enough to stop flooding without needing per-target tracking.
+const canNudge = socketRateLimit(3);
 
 interface MoveData {
   x: number;
@@ -192,6 +200,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
   // these two sockets ever receiving the event now, that existing branch
   // does exactly the right thing for both.
   socket.on(SocketEvents.PLAYER_NUDGE, (data: { targetId?: string }) => {
+    if (!canNudge(socket.id)) return;
     const targetId = data?.targetId;
     if (!targetId || targetId === socket.id) return;
     const rooms = Array.from(socket.rooms);
