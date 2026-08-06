@@ -45,7 +45,15 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
         {theme === 'dark' ? <SunFill size={14} /> : <MoonFill size={14} />}
       </button>
       <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 w-full max-w-sm shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700">
-        <h1 className="text-gray-900 dark:text-gray-100 text-2xl font-bold mb-1">KaiSpace</h1>
+        <div className="flex items-center gap-3 mb-3">
+          <img
+            src="/assets/img/favico.png"
+            alt="KaiSpace"
+            className="block w-12 h-12 object-contain"
+            decoding="async"
+          />
+          <span className="text-2xl font-bold leading-none text-gray-900 dark:text-white">KaiSpace</span>
+        </div>
         <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">{mode === 'login' ? 'Welcome back' : 'Create your account'}</p>
 
         {sessionExpiredMessage && (
