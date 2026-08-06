@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill, PersonPlusFill, DoorOpenFill } from 'react-bootstrap-icons';
+import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill, PersonPlusFill, DoorOpenFill, VolumeUpFill } from 'react-bootstrap-icons';
 import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
@@ -117,7 +117,7 @@ const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', 
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
   const [showEditor, setShowEditor] = useState(false);
 
@@ -598,6 +598,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     }
   }, [roomSlug]);
 
+  // QA #9/#10 — CEO/admin text broadcast. Same prompt-based "quick admin
+  // config" convention as Guest Link above — the server independently
+  // re-checks 'broadcast:text' (roomHandler.ts), this is just the trigger.
+  const handleBroadcast = useCallback(() => {
+    const text = (window.prompt('Pesan broadcast ke SEMUA orang di room ini (tersinkron ke Lark):') ?? '').trim();
+    if (!text) return;
+    emitBroadcastSend(text);
+  }, [emitBroadcastSend]);
+
   // Summon/Follow consent requests (see PendingRequestToast.tsx). Incoming
   // requests auto-clear on the same clock the server uses to auto-decline
   // them (CONSENT_REQUEST_TIMEOUT_MS) so the toast never outlives a request
@@ -643,6 +652,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     const timer = setTimeout(() => useGameStore.getState().setAdminErrorMessage(null), 4000);
     return () => clearTimeout(timer);
   }, [adminErrorMessage]);
+
+  // QA #9/#10 — CEO/admin text broadcast toast. Longer-lived (8s) than the
+  // other brief pings above — this is a room-wide announcement meant to
+  // actually be read, not a quick "someone poked you" ping.
+  const roomBroadcast = useGameStore((s) => s.roomBroadcast);
+  useEffect(() => {
+    if (!roomBroadcast) return;
+    const timer = setTimeout(() => useGameStore.getState().setRoomBroadcast(null), 8000);
+    return () => clearTimeout(timer);
+  }, [roomBroadcast]);
 
   const incomingFollowRequest = useGameStore((s) => s.incomingFollowRequest);
   useEffect(() => {
@@ -1444,6 +1463,18 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             👋 <span className="font-bold">{slappedBy}</span> nyoel kamu — sadar dong!
           </div>
         )}
+        {/* QA #9/#10 — CEO/admin text broadcast. rounded-2xl + max-w-md
+            (not the pill shape above) since this can be a real multi-word
+            announcement, not a short one-liner ping. */}
+        {roomBroadcast && (
+          <div className="bg-teal-600/95 text-white text-sm font-semibold px-4 py-3 rounded-2xl shadow-lg pointer-events-none flex items-start gap-2 animate-fade-in max-w-md text-left">
+            <VolumeUpFill size={16} className="shrink-0 mt-0.5" />
+            <span>
+              <span className="block text-[11px] font-normal opacity-80 mb-0.5">Pengumuman dari {roomBroadcast.senderName}</span>
+              {roomBroadcast.text}
+            </span>
+          </div>
+        )}
         {adminErrorMessage && (
           <div className="bg-red-600/95 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-2 animate-fade-in">
             ⚠️ {adminErrorMessage}
@@ -1485,6 +1516,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleDoorOverride={() => emitDoorOverride(!doorOverride)}
         canManageGuests={isAdmin}
         onCreateGuestLink={handleCreateGuestLink}
+        canBroadcast={isAdmin}
+        onBroadcast={handleBroadcast}
         isGuest={isGuest}
         simplifiedView={simplifiedView}
         onToggleSimplifiedView={() => setSimplifiedView((v) => !v)}

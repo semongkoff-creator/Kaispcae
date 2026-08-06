@@ -15,6 +15,8 @@ import { redactInteractiveSecrets, redactDoorPasswords } from '../lib/redactFurn
 import { unlockDoor, clearUnlockedDoorsForRoom } from './doorLock';
 import { getNearbyRecipients } from './proximityBroadcast';
 import { sendUserDm } from '../lib/larkIm';
+import { relayBroadcastToLark } from '../lib/larkChatSync';
+import { sanitizeChat } from '../middleware/validate';
 
 const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec per socket
 const canTeleport = socketRateLimit(2); // max 2 teleport requests/sec per socket
@@ -26,6 +28,7 @@ const canSlap = socketRateLimit(3); // A10 — burst guard; the real limit is th
 const canCheckInteractive = socketRateLimit(3); // Fitur 15B — throttle brute-force guessing of a password/multiple-choice prompt
 const canApiCall = socketRateLimit(1); // Fitur 15B — API call hits a THIRD-PARTY server; heavier than a DB compare, so a tighter cap
 const canChangeObject = socketRateLimit(2); // Fitur 15B — mutates + saves the room's actual layerData
+const canBroadcast = socketRateLimit(1); // QA #9/#10 — room-wide PA text push, deliberately tighter than any chat rate limit
 
 // A10 — Slap ("colek") cooldown: 30s per (sender socket → target socket) pair,
 // so you can't spam-poke the same person. Ephemeral (socket-id keyed); a
@@ -1620,6 +1623,35 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
     await updatePlayerSpotlight(room, targetSocketId, active);
     io.to(room).emit(SocketEvents.SPOTLIGHT_CHANGED, { id: targetSocketId, active });
+  });
+
+  // QA #9/#10 — CEO/admin-only text broadcast, the text counterpart to
+  // Spotlight above. 1/sec is deliberately tighter than any chat rate
+  // limit — this is a room-wide PA push shown to everyone at once, not a
+  // conversation. Fire-and-forget Lark relay (an outage there must never
+  // block the in-app broadcast, same posture as relayChannelMessageToLark).
+  socket.on(SocketEvents.BROADCAST_SEND, async (data: { text: string }) => {
+    const room = currentRoom; if (!room) return;
+    const senderUid = findUserIdBySocket(socket.id);
+    const rs = getRoomAdmin(room);
+    if (!canAccess(rs, senderUid, 'broadcast:text')) {
+      socket.emit('admin:error', { message: 'Only admins can broadcast' });
+      return;
+    }
+    if (!canBroadcast(socket.id)) return;
+    const text = sanitizeChat(data?.text || '').slice(0, 500);
+    if (!text) return;
+
+    const senderName = getPlayerName(socket.id);
+    const sentAt = Date.now();
+    io.to(room).emit(SocketEvents.BROADCAST_RECEIVED, { text, senderName, sentAt });
+
+    try {
+      const dbRoom = await getPrisma().room.findUnique({ where: { slug: room }, select: { id: true } });
+      if (dbRoom) void relayBroadcastToLark(getPrisma(), dbRoom.id, senderName, text).catch((e) => console.error('[room] broadcast Lark relay failed:', e));
+    } catch (e) {
+      console.error('[room] broadcast Lark lookup failed:', e);
+    }
   });
 
   socket.on(SocketEvents.PLAYER_SIT, (data: { sitting: boolean; x: number; y: number; direction: Avatar['direction']; seatFurnitureId?: string }) => {

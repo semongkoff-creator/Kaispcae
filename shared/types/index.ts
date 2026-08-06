@@ -208,6 +208,18 @@ export interface Notice {
   pinnedAt: number;
 }
 
+// QA #9/#10 — a one-shot admin/CEO announcement (BROADCAST_SEND/RECEIVED),
+// distinct from Notice above: Notice is a single PERSISTENT pinned slot
+// (replaces itself, resent on join so late arrivals see it); a broadcast is
+// a repeatable, ephemeral push — every send is its own event, nothing is
+// stored in RoomState, so a client that joins after one was sent simply
+// never sees it (same posture as a toast/PA announcement in real life).
+export interface RoomBroadcast {
+  text: string;
+  senderName: string;
+  sentAt: number;
+}
+
 // Full room state transmitted over the network
 export interface RoomState {
   id: string;
@@ -318,6 +330,17 @@ export enum SocketEvents {
   // themselves — they only learn about it from this event.
   SPOTLIGHT_TOGGLE = 'presence:spotlight_toggle',
   SPOTLIGHT_CHANGED = 'presence:spotlight_changed',
+
+  // QA #9/#10 — CEO/admin-only text broadcast ("pengumuman teks ke semua").
+  // Text counterpart to Spotlight above (that's the voice/PA version — see
+  // its own comment); same admin-only posture ('broadcast:text' in
+  // shared/permissions.ts, re-checked server-side) and same io.to(room)
+  // delivery (everyone, including any admin who sent it, sees the banner —
+  // simpler than special-casing the sender's own client). Also relayed to
+  // the room's mapped Lark group (see larkChatSync.ts's relayBroadcastToLark)
+  // — "sinkron Lark" per the QA text.
+  BROADCAST_SEND = 'broadcast:send',
+  BROADCAST_RECEIVED = 'broadcast:received',
 
   // A5 — official meeting (Lark VC) started/ended in a meeting zone. Server
   // broadcasts to the room so everyone sees the "join via Lark" banner.

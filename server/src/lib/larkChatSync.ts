@@ -152,3 +152,18 @@ export async function relayChannelMessageToLark(
     await prisma.larkSentMessage.create({ data: { messageId } }).catch(() => {});
   }
 }
+
+// QA #9/#10 — CEO/admin text broadcast, relayed to the room's mapped Lark
+// group. Always sent as the bot with a 📢 prefix (never "as the user" like
+// the channel relay above) — a broadcast is an official announcement, not a
+// personal chat message, so it should read as coming from KaiSpace itself,
+// not impersonate the admin's own Lark identity. No anti-echo bookkeeping
+// needed either: unlike channel chat, there's no inbound "Lark → broadcast"
+// direction for this to loop back through.
+export async function relayBroadcastToLark(prisma: PrismaClient, roomId: string, senderName: string, text: string): Promise<void> {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return;
+  const map = await prisma.roomChatMap.findUnique({ where: { roomId } });
+  if (!map) return;
+  await sendGroupText(map.chatId, `📢 Pengumuman dari ${senderName}:\n${trimmed}`);
+}

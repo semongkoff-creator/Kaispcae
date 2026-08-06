@@ -131,6 +131,10 @@ export const FEATURE_MIN_ROLE = {
   // else's messages too, not just their own. Narrowed to admin+ per
   // explicit request, same tier as the room-management gates above.
   'message:pin': 'admin',
+  // QA #9/#10 — CEO/admin-only text broadcast ("Hanya CEO/admin bisa
+  // broadcast"), the text counterpart to 'presence:spotlight' (voice) above
+  // — same admin tier, same "PA announcement" posture.
+  'broadcast:text': 'admin',
 } as const satisfies Record<string, Role>;
 
 export type FeatureKey = keyof typeof FEATURE_MIN_ROLE;

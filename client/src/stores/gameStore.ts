@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, hasFeatureAccess } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, hasFeatureAccess } from '@virtualmeet/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 import { appendMovementSnapshot, MovementSnapshot, sampleMovementSnapshots } from './movementSmoothing';
@@ -579,6 +579,14 @@ export interface GameState {
   // pattern as slappedBy/nudgedBy above.
   adminErrorMessage: string | null;
   setAdminErrorMessage: (message: string | null) => void;
+
+  // QA #9/#10 — CEO/admin text broadcast; drives a prominent room-wide
+  // toast (see App.tsx), same one-shot-then-auto-clear pattern as
+  // nudgedBy/slappedBy above. Not persisted anywhere — a client that wasn't
+  // connected when it was sent simply never sees it (see RoomBroadcast's own
+  // doc comment, shared/types/index.ts).
+  roomBroadcast: RoomBroadcast | null;
+  setRoomBroadcast: (broadcast: RoomBroadcast | null) => void;
 
   // Soundboard — this room's custom uploaded sounds (defaults live purely
   // client-side as SOUNDBOARD_DEFAULT_SOUNDS, no server round trip needed).
@@ -1244,6 +1252,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   setSlappedBy: (name) => set({ slappedBy: name }),
   adminErrorMessage: null,
   setAdminErrorMessage: (message) => set({ adminErrorMessage: message }),
+
+  roomBroadcast: null,
+  setRoomBroadcast: (broadcast) => set({ roomBroadcast: broadcast }),
 
   soundboardSounds: [],
   setSoundboardSounds: (sounds) => set({ soundboardSounds: sounds }),

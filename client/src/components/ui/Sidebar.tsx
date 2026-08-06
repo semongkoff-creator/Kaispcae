@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg } from 'react-bootstrap-icons';
+import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -62,6 +62,12 @@ interface SidebarProps {
   // Room/Door Override above) — this just fires an action, it isn't a toggle.
   canManageGuests: boolean;
   onCreateGuestLink: () => void;
+
+  // QA #9/#10 — CEO/admin-only text broadcast ("Hanya CEO/admin bisa
+  // broadcast"). Same "one-shot action, no current-state to reflect" shape
+  // as Guest Link above, not a toggle.
+  canBroadcast: boolean;
+  onBroadcast: () => void;
   // Guest Link & Ruang Tunggu — hides every workspace/internal-only row
   // (Messenger chat, Daily Task, Kalender, Cuti, Absensi) for a guest
   // session: all of them require a real account server-side and would just
@@ -187,6 +193,8 @@ export function Sidebar({
   onToggleDoorOverride,
   canManageGuests,
   onCreateGuestLink,
+  canBroadcast,
+  onBroadcast,
   isGuest,
   currentZoneName,
   zoneLocked,
@@ -390,6 +398,12 @@ export function Sidebar({
                 indicator — this is a one-shot action, not a toggle. */}
             {canManageGuests && (
               <MenuRow icon={<Link45deg size={15} />} label="Buat Guest Link" onClick={closeAnd(onCreateGuestLink)} title="Buat link undangan untuk tamu (tanpa akun) masuk ke room ini" />
+            )}
+            {/* QA #9/#10 — CEO/admin-only text broadcast, the text
+                counterpart to Spotlight (voice). One-shot action like Guest
+                Link above — App.tsx's handleBroadcast prompts for the text. */}
+            {canBroadcast && (
+              <MenuRow icon={<VolumeUpFill size={15} />} label="Broadcast" onClick={closeAnd(onBroadcast)} title="Kirim pengumuman teks ke semua orang di room ini (tersinkron ke Lark)" />
             )}
             {isAdmin && (
               <MenuRow icon={<Tools size={15} />} label="Edit Room" onClick={closeAnd(onOpenRoomEditor)} />
