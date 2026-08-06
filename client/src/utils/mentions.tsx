@@ -12,6 +12,14 @@ export function textMentionsUser(text: string, userId: string): boolean {
   return [...text.matchAll(new RegExp(MENTION_PATTERN, 'g'))].some((m) => m[2] === userId);
 }
 
+// Plain-text counterpart to renderWithMentions, for spots that need a bare
+// string rather than JSX (e.g. a channel/DM row's one-line lastMessage
+// preview in the sidebar list — a template string can't hold styled spans).
+// Same "show the name, drop the userId" behavior, just without highlighting.
+export function stripMentionsToPlainText(text: string): string {
+  return text.replace(new RegExp(MENTION_PATTERN, 'g'), '@$1');
+}
+
 // Splits message text into plain segments + styled mention spans. Renders
 // the mentioned NAME (not the raw token) — the userId in parentheses is
 // only ever a render-time lookup key, never shown. Mentions of the current

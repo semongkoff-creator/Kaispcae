@@ -8,7 +8,7 @@ import { GroupMembers } from './GroupMembers';
 import { useProfiles } from '@/hooks/useProfiles';
 import { AttachmentLightbox, type LightboxTarget } from '@/components/ui/AttachmentLightbox';
 import { AttachmentMenuButton } from '@/components/ui/AttachmentMenuButton';
-import { renderWithMentions } from '@/utils/mentions';
+import { renderWithMentions, stripMentionsToPlainText } from '@/utils/mentions';
 
 // §Messenger — the full-screen chat surface, in the same "module panel over
 // the room" shape Docs/Base/Calendar/Attendance already use (see App.tsx).
@@ -201,7 +201,7 @@ export function MessengerApp({
       title: c.name,
       seed: c.id,
       isChannel: true,
-      preview: c.lastMessage ? `${c.lastMessage.senderName}: ${c.lastMessage.text}` : 'Belum ada pesan',
+      preview: c.lastMessage ? `${c.lastMessage.senderName}: ${stripMentionsToPlainText(c.lastMessage.text)}` : 'Belum ada pesan',
       ts: c.lastMessage?.createdAt ?? c.createdAt,
       unread: unreadByTarget[`channel:${c.id}`] ?? 0,
     }));
@@ -211,7 +211,7 @@ export function MessengerApp({
       title: d.otherUser.displayName,
       seed: d.otherUser.id,
       isChannel: false,
-      preview: d.lastMessage ? d.lastMessage.text : 'Belum ada pesan',
+      preview: d.lastMessage ? stripMentionsToPlainText(d.lastMessage.text) : 'Belum ada pesan',
       ts: d.lastMessage?.createdAt ?? d.createdAt,
       unread: unreadByTarget[`dm:${d.id}`] ?? 0,
     }));
@@ -659,7 +659,10 @@ export function MessengerApp({
                             </div>
                           )}
                         </div>
-                        {readersByMessageId[m.id] && (
+                        {/* Admin-only per explicit request — a regular
+                            member sends and reads messages, but doesn't get
+                            to see who else has read any given one. */}
+                        {isAdmin && readersByMessageId[m.id] && (
                           <span className={`text-[10px] text-gray-400 mt-0.5 px-1 ${own ? 'text-right' : ''}`}>
                             Dibaca oleh {readersByMessageId[m.id].map((uid) => playerRecords[uid]?.name ?? 'Seseorang').join(', ')}
                           </span>
@@ -776,7 +779,7 @@ export function MessengerApp({
                       </span>
                     </div>
                     <p className="text-xs text-gray-700 dark:text-gray-200 break-words line-clamp-3">
-                      {m.text || (m.attachmentName ? `📎 ${m.attachmentName}` : '')}
+                      {m.text ? renderWithMentions(m.text, localUserId) : (m.attachmentName ? `📎 ${m.attachmentName}` : '')}
                     </p>
                     {isAdmin && (
                       <button
@@ -819,20 +822,34 @@ export function MessengerApp({
                 {msgMenu.message.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
               </button>
             )}
-            <div className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700 mt-1">
-              Dibaca oleh
-            </div>
-            <div className="max-h-32 overflow-y-auto">
-              {(() => {
-                const readers = readersOf(msgMenu.message);
-                if (readers.length === 0) {
-                  return <div className="px-3 py-1 text-gray-400 dark:text-gray-500">Belum ada yang membaca</div>;
-                }
-                return readers.map((n, i) => (
-                  <div key={i} className="px-3 py-1 text-gray-600 dark:text-gray-300">{n}</div>
-                ));
-              })()}
-            </div>
+            {/* Admin-only per explicit request — see the passive hint's own
+                comment above for why. */}
+            {isAdmin && (
+              <>
+                <div className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700 mt-1">
+                  Dibaca oleh
+                </div>
+                <div className="max-h-32 overflow-y-auto">
+                  {(() => {
+                    const readers = readersOf(msgMenu.message);
+                    if (readers.length === 0) {
+                      return <div className="px-3 py-1 text-gray-400 dark:text-gray-500">Belum ada yang membaca</div>;
+                    }
+                    return readers.map((n, i) => (
+                      <div key={i} className="px-3 py-1 text-gray-600 dark:text-gray-300">{n}</div>
+                    ));
+                  })()}
+                </div>
+              </>
+            )}
+            {/* Non-admin self-check — "cuma bisa inspek diri kita sendiri":
+                count only, on your OWN message only, never names or anyone
+                else's. */}
+            {!isAdmin && msgMenu.message.senderId === localUserId && (
+              <div className="px-3 pt-1.5 pb-1.5 text-[10px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700 mt-1">
+                {readersOf(msgMenu.message).length > 0 ? `Sudah dibaca oleh ${readersOf(msgMenu.message).length} orang` : 'Belum ada yang membaca'}
+              </div>
+            )}
           </div>
         </div>,
         document.body,

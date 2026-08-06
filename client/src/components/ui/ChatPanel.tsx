@@ -557,7 +557,7 @@ export function ChatPanel({
                 className="flex-1 min-w-0 text-left text-[11px] text-gray-600 dark:text-gray-300 truncate cursor-pointer hover:text-purple-700 dark:hover:text-purple-300"
                 title="Lompat ke pesan ini"
               >
-                {currentPin.text || (currentPin.attachmentName ? `📎 ${currentPin.attachmentName}` : 'Pesan disematkan')}
+                {currentPin.text ? renderWithMentions(currentPin.text, localUserId) : currentPin.attachmentName ? `📎 ${currentPin.attachmentName}` : 'Pesan disematkan'}
               </button>
               {pinnedMessages.length > 1 && (
                 <div className="flex items-center gap-0.5 shrink-0 text-gray-400">
@@ -615,7 +615,7 @@ export function ChatPanel({
                       onPin={() => onPinNotice?.(m)}
                     >
                       {m.isProximity && <span className="opacity-60 mr-1">(nearby)</span>}
-                      {m.text && <span className={`break-words ${m.isBot ? 'whitespace-pre-line' : ''}`}>{m.text}</span>}
+                      {m.text && <span className={`break-words ${m.isBot ? 'whitespace-pre-line' : ''}`}>{renderWithMentions(m.text, localUserId)}</span>}
                       {/* Potongan C3 — same attachment UI (icon by type, name,
                           click to open/download) as persisted chat, reused
                           as-is rather than a second render path. */}
@@ -953,20 +953,35 @@ export function ChatPanel({
                 <MegaphoneFill size={11} /> Jadikan pengumuman
               </button>
             )}
-            <div className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700 mt-1">
-              Dibaca oleh
-            </div>
-            <div className="max-h-32 overflow-y-auto">
-              {(() => {
-                const readers = readersOf(msgMenu.message);
-                if (readers.length === 0) {
-                  return <div className="px-3 py-1 text-gray-400 dark:text-gray-500">Belum ada yang membaca</div>;
-                }
-                return readers.map((n, i) => (
-                  <div key={i} className="px-3 py-1 text-gray-600 dark:text-gray-300">{n}</div>
-                ));
-              })()}
-            </div>
+            {/* Admin-only per explicit request — a regular member can send
+                and read messages, just not pull up who's read any given
+                message on demand. */}
+            {isAdmin && (
+              <>
+                <div className="px-3 pt-1.5 pb-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700 mt-1">
+                  Dibaca oleh
+                </div>
+                <div className="max-h-32 overflow-y-auto">
+                  {(() => {
+                    const readers = readersOf(msgMenu.message);
+                    if (readers.length === 0) {
+                      return <div className="px-3 py-1 text-gray-400 dark:text-gray-500">Belum ada yang membaca</div>;
+                    }
+                    return readers.map((n, i) => (
+                      <div key={i} className="px-3 py-1 text-gray-600 dark:text-gray-300">{n}</div>
+                    ));
+                  })()}
+                </div>
+              </>
+            )}
+            {/* Non-admin self-check — "cuma bisa inspek diri kita sendiri":
+                count only, on your OWN message only, never names or anyone
+                else's. */}
+            {!isAdmin && msgMenu.message.senderId === localUserId && (
+              <div className="px-3 pt-1.5 pb-1.5 text-[10px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-700 mt-1">
+                {readersOf(msgMenu.message).length > 0 ? `Sudah dibaca oleh ${readersOf(msgMenu.message).length} orang` : 'Belum ada yang membaca'}
+              </div>
+            )}
           </div>
         </div>,
         document.body,
