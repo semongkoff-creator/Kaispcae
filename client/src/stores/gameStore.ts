@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, hasFeatureAccess } from '@virtualmeet/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
+import { appendMovementSnapshot, MovementSnapshot, sampleMovementSnapshots } from './movementSmoothing';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -113,9 +114,7 @@ function randomColor(): string {
   return AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
 }
 
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
+const REMOTE_MOVEMENT_RENDER_DELAY_MS = 120;
 
 export interface GameState {
   localPlayerId: string;
@@ -130,9 +129,10 @@ export interface GameState {
   upsertPlayer: (player: Avatar) => void;
   removePlayer: (id: string) => void;
 
-  // Remote player position targets (for interpolation)
-  playerTargets: Record<string, { x: number; y: number }>;
-  setPlayerTarget: (id: string, x: number, y: number) => void;
+  // Remote player position snapshots. Rendering trails receipt time slightly
+  // so jittery packets can be interpolated instead of chased one-by-one.
+  playerTargets: Record<string, MovementSnapshot[]>;
+  setPlayerTarget: (id: string, x: number, y: number, receivedAt?: number) => void;
 
   // Interpolate all remote players one step toward their targets
   interpolatePlayers: () => void;
@@ -714,37 +714,42 @@ export const useGameStore = create<GameState>((set, get) => ({
     }),
 
   playerTargets: {},
-  setPlayerTarget: (id, x, y) =>
+  setPlayerTarget: (id, x, y, receivedAt = Date.now()) =>
     set((state) => ({
-      playerTargets: { ...state.playerTargets, [id]: { x, y } },
+      playerTargets: {
+        ...state.playerTargets,
+        [id]: appendMovementSnapshot(state.playerTargets[id] ?? [], { x, y, receivedAt }),
+      },
     })),
 
   interpolatePlayers: () => {
     const state = get();
     const records = { ...state.playerRecords };
     const targets = { ...state.playerTargets };
+    const renderTime = Date.now() - REMOTE_MOVEMENT_RENDER_DELAY_MS;
     let recordsChanged = false;
     let targetsChanged = false;
 
     for (const id of Object.keys(targets)) {
       const player = records[id];
-      const target = targets[id];
-      if (!player || !target) {
+      const snapshots = targets[id];
+      if (!player || !snapshots?.length) {
         delete targets[id];
         targetsChanged = true;
         continue;
       }
 
-      const newX = lerp(player.x, target.x, 0.2);
-      const newY = lerp(player.y, target.y, 0.2);
-
-      // Snap if very close
-      if (Math.abs(newX - target.x) < 0.5 && Math.abs(newY - target.y) < 0.5) {
-        records[id] = { ...player, x: target.x, y: target.y };
+      const sample = sampleMovementSnapshots(snapshots, renderTime);
+      if (!sample) {
         delete targets[id];
         targetsChanged = true;
-      } else {
-        records[id] = { ...player, x: newX, y: newY };
+        continue;
+      }
+
+      records[id] = { ...player, x: sample.x, y: sample.y };
+      if (sample.done) {
+        delete targets[id];
+        targetsChanged = true;
       }
       recordsChanged = true;
     }
