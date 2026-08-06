@@ -1539,7 +1539,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onCreateGuestLink={handleCreateGuestLink}
         canBroadcast={isAdmin}
         onBroadcast={handleBroadcast}
-        isGuest={isGuest}
+        // Bug fix — `isGuest` alone is only the CLIENT's own memory of which
+        // entry path it took (GuestEntry.tsx vs LoginPage). `localRole` is
+        // the SERVER's own authoritative role for this session (room:state's
+        // `role` field — see gameStore.ts, 'guest' is only ever assigned by
+        // the server to an actual Guest Link connection, per
+        // shared/permissions.ts). ORing them in is a pure safety net — if
+        // they ever disagree, treat as guest. Reported: "Member" was still
+        // reachable in a guest session despite the code already gating it on
+        // `isGuest` alone, which this hardens against without knowing
+        // (unreproduced) whether that was a real desync or a stale tab.
+        isGuest={isGuest || localRole === 'guest'}
         simplifiedView={simplifiedView}
         onToggleSimplifiedView={() => setSimplifiedView((v) => !v)}
         currentZoneName={currentZone?.name ?? null}
