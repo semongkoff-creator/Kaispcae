@@ -27,7 +27,7 @@ import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
 import { PALETTE_BY_ID } from '@/data/themeAssets';
 import { isTileBlocked, isDoorTile } from '@/utils/createDefaultRoom';
-import { findTilePath, simplifyPath } from '@/utils/pathfinding';
+import { findTilePath, getCardinalWaypointTarget, simplifyPath } from '@/utils/pathfinding';
 import { avatarColor } from '@/components/ui/ChatAvatar';
 // Bug 16-project (Room Editor) — these map-draw helpers were moved verbatim to
 // mapRender.ts so the editor can render the map identically. GameCanvas's usage
@@ -1038,7 +1038,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       } else if (!activeFollow || !effectiveMoveResult.isMoving) {
         const path = walkTargetRef.current;
         const wt = path[0];
-        const walkResult = updateFollow(wt.x, wt.y, dt);
+        const axisTarget = getCardinalWaypointTarget(effectiveMoveResult.x, effectiveMoveResult.y, wt);
+        const walkResult = updateFollow(axisTarget.x, axisTarget.y, dt);
         if (walkResult.isMoving) {
           effectiveMoveResult = walkResult;
         } else if (path.length > 1 && Math.hypot(wt.x - walkResult.x, wt.y - walkResult.y) < 4) {
