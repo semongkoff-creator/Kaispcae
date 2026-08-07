@@ -1,14 +1,30 @@
 import { Router, Response } from 'express';
 import { Server } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
-import { hasFeatureAccess, SocketEvents } from '@virtualmeet/shared';
+import { hasFeatureAccess, SocketEvents, Zone, LayerData, layerDataToLegacy } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
 import { resolveEntry } from '../lib/roomMembership';
+import { resolveZoneEntry, refreshZoneRestrictionCache } from '../lib/zoneMembership';
 import { groupConversationId } from '../lib/conversations';
 import { requireWorkspace } from '../lib/workspace';
-import { getConnectedAdminSocketIds, forceLeaveForQueue } from '../socket/roomHandler';
+import { getConnectedAdminSocketIds, forceLeaveForQueue, forceZoneExitForQueue } from '../socket/roomHandler';
 import { advanceQueue, QUEUE_MIN_MINUTES, QUEUE_MAX_MINUTES } from '../lib/roomQueue';
+
+// Reads a room's current zone list regardless of which map format it's
+// stored in — a ZEP-edited room's zones live in layerData (layerDataToLegacy
+// derives them), an older room's live in the legacy `zones` column directly.
+// Same fallback JOIN_ROOM already applies when populating the live cache.
+function zonesOfRoom(room: { zones: unknown; layerData: unknown }): Zone[] {
+  if (room.layerData) {
+    try {
+      return layerDataToLegacy(room.layerData as unknown as LayerData).zones;
+    } catch {
+      // Malformed layerData — fall through to whatever the legacy column has.
+    }
+  }
+  return (room.zones as Zone[] | null) ?? [];
+}
 
 const roomMembers = Router();
 
@@ -433,19 +449,31 @@ roomMembers.patch('/rooms/:slug/restricted', authenticateToken, async (req: Auth
 // self-service path otherwise. Management (list/skip) reuses requireRoomAdmin,
 // same gate as the access-grant/revoke endpoints above.
 
-// GET /api/rooms/:slug/queue/mine — the requester's own ticket, if any, plus
-// their live position (only meaningful while 'waiting' — once 'called' or
-// 'active' there's nothing left to wait behind). Polled by the client every
-// few seconds while waiting, same convention as JoinGate's existing
-// 'pending' poll for ordinary approval-gated rooms.
+// `zoneId` throughout this block: absent/undefined means the ROOM-level
+// queue (Room.restrictedAccess); present means a queue scoped to one ZONE
+// within the room (ZoneRestriction) — "ruang CEO" turned out to be a zone,
+// not a separate Room, so these two levels share one REST surface rather
+// than duplicating it. Always normalized to `string | null` before touching
+// Prisma, never left as `undefined` (a Prisma `where` filter treats a
+// missing key as "don't filter", which would silently match BOTH kinds).
+function normalizeZoneId(v: unknown): string | null {
+  return typeof v === 'string' && v ? v : null;
+}
+
+// GET /api/rooms/:slug/queue/mine?zoneId=... — the requester's own ticket,
+// if any, plus their live position (only meaningful while 'waiting' — once
+// 'called' or 'active' there's nothing left to wait behind). Polled by the
+// client every few seconds while waiting, same convention as JoinGate's
+// existing 'pending' poll for ordinary approval-gated rooms.
 roomMembers.get('/rooms/:slug/queue/mine', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
+    const zoneId = normalizeZoneId(req.query.zoneId);
     const prisma = getPrisma();
     const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     const entry = await prisma.roomQueueEntry.findFirst({
-      where: { roomId: room.id, userId: req.userId!, status: { in: ['waiting', 'called', 'active'] } },
+      where: { roomId: room.id, zoneId, userId: req.userId!, status: { in: ['waiting', 'called', 'active'] } },
       orderBy: { requestedAt: 'desc' },
     });
     if (!entry) return res.json({ entry: null });
@@ -453,7 +481,7 @@ roomMembers.get('/rooms/:slug/queue/mine', authenticateToken, async (req: AuthRe
     let position: number | null = null;
     if (entry.status === 'waiting') {
       position = 1 + (await prisma.roomQueueEntry.count({
-        where: { roomId: room.id, status: 'waiting', requestedAt: { lt: entry.requestedAt } },
+        where: { roomId: room.id, zoneId, status: 'waiting', requestedAt: { lt: entry.requestedAt } },
       }));
     }
     return res.json({
@@ -472,8 +500,8 @@ roomMembers.get('/rooms/:slug/queue/mine', authenticateToken, async (req: AuthRe
   }
 });
 
-// POST /api/rooms/:slug/queue/join — { topic?, durationMin } — the form
-// submit. Idempotent like join-request above: re-posting while already
+// POST /api/rooms/:slug/queue/join — { topic?, durationMin, zoneId? } — the
+// form submit. Idempotent like join-request above: re-posting while already
 // queued just returns the existing ticket instead of stacking duplicates.
 roomMembers.post('/rooms/:slug/queue/join', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
@@ -482,19 +510,30 @@ roomMembers.post('/rooms/:slug/queue/join', authenticateToken, async (req: AuthR
       return res.status(400).json({ error: `Durasi harus antara ${QUEUE_MIN_MINUTES}-${QUEUE_MAX_MINUTES} menit` });
     }
     const topic = typeof req.body?.topic === 'string' ? req.body.topic.trim().slice(0, 300) || null : null;
+    const zoneId = normalizeZoneId(req.body?.zoneId);
 
     const prisma = getPrisma();
     const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    if (!room.restrictedAccess || !room.queueEnabled) {
-      return res.status(400).json({ error: 'Room ini tidak membuka antrean' });
+
+    let zoneName: string | null = null;
+    if (zoneId) {
+      const restriction = await prisma.zoneRestriction.findUnique({ where: { roomId_zoneId: { roomId: room.id, zoneId } } });
+      if (!restriction?.queueEnabled) return res.status(400).json({ error: 'Zona ini tidak membuka antrean' });
+      const zone = zonesOfRoom(room).find((z) => z.id === zoneId);
+      zoneName = zone?.name ?? zoneId;
+      const decision = await resolveZoneEntry(prisma, room, zoneId, req.userId!);
+      if (decision.allowed) return res.status(400).json({ error: 'Kamu sudah punya akses ke zona ini' });
+    } else {
+      if (!room.restrictedAccess || !room.queueEnabled) {
+        return res.status(400).json({ error: 'Room ini tidak membuka antrean' });
+      }
+      const entry = await resolveEntry(prisma, room, req.userId!);
+      if (entry.allowed) return res.status(400).json({ error: 'Kamu sudah punya akses ke room ini' });
     }
 
-    const entry = await resolveEntry(prisma, room, req.userId!);
-    if (entry.allowed) return res.status(400).json({ error: 'Kamu sudah punya akses ke room ini' });
-
     const existing = await prisma.roomQueueEntry.findFirst({
-      where: { roomId: room.id, userId: req.userId!, status: { in: ['waiting', 'called', 'active'] } },
+      where: { roomId: room.id, zoneId, userId: req.userId!, status: { in: ['waiting', 'called', 'active'] } },
     });
     if (existing) return res.status(200).json({ status: existing.status, id: existing.id });
 
@@ -502,6 +541,8 @@ roomMembers.post('/rooms/:slug/queue/join', authenticateToken, async (req: AuthR
     const created = await prisma.roomQueueEntry.create({
       data: {
         roomId: room.id,
+        zoneId,
+        zoneName,
         userId: req.userId!,
         name: requester?.displayName || 'Seseorang',
         topic,
@@ -510,10 +551,10 @@ roomMembers.post('/rooms/:slug/queue/join', authenticateToken, async (req: AuthR
       },
     });
 
-    // Opportunistic — if the room's slot happens to be free right now (e.g.
-    // this is the only person waiting), this is what actually calls them
-    // rather than making them wait for the next 20s sweep tick.
-    await advanceQueue(prisma, room.id);
+    // Opportunistic — if the room/zone's slot happens to be free right now
+    // (e.g. this is the only person waiting), this is what actually calls
+    // them rather than making them wait for the next 20s sweep tick.
+    await advanceQueue(prisma, room.id, zoneId);
 
     return res.status(201).json({ status: 'waiting', id: created.id });
   } catch (err) {
@@ -522,24 +563,25 @@ roomMembers.post('/rooms/:slug/queue/join', authenticateToken, async (req: AuthR
   }
 });
 
-// POST /api/rooms/:slug/queue/cancel — the requester changing their mind
-// while still 'waiting' or 'called'. Deliberately does NOT accept 'active'
-// (leaving mid-session goes through the ordinary in-room leave flow, which
-// already completes the ticket immediately — see roomHandler.ts's
-// handleLeave).
+// POST /api/rooms/:slug/queue/cancel — { zoneId? } — the requester changing
+// their mind while still 'waiting' or 'called'. Deliberately does NOT
+// accept 'active' (leaving mid-session goes through the ordinary in-room/
+// in-zone leave flow, which already completes the ticket immediately — see
+// roomHandler.ts's handleLeave and zoneHandler.ts's ZONE_EXIT).
 roomMembers.post('/rooms/:slug/queue/cancel', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
+    const zoneId = normalizeZoneId(req.body?.zoneId);
     const prisma = getPrisma();
     const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     const entry = await prisma.roomQueueEntry.findFirst({
-      where: { roomId: room.id, userId: req.userId!, status: { in: ['waiting', 'called'] } },
+      where: { roomId: room.id, zoneId, userId: req.userId!, status: { in: ['waiting', 'called'] } },
     });
     if (!entry) return res.status(404).json({ error: 'Tidak ada antrean aktif' });
 
     await prisma.roomQueueEntry.update({ where: { id: entry.id }, data: { status: 'cancelled' } });
-    if (entry.status === 'called') await advanceQueue(prisma, room.id);
+    if (entry.status === 'called') await advanceQueue(prisma, room.id, zoneId);
 
     return res.json({ ok: true });
   } catch (err) {
@@ -548,17 +590,18 @@ roomMembers.post('/rooms/:slug/queue/cancel', authenticateToken, async (req: Aut
   }
 });
 
-// GET /api/rooms/:slug/queue — the admin's live view of the whole line, for
-// the Admin Console's queue manager.
+// GET /api/rooms/:slug/queue?zoneId=... — the admin's live view of the
+// whole line, for the Admin Console's queue manager.
 roomMembers.get('/rooms/:slug/queue', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
+    const zoneId = normalizeZoneId(req.query.zoneId);
     const prisma = getPrisma();
     const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa melihat antrean' });
 
     const rows = await prisma.roomQueueEntry.findMany({
-      where: { roomId: room!.id, status: { in: ['waiting', 'called', 'active'] } },
+      where: { roomId: room!.id, zoneId, status: { in: ['waiting', 'called', 'active'] } },
       orderBy: { requestedAt: 'asc' },
     });
     return res.json({
@@ -584,7 +627,9 @@ roomMembers.get('/rooms/:slug/queue', authenticateToken, async (req: AuthRequest
 // POST /api/rooms/:slug/queue/:entryId/skip — admin force-removes any entry
 // (waiting, called, or the one currently active), same as PLAYER_KICK is to
 // an ordinary member — for a no-show that's about to expire on its own
-// anyway, or someone who needs to be bumped from the line right now.
+// anyway, or someone who needs to be bumped from the line right now. Works
+// for both room- and zone-level tickets — entry.zoneId (not a request
+// param) decides which kind of removal to perform.
 roomMembers.post('/rooms/:slug/queue/:entryId/skip', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
@@ -602,13 +647,84 @@ roomMembers.post('/rooms/:slug/queue/:entryId/skip', authenticateToken, async (r
       where: { id: entry.id },
       data: wasActive ? { status: 'done', completedAt: new Date() } : { status: 'skipped' },
     });
-    if (wasActive && ioRef) await forceLeaveForQueue(ioRef, entry.userId, room!.slug, room!.name);
-    await advanceQueue(prisma, room!.id);
+    if (wasActive && ioRef) {
+      if (entry.zoneId) {
+        forceZoneExitForQueue(ioRef, entry.userId, room!.slug, entry.zoneId, entry.zoneName ?? entry.zoneId);
+      } else {
+        await forceLeaveForQueue(ioRef, entry.userId, room!.slug, room!.name);
+      }
+    }
+    await advanceQueue(prisma, room!.id, entry.zoneId);
 
     return res.json({ ok: true });
   } catch (err) {
     console.error('[roomMembers] queue skip error:', err);
     return res.status(500).json({ error: 'Gagal mengubah antrean' });
+  }
+});
+
+// GET /api/rooms/:slug/zone-restrictions — every zone in the room that
+// currently requires staff+ or a queue ticket, for the Admin Console.
+roomMembers.get('/rooms/:slug/zone-restrictions', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    if (error === 404) return res.status(404).json({ error: 'Room not found' });
+    if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa melihat ini' });
+
+    const rows = await prisma.zoneRestriction.findMany({ where: { roomId: room!.id } });
+    return res.json({
+      zones: zonesOfRoom(room!).map((z) => ({ id: z.id, name: z.name })),
+      restrictions: rows.map((r) => ({ zoneId: r.zoneId, minRole: r.minRole, queueEnabled: r.queueEnabled })),
+    });
+  } catch (err) {
+    console.error('[roomMembers] zone-restrictions list error:', err);
+    return res.status(500).json({ error: 'Gagal memuat daftar zona' });
+  }
+});
+
+// PATCH /api/rooms/:slug/zones/:zoneId/restriction — { enabled, minRole?,
+// queueEnabled? }. enabled:false deletes the row outright (an absent row
+// IS "not restricted" — there is no separate off-switch to flip back on
+// accidentally). Refreshes the in-memory cache ZONE_ENTER reads AND
+// broadcasts to the room so anyone already standing there updates without
+// needing to rejoin.
+roomMembers.patch('/rooms/:slug/zones/:zoneId/restriction', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const enabled = req.body?.enabled;
+    if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled harus boolean' });
+    const minRole = req.body?.minRole;
+    if (minRole !== undefined && !['staff', 'admin', 'owner'].includes(minRole)) {
+      return res.status(400).json({ error: 'minRole tidak valid' });
+    }
+    const queueEnabled = req.body?.queueEnabled;
+    if (queueEnabled !== undefined && typeof queueEnabled !== 'boolean') {
+      return res.status(400).json({ error: 'queueEnabled harus boolean' });
+    }
+
+    const prisma = getPrisma();
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    if (error === 404) return res.status(404).json({ error: 'Room not found' });
+    if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa mengubah setelan ini' });
+
+    const zoneId = req.params.zoneId;
+    if (enabled) {
+      await prisma.zoneRestriction.upsert({
+        where: { roomId_zoneId: { roomId: room!.id, zoneId } },
+        create: { roomId: room!.id, zoneId, minRole: minRole ?? 'staff', queueEnabled: queueEnabled ?? true },
+        update: { ...(minRole ? { minRole } : {}), ...(queueEnabled !== undefined ? { queueEnabled } : {}) },
+      });
+    } else {
+      await prisma.zoneRestriction.deleteMany({ where: { roomId: room!.id, zoneId } });
+    }
+
+    const restrictions = await refreshZoneRestrictionCache(prisma, room!.slug, room!.id);
+    if (ioRef) ioRef.to(room!.slug).emit(SocketEvents.ZONE_RESTRICTIONS, { zones: restrictions });
+
+    return res.json({ ok: true, restrictions });
+  } catch (err) {
+    console.error('[roomMembers] zone restriction update error:', err);
+    return res.status(500).json({ error: 'Gagal menyimpan setelan' });
   }
 });
 

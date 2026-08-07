@@ -1,7 +1,7 @@
 import { Server } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
 import { advanceQueue, QUEUE_CALL_GRACE_MS } from '../lib/roomQueue';
-import { forceLeaveForQueue } from './roomHandler';
+import { forceLeaveForQueue, forceZoneExitForQueue } from './roomHandler';
 
 // "Ngobrol dengan CEO" queue — two timers a sweep has to enforce, since
 // neither can be a plain setTimeout (a server restart would silently drop
@@ -33,8 +33,17 @@ async function sweepOnce(io: Server): Promise<void> {
     for (const e of expiredActive) {
       try {
         await prisma.roomQueueEntry.update({ where: { id: e.id }, data: { status: 'done', completedAt: now } });
-        await forceLeaveForQueue(io, e.userId, e.room.slug, e.room.name);
-        await advanceQueue(prisma, e.room.id);
+        // Room-level: remove them from the whole room (same as an admin
+        // kick). Zone-level: only push them out of the ZONE — a restricted
+        // zone inside an otherwise ordinary office must never evict someone
+        // from the office itself, just the one area they weren't allowed to
+        // keep occupying.
+        if (e.zoneId) {
+          await forceZoneExitForQueue(io, e.userId, e.room.slug, e.zoneId, e.zoneName ?? e.zoneId);
+        } else {
+          await forceLeaveForQueue(io, e.userId, e.room.slug, e.room.name);
+        }
+        await advanceQueue(prisma, e.room.id, e.zoneId);
       } catch (err) {
         console.error(`[queue] failed to expire active entry ${e.id}:`, err);
       }
@@ -47,7 +56,7 @@ async function sweepOnce(io: Server): Promise<void> {
     for (const e of staleCalled) {
       try {
         await prisma.roomQueueEntry.update({ where: { id: e.id }, data: { status: 'skipped' } });
-        await advanceQueue(prisma, e.room.id);
+        await advanceQueue(prisma, e.room.id, e.zoneId);
       } catch (err) {
         console.error(`[queue] failed to skip no-show entry ${e.id}:`, err);
       }

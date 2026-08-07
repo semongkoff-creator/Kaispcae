@@ -683,6 +683,7 @@ model Room {
   updatedAt         DateTime             @updatedAt
   members           RoomMember[]
   queueEntries      RoomQueueEntry[]
+  zoneRestrictions  ZoneRestriction[]
   teleportLocations TeleportLocation[]
   ownerBookmarks    OwnerBookmark[]
   mediaObjects      MapMediaObject[]
@@ -809,6 +810,18 @@ model RoomQueueEntry {
   id          String    @id @default(cuid())
   roomId      String
   room        Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  // null = a room-level queue (the whole restricted room). Non-null = a
+  // queue scoped to one ZONE within an otherwise ordinary (or also
+  // restricted) room — see ZoneRestriction below, added when "ruang CEO"
+  // turned out to be a zone inside the shared office map, not a separate
+  // Room. The two kinds never collide: advanceQueue/admitCalledEntry always
+  // filter by this field, so a room-level queue and a zone-level queue in
+  // the SAME room run fully independently.
+  zoneId      String?
+  // Snapshot at creation, same reasoning as `name` below (the requester's
+  // own name) — avoids re-parsing Room.zones/layerData JSON just to label a
+  // notice or an admin's queue list.
+  zoneName    String?
   userId      String
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   name        String
@@ -824,10 +837,42 @@ model RoomQueueEntry {
   endsAt      DateTime?
   completedAt DateTime?
 
-  // The waiting-room position query (oldest 'waiting' first) and the sweep's
-  // expiry scans (by status) are the only queries this table serves.
-  @@index([roomId, status, requestedAt])
+  // The waiting-room position query (oldest 'waiting' first, scoped by
+  // zoneId too) and the sweep's expiry scans (by status) are the only
+  // queries this table serves.
+  @@index([roomId, zoneId, status, requestedAt])
   @@index([userId, status])
+}
+
+// "CEO Office" turned out to be a ZONE inside the shared "Kaitech" map, not
+// a separate Room — Room.restrictedAccess (above) gates walking into a
+// whole different office and has no way to reach a sub-area of one you're
+// already in. This is that same idea one level down: which zones (by
+// Zone.id — a JSON entry in Room.zones/layerData, not a DB row of its own,
+// hence zoneId being a bare string here rather than a relation) require
+// staff+ or a queue ticket to enter. Independent of, and stackable with,
+// zoneLock.ts's manual keyholder lock ("we're in a meeting, don't walk
+// in") — that one is ephemeral/in-memory and anyone can set it; this one is
+// persistent admin config, same posture as restrictedAccess itself.
+model ZoneRestriction {
+  id           String   @id @default(cuid())
+  roomId       String
+  room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  zoneId       String
+  // Minimum RoomMember.role (see shared/permissions.ts's Role/ROLE_ORDER)
+  // that bypasses the queue and may just walk in — reuses the room's own
+  // RoomMember rows (the same ones Room.restrictedAccess's access-grant
+  // endpoints manage), not a separate per-zone grant list, to avoid a
+  // whole second admin UI just for this.
+  minRole      String   @default("staff")
+  // Whether a denied user may self-service via the queue form at all — off
+  // means "staff+ only, no self-service path", same relationship
+  // restrictedAccess/queueEnabled have at the room level.
+  queueEnabled Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([roomId, zoneId])
 }
 
 // §4.1 — Teleport (Admin): staff+ role, shared across everyone with access

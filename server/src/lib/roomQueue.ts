@@ -20,15 +20,19 @@ export const QUEUE_MAX_MINUTES = 120;
 export const QUEUE_CALL_GRACE_MS = 5 * 60 * 1000;
 
 // Transition a 'called' entry to 'active' the moment its holder actually
-// enters the room (called from roomHandler.ts's JOIN_ROOM, right after
-// resolveEntry grants them in via the 'queue-active' reason) — NOT the
-// moment they were called. The gap between being called and actually
-// walking in must not eat into their paid time. A no-op if the entry is
-// already 'active' (a reconnect mid-session must never reset the clock) or
-// gone entirely (skipped/cancelled out from under them — resolveEntry would
-// have already denied that case before this is ever reached).
-export async function admitCalledEntry(prisma: PrismaClient, roomId: string, userId: string): Promise<void> {
-  const entry = await prisma.roomQueueEntry.findFirst({ where: { roomId, userId, status: 'called' } });
+// enters the room/zone (called from roomHandler.ts's JOIN_ROOM for a
+// room-level queue, or zoneHandler.ts's ZONE_ENTER for a zone-level one,
+// right after the entry check grants them in) — NOT the moment they were
+// called. The gap between being called and actually walking in must not eat
+// into their paid time. A no-op if the entry is already 'active' (a
+// reconnect mid-session must never reset the clock) or gone entirely
+// (skipped/cancelled out from under them — the caller's own entry check
+// would have already denied that case before this is ever reached).
+//
+// `zoneId`: null for a room-level queue, a Zone.id for a zone-level one —
+// see RoomQueueEntry's own doc comment for why the two never collide.
+export async function admitCalledEntry(prisma: PrismaClient, roomId: string, zoneId: string | null, userId: string): Promise<void> {
+  const entry = await prisma.roomQueueEntry.findFirst({ where: { roomId, zoneId, userId, status: 'called' } });
   if (!entry) return;
   const now = new Date();
   await prisma.roomQueueEntry.update({
@@ -37,17 +41,17 @@ export async function admitCalledEntry(prisma: PrismaClient, roomId: string, use
   });
 }
 
-// Pull the next 'waiting' entry into 'called' if the room's single slot is
-// currently free. Call this after anything that could free or fill the
+// Pull the next 'waiting' entry into 'called' if the room/zone's single slot
+// is currently free. Call this after anything that could free or fill the
 // slot: a session ending (naturally, early, or skipped), a no-show
 // expiring, or a fresh join landing in an empty queue. Returns the
 // newly-called entry (for a caller that wants to best-effort notify them)
 // or null if the slot is still occupied / nobody is waiting.
-export async function advanceQueue(prisma: PrismaClient, roomId: string): Promise<{ userId: string; name: string } | null> {
-  const occupied = await prisma.roomQueueEntry.findFirst({ where: { roomId, status: { in: ['called', 'active'] } } });
+export async function advanceQueue(prisma: PrismaClient, roomId: string, zoneId: string | null): Promise<{ userId: string; name: string } | null> {
+  const occupied = await prisma.roomQueueEntry.findFirst({ where: { roomId, zoneId, status: { in: ['called', 'active'] } } });
   if (occupied) return null;
   const next = await prisma.roomQueueEntry.findFirst({
-    where: { roomId, status: 'waiting' },
+    where: { roomId, zoneId, status: 'waiting' },
     orderBy: { requestedAt: 'asc' },
   });
   if (!next) return null;

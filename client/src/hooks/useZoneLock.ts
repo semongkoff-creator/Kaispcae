@@ -1,12 +1,27 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Socket } from 'socket.io-client';
-import { SocketEvents, ZoneLockState, ZoneKnockRequest, ZoneApprovalRequest } from '@virtualmeet/shared';
+import { SocketEvents, ZoneLockState, ZoneKnockRequest, ZoneApprovalRequest, ZoneRestrictionState } from '@virtualmeet/shared';
+import { api } from '@/services/api';
 
 // Client state for per-zone locks. The server is authoritative for every
 // decision here — this hook only mirrors what it broadcasts and sends intents.
-export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId: string) {
+export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId: string, roomSlug: string) {
   const [zoneLocks, setZoneLocks] = useState<ZoneLockState[]>([]);
   const [knocks, setKnocks] = useState<ZoneKnockRequest[]>([]);
+  // "Ngobrol dengan CEO" queue, zone-level (see schema.prisma's
+  // ZoneRestriction) — persistent admin config, independent of the manual
+  // keyholder lock above. Loaded once at JOIN_ROOM and re-broadcast to the
+  // room whenever an admin edits one (see roomHandler.ts/roomMembers.ts).
+  const [zoneRestrictions, setZoneRestrictions] = useState<ZoneRestrictionState[]>([]);
+  // The requester's own zone-scoped ticket, if any — 'loading' only while
+  // fetching right after joining the queue; null otherwise (including "no
+  // ticket at all yet", which is the common case so this doesn't default to
+  // 'loading' the way JoinGate's room-level version does).
+  const [zoneQueueTicket, setZoneQueueTicket] = useState<{
+    zoneId: string; status: 'waiting' | 'called' | 'active'; durationMin: number; position: number | null;
+  } | null>(null);
+  const [zoneQueueBusy, setZoneQueueBusy] = useState(false);
+  const [zoneQueueError, setZoneQueueError] = useState('');
   // The zone we were just bounced from, so the UI can offer "knock?".
   const [deniedZoneId, setDeniedZoneId] = useState<string | null>(null);
   // Zones the keyholder has admitted us into (via a knock), so App.tsx's
@@ -26,8 +41,10 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
   // (offer "Ketuk pintu", emits ZONE_KNOCK) or a member-only zone (offer
   // "Minta izin masuk", emits ZONE_APPROVAL_REQUEST instead) — same
   // deniedZoneId/card, different action underneath since a member-only zone
-  // has no keyholder to knock on.
-  const [deniedReason, setDeniedReason] = useState<'locked' | 'member_only' | null>(null);
+  // has no keyholder to knock on. 'restricted'/'queue' are the "Ngobrol
+  // dengan CEO" persistent-config siblings: 'restricted' has no
+  // self-service path at all (queueEnabled is off), 'queue' offers the form.
+  const [deniedReason, setDeniedReason] = useState<'locked' | 'member_only' | 'restricted' | 'queue' | null>(null);
   // Mirrors pendingKnock above, but for the no-keyholder member-only flow.
   const [pendingApproval, setPendingApproval] = useState<{ zoneId: string; zoneName: string } | null>(null);
   // Every admin's own view of guests currently waiting on THEM to decide —
@@ -74,7 +91,22 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
       // QA #8 — same card as a manual lock (deniedZoneId), tagged with WHICH
       // kind so requestEntry below knows whether to knock or ask for approval.
       setDeniedZoneId(msg.zoneId);
-      setDeniedReason(msg.reason === 'member_only' ? 'member_only' : 'locked');
+      if (msg.reason === 'member_only') setDeniedReason('member_only');
+      else if (msg.reason === 'restricted') setDeniedReason('restricted');
+      else if (msg.reason === 'queue') setDeniedReason('queue');
+      else setDeniedReason('locked');
+    };
+    const onZoneRestrictions = (msg: { zones: ZoneRestrictionState[] }) => {
+      setZoneRestrictions(msg?.zones ?? []);
+    };
+    // "Ngobrol dengan CEO" queue, zone-level — our timed slot ran out (see
+    // roomHandler.ts's forceZoneExitForQueue). The actual avatar repositioning
+    // + ZONE_EXIT emit is handled separately in App.tsx (it owns player
+    // position, this hook doesn't) — this listener only owns this hook's own
+    // state: the toast, and dropping a now-finished ticket.
+    const onZoneSessionEnded = (msg: { zoneId: string; zoneName: string }) => {
+      flash(`Waktu sesimu di ${msg.zoneName} sudah habis.`);
+      setZoneQueueTicket((t) => (t && t.zoneId === msg.zoneId ? null : t));
     };
     const onKnock = (msg: ZoneKnockRequest) => {
       // De-dupe: someone mashing the knock button shouldn't stack popups.
@@ -120,6 +152,8 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     socket.on(SocketEvents.ZONE_APPROVAL_REQUESTED, onApprovalRequested);
     socket.on(SocketEvents.ZONE_APPROVAL_DECIDED, onApprovalDecided);
     socket.on(SocketEvents.ZONE_APPROVAL_CANCELLED, onApprovalCancelled);
+    socket.on(SocketEvents.ZONE_RESTRICTIONS, onZoneRestrictions);
+    socket.on(SocketEvents.ZONE_SESSION_ENDED, onZoneSessionEnded);
     return () => {
       socket.off(SocketEvents.ZONE_LOCK_UPDATED, onUpdated);
       socket.off(SocketEvents.ZONE_LOCKED_DENIED, onDenied);
@@ -129,11 +163,76 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
       socket.off(SocketEvents.ZONE_APPROVAL_DECIDED, onApprovalDecided);
       socket.off(SocketEvents.ZONE_APPROVAL_CANCELLED, onApprovalCancelled);
       socket.off(SocketEvents.ZONE_KNOCK_CANCELLED, onCancelled);
+      socket.off(SocketEvents.ZONE_RESTRICTIONS, onZoneRestrictions);
+      socket.off(SocketEvents.ZONE_SESSION_ENDED, onZoneSessionEnded);
     };
   }, [socketRef, flash]);
 
+  // "Ngobrol dengan CEO" queue, zone-level — poll our own ticket while
+  // there's a live one to watch, same 5s convention as JoinGate's room-level
+  // poll. The moment status flips to 'called', re-emit ZONE_ENTER ourselves:
+  // the avatar has been standing at the zone's edge the whole time (same
+  // "optimistic visual entry, server round-trip decides membership" posture
+  // the member_only case already has), so this is what actually walks us in
+  // — the server transitions called -> active and starts the clock right
+  // there (see zoneHandler.ts's ZONE_ENTER handler).
+  useEffect(() => {
+    if (!zoneQueueTicket || zoneQueueTicket.status === 'active') return;
+    const zoneId = zoneQueueTicket.zoneId;
+    const iv = setInterval(async () => {
+      try {
+        const { entry } = await api.getMyQueueStatus(roomSlug, zoneId);
+        if (!entry) {
+          // Skipped by the no-show sweep, or an admin removed it.
+          setZoneQueueTicket(null);
+          if (deniedZoneId === zoneId) setDeniedZoneId(null);
+          return;
+        }
+        setZoneQueueTicket({ zoneId, status: entry.status, durationMin: entry.durationMin, position: entry.position });
+        if (entry.status === 'called') {
+          socketRef.current?.emit(SocketEvents.ZONE_ENTER, zoneId);
+        }
+      } catch {
+        // Transient failure — keep waiting rather than dropping the ticket.
+      }
+    }, 5000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoneQueueTicket?.zoneId, zoneQueueTicket?.status, roomSlug]);
+
   const lockOf = useCallback((zoneId: string | null) =>
     (zoneId ? zoneLocks.find((z) => z.zoneId === zoneId && z.locked) : undefined), [zoneLocks]);
+
+  const restrictionOf = useCallback((zoneId: string | null) =>
+    (zoneId ? zoneRestrictions.find((r) => r.zoneId === zoneId) : undefined), [zoneRestrictions]);
+
+  const joinZoneQueue = useCallback(async (zoneId: string, durationMin: number, topic?: string) => {
+    setZoneQueueBusy(true);
+    setZoneQueueError('');
+    try {
+      await api.joinQueue(roomSlug, durationMin, topic, zoneId);
+      const { entry } = await api.getMyQueueStatus(roomSlug, zoneId);
+      if (entry) setZoneQueueTicket({ zoneId, status: entry.status, durationMin: entry.durationMin, position: entry.position });
+    } catch (e) {
+      setZoneQueueError(e instanceof Error ? e.message : 'Gagal mendaftar antrean');
+    } finally {
+      setZoneQueueBusy(false);
+    }
+  }, [roomSlug]);
+
+  const cancelZoneQueue = useCallback(async () => {
+    if (!zoneQueueTicket) return;
+    setZoneQueueBusy(true);
+    setZoneQueueError('');
+    try {
+      await api.cancelQueue(roomSlug, zoneQueueTicket.zoneId);
+      setZoneQueueTicket(null);
+    } catch (e) {
+      setZoneQueueError(e instanceof Error ? e.message : 'Gagal membatalkan antrean');
+    } finally {
+      setZoneQueueBusy(false);
+    }
+  }, [roomSlug, zoneQueueTicket]);
 
   const setLock = useCallback((zoneId: string, locked: boolean, zoneName?: string) => {
     socketRef.current?.emit(SocketEvents.ZONE_LOCK_SET, { zoneId, locked, zoneName });
@@ -196,6 +295,8 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
   return {
     zoneLocks, knocks, deniedZoneId, deniedReason, pendingKnock, pendingApproval, approvalRequests, toast,
     lockOf, setLock, knock, cancelKnock, decide, isKeyholder, isAdmitted, requestEntry, cancelApproval, decideApproval,
+    // "Ngobrol dengan CEO" queue, zone-level.
+    restrictionOf, zoneQueueTicket, zoneQueueBusy, zoneQueueError, joinZoneQueue, cancelZoneQueue,
     clearDenied: () => setDeniedZoneId(null),
     // App.tsx's client-side entry check calls this directly (no server round
     // trip needed — the physical block already happened locally) to surface

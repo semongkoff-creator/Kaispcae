@@ -883,6 +883,21 @@ export enum SocketEvents {
   // can be called.
   QUEUE_SESSION_ENDED = 'queue:session_ended',
 
+  // Zone-level counterpart — "CEO Office" turned out to be a ZONE, not a
+  // separate Room (see server/src/lib/zoneMembership.ts). Sent only to the
+  // affected socket when their timed zone slot ends; the client reacts by
+  // nudging the avatar out of the zone and emitting ZONE_EXIT itself (see
+  // roomHandler.ts's forceZoneExitForQueue doc comment for why this is
+  // client-driven rather than a server-side teleport).
+  ZONE_SESSION_ENDED = 'zone:session_ended',
+
+  // Which zones in this room require staff+ or a queue ticket (see
+  // schema.prisma's ZoneRestriction) — sent once at JOIN_ROOM (so a fresh
+  // client always starts accurate) and re-broadcast to the whole room
+  // whenever an admin edits a restriction, mirroring ZONE_LOCK_UPDATED's own
+  // shape one level up (persistent config instead of an ephemeral lock).
+  ZONE_RESTRICTIONS = 'zone:restrictions',
+
   // QA (Presence checklist item #8, "Member list akurat") — workspace-wide "who's online + which room" roster (NOT the
   // in-room ParticipantPanel, which only ever sees people standing in the
   // SAME room). Named `roster:` rather than reusing the existing `presence:`
@@ -1510,6 +1525,15 @@ export interface ZoneLockState {
   locked: boolean;
   lockedByUserId?: string;
   lockedByName?: string;
+}
+
+// "Ngobrol dengan CEO" queue, zone-level (see schema.prisma's
+// ZoneRestriction) — persistent admin config, independent of the ephemeral
+// keyholder lock ZoneLockState represents above.
+export interface ZoneRestrictionState {
+  zoneId: string;
+  minRole: string;
+  queueEnabled: boolean;
 }
 
 // Live claim state of one claimable-seat marker (see mapLayers.ts's

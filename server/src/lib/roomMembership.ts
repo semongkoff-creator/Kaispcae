@@ -66,7 +66,7 @@ export async function resolveEntry(
     // admit, without ever touching the persistent RoomMember role above.
     if (room.queueEnabled) {
       const ticket = await prisma.roomQueueEntry.findFirst({
-        where: { roomId: room.id, userId, status: { in: ['called', 'active'] } },
+        where: { roomId: room.id, zoneId: null, userId, status: { in: ['called', 'active'] } },
       });
       if (ticket?.status === 'called') return { allowed: true, reason: 'queue-active' };
       if (ticket?.status === 'active' && ticket.endsAt && ticket.endsAt > new Date()) {

@@ -363,6 +363,24 @@ export function getCachedZones(roomId: string): Zone[] {
   return zoneCache.get(roomId) ?? [];
 }
 
+// "Ngobrol dengan CEO" queue, zone-level (see schema.prisma's
+// ZoneRestriction) — ZONE_ENTER fires on essentially every zone crossing
+// for every player, all day, so it cannot afford a DB round trip for the
+// overwhelming majority of zones that have no restriction at all.
+// zoneHandler.ts loads this ONCE per room at JOIN_ROOM (and refreshes it
+// whenever an admin edits a restriction) so the hot path is a synchronous
+// Map lookup; the DB is only actually hit for the rare zone that IS
+// restricted, where correctness matters more than raw speed anyway.
+const zoneRestrictionCache = new Map<string, Map<string, { minRole: string; queueEnabled: boolean }>>();
+
+export function setCachedZoneRestrictions(roomSlug: string, restrictions: { zoneId: string; minRole: string; queueEnabled: boolean }[]): void {
+  zoneRestrictionCache.set(roomSlug, new Map(restrictions.map((r) => [r.zoneId, { minRole: r.minRole, queueEnabled: r.queueEnabled }])));
+}
+
+export function getCachedZoneRestriction(roomSlug: string, zoneId: string): { minRole: string; queueEnabled: boolean } | undefined {
+  return zoneRestrictionCache.get(roomSlug)?.get(zoneId);
+}
+
 // ─── Last known position (reconnect persistence) ─────────────────────
 //
 // Keyed by the player's real account id (uid), not socket.id — socket.id

@@ -10,6 +10,7 @@ import {
 import { getPrisma } from '../lib/prisma';
 import { resolveEntry } from '../lib/roomMembership';
 import { admitCalledEntry, advanceQueue } from '../lib/roomQueue';
+import { refreshZoneRestrictionCache } from '../lib/zoneMembership';
 import { logActivity } from '../lib/larkBase';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { redactInteractiveSecrets, redactDoorPasswords } from '../lib/redactFurniture';
@@ -446,6 +447,23 @@ export async function forceLeaveForQueue(io: Server, userId: string, roomSlug: s
   await handleLeave(io, targetSocket, roomSlug);
 }
 
+// Zone-level counterpart to forceLeaveForQueue above — a restricted ZONE
+// (e.g. "CEO Office") inside an otherwise ordinary shared office must never
+// evict someone from the whole room when their slot ends, only push them
+// out of that one area. Deliberately soft/client-driven: the server can't
+// reach into the client's Phaser scene to move the avatar, so this just
+// tells the target's own client its zone session ended (App.tsx reacts by
+// nudging the avatar out and emitting ZONE_EXIT itself, same as a normal
+// voluntary walk-out — which is what actually clears zoneHandler.ts's
+// socketZone membership). A no-op if they've already disconnected.
+export function forceZoneExitForQueue(io: Server, userId: string, roomSlug: string, zoneId: string, zoneName: string): void {
+  const targetSocketId = userSocketMap.get(userId);
+  if (!targetSocketId) return;
+  const targetSocket = io.sockets.sockets.get(targetSocketId);
+  if (!targetSocket) return;
+  targetSocket.emit(SocketEvents.ZONE_SESSION_ENDED, { roomSlug, zoneId, zoneName });
+}
+
 export function registerRoomHandlers(io: Server, socket: Socket) {
   let currentRoom: string | null = null;
 
@@ -547,7 +565,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
           // they're already 'active' (a reconnect), so it can never
           // double-fire or reset a running timer.
           if (entry.reason === 'queue-active') {
-            await admitCalledEntry(prisma, approvalRoom.id, enteringUid);
+            await admitCalledEntry(prisma, approvalRoom.id, null, enteringUid);
           }
         } catch (e) {
           console.error('[room] approval check failed:', e);
@@ -896,6 +914,23 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       setCachedTiles(room, tiles);
       setCachedImpassableAreas(room, savedImpassableAreaRects);
       setCachedZones(room, savedZones || fallback!.zones);
+
+      // "Ngobrol dengan CEO" queue, zone-level — load this room's
+      // ZoneRestriction rows into the fast in-memory cache ZONE_ENTER
+      // consults (see roomStore.ts's getCachedZoneRestriction doc comment).
+      // One-time cost per join, same posture as the global-admin accountRole
+      // check elsewhere in this handler — not worth persisting/streaming
+      // live, a rejoin naturally picks up any admin change.
+      try {
+        const prisma = getPrisma();
+        const roomRow = await prisma.room.findUnique({ where: { slug: room }, select: { id: true } });
+        if (roomRow) {
+          const restrictions = await refreshZoneRestrictionCache(prisma, room, roomRow.id);
+          socket.emit(SocketEvents.ZONE_RESTRICTIONS, { zones: restrictions });
+        }
+      } catch (e) {
+        console.warn('[room] failed to load zone restrictions:', e);
+      }
 
       // QA #7/#8/#9 — every desk note currently on a furniture piece in this
       // room, so a fresh join sees them without a separate fetch. Its own
@@ -2143,10 +2178,10 @@ async function completeActiveQueueEntryOnLeave(userId: string, roomSlug: string)
   const prisma = getPrisma();
   const room = await prisma.room.findUnique({ where: { slug: roomSlug }, select: { id: true, name: true, queueEnabled: true } });
   if (!room?.queueEnabled) return;
-  const entry = await prisma.roomQueueEntry.findFirst({ where: { roomId: room.id, userId, status: 'active' } });
+  const entry = await prisma.roomQueueEntry.findFirst({ where: { roomId: room.id, zoneId: null, userId, status: 'active' } });
   if (!entry) return;
   await prisma.roomQueueEntry.update({ where: { id: entry.id }, data: { status: 'done', completedAt: new Date() } });
-  await advanceQueue(prisma, room.id);
+  await advanceQueue(prisma, room.id, null);
 }
 
 async function handleLeave(io: Server, socket: Socket, room: string | null) {

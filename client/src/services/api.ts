@@ -364,13 +364,15 @@ export const api = {
     request<{ status: 'active' | 'pending' | 'rejected' }>(`/rooms/${slug}/join-request`, { method: 'POST' }),
 
   // ── "Ngobrol dengan CEO" queue (see server/src/lib/roomQueue.ts) ──
-  joinQueue: (slug: string, durationMin: number, topic?: string) =>
+  // `zoneId` absent = a room-level queue; present = scoped to one zone
+  // within the room (see server/src/lib/zoneMembership.ts).
+  joinQueue: (slug: string, durationMin: number, topic?: string, zoneId?: string) =>
     request<{ status: string; id: string }>(`/rooms/${slug}/queue/join`, {
       method: 'POST',
-      body: JSON.stringify({ durationMin, topic }),
+      body: JSON.stringify({ durationMin, topic, zoneId }),
     }),
 
-  getMyQueueStatus: (slug: string) =>
+  getMyQueueStatus: (slug: string, zoneId?: string) =>
     request<{
       entry: {
         id: string;
@@ -380,9 +382,10 @@ export const api = {
         calledAt: number | null;
         endsAt: number | null;
       } | null;
-    }>(`/rooms/${slug}/queue/mine`),
+    }>(`/rooms/${slug}/queue/mine${zoneId ? `?zoneId=${encodeURIComponent(zoneId)}` : ''}`),
 
-  cancelQueue: (slug: string) => request<{ ok: true }>(`/rooms/${slug}/queue/cancel`, { method: 'POST' }),
+  cancelQueue: (slug: string, zoneId?: string) =>
+    request<{ ok: true }>(`/rooms/${slug}/queue/cancel`, { method: 'POST', body: JSON.stringify({ zoneId }) }),
 
   getJoinRequests: (slug: string) =>
     request<{ requests: { userId: string; displayName: string; email: string; requestedAt: number }[] }>(

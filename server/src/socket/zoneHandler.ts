@@ -1,9 +1,11 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, hasFeatureAccess } from '@virtualmeet/shared';
+import { SocketEvents, hasFeatureAccess, Role, roleAtLeast } from '@virtualmeet/shared';
 import { mayEnterZone, isZoneLocked, isSealedIn } from './zoneLock';
 import { sendMusicStateToSocket } from './musicHandler';
-import { getCachedZones } from '../store/roomStore';
+import { getCachedZones, getCachedZoneRestriction } from '../store/roomStore';
 import { getConnectedAdminSocketIds, getRoleInRoom, getPlayerName, updateRosterZone } from './roomHandler';
+import { getPrisma } from '../lib/prisma';
+import { admitCalledEntry, advanceQueue } from '../lib/roomQueue';
 
 // Actual A/V zone restriction is computed client-side (see useProximity.ts —
 // every client already knows every player's position and the room's zones,
@@ -69,6 +71,18 @@ function isGuestApprovedForZone(room: string, zoneId: string, guestId: string): 
   return !!approvedGuestZones.get(room)?.has(`${zoneId}:${guestId}`);
 }
 
+// "Ngobrol dengan CEO" queue, zone-level — see ZONE_EXIT/DISCONNECT's own
+// call sites. Mirrors roomHandler.ts's completeActiveQueueEntryOnLeave.
+async function completeActiveZoneQueueEntry(roomSlug: string, zoneId: string, userId: string): Promise<void> {
+  const prisma = getPrisma();
+  const dbRoom = await prisma.room.findUnique({ where: { slug: roomSlug }, select: { id: true } });
+  if (!dbRoom) return;
+  const entry = await prisma.roomQueueEntry.findFirst({ where: { roomId: dbRoom.id, zoneId, userId, status: 'active' } });
+  if (!entry) return;
+  await prisma.roomQueueEntry.update({ where: { id: entry.id }, data: { status: 'done', completedAt: new Date() } });
+  await advanceQueue(prisma, dbRoom.id, zoneId);
+}
+
 export function registerZoneHandlers(io: Server, socket: Socket) {
   let currentRoom: string | null = null;
 
@@ -76,25 +90,26 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
     currentRoom = roomId || 'main-office';
   });
 
-  socket.on(SocketEvents.ZONE_ENTER, (zoneId: string) => {
+  socket.on(SocketEvents.ZONE_ENTER, async (zoneId: string) => {
     if (!currentRoom) return;
+    const room = currentRoom;
     // A locked zone is enforced HERE, not just drawn in the UI. Without this
     // the padlock would be decoration: zone membership drives zone-scoped
     // chat and A/V, so an uninvited socket could still join the meeting's
     // audio by claiming ZONE_ENTER.
     const uid = socket.data.userId as string | undefined;
-    if (isZoneLocked(currentRoom, zoneId) && !mayEnterZone(currentRoom, zoneId, uid)) {
+    if (isZoneLocked(room, zoneId) && !mayEnterZone(room, zoneId, uid)) {
       socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'locked' });
       return;
     }
-    const zone = getCachedZones(currentRoom).find((z) => z.id === zoneId);
+    const zone = getCachedZones(room).find((z) => z.id === zoneId);
     // QA #8 — "ODOO/AI TEAM hanya anggota; terkunci bagi guest." A guest
     // (never a member/staff/admin/owner — those have no guestId at all, see
     // index.ts's io.use()) needs an admin's approval, tracked separately
     // from the manual lock above (this zone was never locked by anyone —
     // there's no keyholder to check against).
     const guestId = (socket.data as { guestId?: string }).guestId;
-    if (guestId && zone?.memberOnly && !isGuestApprovedForZone(currentRoom, zoneId, guestId)) {
+    if (guestId && zone?.memberOnly && !isGuestApprovedForZone(room, zoneId, guestId)) {
       socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'member_only' });
       return;
     }
@@ -104,35 +119,86 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
     // around within the same zone) never locks someone out of a zone
     // they're already standing in.
     if (zone?.capacity) {
-      const others = getSocketIdsInZone(currentRoom, zoneId).filter((id) => id !== socket.id);
+      const others = getSocketIdsInZone(room, zoneId).filter((id) => id !== socket.id);
       if (others.length >= zone.capacity) {
         socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'zone_full' });
         return;
       }
     }
-    socketZone.set(socket.id, { room: currentRoom, zoneId });
-    socket.to(currentRoom).emit(SocketEvents.ZONE_ENTER, { playerId: socket.id, zoneId });
+
+    // "Ngobrol dengan CEO" queue, zone-level (see schema.prisma's
+    // ZoneRestriction) — "ruang CEO" turned out to be a zone, not a separate
+    // Room, so this is the zone-scoped sibling of Room.restrictedAccess.
+    // Fast synchronous cache check first: this handler fires on essentially
+    // every zone crossing for every player, all day, and the overwhelming
+    // majority of zones have no restriction row at all.
+    const restriction = getCachedZoneRestriction(room, zoneId);
+    if (restriction) {
+      if (!uid) {
+        // Unauthenticated (guest) — the queue requires a real account, so
+        // there is no self-service path regardless of queueEnabled.
+        socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'restricted' });
+        return;
+      }
+      if (!roleAtLeast(getRoleInRoom(room, uid), (restriction.minRole as Role) ?? 'staff')) {
+        try {
+          const prisma = getPrisma();
+          const dbRoom = await prisma.room.findUnique({ where: { slug: room }, select: { id: true } });
+          if (!dbRoom) throw new Error('room not found');
+          const ticket = await prisma.roomQueueEntry.findFirst({
+            where: { roomId: dbRoom.id, zoneId, userId: uid, status: { in: ['called', 'active'] } },
+          });
+          const admitted = ticket?.status === 'called' || (ticket?.status === 'active' && !!ticket.endsAt && ticket.endsAt > new Date());
+          if (!admitted) {
+            socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: restriction.queueEnabled ? 'queue' : 'restricted' });
+            return;
+          }
+          // Their turn — this is the actual moment they walk in, so it's
+          // the right place (not the poll that got them here) to start the
+          // session clock. No-ops if already 'active' (a reconnect).
+          await admitCalledEntry(prisma, dbRoom.id, zoneId, uid);
+        } catch (e) {
+          console.error('[zone] restriction check failed:', e);
+          socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'restricted' });
+          return;
+        }
+      }
+    }
+
+    socketZone.set(socket.id, { room, zoneId });
+    socket.to(room).emit(SocketEvents.ZONE_ENTER, { playerId: socket.id, zoneId });
     // Bug follow-up — the member list's live location, see
     // roomHandler.ts's updateRosterZone doc comment.
     updateRosterZone(io, socket.id, zone?.name ?? zoneId);
     // Fitur 2 correction — a Music Bot track already playing in this zone
     // must start for the joining socket right away, with no click/popup.
-    sendMusicStateToSocket(socket, currentRoom, zoneId);
+    sendMusicStateToSocket(socket, room, zoneId);
   });
 
-  socket.on(SocketEvents.ZONE_EXIT, (zoneId: string) => {
+  socket.on(SocketEvents.ZONE_EXIT, async (zoneId: string) => {
     if (!currentRoom) return;
+    const room = currentRoom;
     // Locked zones hold everyone in, keyholder included — unlock first, then
     // walk out. The client also blocks the walk, but membership is what
     // drives zone chat and A/V — so it must be refused HERE too, or someone
     // could leave the meeting's audio while still standing in it.
-    if (isSealedIn(currentRoom, zoneId)) {
+    if (isSealedIn(room, zoneId)) {
       socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'sealed_in' });
       return;
     }
     socketZone.delete(socket.id);
-    socket.to(currentRoom).emit(SocketEvents.ZONE_EXIT, { playerId: socket.id, zoneId });
+    socket.to(room).emit(SocketEvents.ZONE_EXIT, { playerId: socket.id, zoneId });
     updateRosterZone(io, socket.id, null);
+
+    // "Ngobrol dengan CEO" queue, zone-level — leaving early (voluntarily,
+    // for ANY reason) completes an active ticket immediately and advances
+    // the queue, same product decision as the room-level version (see
+    // roomHandler.ts's completeActiveQueueEntryOnLeave). Guarded by the
+    // cache check so an ordinary zone-exit never pays a DB round trip.
+    const uid = socket.data.userId as string | undefined;
+    if (uid && getCachedZoneRestriction(room, zoneId)) {
+      completeActiveZoneQueueEntry(room, zoneId, uid).catch((e) => console.error('[zone] queue leave-complete error:', e));
+    }
   });
 
   // QA #8 — the guest asking for admin approval after being bounced by
@@ -199,6 +265,16 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
   });
 
   socket.on(SocketEvents.DISCONNECT, () => {
+    // "Ngobrol dengan CEO" queue, zone-level — a hard disconnect counts as
+    // leaving early too (same as the ZONE_EXIT branch above), so grab the
+    // zone BEFORE deleting it from socketZone just below.
+    const lastZone = socketZone.get(socket.id);
+    const uid = socket.data.userId as string | undefined;
+    if (uid && lastZone && getCachedZoneRestriction(lastZone.room, lastZone.zoneId)) {
+      completeActiveZoneQueueEntry(lastZone.room, lastZone.zoneId, uid).catch((e) =>
+        console.error('[zone] queue disconnect-complete error:', e),
+      );
+    }
     socketZone.delete(socket.id);
     // A guest who disconnects while waiting shouldn't leave a stale request
     // card on every admin's screen forever — approvedGuestZones is

@@ -182,14 +182,18 @@ export function ApprovalPanel() {
                   <p className="text-sm truncate">{r.name}</p>
                   <p className="text-[11px] text-gray-400 truncate">{r.slug}</p>
                 </div>
-                {r.restrictedAccess && (
-                  <button
-                    onClick={() => setManagingSlug(managingSlug === r.slug ? null : r.slug)}
-                    className="text-xs text-purple-600 hover:text-purple-800 dark:text-purple-300 shrink-0 cursor-pointer"
-                  >
-                    {managingSlug === r.slug ? 'Tutup' : 'Kelola akses'}
-                  </button>
-                )}
+                {/* Always available — a room's own restrictedAccess only
+                    gates the ROOM-level flyout content below; zone-level
+                    restriction (see ZoneRestrictionManager) can apply to
+                    a perfectly ordinary, non-restricted room's map (e.g.
+                    "CEO Office" is a zone inside the shared Kaitech office,
+                    which itself has restrictedAccess off). */}
+                <button
+                  onClick={() => setManagingSlug(managingSlug === r.slug ? null : r.slug)}
+                  className="text-xs text-purple-600 hover:text-purple-800 dark:text-purple-300 shrink-0 cursor-pointer"
+                >
+                  {managingSlug === r.slug ? 'Tutup' : 'Kelola'}
+                </button>
                 <input
                   type="checkbox"
                   checked={r.restrictedAccess}
@@ -212,7 +216,12 @@ export function ApprovalPanel() {
                   className="w-4 h-4 accent-purple-600 shrink-0 cursor-pointer"
                 />
               </div>
-              {managingSlug === r.slug && <RoomAccessManager slug={r.slug} />}
+              {managingSlug === r.slug && (
+                <>
+                  {r.restrictedAccess && <RoomAccessManager slug={r.slug} />}
+                  <ZoneRestrictionManager slug={r.slug} />
+                </>
+              )}
             </div>
           ))}
         </div>
@@ -455,6 +464,108 @@ function RoomAccessManager({ slug }: { slug: string }) {
           )
         )}
       </div>
+    </div>
+  );
+}
+
+// "Ngobrol dengan CEO" queue, zone-level (see server/src/lib/zoneMembership.ts)
+// — "ruang CEO" turned out to be a ZONE inside the shared office map, not a
+// separate Room, so restricting it is configured per-zone here rather than
+// via the room-level restrictedAccess toggle above. Independent of that
+// toggle: an otherwise completely ordinary room can still have one zone
+// gated this way.
+function ZoneRestrictionManager({ slug }: { slug: string }) {
+  const [zones, setZones] = useState<{ id: string; name: string }[] | null>(null);
+  const [restrictions, setRestrictions] = useState<{ zoneId: string; minRole: string; queueEnabled: boolean }[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const res = await adminApi.getZoneRestrictions(slug);
+      setZones(res.zones);
+      setRestrictions(res.restrictions);
+      setError('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Gagal memuat daftar zona');
+    }
+  }, [slug]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const restrictionOf = (zoneId: string) => restrictions.find((r) => r.zoneId === zoneId);
+
+  const save = async (zoneId: string, patch: { enabled: boolean; minRole?: string; queueEnabled?: boolean }) => {
+    setBusy(zoneId);
+    try {
+      await adminApi.setZoneRestriction(slug, zoneId, patch);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Gagal menyimpan');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="px-4 py-3 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-800">
+      <h3 className="text-xs font-semibold mb-1 flex items-center gap-1.5"><ShieldLock size={12} /> Zona dibatasi</h3>
+      <p className="text-[11px] text-gray-400 mb-2">
+        Batasi satu AREA tertentu di dalam map ini (mis. &quot;CEO Office&quot;) tanpa membatasi seluruh room — orang yang tidak
+        memenuhi role bisa isi form antrean untuk dapat giliran masuk sendiri.
+      </p>
+      {error && <p className="text-[11px] text-red-500 mb-2">{error}</p>}
+      {zones === null ? (
+        <p className="text-xs text-gray-400">Memuat zona…</p>
+      ) : zones.length === 0 ? (
+        <p className="text-xs text-gray-400">Room ini belum punya zona.</p>
+      ) : (
+        <div className="space-y-1">
+          {zones.map((z) => {
+            const r = restrictionOf(z.id);
+            const enabled = !!r;
+            return (
+              <div key={z.id} className="text-xs">
+                <label className="flex items-center gap-2 cursor-pointer py-1">
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    disabled={busy === z.id}
+                    onChange={() => save(z.id, { enabled: !enabled })}
+                    className="w-3.5 h-3.5 accent-purple-600 cursor-pointer shrink-0"
+                  />
+                  <span className="flex-1 truncate">{z.name}</span>
+                  {enabled && <span className="text-[10px] text-purple-600 shrink-0">dibatasi</span>}
+                </label>
+                {enabled && r && (
+                  <div className="ml-5 mb-1.5 flex items-center gap-2 flex-wrap">
+                    <select
+                      value={r.minRole}
+                      disabled={busy === z.id}
+                      onChange={(e) => save(z.id, { enabled: true, minRole: e.target.value })}
+                      className="px-1.5 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-[11px]"
+                    >
+                      <option value="staff">staff+</option>
+                      <option value="admin">admin+</option>
+                      <option value="owner">owner saja</option>
+                    </select>
+                    <label className="flex items-center gap-1 text-[11px] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={r.queueEnabled}
+                        disabled={busy === z.id}
+                        onChange={() => save(z.id, { enabled: true, queueEnabled: !r.queueEnabled })}
+                        className="w-3 h-3 accent-purple-600 cursor-pointer"
+                      />
+                      Antrean
+                    </label>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

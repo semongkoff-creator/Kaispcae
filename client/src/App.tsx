@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill, PersonPlusFill, DoorOpenFill, VolumeUpFill } from 'react-bootstrap-icons';
-import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode } from '@virtualmeet/shared';
+import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -462,7 +462,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // it changes. State (not a ref) so the Private tab can actually appear.
   const currentZoneIdRef = useRef<string | null>(null);
   const [currentZone, setCurrentZone] = useState<{ id: string; name: string } | null>(null);
-  const zoneLock = useZoneLock(socketRef, authUserId);
+  const zoneLock = useZoneLock(socketRef, authUserId, roomSlug);
 
   // Put the player back on the nearest tile inside the zone they may not leave.
   const pushBackInside = useCallback((zoneId: string) => {
@@ -526,6 +526,37 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     // Walking out of the zone you were bounced from clears the knock prompt.
     if (!zoneId) zoneLock.clearDenied();
   }, [localPlayer.x, localPlayer.y, zones, emitZoneEnter, emitZoneExit]);
+
+  // "Ngobrol dengan CEO" queue, zone-level — our timed slot in a restricted
+  // zone ran out (see roomHandler.ts's forceZoneExitForQueue). Unlike a
+  // manually-locked zone (which the player can only ever be pushed BACK INTO,
+  // never out of — see pushBackInside above), this needs the opposite: the
+  // server can't reach into the client's canvas to move the avatar itself,
+  // so this nudges it just outside the zone's own rect and emits ZONE_EXIT —
+  // exactly what a normal voluntary walk-out already does, just server-
+  // triggered. Not pixel-perfect (no attempt to find the nearest actually-
+  // walkable tile), but the access control itself already happened
+  // server-side regardless of where the avatar visually lands.
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    const onZoneSessionEnded = (msg: { zoneId: string; zoneName: string }) => {
+      if (currentZoneIdRef.current !== msg.zoneId) return;
+      const z = zones.find((x) => x.id === msg.zoneId);
+      if (z) {
+        useGameStore.getState().setLocalPlayer({
+          x: (z.x + z.width / 2) * TILE_SIZE,
+          y: Math.max(0, z.y - 1) * TILE_SIZE,
+          isMoving: false,
+        });
+      }
+      emitZoneExit(msg.zoneId);
+      currentZoneIdRef.current = null;
+      setCurrentZone(null);
+    };
+    socket.on(SocketEvents.ZONE_SESSION_ENDED, onZoneSessionEnded);
+    return () => { socket.off(SocketEvents.ZONE_SESSION_ENDED, onZoneSessionEnded); };
+  }, [socketRef, zones, emitZoneExit]);
 
   const zoneChatHistory = useGameStore((s) => s.zoneChatHistory);
   const handleSendZoneChat = useCallback((text: string, zoneId: string, attachmentUrl?: string, attachmentName?: string) => {
@@ -2140,6 +2171,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onDecide={zoneLock.decide}
           onCancelApproval={zoneLock.cancelApproval}
           onDecideApproval={zoneLock.decideApproval}
+          zoneQueueTicket={zoneLock.zoneQueueTicket}
+          zoneQueueBusy={zoneLock.zoneQueueBusy}
+          zoneQueueError={zoneLock.zoneQueueError}
+          onJoinZoneQueue={zoneLock.joinZoneQueue}
+          onCancelZoneQueue={zoneLock.cancelZoneQueue}
         />
       )}
 

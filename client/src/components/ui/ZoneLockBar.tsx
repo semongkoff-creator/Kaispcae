@@ -1,5 +1,8 @@
-import { LockFill, HandIndexThumbFill, PersonBadgeFill } from 'react-bootstrap-icons';
+import { useState } from 'react';
+import { LockFill, HandIndexThumbFill, PersonBadgeFill, HourglassSplit, PeopleFill } from 'react-bootstrap-icons';
 import { ZoneKnockRequest, ZoneLockState, ZoneApprovalRequest } from '@virtualmeet/shared';
+
+const ZONE_QUEUE_DURATION_OPTIONS = [15, 30, 45, 60];
 
 // All the zone-lock UI, kept in one strip above the HUD so it never collides
 // with the room's own controls (the floating Chat button already taught us
@@ -7,6 +10,7 @@ import { ZoneKnockRequest, ZoneLockState, ZoneApprovalRequest } from '@virtualme
 export function ZoneLockBar({
   currentZone, lock, isKeyholder, knocks, deniedZoneId, deniedZoneName, deniedReason, pendingKnock, pendingApproval, approvalRequests, toast,
   onKnock, onCancelKnock, onDecide, onCancelApproval, onDecideApproval,
+  zoneQueueTicket, zoneQueueBusy, zoneQueueError, onJoinZoneQueue, onCancelZoneQueue,
 }: {
   currentZone: { id: string; name: string } | null;
   lock: ZoneLockState | undefined;
@@ -15,8 +19,10 @@ export function ZoneLockBar({
   deniedZoneId: string | null;
   deniedZoneName: string | null;
   // QA #8 — which card/action the denial below should offer: 'locked' →
-  // knock the keyholder (existing flow), 'member_only' → ask an admin.
-  deniedReason: 'locked' | 'member_only' | null;
+  // knock the keyholder, 'member_only' → ask an admin. "Ngobrol dengan CEO"
+  // queue, zone-level — 'restricted' has no self-service path at all,
+  // 'queue' offers the join-queue form below.
+  deniedReason: 'locked' | 'member_only' | 'restricted' | 'queue' | null;
   // Potongan A2 — set the moment we've knocked and not yet resolved.
   pendingKnock: { zoneId: string; zoneName: string } | null;
   // QA #8 — same idea as pendingKnock, for the no-keyholder member-only flow.
@@ -30,7 +36,18 @@ export function ZoneLockBar({
   onDecide: (k: ZoneKnockRequest, admit: boolean) => void;
   onCancelApproval: () => void;
   onDecideApproval: (r: ZoneApprovalRequest, admit: boolean) => void;
+  // "Ngobrol dengan CEO" queue, zone-level (see useZoneLock.ts).
+  zoneQueueTicket: { zoneId: string; status: 'waiting' | 'called' | 'active'; durationMin: number; position: number | null } | null;
+  zoneQueueBusy: boolean;
+  zoneQueueError: string;
+  onJoinZoneQueue: (zoneId: string, durationMin: number, topic?: string) => void;
+  onCancelZoneQueue: () => void;
 }) {
+  const [queueDuration, setQueueDuration] = useState(15);
+  const [queueTopic, setQueueTopic] = useState('');
+
+  const queueingHere = zoneQueueTicket && zoneQueueTicket.zoneId === deniedZoneId;
+
   return (
     <>
       {/* Knock requests — only the keyholder ever receives these. */}
@@ -80,7 +97,10 @@ export function ZoneLockBar({
           out of it. Stays up regardless of exactly where you're standing —
           the point is you're still waiting, not that you haven't moved.
           QA #8 — pendingApproval is the same idea for the member-only flow,
-          same priority/placement, just its own Cancel emit underneath. */}
+          same priority/placement, just its own Cancel emit underneath.
+          "Ngobrol dengan CEO" queue — queueingHere is the zone-level sibling:
+          once a ticket exists for the zone we're currently bounced from, show
+          its live status instead of the plain deny card below. */}
       {pendingKnock ? (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-purple-200 dark:border-gray-700 p-3">
           <p className="text-xs text-gray-800 dark:text-gray-100 inline-flex items-center gap-1.5">
@@ -100,6 +120,69 @@ export function ZoneLockBar({
           <button onClick={onCancelApproval} className="w-full py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium cursor-pointer">
             Cancel
           </button>
+        </div>
+      ) : queueingHere && zoneQueueTicket ? (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-purple-200 dark:border-gray-700 p-3">
+          <p className="text-xs text-gray-800 dark:text-gray-100 inline-flex items-center gap-1.5">
+            <HourglassSplit size={11} className="text-purple-600" />
+            {zoneQueueTicket.status === 'called' ? 'Giliranmu — masuk sekarang…' : `Menunggu giliran di ${deniedZoneName ?? 'zona ini'}...`}
+          </p>
+          <p className="text-[10px] text-gray-400 mb-2">
+            {zoneQueueTicket.status === 'called'
+              ? 'Sedang membuka akses untukmu.'
+              : `Nomor antreanmu ke ${zoneQueueTicket.position ?? '—'}, durasi ${zoneQueueTicket.durationMin} menit.`}
+          </p>
+          {zoneQueueTicket.status === 'waiting' && (
+            <button onClick={onCancelZoneQueue} disabled={zoneQueueBusy} className="w-full py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium cursor-pointer disabled:opacity-50">
+              Batalkan antrean
+            </button>
+          )}
+        </div>
+      ) : deniedReason === 'queue' && deniedZoneId ? (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-purple-200 dark:border-gray-700 p-3">
+          <p className="text-xs text-gray-800 dark:text-gray-100 inline-flex items-center gap-1.5 mb-1.5">
+            <PeopleFill size={11} className="text-purple-600" /> <span className="font-semibold">{deniedZoneName ?? 'Zona ini'}</span> pakai sistem antrean
+          </p>
+          <p className="text-[10px] text-gray-400 mb-2">Isi form ini untuk dapat nomor antrean — otomatis masuk begitu giliranmu tiba.</p>
+          <div className="grid grid-cols-4 gap-1.5 mb-2">
+            {ZONE_QUEUE_DURATION_OPTIONS.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setQueueDuration(m)}
+                className={`text-[11px] py-1.5 rounded-md border cursor-pointer ${
+                  queueDuration === m
+                    ? 'bg-purple-600 border-purple-600 text-white'
+                    : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-purple-300'
+                }`}
+              >
+                {m}m
+              </button>
+            ))}
+          </div>
+          <input
+            type="text"
+            value={queueTopic}
+            onChange={(e) => setQueueTopic(e.target.value)}
+            maxLength={300}
+            placeholder="Keperluan (opsional)"
+            className="w-full text-xs px-2.5 py-1.5 mb-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus:outline-none focus:ring-1 focus:ring-purple-400"
+          />
+          {zoneQueueError && <p className="text-[10px] text-red-500 mb-1.5">{zoneQueueError}</p>}
+          <button
+            onClick={() => onJoinZoneQueue(deniedZoneId, queueDuration, queueTopic || undefined)}
+            disabled={zoneQueueBusy}
+            className="w-full py-1.5 rounded-lg bg-purple-600 text-white text-xs font-medium cursor-pointer hover:bg-purple-700 disabled:opacity-50"
+          >
+            {zoneQueueBusy ? 'Mendaftar…' : 'Daftar antrean'}
+          </button>
+        </div>
+      ) : deniedReason === 'restricted' && deniedZoneId ? (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-amber-200 dark:border-gray-700 p-3">
+          <p className="text-xs text-gray-800 dark:text-gray-100 inline-flex items-center gap-1.5">
+            <LockFill size={11} className="text-amber-600" /> <span className="font-semibold">{deniedZoneName ?? 'Zona ini'}</span> dibatasi
+          </p>
+          <p className="text-[10px] text-gray-400">Hanya role tertentu yang bisa masuk. Hubungi admin kalau kamu seharusnya punya akses.</p>
         </div>
       ) : deniedZoneId && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-amber-200 dark:border-gray-700 p-3">

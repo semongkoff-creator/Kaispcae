@@ -94,17 +94,33 @@ export const adminApi = {
       body: JSON.stringify({ restrictedAccess, queueEnabled }),
     }),
 
-  getRoomQueue: (slug: string) =>
+  getRoomQueue: (slug: string, zoneId?: string) =>
     req<{
       queueEnabled: boolean;
       entries: {
         id: string; userId: string; name: string; topic: string | null; durationMin: number;
         status: 'waiting' | 'called' | 'active'; requestedAt: number; calledAt: number | null; endsAt: number | null;
       }[];
-    }>(`/rooms/${slug}/queue`),
+    }>(`/rooms/${slug}/queue${zoneId ? `?zoneId=${encodeURIComponent(zoneId)}` : ''}`),
 
   skipQueueEntry: (slug: string, entryId: string) =>
     req<{ ok: true }>(`/rooms/${slug}/queue/${entryId}/skip`, { method: 'POST' }),
+
+  // "Ngobrol dengan CEO" queue, zone-level (see server/src/lib/zoneMembership.ts)
+  // — "ruang CEO" turned out to be a zone inside the shared office, not a
+  // separate Room, so restricting it is configured per-zone rather than via
+  // setRoomRestricted above.
+  getZoneRestrictions: (slug: string) =>
+    req<{
+      zones: { id: string; name: string }[];
+      restrictions: { zoneId: string; minRole: string; queueEnabled: boolean }[];
+    }>(`/rooms/${slug}/zone-restrictions`),
+
+  setZoneRestriction: (slug: string, zoneId: string, patch: { enabled: boolean; minRole?: string; queueEnabled?: boolean }) =>
+    req<{ ok: true }>(`/rooms/${slug}/zones/${encodeURIComponent(zoneId)}/restriction`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
 
   getRoomAccessList: (slug: string) =>
     req<{ members: { userId: string; displayName: string; email: string; role: string; status: string }[] }>(`/rooms/${slug}/access-list`)
