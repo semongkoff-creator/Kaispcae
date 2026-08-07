@@ -23,7 +23,14 @@ export interface EntryDecision {
   //   restrictedMinRole. Deliberately NOT the same as 'needs-request' —
   //   there is no self-service path out of this one; an admin has to grant
   //   the role directly (see routes/rooms.ts's room-access endpoints).
-  reason: 'open' | 'member' | 'privileged' | 'pending' | 'rejected' | 'needs-request' | 'restricted';
+  // 'queue' — same as 'restricted', except room.queueEnabled is also on, so
+  //   the client should show the "join the queue" form instead of a dead
+  //   end (see lib/roomQueue.ts).
+  // 'queue-active' — this user currently holds a 'called' or unexpired
+  //   'active' RoomQueueEntry for this room: a session-scoped admission,
+  //   separate from a real RoomMember role grant (see RoomQueueEntry's own
+  //   doc comment for why it's not just a temporary role).
+  reason: 'open' | 'member' | 'privileged' | 'pending' | 'rejected' | 'needs-request' | 'restricted' | 'queue' | 'queue-active';
 }
 
 // Owner and global admins always get in: the owner cannot be locked out of
@@ -31,7 +38,7 @@ export interface EntryDecision {
 // shared/permissions.ts's AccountRole).
 export async function resolveEntry(
   prisma: PrismaClient,
-  room: { id: string; ownerId: string; requiresApproval: boolean; restrictedAccess?: boolean; restrictedMinRole?: string },
+  room: { id: string; ownerId: string; requiresApproval: boolean; restrictedAccess?: boolean; restrictedMinRole?: string; queueEnabled?: boolean },
   userId: string,
 ): Promise<EntryDecision> {
   if (userId === room.ownerId) return { allowed: true, reason: 'privileged' };
@@ -52,6 +59,20 @@ export async function resolveEntry(
     const minRole = (room.restrictedMinRole as Role | undefined) ?? 'staff';
     if (member?.status === 'active' && roleAtLeast(role, minRole)) {
       return { allowed: true, reason: 'member' };
+    }
+
+    // "Ngobrol dengan CEO" queue — a 'called' ticket (their turn) or an
+    // 'active' one that hasn't expired yet (a mid-session reconnect) both
+    // admit, without ever touching the persistent RoomMember role above.
+    if (room.queueEnabled) {
+      const ticket = await prisma.roomQueueEntry.findFirst({
+        where: { roomId: room.id, userId, status: { in: ['called', 'active'] } },
+      });
+      if (ticket?.status === 'called') return { allowed: true, reason: 'queue-active' };
+      if (ticket?.status === 'active' && ticket.endsAt && ticket.endsAt > new Date()) {
+        return { allowed: true, reason: 'queue-active' };
+      }
+      return { allowed: false, reason: 'queue' };
     }
     return { allowed: false, reason: 'restricted' };
   }

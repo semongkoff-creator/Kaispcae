@@ -7,7 +7,8 @@ import { resolveRoomRole } from '../lib/roles';
 import { resolveEntry } from '../lib/roomMembership';
 import { groupConversationId } from '../lib/conversations';
 import { requireWorkspace } from '../lib/workspace';
-import { getConnectedAdminSocketIds } from '../socket/roomHandler';
+import { getConnectedAdminSocketIds, forceLeaveForQueue } from '../socket/roomHandler';
+import { advanceQueue, QUEUE_MIN_MINUTES, QUEUE_MAX_MINUTES } from '../lib/roomQueue';
 
 const roomMembers = Router();
 
@@ -67,6 +68,12 @@ roomMembers.post('/rooms/:slug/join-request', authenticateToken, async (req: Aut
     // by an admin (see the room-access endpoints), never requested.
     if (entry.reason === 'restricted') {
       return res.status(403).json({ status: 'restricted', error: 'Room ini dibatasi. Hubungi admin untuk diberi akses.' });
+    }
+    // Same "no auto-created pending row" reasoning as 'restricted' above —
+    // a queue-gated room's only self-service path is POST .../queue/join,
+    // never this ordinary join-request flow.
+    if (entry.reason === 'queue') {
+      return res.status(403).json({ status: 'queue', error: 'Room ini pakai sistem antrean. Daftar antrean untuk mendapat giliran.' });
     }
 
     await prisma.roomMember.upsert({
@@ -336,7 +343,7 @@ roomMembers.get('/admin/rooms-approval', authenticateToken, requireWorkspace('wo
     const prisma = getPrisma();
     const rooms = await prisma.room.findMany({
       orderBy: { createdAt: 'desc' },
-      select: { slug: true, name: true, requiresApproval: true, isPublic: true, restrictedAccess: true, restrictedMinRole: true },
+      select: { slug: true, name: true, requiresApproval: true, isPublic: true, restrictedAccess: true, restrictedMinRole: true, queueEnabled: true },
     });
     return res.json({ rooms });
   } catch (err) {
@@ -391,6 +398,14 @@ roomMembers.patch('/rooms/:slug/restricted', authenticateToken, async (req: Auth
     if (restrictedMinRole !== undefined && !['staff', 'admin', 'owner'].includes(restrictedMinRole)) {
       return res.status(400).json({ error: 'restrictedMinRole tidak valid' });
     }
+    // "Ngobrol dengan CEO" queue toggle — bundled into this same endpoint
+    // (rather than a separate route) because it's configured from the exact
+    // same Admin Console section as restrictedAccess itself, and only ever
+    // makes sense alongside it.
+    const queueEnabled = req.body?.queueEnabled;
+    if (queueEnabled !== undefined && typeof queueEnabled !== 'boolean') {
+      return res.status(400).json({ error: 'queueEnabled harus boolean' });
+    }
     const prisma = getPrisma();
     const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
@@ -398,13 +413,202 @@ roomMembers.patch('/rooms/:slug/restricted', authenticateToken, async (req: Auth
 
     const updated = await prisma.room.update({
       where: { id: room!.id },
-      data: { restrictedAccess, ...(restrictedMinRole ? { restrictedMinRole } : {}) },
-      select: { slug: true, restrictedAccess: true, restrictedMinRole: true },
+      data: {
+        restrictedAccess,
+        ...(restrictedMinRole ? { restrictedMinRole } : {}),
+        ...(queueEnabled !== undefined ? { queueEnabled } : {}),
+      },
+      select: { slug: true, restrictedAccess: true, restrictedMinRole: true, queueEnabled: true },
     });
     return res.json(updated);
   } catch (err) {
     console.error('[roomMembers] set restricted error:', err);
     return res.status(500).json({ error: 'Gagal menyimpan setelan' });
+  }
+});
+
+// ── "Ngobrol dengan CEO" queue ──────────────────────────────────────────
+// Self-service (join/mine/cancel) needs only authentication — that's the
+// whole point, a restricted room with queueing on has NO admin-mediated
+// self-service path otherwise. Management (list/skip) reuses requireRoomAdmin,
+// same gate as the access-grant/revoke endpoints above.
+
+// GET /api/rooms/:slug/queue/mine — the requester's own ticket, if any, plus
+// their live position (only meaningful while 'waiting' — once 'called' or
+// 'active' there's nothing left to wait behind). Polled by the client every
+// few seconds while waiting, same convention as JoinGate's existing
+// 'pending' poll for ordinary approval-gated rooms.
+roomMembers.get('/rooms/:slug/queue/mine', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+
+    const entry = await prisma.roomQueueEntry.findFirst({
+      where: { roomId: room.id, userId: req.userId!, status: { in: ['waiting', 'called', 'active'] } },
+      orderBy: { requestedAt: 'desc' },
+    });
+    if (!entry) return res.json({ entry: null });
+
+    let position: number | null = null;
+    if (entry.status === 'waiting') {
+      position = 1 + (await prisma.roomQueueEntry.count({
+        where: { roomId: room.id, status: 'waiting', requestedAt: { lt: entry.requestedAt } },
+      }));
+    }
+    return res.json({
+      entry: {
+        id: entry.id,
+        status: entry.status,
+        durationMin: entry.durationMin,
+        position,
+        calledAt: entry.calledAt?.getTime() ?? null,
+        endsAt: entry.endsAt?.getTime() ?? null,
+      },
+    });
+  } catch (err) {
+    console.error('[roomMembers] queue/mine error:', err);
+    return res.status(500).json({ error: 'Gagal memuat status antrean' });
+  }
+});
+
+// POST /api/rooms/:slug/queue/join — { topic?, durationMin } — the form
+// submit. Idempotent like join-request above: re-posting while already
+// queued just returns the existing ticket instead of stacking duplicates.
+roomMembers.post('/rooms/:slug/queue/join', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const durationMin = Math.round(Number(req.body?.durationMin));
+    if (!Number.isFinite(durationMin) || durationMin < QUEUE_MIN_MINUTES || durationMin > QUEUE_MAX_MINUTES) {
+      return res.status(400).json({ error: `Durasi harus antara ${QUEUE_MIN_MINUTES}-${QUEUE_MAX_MINUTES} menit` });
+    }
+    const topic = typeof req.body?.topic === 'string' ? req.body.topic.trim().slice(0, 300) || null : null;
+
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    if (!room.restrictedAccess || !room.queueEnabled) {
+      return res.status(400).json({ error: 'Room ini tidak membuka antrean' });
+    }
+
+    const entry = await resolveEntry(prisma, room, req.userId!);
+    if (entry.allowed) return res.status(400).json({ error: 'Kamu sudah punya akses ke room ini' });
+
+    const existing = await prisma.roomQueueEntry.findFirst({
+      where: { roomId: room.id, userId: req.userId!, status: { in: ['waiting', 'called', 'active'] } },
+    });
+    if (existing) return res.status(200).json({ status: existing.status, id: existing.id });
+
+    const requester = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
+    const created = await prisma.roomQueueEntry.create({
+      data: {
+        roomId: room.id,
+        userId: req.userId!,
+        name: requester?.displayName || 'Seseorang',
+        topic,
+        durationMin,
+        status: 'waiting',
+      },
+    });
+
+    // Opportunistic — if the room's slot happens to be free right now (e.g.
+    // this is the only person waiting), this is what actually calls them
+    // rather than making them wait for the next 20s sweep tick.
+    await advanceQueue(prisma, room.id);
+
+    return res.status(201).json({ status: 'waiting', id: created.id });
+  } catch (err) {
+    console.error('[roomMembers] queue/join error:', err);
+    return res.status(500).json({ error: 'Gagal mendaftar antrean' });
+  }
+});
+
+// POST /api/rooms/:slug/queue/cancel — the requester changing their mind
+// while still 'waiting' or 'called'. Deliberately does NOT accept 'active'
+// (leaving mid-session goes through the ordinary in-room leave flow, which
+// already completes the ticket immediately — see roomHandler.ts's
+// handleLeave).
+roomMembers.post('/rooms/:slug/queue/cancel', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+
+    const entry = await prisma.roomQueueEntry.findFirst({
+      where: { roomId: room.id, userId: req.userId!, status: { in: ['waiting', 'called'] } },
+    });
+    if (!entry) return res.status(404).json({ error: 'Tidak ada antrean aktif' });
+
+    await prisma.roomQueueEntry.update({ where: { id: entry.id }, data: { status: 'cancelled' } });
+    if (entry.status === 'called') await advanceQueue(prisma, room.id);
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[roomMembers] queue/cancel error:', err);
+    return res.status(500).json({ error: 'Gagal membatalkan antrean' });
+  }
+});
+
+// GET /api/rooms/:slug/queue — the admin's live view of the whole line, for
+// the Admin Console's queue manager.
+roomMembers.get('/rooms/:slug/queue', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    if (error === 404) return res.status(404).json({ error: 'Room not found' });
+    if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa melihat antrean' });
+
+    const rows = await prisma.roomQueueEntry.findMany({
+      where: { roomId: room!.id, status: { in: ['waiting', 'called', 'active'] } },
+      orderBy: { requestedAt: 'asc' },
+    });
+    return res.json({
+      queueEnabled: room!.queueEnabled,
+      entries: rows.map((r) => ({
+        id: r.id,
+        userId: r.userId,
+        name: r.name,
+        topic: r.topic,
+        durationMin: r.durationMin,
+        status: r.status,
+        requestedAt: r.requestedAt.getTime(),
+        calledAt: r.calledAt?.getTime() ?? null,
+        endsAt: r.endsAt?.getTime() ?? null,
+      })),
+    });
+  } catch (err) {
+    console.error('[roomMembers] queue list error:', err);
+    return res.status(500).json({ error: 'Gagal memuat antrean' });
+  }
+});
+
+// POST /api/rooms/:slug/queue/:entryId/skip — admin force-removes any entry
+// (waiting, called, or the one currently active), same as PLAYER_KICK is to
+// an ordinary member — for a no-show that's about to expire on its own
+// anyway, or someone who needs to be bumped from the line right now.
+roomMembers.post('/rooms/:slug/queue/:entryId/skip', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    if (error === 404) return res.status(404).json({ error: 'Room not found' });
+    if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa mengubah antrean' });
+
+    const entry = await prisma.roomQueueEntry.findUnique({ where: { id: req.params.entryId } });
+    if (!entry || entry.roomId !== room!.id || !['waiting', 'called', 'active'].includes(entry.status)) {
+      return res.status(404).json({ error: 'Entri antrean tidak ditemukan' });
+    }
+
+    const wasActive = entry.status === 'active';
+    await prisma.roomQueueEntry.update({
+      where: { id: entry.id },
+      data: wasActive ? { status: 'done', completedAt: new Date() } : { status: 'skipped' },
+    });
+    if (wasActive && ioRef) await forceLeaveForQueue(ioRef, entry.userId, room!.slug, room!.name);
+    await advanceQueue(prisma, room!.id);
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[roomMembers] queue skip error:', err);
+    return res.status(500).json({ error: 'Gagal mengubah antrean' });
   }
 });
 

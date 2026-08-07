@@ -9,6 +9,7 @@ import {
 } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';
 import { resolveEntry } from '../lib/roomMembership';
+import { admitCalledEntry, advanceQueue } from '../lib/roomQueue';
 import { logActivity } from '../lib/larkBase';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { redactInteractiveSecrets, redactDoorPasswords } from '../lib/redactFurniture';
@@ -386,6 +387,21 @@ export function getConnectedAdminSocketIds(roomSlug: string): string[] {
   return ids;
 }
 
+// "Ngobrol dengan CEO" queue — force-remove a user whose timed slot just
+// ended (called from queueSweep.ts, which lives outside this file and has
+// no socket of its own). Reuses handleLeave's exact cleanup, same reasoning
+// as PLAYER_KICK: to everyone else in the room, a timed-out queue slot must
+// look identical to an ordinary leave. A no-op if they've already
+// disconnected — the sweep already caught up on the DB side regardless.
+export async function forceLeaveForQueue(io: Server, userId: string, roomSlug: string, roomName: string): Promise<void> {
+  const targetSocketId = userSocketMap.get(userId);
+  if (!targetSocketId) return;
+  const targetSocket = io.sockets.sockets.get(targetSocketId);
+  if (!targetSocket) return;
+  targetSocket.emit(SocketEvents.QUEUE_SESSION_ENDED, { roomSlug, roomName });
+  await handleLeave(io, targetSocket, roomSlug);
+}
+
 export function registerRoomHandlers(io: Server, socket: Socket) {
   let currentRoom: string | null = null;
 
@@ -447,7 +463,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       // try/catch around both. A single catch that denied on any error would
       // fail closed for the ~191 walk-in rooms too, so a DB blip would lock
       // everyone out of rooms that never asked to be gated.
-      let approvalRoom: { id: string; ownerId: string; requiresApproval: boolean; restrictedAccess: boolean; restrictedMinRole: string; slug: string } | null = null;
+      let approvalRoom: { id: string; ownerId: string; requiresApproval: boolean; restrictedAccess: boolean; restrictedMinRole: string; queueEnabled: boolean; slug: string; name: string } | null = null;
       try {
         approvalRoom = await prisma.room.findUnique({ where: { slug: room } });
       } catch (e) {
@@ -480,6 +496,14 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
           if (!entry.allowed) {
             socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: entry.reason });
             return;
+          }
+          // "Ngobrol dengan CEO" queue — this is the actual moment the
+          // requester walks in, so it's the correct place (not the poll
+          // that got them here) to start their session clock. No-ops if
+          // they're already 'active' (a reconnect), so it can never
+          // double-fire or reset a running timer.
+          if (entry.reason === 'queue-active') {
+            await admitCalledEntry(prisma, approvalRoom.id, enteringUid);
           }
         } catch (e) {
           console.error('[room] approval check failed:', e);
@@ -2054,6 +2078,20 @@ async function savePositionForReconnect(room: string, socket: Socket): Promise<v
   if (player) saveLastKnownPosition(uid, room, player.x, player.y, player.direction);
 }
 
+// "Ngobrol dengan CEO" queue — see handleLeave's own call site. Cheap for
+// the overwhelming majority of leaves: bails on the very first query unless
+// this room actually has queueing on, so ordinary rooms pay one extra
+// findUnique and nothing more.
+async function completeActiveQueueEntryOnLeave(userId: string, roomSlug: string): Promise<void> {
+  const prisma = getPrisma();
+  const room = await prisma.room.findUnique({ where: { slug: roomSlug }, select: { id: true, name: true, queueEnabled: true } });
+  if (!room?.queueEnabled) return;
+  const entry = await prisma.roomQueueEntry.findFirst({ where: { roomId: room.id, userId, status: 'active' } });
+  if (!entry) return;
+  await prisma.roomQueueEntry.update({ where: { id: entry.id }, data: { status: 'done', completedAt: new Date() } });
+  await advanceQueue(prisma, room.id);
+}
+
 async function handleLeave(io: Server, socket: Socket, room: string | null) {
   if (!room) return;
   console.log(`[room] ${playerNames.get(socket.id) || socket.id} left ${room}`);
@@ -2070,6 +2108,17 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
   const leavingUid = findUserIdBySocket(socket.id);
   if (leavingUid) {
     await savePositionForReconnect(room, socket);
+
+    // "Ngobrol dengan CEO" queue — per product decision, leaving/disconnecting
+    // mid-slot (for ANY reason — LEAVE_ROOM, disconnect, or PLAYER_KICK all
+    // funnel through here, same as the allowlist revoke just below) counts as
+    // "done" and advances the queue immediately, rather than holding the next
+    // person hostage until the original timer would have expired. Fire-and-
+    // forget: this is bookkeeping for a queue that may not even be enabled on
+    // this room, and must never slow down or block an ordinary leave.
+    completeActiveQueueEntryOnLeave(leavingUid, room).catch((e) =>
+      console.error('[room] queue leave-complete error:', e),
+    );
 
     // A knock-admitted user's allowlist entry is a one-time entry pass, not
     // a standing grant — otherwise once let in, they (and anyone reading

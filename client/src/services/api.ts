@@ -363,6 +363,27 @@ export const api = {
   requestJoin: (slug: string) =>
     request<{ status: 'active' | 'pending' | 'rejected' }>(`/rooms/${slug}/join-request`, { method: 'POST' }),
 
+  // ── "Ngobrol dengan CEO" queue (see server/src/lib/roomQueue.ts) ──
+  joinQueue: (slug: string, durationMin: number, topic?: string) =>
+    request<{ status: string; id: string }>(`/rooms/${slug}/queue/join`, {
+      method: 'POST',
+      body: JSON.stringify({ durationMin, topic }),
+    }),
+
+  getMyQueueStatus: (slug: string) =>
+    request<{
+      entry: {
+        id: string;
+        status: 'waiting' | 'called' | 'active';
+        durationMin: number;
+        position: number | null;
+        calledAt: number | null;
+        endsAt: number | null;
+      } | null;
+    }>(`/rooms/${slug}/queue/mine`),
+
+  cancelQueue: (slug: string) => request<{ ok: true }>(`/rooms/${slug}/queue/cancel`, { method: 'POST' }),
+
   getJoinRequests: (slug: string) =>
     request<{ requests: { userId: string; displayName: string; email: string; requestedAt: number }[] }>(
       `/rooms/${slug}/join-requests`,

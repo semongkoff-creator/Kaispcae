@@ -870,6 +870,13 @@ export enum SocketEvents {
   PLAYER_FORCE_MUTE = 'player:force_mute',
   PLAYER_FORCE_MUTED = 'player:force_muted',
 
+  // "Ngobrol dengan CEO" queue (see server/src/lib/roomQueue.ts) — sent only
+  // to the removed player's own socket, same "never broadcast" shape as
+  // PLAYER_KICKED above, when their timed slot in a restricted+queued room
+  // runs out and the sweep force-removes them so the next person in line
+  // can be called.
+  QUEUE_SESSION_ENDED = 'queue:session_ended',
+
   // QA (Presence checklist item #8, "Member list akurat") — workspace-wide "who's online + which room" roster (NOT the
   // in-room ParticipantPanel, which only ever sees people standing in the
   // SAME room). Named `roster:` rather than reusing the existing `presence:`

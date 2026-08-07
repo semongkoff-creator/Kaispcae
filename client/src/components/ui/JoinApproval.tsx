@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { PersonCheck, PersonX, HourglassSplit, ShieldLock, XLg } from 'react-bootstrap-icons';
+import { PersonCheck, PersonX, HourglassSplit, ShieldLock, XLg, PeopleFill } from 'react-bootstrap-icons';
 import { api } from '@/services/api';
 
 // Room join approval, client half (server: routes/roomMembers.ts).
@@ -7,7 +7,21 @@ import { api } from '@/services/api';
 // Two surfaces, deliberately in one file because they are two ends of one
 // conversation: the person waiting, and the admin deciding.
 
-type Reason = 'needs-request' | 'pending' | 'rejected' | 'restricted' | 'error' | string;
+type Reason = 'needs-request' | 'pending' | 'rejected' | 'restricted' | 'error' | 'queue' | string;
+
+// "Ngobrol dengan CEO" queue ticket (see server/src/lib/roomQueue.ts).
+// 'active' never actually renders here — the instant a ticket reaches
+// 'called', the membership poll below notices resolveEntry now allows this
+// user in and fires onAdmitted(), swapping JoinGate out for the real room
+// before a 'called' ticket would ever flip to 'active' client-side.
+type QueueTicket = {
+  id: string;
+  status: 'waiting' | 'called' | 'active';
+  durationMin: number;
+  position: number | null;
+};
+
+const QUEUE_DURATION_OPTIONS = [15, 30, 45, 60, 90, 120];
 
 // What an employee sees instead of the room when it needs approval. This
 // exists because the socket gate denies the join outright — without it they
@@ -28,15 +42,25 @@ export function JoinGate({
   const [state, setState] = useState<Reason>(reason);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // "Ngobrol dengan CEO" queue — the requester's own ticket. 'loading' until
+  // the first fetch resolves, so the join form doesn't flash before we know
+  // whether they already have a ticket (e.g. they reloaded mid-wait).
+  const [ticket, setTicket] = useState<QueueTicket | null | 'loading'>('loading');
+  const [durationMin, setDurationMin] = useState(15);
+  const [topic, setTopic] = useState('');
 
-  useEffect(() => setState(reason), [reason]);
+  useEffect(() => { setState(reason); if (reason === 'queue') setTicket('loading'); }, [reason]);
 
-  // While pending, poll for the decision. The socket is NOT connected to this
-  // room — the join was denied, that is the whole point — so there is no
-  // event to listen for here; without this the screen's "kamu akan otomatis
-  // masuk" would simply be untrue and the user would sit there forever.
+  // While pending OR queued, poll for admission. The socket is NOT connected
+  // to this room — the join was denied, that is the whole point — so there
+  // is no event to listen for here; without this the screen's "kamu akan
+  // otomatis masuk" would simply be untrue and the user would sit there
+  // forever. Covers the queue wait too: the instant this user's ticket is
+  // called, resolveEntry starts returning allowed (reason 'queue-active'),
+  // so this single poll is what notices it and moves them into the room —
+  // no separate "your turn" mechanism needed.
   useEffect(() => {
-    if (state !== 'pending') return;
+    if (state !== 'pending' && state !== 'queue') return;
     const iv = setInterval(async () => {
       try {
         const m = await api.getMembership(roomSlug);
@@ -48,6 +72,50 @@ export function JoinGate({
     }, 5000);
     return () => clearInterval(iv);
   }, [state, roomSlug, onAdmitted]);
+
+  // The ticket itself — display only (position, waiting vs. already-called
+  // UI). Never what actually admits them (the membership poll above is).
+  const loadTicket = useCallback(async () => {
+    try {
+      const { entry } = await api.getMyQueueStatus(roomSlug);
+      setTicket(entry);
+    } catch {
+      setTicket(null);
+    }
+  }, [roomSlug]);
+
+  useEffect(() => {
+    if (state !== 'queue') return;
+    void loadTicket();
+    const iv = setInterval(loadTicket, 5000);
+    return () => clearInterval(iv);
+  }, [state, loadTicket]);
+
+  const joinQueue = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.joinQueue(roomSlug, durationMin, topic.trim() || undefined);
+      await loadTicket();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Gagal mendaftar antrean');
+    } finally {
+      setBusy(false);
+    }
+  }, [roomSlug, durationMin, topic, loadTicket]);
+
+  const cancelQueue = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.cancelQueue(roomSlug);
+      setTicket(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Gagal membatalkan antrean');
+    } finally {
+      setBusy(false);
+    }
+  }, [roomSlug]);
 
   const request = useCallback(async () => {
     setBusy(true);
@@ -72,7 +140,15 @@ export function JoinGate({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-6">
       <div className="w-full max-w-md text-center">
         <div className="w-14 h-14 rounded-2xl bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-300 flex items-center justify-center mx-auto mb-4">
-          {state === 'pending' ? <HourglassSplit size={24} /> : state === 'rejected' ? <PersonX size={24} /> : <ShieldLock size={24} />}
+          {state === 'pending' || (state === 'queue' && ticket && ticket !== 'loading') ? (
+            <HourglassSplit size={24} />
+          ) : state === 'rejected' ? (
+            <PersonX size={24} />
+          ) : state === 'queue' ? (
+            <PeopleFill size={24} />
+          ) : (
+            <ShieldLock size={24} />
+          )}
         </div>
 
         {state === 'pending' && (
@@ -107,6 +183,92 @@ export function JoinGate({
               <span className="font-medium text-gray-700 dark:text-gray-200">{title}</span> hanya bisa dimasuki role tertentu.
               Hubungi admin kalau kamu seharusnya punya akses.
             </p>
+          </>
+        )}
+
+        {/* "Ngobrol dengan CEO" queue — a restricted room with queueing on
+            (see resolveEntry's 'queue' reason). Three sub-states share this
+            one branch: loading the ticket, showing the join form (no ticket
+            yet), and showing the live waiting screen (ticket exists) —
+            switching on `ticket` rather than a separate `state` value keeps
+            the "am I admitted yet" poll above untouched by which of these
+            is currently rendered. */}
+        {state === 'queue' && ticket === 'loading' && (
+          <p className="text-sm text-gray-400">Memeriksa antrean…</p>
+        )}
+
+        {state === 'queue' && ticket === null && (
+          <>
+            <h1 className="text-lg font-semibold mb-1.5">Ngobrol dengan CEO</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+              <span className="font-medium text-gray-700 dark:text-gray-200">{title}</span> pakai sistem antrean. Isi form ini untuk
+              dapat nomor antrean — kamu akan otomatis masuk begitu giliranmu tiba.
+            </p>
+            <div className="text-left mb-4">
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">Durasi (menit)</label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {QUEUE_DURATION_OPTIONS.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setDurationMin(m)}
+                    className={`text-xs py-1.5 rounded-md border ${
+                      durationMin === m
+                        ? 'bg-purple-600 border-purple-600 text-white'
+                        : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-purple-300'
+                    }`}
+                  >
+                    {m} menit
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="text-left mb-5">
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">Keperluan (opsional)</label>
+              <input
+                type="text"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                maxLength={300}
+                placeholder="Mis. diskusi proposal Q3"
+                className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-purple-400"
+              />
+            </div>
+            <button
+              onClick={joinQueue}
+              disabled={busy}
+              className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg mb-2"
+            >
+              {busy ? 'Mendaftar…' : 'Daftar antrean'}
+            </button>
+          </>
+        )}
+
+        {state === 'queue' && ticket && ticket !== 'loading' && (
+          <>
+            <h1 className="text-lg font-semibold mb-1.5">
+              {ticket.status === 'called' ? 'Giliranmu sekarang' : 'Menunggu giliran'}
+            </h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+              {ticket.status === 'called' ? (
+                <>Room sedang dibuka untukmu — halaman ini akan otomatis masuk.</>
+              ) : (
+                <>
+                  Nomor antreanmu ke <span className="font-medium text-gray-700 dark:text-gray-200">{ticket.position ?? '—'}</span>.
+                  Kamu akan otomatis masuk ke <span className="font-medium text-gray-700 dark:text-gray-200">{title}</span> begitu
+                  giliranmu tiba, dengan waktu {ticket.durationMin} menit.
+                </>
+              )}
+            </p>
+            {ticket.status === 'waiting' && (
+              <button
+                onClick={cancelQueue}
+                disabled={busy}
+                className="text-xs text-gray-400 hover:text-red-500 disabled:opacity-50 mb-4"
+              >
+                Batalkan antrean
+              </button>
+            )}
           </>
         )}
 

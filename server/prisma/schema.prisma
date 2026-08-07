@@ -120,6 +120,7 @@ model User {
   docComments             DocComment[]              @relation("DocCommentAuthor")
   docVersions             DocVersion[]              @relation("DocVersionAuthor")
   roomMembers             RoomMember[]
+  roomQueueEntries        RoomQueueEntry[]
   ownedRooms              Room[]
   sentChatMessages        ChatMessage[]
   chatReads               ChatRead[]
@@ -672,9 +673,16 @@ model Room {
   // join-request grants, so approving someone into a NORMAL room never
   // accidentally satisfies a DIFFERENT room's restriction.
   restrictedMinRole  String               @default("staff")
+  // "Ngobrol dengan CEO" queue — only meaningful while restrictedAccess is
+  // on. When true, someone denied by restrictedAccess sees a "join the
+  // queue" form instead of a dead end (see resolveEntry's 'queue' reason);
+  // when false (default), a restricted room behaves exactly as before —
+  // admin-granted access only, no self-service path at all.
+  queueEnabled      Boolean              @default(false)
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
   members           RoomMember[]
+  queueEntries      RoomQueueEntry[]
   teleportLocations TeleportLocation[]
   ownerBookmarks    OwnerBookmark[]
   mediaObjects      MapMediaObject[]
@@ -780,6 +788,46 @@ model RoomMember {
   @@id([userId, roomId])
   // The admin's pending queue for one room — the only query this column adds.
   @@index([roomId, status])
+}
+
+// "Ngobrol dengan CEO" queue — a timed, FIFO ticket for a restricted room
+// (Room.restrictedAccess + queueEnabled). Deliberately its OWN admission
+// mechanism, not a temporary RoomMember role grant: a queue slot is
+// session-scoped and self-expiring by design, and reusing the persistent
+// role-grant system for something meant to auto-revoke would mean either
+// polluting real role data with transient state or building a second
+// "temporary" flag on top of it anyway.
+//
+// Status lifecycle: waiting -> called -> active -> done
+//                       \-> cancelled   \-> skipped (no-show past the call
+//                                            grace period, or admin skip)
+// 'called' means "your turn — come in", but the clock does not start until
+// you actually walk in (resolveEntry/JOIN_ROOM flips called -> active the
+// moment entry is granted) — so idle time between the call and arriving
+// never eats into the requester's paid slot. See lib/roomQueue.ts.
+model RoomQueueEntry {
+  id          String    @id @default(cuid())
+  roomId      String
+  room        Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  topic       String?
+  // Chosen by the requester when they fill the form (not the admin) — see
+  // lib/roomQueue.ts's QUEUE_MIN_MINUTES/QUEUE_MAX_MINUTES for the bounds
+  // that keep one person from booking the whole day.
+  durationMin Int
+  status      String    @default("waiting")
+  requestedAt DateTime  @default(now())
+  calledAt    DateTime?
+  startedAt   DateTime?
+  endsAt      DateTime?
+  completedAt DateTime?
+
+  // The waiting-room position query (oldest 'waiting' first) and the sweep's
+  // expiry scans (by status) are the only queries this table serves.
+  @@index([roomId, status, requestedAt])
+  @@index([userId, status])
 }
 
 // §4.1 — Teleport (Admin): staff+ role, shared across everyone with access

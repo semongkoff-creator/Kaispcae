@@ -847,6 +847,16 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().setKickedNotice(`You were removed from this room by ${data.byName}.`);
     });
 
+    // "Ngobrol dengan CEO" queue (see server/src/lib/roomQueue.ts) — this
+    // user's timed slot ran out and the sweep already force-removed them via
+    // the same handleLeave cleanup PLAYER_KICKED uses; reuses kickedNotice's
+    // own "show it, then leave" UI rather than a whole new notice slot for
+    // what is, from this screen's point of view, the same event.
+    socket.on(SocketEvents.QUEUE_SESSION_ENDED, (data: { roomSlug: string; roomName: string }) => {
+      console.warn('[socket] queue session ended in', data.roomSlug);
+      useGameStore.getState().setKickedNotice('Waktu sesi ngobrolmu sudah habis.');
+    });
+
     // QA (Moderasi checklist item 11, "Kick/mute admin") — this listener
     // itself only records the notice; the ACTUAL mute (flipping the local
     // mic track + re-broadcasting PLAYER_MIC so the badge updates for

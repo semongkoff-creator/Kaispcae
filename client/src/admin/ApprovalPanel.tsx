@@ -19,7 +19,7 @@ const fmt = new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', h
 // one place that shows every pending request across every room.
 export function ApprovalPanel() {
   const [rows, setRows] = useState<PendingRequest[]>([]);
-  const [rooms, setRooms] = useState<{ slug: string; name: string; requiresApproval: boolean; isPublic: boolean; restrictedAccess: boolean; restrictedMinRole: string }[]>([]);
+  const [rooms, setRooms] = useState<{ slug: string; name: string; requiresApproval: boolean; isPublic: boolean; restrictedAccess: boolean; restrictedMinRole: string; queueEnabled: boolean }[]>([]);
   const [toggling, setToggling] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -228,6 +228,15 @@ export function ApprovalPanel() {
 // doc comment for why the socket-based ADMIN_GRANT/STAFF_GRANT couldn't be
 // reused here (circular: you'd need to already be let into the restricted
 // room to grant someone else access to it).
+type QueueEntryRow = {
+  id: string; userId: string; name: string; topic: string | null; durationMin: number;
+  status: 'waiting' | 'called' | 'active'; requestedAt: number; calledAt: number | null; endsAt: number | null;
+};
+
+const QUEUE_STATUS_LABEL: Record<QueueEntryRow['status'], string> = {
+  waiting: 'menunggu', called: 'dipanggil', active: 'sedang di dalam',
+};
+
 function RoomAccessManager({ slug }: { slug: string }) {
   const [members, setMembers] = useState<{ userId: string; displayName: string; email: string; role: string }[] | null>(null);
   const [people, setPeople] = useState<{ id: string; displayName: string }[] | null>(null);
@@ -237,6 +246,16 @@ function RoomAccessManager({ slug }: { slug: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
+  // "Ngobrol dengan CEO" queue — its own toggle + live list, nested under
+  // this same access-manager flyout since it only ever makes sense for a
+  // room that's already restricted. Polled every 5s while this panel is
+  // open, same convention as JoinGate's own queue-status poll — an admin
+  // watching the line should see it move without manually refreshing.
+  const [queueEnabled, setQueueEnabled] = useState(false);
+  const [queueEntries, setQueueEntries] = useState<QueueEntryRow[] | null>(null);
+  const [queueToggling, setQueueToggling] = useState(false);
+  const [queueBusy, setQueueBusy] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     try {
       setMembers(await adminApi.getRoomAccessList(slug));
@@ -245,10 +264,52 @@ function RoomAccessManager({ slug }: { slug: string }) {
     }
   }, [slug]);
 
+  const loadQueue = useCallback(async () => {
+    try {
+      const res = await adminApi.getRoomQueue(slug);
+      setQueueEnabled(res.queueEnabled);
+      setQueueEntries(res.entries);
+    } catch {
+      // Silent — this is a background refresh; the panel just keeps showing
+      // the last-known list rather than flashing an error on a blip.
+    }
+  }, [slug]);
+
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void loadQueue();
+    const iv = setInterval(loadQueue, 5000);
+    return () => clearInterval(iv);
+  }, [loadQueue]);
   useEffect(() => {
     api.getWorkspacePeople().then((res) => setPeople(res.people)).catch(() => setPeople([]));
   }, []);
+
+  const toggleQueue = async () => {
+    const next = !queueEnabled;
+    setQueueToggling(true);
+    setQueueEnabled(next);
+    try {
+      await adminApi.setRoomQueueEnabled(slug, true, next);
+    } catch (e) {
+      setQueueEnabled(!next);
+      setError(e instanceof Error ? e.message : 'Gagal menyimpan');
+    } finally {
+      setQueueToggling(false);
+    }
+  };
+
+  const skipQueueEntry = async (entryId: string) => {
+    setQueueBusy(entryId);
+    try {
+      await adminApi.skipQueueEntry(slug, entryId);
+      await loadQueue();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Gagal mengubah antrean');
+    } finally {
+      setQueueBusy(null);
+    }
+  };
 
   const grant = async () => {
     if (!pickedUserId) return;
@@ -345,6 +406,53 @@ function RoomAccessManager({ slug }: { slug: string }) {
               </button>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* "Ngobrol dengan CEO" queue — self-service alternative for everyone
+          NOT on the access list above: they fill their own form (name,
+          keperluan, durasi) instead of waiting on an admin to grant access. */}
+      <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800">
+        <label className="flex items-center gap-2 text-xs mb-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={queueEnabled}
+            disabled={queueToggling}
+            onChange={toggleQueue}
+            className="w-3.5 h-3.5 accent-purple-600 cursor-pointer"
+          />
+          <span className="font-medium">Aktifkan antrean &quot;Ngobrol dengan CEO&quot;</span>
+        </label>
+        <p className="text-[11px] text-gray-400 mb-2">
+          Orang yang ditolak masuk bisa isi form untuk dapat nomor antrean dan pilih durasi sendiri — otomatis masuk saat gilirannya,
+          otomatis keluar saat waktunya habis, lalu giliran berikutnya otomatis masuk.
+        </p>
+        {queueEnabled && (
+          queueEntries === null ? (
+            <p className="text-xs text-gray-400">Memuat antrean…</p>
+          ) : queueEntries.length === 0 ? (
+            <p className="text-xs text-gray-400">Antrean kosong.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {queueEntries.map((q) => (
+                <div key={q.id} className="flex items-center gap-2 text-xs">
+                  <span className="flex-1 min-w-0 truncate">
+                    {q.name}
+                    {q.topic ? ` — ${q.topic}` : ''}{' '}
+                    <span className="text-gray-400">({QUEUE_STATUS_LABEL[q.status]}, {q.durationMin} menit)</span>
+                  </span>
+                  <button
+                    onClick={() => skipQueueEntry(q.id)}
+                    disabled={queueBusy === q.id}
+                    title="Lewati / keluarkan dari antrean"
+                    className="text-gray-400 hover:text-red-500 disabled:opacity-50 cursor-pointer"
+                  >
+                    <XLg size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )
         )}
       </div>
     </div>

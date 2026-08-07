@@ -69,7 +69,7 @@ export const adminApi = {
   // server/src/routes/roomMembers.ts). Unwrapped to the array here because
   // every caller wants the list, not the envelope.
   listRoomsApproval: () =>
-    req<{ rooms: { slug: string; name: string; requiresApproval: boolean; isPublic: boolean; restrictedAccess: boolean; restrictedMinRole: string }[] }>('/admin/rooms-approval')
+    req<{ rooms: { slug: string; name: string; requiresApproval: boolean; isPublic: boolean; restrictedAccess: boolean; restrictedMinRole: string; queueEnabled: boolean }[] }>('/admin/rooms-approval')
       .then((r) => r.rooms),
 
   setRoomApproval: (slug: string, requiresApproval: boolean) =>
@@ -81,10 +81,30 @@ export const adminApi = {
   // QA (Akses ruang checklist item 1, "Ruang sensitif terkontrol") — see
   // server/src/routes/roomMembers.ts's own doc comments on each endpoint.
   setRoomRestricted: (slug: string, restrictedAccess: boolean) =>
-    req<{ slug: string; restrictedAccess: boolean; restrictedMinRole: string }>(`/rooms/${slug}/restricted`, {
+    req<{ slug: string; restrictedAccess: boolean; restrictedMinRole: string; queueEnabled: boolean }>(`/rooms/${slug}/restricted`, {
       method: 'PATCH',
       body: JSON.stringify({ restrictedAccess }),
     }),
+
+  // "Ngobrol dengan CEO" queue toggle — same endpoint as setRoomRestricted
+  // above (see server/src/routes/roomMembers.ts's own comment on why).
+  setRoomQueueEnabled: (slug: string, restrictedAccess: boolean, queueEnabled: boolean) =>
+    req<{ slug: string; restrictedAccess: boolean; restrictedMinRole: string; queueEnabled: boolean }>(`/rooms/${slug}/restricted`, {
+      method: 'PATCH',
+      body: JSON.stringify({ restrictedAccess, queueEnabled }),
+    }),
+
+  getRoomQueue: (slug: string) =>
+    req<{
+      queueEnabled: boolean;
+      entries: {
+        id: string; userId: string; name: string; topic: string | null; durationMin: number;
+        status: 'waiting' | 'called' | 'active'; requestedAt: number; calledAt: number | null; endsAt: number | null;
+      }[];
+    }>(`/rooms/${slug}/queue`),
+
+  skipQueueEntry: (slug: string, entryId: string) =>
+    req<{ ok: true }>(`/rooms/${slug}/queue/${entryId}/skip`, { method: 'POST' }),
 
   getRoomAccessList: (slug: string) =>
     req<{ members: { userId: string; displayName: string; email: string; role: string; status: string }[] }>(`/rooms/${slug}/access-list`)

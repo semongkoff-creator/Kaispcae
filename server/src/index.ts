@@ -47,6 +47,7 @@ import { startLarkEventStream } from './lib/larkWs';
 import { subscribeLeaveApproval } from './lib/larkApproval';
 import { startReminderSweep } from './socket/reminderSweep';
 import { startAttendanceSweep } from './socket/attendanceSweep';
+import { startQueueSweep } from './socket/queueSweep';
 import { getYoutubeQuotaStatus } from './lib/youtubeService';
 import { getTurnRelayStatus } from './socket/rtcHandler';
 
@@ -258,6 +259,7 @@ async function start() {
   startMediaExpirySweep(io);
   startReminderSweep(io);
   startAttendanceSweep(io);
+  startQueueSweep(io);
 
   httpServer.listen(config.PORT, () => {
     console.log(`[server] VirtualMeet running on http://localhost:${config.PORT}`);
