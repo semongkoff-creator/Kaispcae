@@ -59,6 +59,15 @@ roomMembers.post('/rooms/:slug/join-request', authenticateToken, async (req: Aut
     // let someone re-queue indefinitely past an admin's "no". Lifting it is an
     // admin action (approve below), not something the rejected user can do.
     if (entry.reason === 'rejected') return res.status(403).json({ status: 'rejected', error: 'Permintaan bergabung ditolak admin.' });
+    // QA (Akses ruang checklist item 1, "Ruang sensitif terkontrol") — a
+    // restricted room has NO self-service request path, unlike an ordinary
+    // approval-gated one below — falling through to that would wrongly
+    // create a pending row and notify admins as if this were a normal
+    // "please let me in" request. Access here can only be granted directly
+    // by an admin (see the room-access endpoints), never requested.
+    if (entry.reason === 'restricted') {
+      return res.status(403).json({ status: 'restricted', error: 'Room ini dibatasi. Hubungi admin untuk diberi akses.' });
+    }
 
     await prisma.roomMember.upsert({
       where: { userId_roomId: { userId: req.userId!, roomId: room.id } },
@@ -327,7 +336,7 @@ roomMembers.get('/admin/rooms-approval', authenticateToken, requireWorkspace('wo
     const prisma = getPrisma();
     const rooms = await prisma.room.findMany({
       orderBy: { createdAt: 'desc' },
-      select: { slug: true, name: true, requiresApproval: true, isPublic: true },
+      select: { slug: true, name: true, requiresApproval: true, isPublic: true, restrictedAccess: true, restrictedMinRole: true },
     });
     return res.json({ rooms });
   } catch (err) {
@@ -365,6 +374,127 @@ roomMembers.patch('/rooms/:slug/approval', authenticateToken, async (req: AuthRe
   } catch (err) {
     console.error('[roomMembers] set approval error:', err);
     return res.status(500).json({ error: 'Gagal menyimpan setelan' });
+  }
+});
+
+// QA (Akses ruang checklist item 1, "Ruang sensitif terkontrol") — turn the
+// stricter gate on/off for one room, same shape as PATCH /approval above
+// (same room-admin gate, same "existing active+sufficient-role members
+// aren't evicted" posture — see resolveEntry's own comment).
+roomMembers.patch('/rooms/:slug/restricted', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const restrictedAccess = req.body?.restrictedAccess;
+    if (typeof restrictedAccess !== 'boolean') {
+      return res.status(400).json({ error: 'restrictedAccess harus boolean' });
+    }
+    const restrictedMinRole = req.body?.restrictedMinRole;
+    if (restrictedMinRole !== undefined && !['staff', 'admin', 'owner'].includes(restrictedMinRole)) {
+      return res.status(400).json({ error: 'restrictedMinRole tidak valid' });
+    }
+    const prisma = getPrisma();
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    if (error === 404) return res.status(404).json({ error: 'Room not found' });
+    if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa mengubah setelan ini' });
+
+    const updated = await prisma.room.update({
+      where: { id: room!.id },
+      data: { restrictedAccess, ...(restrictedMinRole ? { restrictedMinRole } : {}) },
+      select: { slug: true, restrictedAccess: true, restrictedMinRole: true },
+    });
+    return res.json(updated);
+  } catch (err) {
+    console.error('[roomMembers] set restricted error:', err);
+    return res.status(500).json({ error: 'Gagal menyimpan setelan' });
+  }
+});
+
+// GET /api/rooms/:slug/access-list — everyone currently holding a
+// RoomMember row with role staff/admin (owner is implicit — the room's
+// own ownerId, not a RoomMember row) — i.e. exactly who a restricted room
+// currently admits, for the Admin Console's room-access manager to display.
+roomMembers.get('/rooms/:slug/access-list', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    if (error === 404) return res.status(404).json({ error: 'Room not found' });
+    if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa melihat ini' });
+
+    const members = await prisma.roomMember.findMany({
+      where: { roomId: room!.id, role: { in: ['staff', 'admin'] } },
+      include: { user: { select: { id: true, displayName: true, email: true } } },
+      orderBy: { joinedAt: 'asc' },
+    });
+    return res.json({
+      members: members.map((m) => ({ userId: m.userId, displayName: m.user.displayName, email: m.user.email, role: m.role, status: m.status })),
+    });
+  } catch (err) {
+    console.error('[roomMembers] access-list error:', err);
+    return res.status(500).json({ error: 'Gagal memuat daftar akses' });
+  }
+});
+
+// POST /api/rooms/:slug/access-grant — grant a user staff/admin role in
+// THIS room directly, without requiring them to be online/present — the
+// socket-based ADMIN_GRANT/STAFF_GRANT (roomHandler.ts) only works against
+// someone currently standing in front of you, which is circular for a
+// restricted room nobody unauthorized can even enter to be granted access
+// from inside. Deliberately does NOT require an existing 'active'
+// membership row first — granting IS how someone gets one, same as
+// approving a join-request does.
+roomMembers.post('/rooms/:slug/access-grant', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUserId = req.body?.userId;
+    const role = req.body?.role;
+    if (typeof targetUserId !== 'string' || !targetUserId) return res.status(400).json({ error: 'userId wajib diisi' });
+    if (role !== 'staff' && role !== 'admin') return res.status(400).json({ error: 'role harus staff atau admin' });
+
+    const prisma = getPrisma();
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    if (error === 404) return res.status(404).json({ error: 'Room not found' });
+    if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa memberi akses' });
+
+    const target = await prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true, displayName: true } });
+    if (!target) return res.status(404).json({ error: 'User tidak ditemukan' });
+
+    await prisma.roomMember.upsert({
+      where: { userId_roomId: { userId: targetUserId, roomId: room!.id } },
+      create: { userId: targetUserId, roomId: room!.id, role, status: 'active' },
+      // status:'active' unconditionally — a grant is an explicit admit
+      // decision, same as approving a pending join-request; a previously
+      // 'rejected' or 'pending' row must not stay stuck once an admin has
+      // directly handed this person a role.
+      update: { role, status: 'active' },
+    });
+    return res.json({ ok: true, userId: targetUserId, displayName: target.displayName, role });
+  } catch (err) {
+    console.error('[roomMembers] access-grant error:', err);
+    return res.status(500).json({ error: 'Gagal memberi akses' });
+  }
+});
+
+// POST /api/rooms/:slug/access-revoke — the inverse: drop back to plain
+// 'member' (not deleted outright — they may still have ordinary walk-in
+// membership in a non-restricted room; only the ELEVATED role that
+// satisfied restrictedMinRole is what's being taken away).
+roomMembers.post('/rooms/:slug/access-revoke', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUserId = req.body?.userId;
+    if (typeof targetUserId !== 'string' || !targetUserId) return res.status(400).json({ error: 'userId wajib diisi' });
+
+    const prisma = getPrisma();
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    if (error === 404) return res.status(404).json({ error: 'Room not found' });
+    if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa mencabut akses' });
+    if (targetUserId === room!.ownerId) return res.status(400).json({ error: 'Tidak bisa mencabut akses pemilik room' });
+
+    await prisma.roomMember.updateMany({
+      where: { userId: targetUserId, roomId: room!.id },
+      data: { role: 'member' },
+    });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[roomMembers] access-revoke error:', err);
+    return res.status(500).json({ error: 'Gagal mencabut akses' });
   }
 });
 

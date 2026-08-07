@@ -7,7 +7,7 @@ import { api } from '@/services/api';
 // Two surfaces, deliberately in one file because they are two ends of one
 // conversation: the person waiting, and the admin deciding.
 
-type Reason = 'needs-request' | 'pending' | 'rejected' | 'error' | string;
+type Reason = 'needs-request' | 'pending' | 'rejected' | 'restricted' | 'error' | string;
 
 // What an employee sees instead of the room when it needs approval. This
 // exists because the socket gate denies the join outright — without it they
@@ -91,6 +91,21 @@ export function JoinGate({
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
               Admin <span className="font-medium text-gray-700 dark:text-gray-200">{title}</span> menolak permintaan bergabungmu.
               Hubungi admin langsung kalau menurutmu ini keliru.
+            </p>
+          </>
+        )}
+
+        {/* QA (Akses ruang checklist item 1, "Ruang sensitif terkontrol") —
+            deliberately NO request button here, unlike needs-request below:
+            a restricted room has no self-service path at all — access can
+            only be granted directly by an admin (Admin Console's room
+            access manager), not requested and approved. */}
+        {state === 'restricted' && (
+          <>
+            <h1 className="text-lg font-semibold mb-1.5">Room ini dibatasi</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+              <span className="font-medium text-gray-700 dark:text-gray-200">{title}</span> hanya bisa dimasuki role tertentu.
+              Hubungi admin kalau kamu seharusnya punya akses.
             </p>
           </>
         )}

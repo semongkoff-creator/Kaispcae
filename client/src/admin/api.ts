@@ -69,13 +69,37 @@ export const adminApi = {
   // server/src/routes/roomMembers.ts). Unwrapped to the array here because
   // every caller wants the list, not the envelope.
   listRoomsApproval: () =>
-    req<{ rooms: { slug: string; name: string; requiresApproval: boolean; isPublic: boolean }[] }>('/admin/rooms-approval')
+    req<{ rooms: { slug: string; name: string; requiresApproval: boolean; isPublic: boolean; restrictedAccess: boolean; restrictedMinRole: string }[] }>('/admin/rooms-approval')
       .then((r) => r.rooms),
 
   setRoomApproval: (slug: string, requiresApproval: boolean) =>
     req<{ slug: string; requiresApproval: boolean }>(`/rooms/${slug}/approval`, {
       method: 'PATCH',
       body: JSON.stringify({ requiresApproval }),
+    }),
+
+  // QA (Akses ruang checklist item 1, "Ruang sensitif terkontrol") — see
+  // server/src/routes/roomMembers.ts's own doc comments on each endpoint.
+  setRoomRestricted: (slug: string, restrictedAccess: boolean) =>
+    req<{ slug: string; restrictedAccess: boolean; restrictedMinRole: string }>(`/rooms/${slug}/restricted`, {
+      method: 'PATCH',
+      body: JSON.stringify({ restrictedAccess }),
+    }),
+
+  getRoomAccessList: (slug: string) =>
+    req<{ members: { userId: string; displayName: string; email: string; role: string; status: string }[] }>(`/rooms/${slug}/access-list`)
+      .then((r) => r.members),
+
+  grantRoomAccess: (slug: string, userId: string, role: 'staff' | 'admin') =>
+    req<{ ok: true; userId: string; displayName: string; role: string }>(`/rooms/${slug}/access-grant`, {
+      method: 'POST',
+      body: JSON.stringify({ userId, role }),
+    }),
+
+  revokeRoomAccess: (slug: string, userId: string) =>
+    req<{ ok: true }>(`/rooms/${slug}/access-revoke`, {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
     }),
 
   listJoinRequests: () =>

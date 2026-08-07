@@ -113,6 +113,12 @@ const AVATAR_COLORS = ['#4ecdc4', '#ffe66d', '#a786df', '#6bcb77', '#4d96ff', '#
 const GUEST_UID_PREFIX = 'guest:';
 function guestUid(guestId: string): string { return `${GUEST_UID_PREFIX}${guestId}`; }
 function isGuestUid(uid: string): boolean { return uid.startsWith(GUEST_UID_PREFIX); }
+// QA (Akses tamu checklist item 2, "Guest terbatas") — cheaper than
+// resolving a uid first (findUserIdBySocket + isGuestUid) for handlers that
+// don't already have one on hand; reads the same server-verified guest JWT
+// claim every other guest check in this codebase ultimately traces back to
+// (see index.ts's io.use handshake middleware).
+function isGuestSocket(socket: Socket): boolean { return !!(socket.data as { guestId?: string }).guestId; }
 
 const DEFAULT_ROOM = 'main-office';
 const DEFAULT_ROOM_NAME = 'Main Office';
@@ -441,7 +447,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       // try/catch around both. A single catch that denied on any error would
       // fail closed for the ~191 walk-in rooms too, so a DB blip would lock
       // everyone out of rooms that never asked to be gated.
-      let approvalRoom: { id: string; ownerId: string; requiresApproval: boolean; slug: string } | null = null;
+      let approvalRoom: { id: string; ownerId: string; requiresApproval: boolean; restrictedAccess: boolean; restrictedMinRole: string; slug: string } | null = null;
       try {
         approvalRoom = await prisma.room.findUnique({ where: { slug: room } });
       } catch (e) {
@@ -452,7 +458,16 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         console.error('[room] could not read room for approval check:', e);
       }
 
-      if (approvalRoom?.requiresApproval) {
+      // QA (Akses ruang checklist item 1) — restrictedAccess must be
+      // checked regardless of requiresApproval's own value: they're
+      // independent flags (a room could be restrictedAccess=true but
+      // requiresApproval=false, e.g. left at its default), and
+      // resolveEntry itself already checks restrictedAccess FIRST — but
+      // only if it's actually reached, which requiresApproval alone used
+      // to gate. Without this OR, a restricted room with requiresApproval
+      // off would skip resolveEntry entirely and fall through to the plain
+      // walk-in path below, letting anyone in.
+      if (approvalRoom?.requiresApproval || approvalRoom?.restrictedAccess) {
         // Past this point the room HAS asked to be gated, so errors fail closed:
         // an unverifiable entry into an approval-required room is exactly what
         // the gate exists to prevent.
@@ -917,6 +932,11 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   // otherwise receives).
   socket.on(SocketEvents.INTERACTIVE_PASSWORD_CHECK, async (data: InteractivePasswordCheckPayload) => {
     if (!canCheckInteractive(socket.id)) return;
+    // QA (Akses tamu checklist item 2, "Guest terbatas") — interactive
+    // objects (password prompts, door locks, API-triggered pieces,
+    // multi-choice) are internal-workspace tooling, not meeting features a
+    // link-in visitor needs.
+    if (isGuestSocket(socket)) return;
     const room = currentRoom; if (!room) return;
     const furnitureId = data?.furnitureId, attempt = data?.attempt;
     if (typeof furnitureId !== 'string' || typeof attempt !== 'string') return;
@@ -947,6 +967,9 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   // the actual "can walk through now" enforcement lives there, not here.
   socket.on(SocketEvents.INTERACTIVE_DOOR_PASSWORD_CHECK, async (data: InteractiveDoorPasswordCheckPayload) => {
     if (!canCheckInteractive(socket.id)) return;
+    // QA (Akses tamu checklist item 2) — same reasoning as the furniture
+    // password check above.
+    if (isGuestSocket(socket)) return;
     const room = currentRoom; if (!room) return;
     const x = data?.x, y = data?.y, attempt = data?.attempt;
     if (!Number.isInteger(x) || !Number.isInteger(y) || typeof attempt !== 'string') return;
@@ -979,6 +1002,9 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   // exactly what redactInteractiveSecrets already stripped from it).
   socket.on(SocketEvents.INTERACTIVE_CHOICE_CHECK, async (data: InteractiveChoiceCheckPayload) => {
     if (!canCheckInteractive(socket.id)) return;
+    // QA (Akses tamu checklist item 2) — same reasoning as the interactive
+    // handlers above.
+    if (isGuestSocket(socket)) return;
     const room = currentRoom; if (!room) return;
     const furnitureId = data?.furnitureId, selectedIndex = data?.selectedIndex;
     if (typeof furnitureId !== 'string' || !Number.isInteger(selectedIndex)) return;
@@ -1011,6 +1037,11 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   // third-party endpoint can't hang this handler indefinitely.
   socket.on(SocketEvents.INTERACTIVE_API_CALL, async (data: InteractiveApiCallPayload) => {
     if (!canApiCall(socket.id)) return;
+    // QA (Akses tamu checklist item 2) — this one especially: an admin-
+    // configured API call is internal workspace tooling by definition, and
+    // the server making the request on a guest's behalf is exactly the
+    // SSRF-by-proxy risk the comment above already flags for real members.
+    if (isGuestSocket(socket)) return;
     const room = currentRoom; if (!room) return;
     const furnitureId = data?.furnitureId;
     if (typeof furnitureId !== 'string') return;
@@ -1058,6 +1089,10 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   // save — no separate client-side removal logic needed anywhere.
   socket.on(SocketEvents.INTERACTIVE_CHANGE_OBJECT, async (data: InteractiveChangeObjectPayload) => {
     if (!canChangeObject(socket.id)) return;
+    // QA (Akses tamu checklist item 2) — same reasoning as the interactive
+    // handlers above; this one mutates the room's actual saved layerData
+    // for everyone, so it's especially not something a guest should trigger.
+    if (isGuestSocket(socket)) return;
     const room = currentRoom; if (!room) return;
     const furnitureId = data?.furnitureId;
     if (typeof furnitureId !== 'string') return;
@@ -1342,6 +1377,12 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const uid = findUserIdBySocket(socket.id);
     const nickname = data?.nickname?.trim();
     if (!uid || !nickname) return;
+    // QA (Akses tamu checklist item 2, "Guest terbatas") — "open to ALL
+    // roles" in the comment below has only ever meant every REAL member
+    // tier (member/staff/admin/owner), not guests — a link-in visitor
+    // pulling a real employee across the map isn't a case that comment's
+    // "per product decision" was actually about.
+    if (isGuestUid(uid)) return;
 
     // Summon is open to ALL roles (per product decision) — no staff gate. The
     // safety rails that remain are enough: the target must ACCEPT (consent),
@@ -1530,6 +1571,10 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   // 30s-per-target cooldown. Nothing persisted (optional activity_log only).
   socket.on(SocketEvents.SLAP, async (data: { nickname: string }) => {
     if (!canSlap(socket.id)) return;
+    // QA (Akses tamu checklist item 2) — no consent step at all (unlike
+    // Summon above), so this is even less appropriate for a guest to reach
+    // than Summon is.
+    if (isGuestSocket(socket)) return;
     const room = currentRoom; if (!room) return;
     const nickname = data?.nickname?.trim();
     if (!nickname) return;
@@ -1586,6 +1631,10 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
   socket.on(SocketEvents.PLAYER_HAND, async (raised: boolean) => {
     const room = currentRoom; if (!room) return;
+    // QA (Akses tamu checklist item 2, "Guest terbatas") — hand raise is a
+    // meeting-participation cue a guest attending a meeting has no real
+    // need for; kept to move/chat/mic/camera/screen per the confirmed cut.
+    if (isGuestSocket(socket)) return;
     const val = !!raised;
     // Visual ✋ badge: whole room, both raise and lower (unchanged).
     socket.to(room).emit(SocketEvents.PLAYER_HAND_UPDATED, { id: socket.id, handRaised: val });
@@ -1622,6 +1671,10 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   // doesn't gate anything on it.
   socket.on(SocketEvents.PLAYER_HIDDEN, async (hidden: boolean) => {
     const room = currentRoom; if (!room) return;
+    // QA (Akses tamu checklist item 2) — a guest going invisible to regular
+    // members has no legitimate use case and only invites abuse (lurking
+    // unseen in someone else's room).
+    if (isGuestSocket(socket)) return;
     const val = !!hidden;
     socket.to(room).emit(SocketEvents.PLAYER_HIDDEN_UPDATED, { id: socket.id, hidden: val });
     updatePlayerHidden(room, socket.id, val);
@@ -1636,6 +1689,10 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   // rule for both, not two similar-but-separately-maintained copies.
   socket.on(SocketEvents.SOUNDBOARD_PLAY, async (data: SoundboardPlayPayload) => {
     const room = currentRoom; if (!room) return;
+    // QA (Akses tamu checklist item 2) — cosmetic but still fits the "very
+    // few features" cut — a visitor blasting sound effects isn't a case
+    // worth keeping open.
+    if (isGuestSocket(socket)) return;
     const soundId = data?.soundId;
     if (typeof soundId !== 'string' || !soundId) return;
     const now = Date.now();
@@ -1728,6 +1785,11 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
   socket.on(SocketEvents.PLAYER_SIT, (data: { sitting: boolean; x: number; y: number; direction: Avatar['direction']; seatFurnitureId?: string }) => {
     const room = currentRoom; if (!room) return;
+    // QA (Akses tamu checklist item 2) — chairs (transient sit, distinct
+    // from the persistent "assign as my seat" claim, which was already
+    // guest-blocked before this — furnitureHandler.ts isn't registered for
+    // guest sockets at all) aren't part of the kept-open guest feature set.
+    if (isGuestSocket(socket)) return;
     if (typeof data?.x !== 'number' || typeof data?.y !== 'number') return;
     // seatFurnitureId rides along so peers know WHICH chair this is — chairs
     // sharing a Furniture.tableId form a private audio group (see the client's
@@ -1875,6 +1937,31 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const byName = playerNames.get(socket.id) || 'An admin';
     targetSocket.emit(SocketEvents.PLAYER_KICKED, { byName });
     await handleLeave(io, targetSocket, room);
+  });
+
+  // QA (Moderasi checklist item 11, "Kick/mute admin") — same shape as
+  // PLAYER_KICK just above, but the server can only ASK: the target's own
+  // client (see useSocket.ts's PLAYER_FORCE_MUTED listener) is what
+  // actually flips its local mic track off and re-emits PLAYER_MIC so the
+  // existing badge machinery (PLAYER_MIC_UPDATED) picks it up with no
+  // separate broadcast needed here.
+  socket.on(SocketEvents.PLAYER_FORCE_MUTE, (data: { targetUserId: string }) => {
+    const room = currentRoom; if (!room) return;
+    const senderUid = findUserIdBySocket(socket.id);
+    const rs = getRoomAdmin(room);
+    if (!canAccess(rs, senderUid, 'room:force_mute')) {
+      socket.emit('admin:error', { message: 'Only admins can mute other players' });
+      return;
+    }
+    const targetUserId = data?.targetUserId;
+    if (!targetUserId || targetUserId === senderUid) return;
+    const targetSocketId = userSocketMap.get(targetUserId);
+    if (!targetSocketId) return;
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    if (!targetSocket) return;
+
+    const byName = playerNames.get(socket.id) || 'An admin';
+    targetSocket.emit(SocketEvents.PLAYER_FORCE_MUTED, { byName });
   });
 
   socket.on(SocketEvents.LEAVE_ROOM, () => {

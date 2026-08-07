@@ -224,6 +224,23 @@ export interface GameState {
   kickedNotice: string | null;
   setKickedNotice: (notice: string | null) => void;
 
+  // QA (Moderasi checklist item 11, "Kick/mute admin") — set when an admin
+  // force-mutes us (shared/permissions.ts's 'room:force_mute'). Unlike
+  // kickedNotice this does NOT bounce anyone anywhere — App.tsx's own
+  // effect both performs the actual mute (the server can only ask, see
+  // PLAYER_FORCE_MUTED's own doc comment) and shows a brief self-dismissing
+  // toast, same shape as miniModeError/screenShareError.
+  forceMutedNotice: string | null;
+  setForceMutedNotice: (notice: string | null) => void;
+
+  // QA (Data A/V checklist item 7, "Rekaman & consent") — genuinely
+  // room-wide (unlike activeRecording below, which stays role/identity-
+  // filtered — see its own doc comment). Just a boolean, no recordingId/
+  // title/names — enough for a "room ini sedang direkam" banner visible to
+  // literally everyone, regardless of role.
+  roomRecordingActive: boolean;
+  setRoomRecordingActive: (active: boolean) => void;
+
   // QA items #9/#10 (multi-tab) — this specific TAB's connection lost to a
   // newer one for the same account/guest token (see shared
   // SocketEvents.SESSION_TAKEN_OVER). Same "show a notice, then leave"
@@ -830,6 +847,10 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   kickedNotice: null,
   setKickedNotice: (notice) => set({ kickedNotice: notice }),
+  forceMutedNotice: null,
+  setForceMutedNotice: (notice) => set({ forceMutedNotice: notice }),
+  roomRecordingActive: false,
+  setRoomRecordingActive: (active) => set({ roomRecordingActive: active }),
 
   sessionTakenOverNotice: null,
   setSessionTakenOverNotice: (notice) => set({ sessionTakenOverNotice: notice }),

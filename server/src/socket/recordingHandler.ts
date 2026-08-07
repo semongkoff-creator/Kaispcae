@@ -39,11 +39,26 @@ function findSocketByUserId(io: Server, room: string, userId: string): string | 
 }
 
 export function registerRecordingHandlers(io: Server, socket: Socket): void {
-  socket.on(SocketEvents.JOIN_ROOM, (roomId: string, _playerName?: string, _avatarConfig?: unknown, userId?: string) => {
+  socket.on(SocketEvents.JOIN_ROOM, async (roomId: string, _playerName?: string, _avatarConfig?: unknown, userId?: string) => {
     const room = roomId || 'main-office';
     const uid = (socket.data as { userId?: string }).userId || userId || socket.id;
     socketToUid.set(socket.id, uid);
     socketToRoom.set(socket.id, room);
+
+    // QA (Data A/V checklist item 7) — a late joiner must see the banner
+    // immediately too, not just learn about it on the NEXT start/stop —
+    // RECORDING_ACTIVE_CHANGED above is a live delta, this is the
+    // equivalent one-time snapshot (same "ROOM_STATE for the thing this
+    // module doesn't otherwise expose there" shape as MEDIA_LIST arriving
+    // right after ROOM_STATE elsewhere in this app).
+    try {
+      const dbRoom = await getPrisma().room.findUnique({ where: { slug: room }, select: { id: true } });
+      if (!dbRoom) return;
+      const active = await getPrisma().recording.findFirst({ where: { roomId: dbRoom.id, status: { in: ['recording', 'processing'] } } });
+      socket.emit(SocketEvents.RECORDING_ACTIVE_CHANGED, { active: !!active });
+    } catch (e) {
+      console.error('[recording] active-status check on join failed:', e);
+    }
   });
 
   socket.on(SocketEvents.RECORDING_START, async (data: { targetUserId: string; title: string }) => {
@@ -139,6 +154,9 @@ export function registerRecordingHandlers(io: Server, socket: Socket): void {
           }
         }
       }
+      // QA (Data A/V checklist item 7) — genuinely room-wide, unlike the
+      // per-socket loop above; see RECORDING_ACTIVE_CHANGED's own comment.
+      io.to(room).emit(SocketEvents.RECORDING_ACTIVE_CHANGED, { active: true });
     } catch (e) {
       console.error('[recording] start error:', e);
     }
@@ -180,6 +198,7 @@ export function registerRecordingHandlers(io: Server, socket: Socket): void {
       if (!data.fileUrl) {
         await prisma.recording.update({ where: { id: row.id }, data: { status: 'failed', endedAt: new Date() } });
         io.to(room).emit(SocketEvents.RECORDING_FAILED, { recordingId: row.id, targetUserId: row.targetUserId });
+        io.to(room).emit(SocketEvents.RECORDING_ACTIVE_CHANGED, { active: false });
         return;
       }
 
@@ -205,6 +224,7 @@ export function registerRecordingHandlers(io: Server, socket: Socket): void {
         },
       });
       io.to(room).emit(SocketEvents.RECORDING_ENDED, { recordingId: row.id, targetUserId: row.targetUserId });
+      io.to(room).emit(SocketEvents.RECORDING_ACTIVE_CHANGED, { active: false });
     } catch (e) {
       console.error('[recording] finalize error:', e);
     }
@@ -230,6 +250,7 @@ export function registerRecordingHandlers(io: Server, socket: Socket): void {
       if (!active) return;
       await prisma.recording.update({ where: { id: active.id }, data: { status: 'failed', endedAt: new Date() } });
       io.to(room).emit(SocketEvents.RECORDING_FAILED, { recordingId: active.id, targetUserId: active.targetUserId });
+      io.to(room).emit(SocketEvents.RECORDING_ACTIVE_CHANGED, { active: false });
     } catch (e) {
       console.error('[recording] disconnect cleanup error:', e);
     }

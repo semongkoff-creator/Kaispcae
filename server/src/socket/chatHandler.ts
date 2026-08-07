@@ -32,7 +32,17 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
     // render as a normal message. A recognized command is NEVER broadcast
     // as the sender's own chat message — only the bot's reply is. Skipped
     // entirely for a file share (empty text) — nothing to parse as a command.
+    // QA (Akses tamu checklist item 2, "Guest terbatas") — chat itself
+    // stays open to a guest (that's one of the few kept features), but a
+    // recognized Music Bot command is silently swallowed rather than
+    // routed — same "not part of the kept-open set" reasoning as
+    // roomHandler.ts's SOUNDBOARD_PLAY guest block. Checked ONLY here (not
+    // by hiding musicHandler.ts's own registration, unlike most guest cuts
+    // elsewhere) since it's a plain-text command inside an otherwise-open
+    // chat channel, not a separate socket event to gate at registration time.
+    const isGuest = !!(socket.data as { guestId?: string }).guestId;
     if (text && isMusicCommand(text)) {
+      if (isGuest) return;
       void handleMusicCommand(io, currentRoom, zoneId, socket.id, playerName(), text)
         .catch((e) => console.error('[musicBot] handleMusicCommand failed:', e));
       return;

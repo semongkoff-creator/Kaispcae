@@ -104,6 +104,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // one) — gameStore is a global singleton that outlives any one
     // useSocket instance, so nothing else would ever clear this otherwise.
     useGameStore.getState().setRoomFullNotice(null);
+    // Same reasoning — a stale "recording active" banner from the PREVIOUS
+    // room must not carry over; recordingHandler.ts sends the real current
+    // state right after JOIN_ROOM regardless, but that arrives a tick
+    // later than this synchronous reset, so without this line the banner
+    // would flash on/off if the old and new room's states differ.
+    useGameStore.getState().setRoomRecordingActive(false);
     // Same reasoning for the Activity Feed — without this, portal travel or
     // leaving-and-rejoining a different room left the previous room's
     // events mixed in with the new room's own (see clearActivity's doc
@@ -511,6 +517,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().setActiveRecording(null);
     });
 
+    // QA (Data A/V checklist item 7) — genuinely room-wide, every socket
+    // gets this regardless of role (see the event's own doc comment).
+    socket.on(SocketEvents.RECORDING_ACTIVE_CHANGED, (data: { active: boolean }) => {
+      useGameStore.getState().setRoomRecordingActive(!!data?.active);
+    });
+
     socket.on(SocketEvents.FURNITURE_ASSIGNED, (data: { furnitureId: string; userId: string; name: string }) => {
       useGameStore.getState().setFurnitureAssignment(data.furnitureId, data.userId, data.name);
     });
@@ -833,6 +845,18 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       // cleanup for us before sending this, so there's nothing left to do
       // here but inform the player and get them out.
       useGameStore.getState().setKickedNotice(`You were removed from this room by ${data.byName}.`);
+    });
+
+    // QA (Moderasi checklist item 11, "Kick/mute admin") — this listener
+    // itself only records the notice; the ACTUAL mute (flipping the local
+    // mic track + re-broadcasting PLAYER_MIC so the badge updates for
+    // everyone) happens in App.tsx's own effect, which is where
+    // toggleMic/isMicMuted actually live (useWebRTC, a sibling hook this
+    // one has no reference to) — see PLAYER_FORCE_MUTED's own doc comment
+    // in shared/types for why the server can only ask, not act directly.
+    socket.on(SocketEvents.PLAYER_FORCE_MUTED, (data: { byName: string }) => {
+      console.warn('[socket] force-muted by', data.byName);
+      useGameStore.getState().setForceMutedNotice(`Mic kamu dimatikan oleh ${data.byName}.`);
     });
 
     // QA items #9/#10 (multi-tab) — a NEWER tab/connection took over this
@@ -1262,6 +1286,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.PLAYER_KICK, { targetUserId });
   }, []);
 
+  const emitForceMute = useCallback((targetUserId: string) => {
+    console.log('[socket] emit player:force_mute →', targetUserId);
+    socketRef.current?.emit(SocketEvents.PLAYER_FORCE_MUTE, { targetUserId });
+  }, []);
+
   const emitRoomLock = useCallback((locked: boolean) => {
     socketRef.current?.emit(SocketEvents.ROOM_LOCK_SET, { locked });
   }, []);
@@ -1372,5 +1401,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
+  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitForceMute, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
 }

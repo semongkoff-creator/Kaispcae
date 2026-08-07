@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { PersonCheck, PersonX } from 'react-bootstrap-icons';
+import { PersonCheck, PersonX, ShieldLock, XLg } from 'react-bootstrap-icons';
 import { adminApi } from './api';
 import { api } from '@/services/api';
 
@@ -19,11 +19,15 @@ const fmt = new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', h
 // one place that shows every pending request across every room.
 export function ApprovalPanel() {
   const [rows, setRows] = useState<PendingRequest[]>([]);
-  const [rooms, setRooms] = useState<{ slug: string; name: string; requiresApproval: boolean; isPublic: boolean }[]>([]);
+  const [rooms, setRooms] = useState<{ slug: string; name: string; requiresApproval: boolean; isPublic: boolean; restrictedAccess: boolean; restrictedMinRole: string }[]>([]);
   const [toggling, setToggling] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
+  // QA (Akses ruang checklist item 1, "Ruang sensitif terkontrol") — which
+  // room's access-manager flyout is open, if any. One at a time, like every
+  // other single-active-panel convention elsewhere in this app.
+  const [managingSlug, setManagingSlug] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -121,41 +125,227 @@ export function ApprovalPanel() {
         <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden max-h-80 overflow-y-auto">
           {rooms.length === 0 && <p className="px-4 py-6 text-sm text-gray-400 text-center">Belum ada room.</p>}
           {rooms.map((r) => (
-            <label
-              key={r.slug}
-              className="px-4 py-2.5 flex items-center gap-3 border-b border-gray-100 dark:border-gray-800 last:border-0 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="text-sm truncate">{r.name}</p>
-                <p className="text-[11px] text-gray-400 truncate">{r.slug}</p>
+            <div key={r.slug} className="border-b border-gray-100 dark:border-gray-800 last:border-0">
+              <div className="px-4 py-2.5 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm truncate">{r.name}</p>
+                  <p className="text-[11px] text-gray-400 truncate">{r.slug}</p>
+                </div>
+                <span className="text-xs text-gray-400 shrink-0">
+                  {r.requiresApproval ? 'Perlu persetujuan' : 'Bebas masuk'}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={r.requiresApproval}
+                  disabled={toggling === r.slug}
+                  title="Perlu persetujuan admin untuk masuk"
+                  onChange={async (e) => {
+                    const next = e.target.checked;
+                    setToggling(r.slug);
+                    // Optimistic: the row flips immediately and is rolled back if
+                    // the server refuses, so a slow request doesn't feel stuck.
+                    setRooms((prev) => prev.map((x) => (x.slug === r.slug ? { ...x, requiresApproval: next } : x)));
+                    try {
+                      await adminApi.setRoomApproval(r.slug, next);
+                    } catch (err) {
+                      setRooms((prev) => prev.map((x) => (x.slug === r.slug ? { ...x, requiresApproval: !next } : x)));
+                      setError(err instanceof Error ? err.message : 'Gagal menyimpan');
+                    } finally {
+                      setToggling(null);
+                    }
+                  }}
+                  className="w-4 h-4 accent-purple-600 shrink-0 cursor-pointer"
+                />
               </div>
-              <span className="text-xs text-gray-400 shrink-0">
-                {r.requiresApproval ? 'Perlu persetujuan' : 'Bebas masuk'}
-              </span>
-              <input
-                type="checkbox"
-                checked={r.requiresApproval}
-                disabled={toggling === r.slug}
-                onChange={async (e) => {
-                  const next = e.target.checked;
-                  setToggling(r.slug);
-                  // Optimistic: the row flips immediately and is rolled back if
-                  // the server refuses, so a slow request doesn't feel stuck.
-                  setRooms((prev) => prev.map((x) => (x.slug === r.slug ? { ...x, requiresApproval: next } : x)));
-                  try {
-                    await adminApi.setRoomApproval(r.slug, next);
-                  } catch (err) {
-                    setRooms((prev) => prev.map((x) => (x.slug === r.slug ? { ...x, requiresApproval: !next } : x)));
-                    setError(err instanceof Error ? err.message : 'Gagal menyimpan');
-                  } finally {
-                    setToggling(null);
-                  }
-                }}
-                className="w-4 h-4 accent-purple-600 shrink-0"
-              />
-            </label>
+            </div>
           ))}
         </div>
+      </div>
+
+      {/* QA (Akses ruang checklist item 1, "Ruang sensitif terkontrol") —
+          separate from the ordinary approval list above: this is the
+          STRICTER gate (no self-service request path at all — see
+          resolveEntry's own doc comment), for rooms like a CEO room or
+          client room where only specifically-granted staff+ may enter. */}
+      <div className="mt-8">
+        <h2 className="text-sm font-semibold mb-1 flex items-center gap-1.5"><ShieldLock size={14} /> Room dibatasi (akses khusus)</h2>
+        <p className="text-xs text-gray-400 mb-3">
+          Kalau dinyalakan, HANYA orang yang kamu beri akses langsung di bawah ini yang bisa masuk — tidak ada jalur "minta izin".
+          Cocok untuk ruang CEO/klien atau ruangan sensitif lainnya.
+        </p>
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden max-h-96 overflow-y-auto">
+          {rooms.length === 0 && <p className="px-4 py-6 text-sm text-gray-400 text-center">Belum ada room.</p>}
+          {rooms.map((r) => (
+            <div key={r.slug} className="border-b border-gray-100 dark:border-gray-800 last:border-0">
+              <div className="px-4 py-2.5 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm truncate">{r.name}</p>
+                  <p className="text-[11px] text-gray-400 truncate">{r.slug}</p>
+                </div>
+                {r.restrictedAccess && (
+                  <button
+                    onClick={() => setManagingSlug(managingSlug === r.slug ? null : r.slug)}
+                    className="text-xs text-purple-600 hover:text-purple-800 dark:text-purple-300 shrink-0 cursor-pointer"
+                  >
+                    {managingSlug === r.slug ? 'Tutup' : 'Kelola akses'}
+                  </button>
+                )}
+                <input
+                  type="checkbox"
+                  checked={r.restrictedAccess}
+                  disabled={toggling === `restrict:${r.slug}`}
+                  title="Batasi room ini hanya untuk role tertentu"
+                  onChange={async (e) => {
+                    const next = e.target.checked;
+                    setToggling(`restrict:${r.slug}`);
+                    setRooms((prev) => prev.map((x) => (x.slug === r.slug ? { ...x, restrictedAccess: next } : x)));
+                    if (next) setManagingSlug(r.slug);
+                    try {
+                      await adminApi.setRoomRestricted(r.slug, next);
+                    } catch (err) {
+                      setRooms((prev) => prev.map((x) => (x.slug === r.slug ? { ...x, restrictedAccess: !next } : x)));
+                      setError(err instanceof Error ? err.message : 'Gagal menyimpan');
+                    } finally {
+                      setToggling(null);
+                    }
+                  }}
+                  className="w-4 h-4 accent-purple-600 shrink-0 cursor-pointer"
+                />
+              </div>
+              {managingSlug === r.slug && <RoomAccessManager slug={r.slug} />}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// QA (Akses ruang checklist item 1) — who currently holds staff/admin role
+// in this specific room (i.e. who a restricted room actually admits), plus
+// a small picker to grant/revoke it. Grants work even for someone not
+// currently online/in the room — see roomMembers.ts's access-grant route
+// doc comment for why the socket-based ADMIN_GRANT/STAFF_GRANT couldn't be
+// reused here (circular: you'd need to already be let into the restricted
+// room to grant someone else access to it).
+function RoomAccessManager({ slug }: { slug: string }) {
+  const [members, setMembers] = useState<{ userId: string; displayName: string; email: string; role: string }[] | null>(null);
+  const [people, setPeople] = useState<{ id: string; displayName: string }[] | null>(null);
+  const [query, setQuery] = useState('');
+  const [pickedUserId, setPickedUserId] = useState('');
+  const [pickedRole, setPickedRole] = useState<'staff' | 'admin'>('staff');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      setMembers(await adminApi.getRoomAccessList(slug));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Gagal memuat daftar akses');
+    }
+  }, [slug]);
+
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    api.getWorkspacePeople().then((res) => setPeople(res.people)).catch(() => setPeople([]));
+  }, []);
+
+  const grant = async () => {
+    if (!pickedUserId) return;
+    setBusy(true);
+    setError('');
+    try {
+      await adminApi.grantRoomAccess(slug, pickedUserId, pickedRole);
+      setPickedUserId('');
+      setQuery('');
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Gagal memberi akses');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revoke = async (userId: string) => {
+    setBusy(true);
+    setError('');
+    try {
+      await adminApi.revokeRoomAccess(slug, userId);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Gagal mencabut akses');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const filteredPeople = (people ?? []).filter(
+    (p) => query.length > 0 && p.displayName.toLowerCase().includes(query.toLowerCase()) && !members?.some((m) => m.userId === p.id),
+  );
+
+  return (
+    <div className="px-4 py-3 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-800">
+      {error && <p className="text-xs text-red-500 mb-2">{error}</p>}
+
+      {members === null ? (
+        <p className="text-xs text-gray-400">Memuat…</p>
+      ) : members.length === 0 ? (
+        <p className="text-xs text-gray-400 mb-2">Belum ada yang diberi akses — hanya pemilik room yang bisa masuk.</p>
+      ) : (
+        <div className="mb-3 space-y-1.5">
+          {members.map((m) => (
+            <div key={m.userId} className="flex items-center gap-2 text-xs">
+              <span className="flex-1 min-w-0 truncate">{m.displayName} <span className="text-gray-400">({m.role})</span></span>
+              <button
+                onClick={() => revoke(m.userId)}
+                disabled={busy}
+                title="Cabut akses"
+                className="text-gray-400 hover:text-red-500 disabled:opacity-50 cursor-pointer"
+              >
+                <XLg size={11} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="relative flex items-center gap-1.5">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setPickedUserId(''); }}
+          placeholder="Cari orang…"
+          className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs focus:outline-none focus:ring-1 focus:ring-purple-400"
+        />
+        <select
+          value={pickedRole}
+          onChange={(e) => setPickedRole(e.target.value as 'staff' | 'admin')}
+          className="px-1.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs"
+        >
+          <option value="staff">staff</option>
+          <option value="admin">admin</option>
+        </select>
+        <button
+          onClick={grant}
+          disabled={busy || !pickedUserId}
+          className="px-2.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-xs shrink-0 cursor-pointer"
+        >
+          Beri akses
+        </button>
+
+        {query && filteredPeople.length > 0 && !pickedUserId && (
+          <div className="absolute top-full left-0 mt-1 w-full max-h-40 overflow-y-auto bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 shadow-lg z-10">
+            {filteredPeople.slice(0, 20).map((p) => (
+              <button
+                key={p.id}
+                onClick={() => { setPickedUserId(p.id); setQuery(p.displayName); }}
+                className="w-full text-left px-2.5 py-1.5 text-xs hover:bg-purple-50 dark:hover:bg-gray-800 cursor-pointer"
+              >
+                {p.displayName}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

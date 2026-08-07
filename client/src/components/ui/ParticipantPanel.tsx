@@ -31,6 +31,12 @@ interface ParticipantPanelProps {
   // skips writing back to yourself (see useSocket.ts), so it's passed
   // through separately for the local row's badge.
   isMicMuted: boolean;
+  // QA (Akses tamu checklist item 2, "Guest terbatas") — hides this
+  // VIEWER's ability to use Summon/Slap/Locate (already server-rejected
+  // for Summon/Slap; Locate is pure client pathfinding with no server
+  // component to gate). Does NOT affect whether others can target a guest
+  // with these — only what the guest viewing this panel can do.
+  isGuest?: boolean;
   emitFollowRequest: (targetUserId: string) => void;
   emitFollowUnfollow: () => void;
   emitSummonUser: (nickname: string) => void;
@@ -43,6 +49,12 @@ interface ParticipantPanelProps {
   // Temporary removal from the room, admin+ only (see shared/permissions.ts's
   // 'room:kick') — not a ban, the target can rejoin any time.
   emitKick?: (targetUserId: string) => void;
+  // QA (Moderasi checklist item 11, "Kick/mute admin") — admin+ only (see
+  // shared/permissions.ts's 'room:force_mute'). Distinct from onToggleMute
+  // below: that one is a purely LOCAL "mute them for me" listening
+  // preference (mutedUserIds); this actually turns the TARGET's own mic
+  // off, visible to everyone via the normal PLAYER_MIC_UPDATED badge.
+  emitForceMute?: (targetUserId: string) => void;
   // "Tarik Paksa" (Force-pull) — admin+ only (see shared/permissions.ts's
   // 'force_pull'). Unlike Summon (emitSummonUser above, open to everyone,
   // consent-gated), this moves the target immediately with no accept step.
@@ -61,7 +73,7 @@ interface ParticipantPanelProps {
 
 const MAX_VIDEO_THUMBS = 3;
 
-export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, emitKick, emitForcePull, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
+export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, emitKick, emitForceMute, emitForcePull, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
@@ -88,6 +100,7 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest,
     return 'member';
   };
   const canKick = roleAtLeast(localRole, 'admin');
+  const canForceMute = roleAtLeast(localRole, 'admin');
   const canSpotlight = roleAtLeast(localRole, 'admin');
   const canForcePull = roleAtLeast(localRole, 'admin');
 
@@ -204,16 +217,17 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, emitFollowRequest,
                 isFollowingThem={!!p.userId && followInfo?.targetUserId === p.userId}
                 onFollow={p.userId ? () => emitFollowRequest(p.userId!) : undefined}
                 onUnfollow={emitFollowUnfollow}
-                onSummon={() => emitSummonUser(p.name)}
-                onSlap={() => emitSlap(p.name)}
+                onSummon={isGuest ? undefined : () => emitSummonUser(p.name)}
+                onSlap={isGuest ? undefined : () => emitSlap(p.name)}
                 isMuted={!!p.userId && mutedUserIds.has(p.userId)}
                 onToggleMute={p.userId ? () => (mutedUserIds.has(p.userId!) ? unmuteUser(p.userId!) : muteUser(p.userId!)) : undefined}
                 onMessage={p.userId && !p.isGuest && onStartDm ? () => onStartDm(p.userId!) : undefined}
                 isGuest={p.isGuest}
                 onKick={canKick && p.userId && emitKick ? () => emitKick(p.userId!) : undefined}
+                onForceMute={canForceMute && p.userId && emitForceMute && !p.micMuted ? () => emitForceMute(p.userId!) : undefined}
                 onForcePull={canForcePull && p.userId && emitForcePull ? () => emitForcePull(p.userId!) : undefined}
                 onSpotlight={canSpotlight && p.userId && emitSpotlight ? () => emitSpotlight(p.userId!, !p.spotlightActive) : undefined}
-                onLocate={() => handleLocate(p.id)}
+                onLocate={isGuest ? undefined : () => handleLocate(p.id)}
               />
             ))}
           </div>
@@ -245,6 +259,7 @@ function ParticipantRow({
   onToggleMute,
   onMessage,
   onKick,
+  onForceMute,
   onForcePull,
   onSpotlight,
   onLocate,
@@ -301,6 +316,12 @@ function ParticipantRow({
   // Temporary removal from the room — undefined (not just a no-op) when I'm
   // below admin, same "hide, don't disable" convention as onSummon above.
   onKick?: () => void;
+  // QA (Moderasi checklist item 11, "Kick/mute admin") — force this row's
+  // player's mic off (visible to everyone via the normal muted badge, not
+  // just to me — see onToggleMute below for that separate LOCAL-only
+  // preference). Undefined (not disabled) below admin, same convention as
+  // onKick, and also undefined once already muted (nothing left to force).
+  onForceMute?: () => void;
   // "Tarik Paksa" (Force-pull) — moves this row's player here immediately,
   // no consent. Undefined (not disabled) below admin, same convention as
   // onKick — a plain member never sees this row's option exist at all.
@@ -371,7 +392,7 @@ function ParticipantRow({
   // leaving it open over a row whose state just changed reads as if the
   // click didn't register.
   const pick = (fn?: () => void) => () => { closeMenu(); fn?.(); };
-  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onToggleMute || onMessage || onKick || onForcePull || onSpotlight || onLocate);
+  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onToggleMute || onMessage || onKick || onForceMute || onForcePull || onSpotlight || onLocate);
 
   return (
     <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50 dark:bg-gray-700/50">
@@ -489,16 +510,24 @@ function ParticipantRow({
                     onClick={pick(onSpotlight)}
                   />
                 )}
+                {(onForceMute || onKick) && (
+                  <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+                )}
+                {onForceMute && (
+                  <MenuItem
+                    icon={<MicMuteFill size={12} />}
+                    label="Matikan Mic (Admin)"
+                    danger
+                    onClick={pick(() => { if (window.confirm(`Matikan mic ${name}? Dia bisa nyalain lagi sendiri kapan saja.`)) onForceMute(); })}
+                  />
+                )}
                 {onKick && (
-                  <>
-                    <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
-                    <MenuItem
-                      icon={<PersonDashFill size={12} />}
-                      label="Keluarkan"
-                      danger
-                      onClick={pick(() => { if (window.confirm(`Keluarkan ${name} dari room ini? Dia bisa masuk lagi kapan saja.`)) onKick(); })}
-                    />
-                  </>
+                  <MenuItem
+                    icon={<PersonDashFill size={12} />}
+                    label="Keluarkan"
+                    danger
+                    onClick={pick(() => { if (window.confirm(`Keluarkan ${name} dari room ini? Dia bisa masuk lagi kapan saja.`)) onKick(); })}
+                  />
                 )}
               </div>,
               document.body,

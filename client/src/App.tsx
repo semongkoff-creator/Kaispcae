@@ -134,7 +134,7 @@ const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', 
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitForceMute, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
   const [showEditor, setShowEditor] = useState(false);
   // QA #1/#6/#7 — reopen the first-run walkthrough on demand (Sidebar's
@@ -437,6 +437,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
   // §7 — Screen Recording
   const activeRecording = useGameStore((s) => s.activeRecording);
+  const roomRecordingActive = useGameStore((s) => s.roomRecordingActive);
   const findSocketIdByUserId = useCallback(
     (userId: string) => Object.values(playerRecords).find((p) => p.userId === userId)?.id,
     [playerRecords],
@@ -538,6 +539,21 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     const enabled = await toggleMic();
     emitPlayerMic(!enabled);
   }, [toggleMic, emitPlayerMic]);
+
+  // QA (Moderasi checklist item 11, "Kick/mute admin") — the server can
+  // only ASK (see PLAYER_FORCE_MUTED's own doc comment); this is where the
+  // ask is actually carried out. Guarded on `!isMicMuted` so it's a true
+  // "force OFF", not a blind toggle that would turn the mic back ON if it
+  // happened to already be muted for some other reason. Self-dismisses the
+  // toast — same shape as miniModeError/screenShareError.
+  const forceMutedNotice = useGameStore((s) => s.forceMutedNotice);
+  useEffect(() => {
+    if (!forceMutedNotice) return;
+    if (!isMicMuted) handleMicToggle();
+    const t = setTimeout(() => useGameStore.getState().setForceMutedNotice(null), 6000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forceMutedNotice]);
 
   const handleCameraToggle = useCallback(() => {
     toggleCamera();
@@ -1201,6 +1217,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       // to open the emote wheel and eat the character) and while a suite
       // module is covering the room.
       if (shouldIgnoreRoomHotkey(e.target, moduleOpen)) return;
+      // QA (Akses tamu checklist item 2, "Guest terbatas") — emotes are
+      // hotkey-only (no visible button to hide), so the block has to live
+      // here; also rejected server-side now (see emoteHandler.ts).
+      if (isGuest) return;
       if (e.key === 'b' || e.key === 'B') {
         e.preventDefault();
         setShowEmoteWheel((v) => !v);
@@ -1208,7 +1228,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [moduleOpen]);
+  }, [moduleOpen, isGuest]);
 
   const allPlayers = { [localPlayerId]: useGameStore.getState().localPlayer, ...playerRecords };
 
@@ -1369,6 +1389,19 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         lowSpecMode={simplifiedView}
       />
 
+      {/* QA (Data A/V checklist item 7, "Rekaman & consent") — persistent
+          (not a self-dismissing toast, unlike the notices below) and
+          visible to LITERALLY EVERYONE regardless of role — see
+          roomRecordingActive's own doc comment in gameStore.ts for why
+          RECORDING_STARTED's existing role-filtered visibility isn't
+          enough on its own. */}
+      {roomRecordingActive && !editorMode && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 bg-red-600/95 text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+          Room ini sedang direkam
+        </div>
+      )}
+
       {/* A5 — meeting controls, only while standing inside a meeting-type zone */}
       {meetingZone && !editorMode && (
         <MeetingControl roomId={roomSlug} zoneId={meetingZone.id} />
@@ -1400,11 +1433,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             </p>
           </div>
           <div className="absolute top-14 left-16 flex items-start gap-2 pointer-events-none">
-            <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} emitKick={emitKick} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
-            <SoundboardPanel roomSlug={roomSlug} emitSoundboardPlay={emitSoundboardPlay} open={activePanel === 'soundboard'} onToggle={() => openPanel('soundboard')} onClose={closePanel} />
+            <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} isGuest={isGuest} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
+            {/* QA (Akses tamu checklist item 2, "Guest terbatas") — Soundboard
+                playback is now also server-rejected for guests
+                (roomHandler.ts's SOUNDBOARD_PLAY), so hiding the panel too
+                avoids a dead "nothing happens when I click" button. */}
+            {!isGuest && (
+              <SoundboardPanel roomSlug={roomSlug} emitSoundboardPlay={emitSoundboardPlay} open={activePanel === 'soundboard'} onToggle={() => openPanel('soundboard')} onClose={closePanel} />
+            )}
             <ActivityFeed />
           </div>
-          <MusicPlayerWidget zoneId={currentZone?.id ?? null} />
+          {!isGuest && <MusicPlayerWidget zoneId={currentZone?.id ?? null} />}
         </>
       )}
 
@@ -1905,8 +1944,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         <DeviceMenu kind="audio" />
         <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
         <DeviceMenu kind="video" />
-        <HandButton raised={!!localPlayer.handRaised} onToggle={handleHandToggle} />
-        <HiddenButton hidden={!!localPlayer.hidden} onToggle={handleHiddenToggle} />
+        {/* QA (Akses tamu checklist item 2, "Guest terbatas") — both
+            server-rejected for guests now too (roomHandler.ts's
+            PLAYER_HAND/PLAYER_HIDDEN). Mic/Camera/Screen Share stay —
+            those are the kept-open meeting-participation set. */}
+        {!isGuest && <HandButton raised={!!localPlayer.handRaised} onToggle={handleHandToggle} />}
+        {!isGuest && <HiddenButton hidden={!!localPlayer.hidden} onToggle={handleHiddenToggle} />}
         <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
         <NotificationSettings />
       </div>
@@ -1939,6 +1982,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {screenShareError && !moduleOpen && (
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/80 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none max-w-md text-center">
           {screenShareError}
+        </div>
+      )}
+
+      {/* QA (Moderasi checklist item 11) — self-dismisses via the effect
+          near handleMicToggle above, same one-off-action-notice treatment
+          as screenShareError/miniModeError. */}
+      {forceMutedNotice && !moduleOpen && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 bg-amber-50 dark:bg-amber-900/80 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none max-w-md text-center">
+          🔇 {forceMutedNotice}
         </div>
       )}
 

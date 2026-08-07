@@ -378,7 +378,10 @@ export function Sidebar({
             {/* Standing in a zone → this locks the ZONE (Meeting Room B, …).
                 Anyone inside may lock it and becomes its keyholder; people who
                 walk in afterwards must knock and be admitted BY THEM. */}
-            {currentZoneName && (
+            {/* QA (Akses tamu checklist item 2) — already a dead end for a
+                guest (zoneLock.ts isn't registered for guest sockets),
+                just never hidden. */}
+            {currentZoneName && !isGuest && (
               <MenuRow
                 icon={zoneLocked ? <LockFill size={15} /> : <UnlockFill size={15} />}
                 label={zoneLocked ? `Buka ${currentZoneName}` : `Kunci ${currentZoneName}`}
@@ -446,7 +449,12 @@ export function Sidebar({
             )}
 
             <MenuDivider />
-            <MenuRow icon={<ImageFill size={15} />} label="Add Media" active={showAddMediaPanel} onClick={closeAnd(onToggleAddMedia)} />
+            {/* QA (Akses tamu checklist item 2, "Guest terbatas") — was
+                already a dead end for a guest (mediaHandler.ts/noteHandler.ts
+                aren't registered for guest sockets at all), just never hidden. */}
+            {!isGuest && (
+              <MenuRow icon={<ImageFill size={15} />} label="Add Media" active={showAddMediaPanel} onClick={closeAnd(onToggleAddMedia)} />
+            )}
 
             {canRecord && (
               <div className="flex items-center gap-3 px-3 py-2">
@@ -495,7 +503,11 @@ export function Sidebar({
 
       <SidebarDivider />
 
-      <AvatarEditorButton onClick={onEditAvatar} variant="sidebar" />
+      {/* QA (Akses tamu checklist item 2) — a guest's avatar edits already
+          never persisted (PUT /users/me/avatar 401s and is swallowed, see
+          App.tsx's persistAvatar) since they have no User row to save to —
+          offering the editor at all was misleading, not just extraneous. */}
+      {!isGuest && <AvatarEditorButton onClick={onEditAvatar} variant="sidebar" />}
       <PresenceButton manualStatus={manualStatus} onPick={onPickPresence} variant="sidebar" />
 
       <SidebarIcon

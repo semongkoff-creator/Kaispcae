@@ -79,6 +79,13 @@ export const FEATURE_MIN_ROLE = {
   // since forcibly ending someone's session is more disruptive than moving
   // them.
   'room:kick': 'admin',
+  // QA (Moderasi checklist item 11, "Kick/mute admin") — the mic-mute
+  // toggle itself has always been self-service (PLAYER_MIC has no gate at
+  // all — see roomHandler.ts's own comment there), but there was no way
+  // for an admin to mute someone ELSE who's disrupting the room short of
+  // kicking them outright. Same admin tier as Kick — silencing someone
+  // without their consent is at least as disruptive as removing them.
+  'room:force_mute': 'admin',
   // Zoom-style "Lock Meeting" — an admin/owner toggles the room closed so
   // no new non-admin can enter (people already inside stay). In-memory only
   // (see roomHandler.ts's RoomAdminState.locked), resets on server restart.

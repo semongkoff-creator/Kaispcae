@@ -758,6 +758,17 @@ export enum SocketEvents {
   RECORDING_FINALIZE = 'recording:finalize',
   RECORDING_ENDED = 'recording:ended',
   RECORDING_FAILED = 'recording:failed',
+  // QA (Data A/V checklist item 7, "Rekaman & consent") — RECORDING_STARTED
+  // above deliberately stays role-filtered (see its own comment) since a
+  // plain member never needs the recordingId/title/who's-recording-who
+  // detail. But before this, a plain member got NO signal AT ALL that
+  // recording was happening — even though whatever the recorder's own
+  // browser captures (their screen, which in Meeting View shows everyone's
+  // tile) could still sweep up other participants' video/audio. This is a
+  // genuinely room-wide, minimal (just a boolean, no identity/title) signal
+  // broadcast to literally everyone in the room, so "is this room being
+  // recorded right now" always has a visible answer regardless of role.
+  RECORDING_ACTIVE_CHANGED = 'recording:active_changed',
 
   // Persisted Channel/DM/Thread chat (see ChatMessage's sibling doc comment
   // below) — separate from CHAT_MESSAGE/CHAT_BROADCAST above, which now only
@@ -845,6 +856,19 @@ export enum SocketEvents {
   // reuses handleLeave's exact same cleanup.
   PLAYER_KICK = 'player:kick',
   PLAYER_KICKED = 'player:kicked',
+
+  // QA (Moderasi checklist item 11, "Kick/mute admin") — same shape as
+  // PLAYER_KICK/PLAYER_KICKED above: PLAYER_FORCE_MUTE is the admin's
+  // request, PLAYER_FORCE_MUTED is sent only to the target's own socket
+  // (never broadcast). Unlike kick, the server can't unilaterally mute a
+  // remote track it never had authority over (that state lives entirely on
+  // the target's own device — see useWebRTC's toggleMic) — this only
+  // ASKS the target's client to mute itself; PLAYER_MIC/PLAYER_MIC_UPDATED
+  // (the existing self-mute broadcast) already carries the resulting badge
+  // to everyone else once the target's client complies, no separate
+  // broadcast needed here.
+  PLAYER_FORCE_MUTE = 'player:force_mute',
+  PLAYER_FORCE_MUTED = 'player:force_muted',
 
   // QA (Presence checklist item #8, "Member list akurat") — workspace-wide "who's online + which room" roster (NOT the
   // in-room ParticipantPanel, which only ever sees people standing in the

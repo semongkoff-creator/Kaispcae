@@ -655,6 +655,23 @@ model Room {
   // strand everyone currently using them.
   requiresApproval  Boolean              @default(true)
   maxPlayers        Int                  @default(50)
+  // QA (Akses ruang checklist item 1, "Ruang sensitif terkontrol") — a
+  // STRICTER gate than requiresApproval above: when true, self-service
+  // join-request is disabled entirely (no "needs-request" path at all, see
+  // resolveEntry) — only someone who ALREADY holds a RoomMember row with
+  // role >= restrictedMinRole (granted out-of-band by an admin, via the
+  // Admin Console's room access manager) may enter. Owner/global-admin
+  // always bypass, same as every other entry gate in this app. Separate
+  // boolean (not just repurposing requiresApproval) so a room can flip
+  // back to ordinary approval-gated without losing which specific people
+  // were on the restricted allowlist.
+  restrictedAccess   Boolean              @default(false)
+  // Minimum RoomMember.role (see shared/permissions.ts's Role/ROLE_ORDER)
+  // required to enter while restrictedAccess is on. 'staff' by default —
+  // deliberately one tier above the ordinary 'member' every approved
+  // join-request grants, so approving someone into a NORMAL room never
+  // accidentally satisfies a DIFFERENT room's restriction.
+  restrictedMinRole  String               @default("staff")
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
   members           RoomMember[]
