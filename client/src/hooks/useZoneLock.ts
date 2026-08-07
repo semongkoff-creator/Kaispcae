@@ -296,7 +296,7 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     zoneLocks, knocks, deniedZoneId, deniedReason, pendingKnock, pendingApproval, approvalRequests, toast,
     lockOf, setLock, knock, cancelKnock, decide, isKeyholder, isAdmitted, requestEntry, cancelApproval, decideApproval,
     // "Ngobrol dengan CEO" queue, zone-level.
-    restrictionOf, zoneQueueTicket, zoneQueueBusy, zoneQueueError, joinZoneQueue, cancelZoneQueue,
+    zoneRestrictions, restrictionOf, zoneQueueTicket, zoneQueueBusy, zoneQueueError, joinZoneQueue, cancelZoneQueue,
     clearDenied: () => setDeniedZoneId(null),
     // App.tsx's client-side entry check calls this directly (no server round
     // trip needed — the physical block already happened locally) to surface

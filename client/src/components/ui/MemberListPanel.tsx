@@ -59,10 +59,6 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
           <div>
             <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Member</h2>
             <p className="text-xs text-gray-500 dark:text-gray-400">{people ? `${onlineCount} online dari ${people.length}` : 'Memuat…'}</p>
-            {/* Bug report follow-up — makes it obvious at a glance whether
-                "(room kamu)" tags below are plausible: if this says the same
-                room as everyone else online, that's not the panel failing
-                to differentiate, it's genuinely the only populated room. */}
             <p className="text-[10px] text-gray-400 dark:text-gray-500">Kamu di room: {myRoomName}</p>
           </div>
           <button onClick={onClose} title="Tutup" className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer">
@@ -78,7 +74,6 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
           )}
           {rows.map((r) => {
             const online = !!r.presence;
-            const here = r.presence?.roomSlug === currentRoomSlug;
             return (
               <div key={r.id} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-purple-50 dark:hover:bg-gray-700">
                 <div className="relative shrink-0">
@@ -92,16 +87,16 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
                   <p className="text-sm text-gray-900 dark:text-gray-100 truncate">
                     {r.displayName}{r.id === localUserId ? ' (kamu)' : ''}
                   </p>
-                  {/* Bug fix — this used to collapse to a plain "Di sini" for
-                      anyone sharing your room, which told you THAT they were
-                      nearby but never named the room itself — exactly the
-                      "lokasi ruang ga ketauan dimana" the checklist item
-                      ("lokasi ruang real-time") asks for. Always show the
-                      actual room name now; "(room kamu)" only adds the
-                      "that's where you are too" context on top of it. */}
+                  {/* Bug fix follow-up — dropped the "(room kamu)" suffix:
+                      it only ever compared roomSlug, so once zones existed it
+                      actively lied ("room kamu" on someone in a completely
+                      different zone of the same office). Just the real,
+                      live room+zone location, same for every row including
+                      your own — no separate "that's you too" annotation to
+                      go stale. */}
                   <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                     {online
-                      ? `${r.presence!.roomName}${r.presence!.zoneName ? ` · ${r.presence!.zoneName}` : ''}${here ? ' (room kamu)' : ''}`
+                      ? `${r.presence!.roomName}${r.presence!.zoneName ? ` · ${r.presence!.zoneName}` : ''}`
                       : 'Offline'}
                   </p>
                 </div>

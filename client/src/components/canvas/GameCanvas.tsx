@@ -194,6 +194,13 @@ interface GameCanvasProps {
   // high-DPI low-end screen) and throttles the draw loop to ~30fps (down
   // from uncapped, i.e. the display's own refresh rate — often 60+).
   lowSpecMode?: boolean;
+  // "Ngobrol dengan CEO" queue, zone-level (see schema.prisma's
+  // ZoneRestriction) — zone ids that currently require staff+ or a queue
+  // ticket to enter, so their banner can show a lock badge. A plain React
+  // prop (not threaded into the imperative draw loop like doorOverride/
+  // unlockedDoors) — this only changes at JOIN_ROOM or when an admin edits
+  // a restriction, nowhere near a per-frame concern.
+  restrictedZoneIds?: Set<string>;
 }
 
 // QA (Kompat checklist item 7) — devicePixelRatio is capped even OUTSIDE
@@ -290,7 +297,7 @@ function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: numb
   return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, lowSpecMode = false }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -2318,16 +2325,18 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           >
             {zone.type === 'meeting' ? (
               <div
-                className="px-3 py-1.5 text-center text-white font-bold text-sm tracking-wide shadow-md"
+                className="px-3 py-1.5 text-center text-white font-bold text-sm tracking-wide shadow-md inline-flex items-center gap-1.5"
                 style={{ backgroundColor: zone.color || '#7c3aed' }}
               >
+                {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
                 {zone.label}
               </div>
             ) : (
               <div
-                className="px-2 py-0.5 rounded-full text-[10px] font-semibold text-white shadow whitespace-nowrap"
+                className="px-2 py-0.5 rounded-full text-[10px] font-semibold text-white shadow whitespace-nowrap inline-flex items-center gap-1"
                 style={{ backgroundColor: zone.color || '#7c3aed' }}
               >
+                {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
                 {zone.label}
               </div>
             )}

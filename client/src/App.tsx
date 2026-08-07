@@ -463,6 +463,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const currentZoneIdRef = useRef<string | null>(null);
   const [currentZone, setCurrentZone] = useState<{ id: string; name: string } | null>(null);
   const zoneLock = useZoneLock(socketRef, authUserId, roomSlug);
+  // "Ngobrol dengan CEO" queue, zone-level — the map's own visual "tile
+  // effect" (a lock badge on the zone's banner, see GameCanvas.tsx), so a
+  // restricted area like "CEO Office" is visibly marked from a distance
+  // instead of only revealing itself once someone walks in and gets
+  // bounced. Shown to everyone regardless of whether THEY personally
+  // qualify to enter — same as a real "Authorized Personnel Only" sign.
+  const restrictedZoneIds = useMemo(() => new Set(zoneLock.zoneRestrictions.map((r) => r.zoneId)), [zoneLock.zoneRestrictions]);
 
   // Put the player back on the nearest tile inside the zone they may not leave.
   const pushBackInside = useCallback((zoneId: string) => {
@@ -1418,6 +1425,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onNoteOpen={setNoteEditingId}
         onDoorPasswordTrigger={handleDoorPasswordTrigger}
         lowSpecMode={simplifiedView}
+        restrictedZoneIds={restrictedZoneIds}
       />
 
       {/* QA (Data A/V checklist item 7, "Rekaman & consent") — persistent
