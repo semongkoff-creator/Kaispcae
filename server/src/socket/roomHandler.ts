@@ -121,6 +121,21 @@ function isGuestUid(uid: string): boolean { return uid.startsWith(GUEST_UID_PREF
 // (see index.ts's io.use handshake middleware).
 function isGuestSocket(socket: Socket): boolean { return !!(socket.data as { guestId?: string }).guestId; }
 
+// Same "very few features" cut as isGuestSocket above, extended to
+// self-registered (non-Lark) accounts nobody has promoted — see
+// RoomAdminState.restrictedTierUserIds' own doc comment for why a manual
+// account needs the same treatment as a Guest Link visitor by default.
+// Takes `room` explicitly (rather than resolving it internally) since every
+// call site already has — or trivially can get — the current room, and
+// restrictedTierUserIds is per-room state populated at JOIN_ROOM.
+function isRestrictedSocket(socket: Socket, room: string | null): boolean {
+  if (isGuestSocket(socket)) return true;
+  if (!room) return false;
+  const uid = findUserIdBySocket(socket.id);
+  if (!uid) return false;
+  return getRoomAdmin(room).restrictedTierUserIds.has(uid);
+}
+
 const DEFAULT_ROOM = 'main-office';
 const DEFAULT_ROOM_NAME = 'Main Office';
 
@@ -135,10 +150,26 @@ const userSocketMap = new Map<string, string>();
 // maintained alongside userSocketMap above (same set/delete call sites:
 // JOIN_ROOM success and handleLeave). Guests are never entered here — they
 // have no User row, so they don't belong in a workspace member roster.
-const userRoomMap = new Map<string, { roomSlug: string; roomName: string }>();
+const userRoomMap = new Map<string, { roomSlug: string; roomName: string; zoneName?: string }>();
 
 function broadcastRosterUpdate(io: Server, update: RosterUpdate) {
   io.emit(SocketEvents.ROSTER_UPDATED, update);
+}
+
+// Bug follow-up — the roster used to only ever record the top-level ROOM,
+// so two people in the same office but different areas (e.g. one at their
+// desk, one in "Meeting Room") both showed the same room-only label with no
+// way to tell them apart. Called from zoneHandler.ts's ZONE_ENTER/ZONE_EXIT
+// — the only two places that know a socket's zone membership — with
+// `zoneName: null` on exit. A no-op for guests (never in userRoomMap) and
+// for a socket whose room-level presence hasn't been recorded yet.
+export function updateRosterZone(io: Server, socketId: string, zoneName: string | null): void {
+  const uid = findUserIdBySocket(socketId);
+  if (!uid) return;
+  const existing = userRoomMap.get(uid);
+  if (!existing) return;
+  existing.zoneName = zoneName ?? undefined;
+  broadcastRosterUpdate(io, { userId: uid, online: true, roomSlug: existing.roomSlug, roomName: existing.roomName, zoneName: existing.zoneName });
 }
 
 // Reconnect grace period — a bare network drop (wifi blip, tab backgrounded,
@@ -191,6 +222,13 @@ interface RoomAdminState {
   // restart" posture as `locked` above — an emergency mode isn't config that
   // should silently survive a redeploy.
   doorOverride?: boolean;
+  // Self-registered (non-Lark) accounts nobody has promoted — see getRole's
+  // own doc comment on why these are clamped to 'guest'. Populated per-join
+  // (roomHandler's JOIN_ROOM, same "checked fresh each connection, not
+  // persisted" posture as the global-admin accountRole check right next to
+  // it) rather than loaded from DB here, since it depends on live User
+  // fields that can change between sessions.
+  restrictedTierUserIds: Set<string>;
   // Guest Link & Ruang Tunggu — guestIds (not socket ids, not full uids) an
   // admin has explicitly admitted via GUEST_JOIN_DECIDE. Checked on every
   // guest JOIN_ROOM: absent → held in the waiting room; present → proceeds
@@ -223,6 +261,12 @@ function getRole(rs: RoomAdminState, uid: string): Role {
   if (uid === rs.masterAdminUserId) return 'owner';
   if (rs.adminUserIds.has(uid)) return 'admin';
   if (rs.staffUserIds.has(uid)) return 'staff';
+  // Self-registered (non-Lark) account nobody has promoted — see
+  // restrictedTierUserIds' own doc comment. Checked LAST, after every
+  // explicit-privilege check above: creating a room (master admin) or being
+  // granted admin/staff already means someone vouched for this account, and
+  // that decision must win regardless of how they logged in.
+  if (rs.restrictedTierUserIds.has(uid)) return 'guest';
   return 'member';
 }
 
@@ -251,7 +295,7 @@ const roomNoticeMap = new Map<string, Notice>();
 
 function getRoomAdmin(room: string): RoomAdminState {
   if (!roomAdminMap.has(room)) {
-    roomAdminMap.set(room, { masterAdminUserId: '', adminUserIds: new Set(), staffUserIds: new Set(), loadedFromDb: false });
+    roomAdminMap.set(room, { masterAdminUserId: '', adminUserIds: new Set(), staffUserIds: new Set(), restrictedTierUserIds: new Set(), loadedFromDb: false });
   }
   return roomAdminMap.get(room)!;
 }
@@ -615,8 +659,21 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // 'guest' regardless of anything this could add to adminUserIds).
     try {
       if (!isGuest) {
-        const account = await getPrisma().user.findUnique({ where: { id: uid }, select: { accountRole: true } });
+        const account = await getPrisma().user.findUnique({ where: { id: uid }, select: { accountRole: true, larkOpenId: true, workspaceRole: true } });
         if (account?.accountRole === 'admin') rs.adminUserIds.add(uid);
+        // Guest-tier for self-registered accounts — POST /auth/register is
+        // public (anyone can hit it), unlike Lark OAuth login which requires
+        // actually being in the org's Lark tenant. A manual account is
+        // otherwise indistinguishable from a real employee, so without this
+        // "buat akun manual" is a free bypass around every guest restriction
+        // this app has. Only clamps the DEFAULT — an admin explicitly
+        // promoting the account (workspaceRole/accountRole, or a room-level
+        // staff/admin grant, both checked above/below this) always wins.
+        if (account && !account.larkOpenId && account.accountRole !== 'admin' && account.workspaceRole !== 'admin') {
+          rs.restrictedTierUserIds.add(uid);
+        } else {
+          rs.restrictedTierUserIds.delete(uid);
+        }
       }
     } catch (e) {
       console.warn('[room] failed to check global admin status:', e);
@@ -960,8 +1017,8 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // objects (password prompts, door locks, API-triggered pieces,
     // multi-choice) are internal-workspace tooling, not meeting features a
     // link-in visitor needs.
-    if (isGuestSocket(socket)) return;
     const room = currentRoom; if (!room) return;
+    if (isRestrictedSocket(socket, room)) return;
     const furnitureId = data?.furnitureId, attempt = data?.attempt;
     if (typeof furnitureId !== 'string' || typeof attempt !== 'string') return;
     try {
@@ -993,8 +1050,8 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     if (!canCheckInteractive(socket.id)) return;
     // QA (Akses tamu checklist item 2) — same reasoning as the furniture
     // password check above.
-    if (isGuestSocket(socket)) return;
     const room = currentRoom; if (!room) return;
+    if (isRestrictedSocket(socket, room)) return;
     const x = data?.x, y = data?.y, attempt = data?.attempt;
     if (!Number.isInteger(x) || !Number.isInteger(y) || typeof attempt !== 'string') return;
     try {
@@ -1028,8 +1085,8 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     if (!canCheckInteractive(socket.id)) return;
     // QA (Akses tamu checklist item 2) — same reasoning as the interactive
     // handlers above.
-    if (isGuestSocket(socket)) return;
     const room = currentRoom; if (!room) return;
+    if (isRestrictedSocket(socket, room)) return;
     const furnitureId = data?.furnitureId, selectedIndex = data?.selectedIndex;
     if (typeof furnitureId !== 'string' || !Number.isInteger(selectedIndex)) return;
     try {
@@ -1065,8 +1122,8 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // configured API call is internal workspace tooling by definition, and
     // the server making the request on a guest's behalf is exactly the
     // SSRF-by-proxy risk the comment above already flags for real members.
-    if (isGuestSocket(socket)) return;
     const room = currentRoom; if (!room) return;
+    if (isRestrictedSocket(socket, room)) return;
     const furnitureId = data?.furnitureId;
     if (typeof furnitureId !== 'string') return;
     const uid = findUserIdBySocket(socket.id);
@@ -1116,8 +1173,8 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // QA (Akses tamu checklist item 2) — same reasoning as the interactive
     // handlers above; this one mutates the room's actual saved layerData
     // for everyone, so it's especially not something a guest should trigger.
-    if (isGuestSocket(socket)) return;
     const room = currentRoom; if (!room) return;
+    if (isRestrictedSocket(socket, room)) return;
     const furnitureId = data?.furnitureId;
     if (typeof furnitureId !== 'string') return;
     try {
@@ -1406,7 +1463,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // tier (member/staff/admin/owner), not guests — a link-in visitor
     // pulling a real employee across the map isn't a case that comment's
     // "per product decision" was actually about.
-    if (isGuestUid(uid)) return;
+    if (isRestrictedSocket(socket, room)) return;
 
     // Summon is open to ALL roles (per product decision) — no staff gate. The
     // safety rails that remain are enough: the target must ACCEPT (consent),
@@ -1598,8 +1655,8 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // QA (Akses tamu checklist item 2) — no consent step at all (unlike
     // Summon above), so this is even less appropriate for a guest to reach
     // than Summon is.
-    if (isGuestSocket(socket)) return;
     const room = currentRoom; if (!room) return;
+    if (isRestrictedSocket(socket, room)) return;
     const nickname = data?.nickname?.trim();
     if (!nickname) return;
 
@@ -1658,7 +1715,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // QA (Akses tamu checklist item 2, "Guest terbatas") — hand raise is a
     // meeting-participation cue a guest attending a meeting has no real
     // need for; kept to move/chat/mic/camera/screen per the confirmed cut.
-    if (isGuestSocket(socket)) return;
+    if (isRestrictedSocket(socket, room)) return;
     const val = !!raised;
     // Visual ✋ badge: whole room, both raise and lower (unchanged).
     socket.to(room).emit(SocketEvents.PLAYER_HAND_UPDATED, { id: socket.id, handRaised: val });
@@ -1698,7 +1755,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // QA (Akses tamu checklist item 2) — a guest going invisible to regular
     // members has no legitimate use case and only invites abuse (lurking
     // unseen in someone else's room).
-    if (isGuestSocket(socket)) return;
+    if (isRestrictedSocket(socket, room)) return;
     const val = !!hidden;
     socket.to(room).emit(SocketEvents.PLAYER_HIDDEN_UPDATED, { id: socket.id, hidden: val });
     updatePlayerHidden(room, socket.id, val);
@@ -1716,7 +1773,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // QA (Akses tamu checklist item 2) — cosmetic but still fits the "very
     // few features" cut — a visitor blasting sound effects isn't a case
     // worth keeping open.
-    if (isGuestSocket(socket)) return;
+    if (isRestrictedSocket(socket, room)) return;
     const soundId = data?.soundId;
     if (typeof soundId !== 'string' || !soundId) return;
     const now = Date.now();
@@ -1813,7 +1870,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // from the persistent "assign as my seat" claim, which was already
     // guest-blocked before this — furnitureHandler.ts isn't registered for
     // guest sockets at all) aren't part of the kept-open guest feature set.
-    if (isGuestSocket(socket)) return;
+    if (isRestrictedSocket(socket, room)) return;
     if (typeof data?.x !== 'number' || typeof data?.y !== 'number') return;
     // seatFurnitureId rides along so peers know WHICH chair this is — chairs
     // sharing a Furniture.tableId form a private audio group (see the client's
@@ -2061,7 +2118,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // this (Sidebar hides the "Member" row for isGuest), this is the
     // server-side backstop in case a guest client fakes the request anyway.
     if ((socket.data as { guestId?: string }).guestId) return;
-    const snapshot: RosterEntry[] = Array.from(userRoomMap, ([userId, v]) => ({ userId, roomSlug: v.roomSlug, roomName: v.roomName }));
+    const snapshot: RosterEntry[] = Array.from(userRoomMap, ([userId, v]) => ({ userId, roomSlug: v.roomSlug, roomName: v.roomName, zoneName: v.zoneName }));
     socket.emit(SocketEvents.ROSTER_SNAPSHOT, snapshot);
   });
 }

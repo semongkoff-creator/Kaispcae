@@ -564,7 +564,7 @@ export interface GameState {
   // once from ROSTER_SNAPSHOT (requested when the panel opens — see
   // useSocket's emitRosterListRequest) and kept live via ROSTER_UPDATED
   // deltas from then on, same "snapshot then live patches" shape as notes.
-  roster: Record<string, { roomSlug: string; roomName: string }>;
+  roster: Record<string, { roomSlug: string; roomName: string; zoneName?: string }>;
   setRosterSnapshot: (entries: RosterEntry[]) => void;
   applyRosterUpdate: (update: RosterUpdate) => void;
 
@@ -1268,11 +1268,11 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   roster: {},
   setRosterSnapshot: (entries) => set({
-    roster: Object.fromEntries(entries.map((e) => [e.userId, { roomSlug: e.roomSlug, roomName: e.roomName }])),
+    roster: Object.fromEntries(entries.map((e) => [e.userId, { roomSlug: e.roomSlug, roomName: e.roomName, zoneName: e.zoneName }])),
   }),
   applyRosterUpdate: (update) => set((state) => {
     const next = { ...state.roster };
-    if (update.online) next[update.userId] = { roomSlug: update.roomSlug, roomName: update.roomName };
+    if (update.online) next[update.userId] = { roomSlug: update.roomSlug, roomName: update.roomName, zoneName: update.zoneName };
     else delete next[update.userId];
     return { roster: next };
   }),

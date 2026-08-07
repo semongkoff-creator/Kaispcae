@@ -46,7 +46,8 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
   // The local user is included in their own ROSTER_SNAPSHOT/_UPDATED entries
   // (server records every non-guest join, not just other people's), so this
   // is the same live data other rows use — not a special case.
-  const myRoomName = roster[localUserId]?.roomName ?? currentRoomSlug;
+  const myPresence = roster[localUserId];
+  const myRoomName = myPresence?.zoneName ? `${myPresence.roomName} · ${myPresence.zoneName}` : (myPresence?.roomName ?? currentRoomSlug);
 
   return (
     <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onMouseDown={onClose}>
@@ -100,7 +101,7 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
                       "that's where you are too" context on top of it. */}
                   <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                     {online
-                      ? `${r.presence!.roomName}${here ? ' (room kamu)' : ''}`
+                      ? `${r.presence!.roomName}${r.presence!.zoneName ? ` · ${r.presence!.zoneName}` : ''}${here ? ' (room kamu)' : ''}`
                       : 'Offline'}
                   </p>
                 </div>

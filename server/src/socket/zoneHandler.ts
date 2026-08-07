@@ -3,7 +3,7 @@ import { SocketEvents, hasFeatureAccess } from '@virtualmeet/shared';
 import { mayEnterZone, isZoneLocked, isSealedIn } from './zoneLock';
 import { sendMusicStateToSocket } from './musicHandler';
 import { getCachedZones } from '../store/roomStore';
-import { getConnectedAdminSocketIds, getRoleInRoom, getPlayerName } from './roomHandler';
+import { getConnectedAdminSocketIds, getRoleInRoom, getPlayerName, updateRosterZone } from './roomHandler';
 
 // Actual A/V zone restriction is computed client-side (see useProximity.ts —
 // every client already knows every player's position and the room's zones,
@@ -112,6 +112,9 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
     }
     socketZone.set(socket.id, { room: currentRoom, zoneId });
     socket.to(currentRoom).emit(SocketEvents.ZONE_ENTER, { playerId: socket.id, zoneId });
+    // Bug follow-up — the member list's live location, see
+    // roomHandler.ts's updateRosterZone doc comment.
+    updateRosterZone(io, socket.id, zone?.name ?? zoneId);
     // Fitur 2 correction — a Music Bot track already playing in this zone
     // must start for the joining socket right away, with no click/popup.
     sendMusicStateToSocket(socket, currentRoom, zoneId);
@@ -129,6 +132,7 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
     }
     socketZone.delete(socket.id);
     socket.to(currentRoom).emit(SocketEvents.ZONE_EXIT, { playerId: socket.id, zoneId });
+    updateRosterZone(io, socket.id, null);
   });
 
   // QA #8 — the guest asking for admin approval after being bounced by

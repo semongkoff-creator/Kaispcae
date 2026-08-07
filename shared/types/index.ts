@@ -305,13 +305,19 @@ export interface RosterEntry {
   userId: string;
   roomSlug: string;
   roomName: string;
+  // Bug follow-up (member list "room kamu" never changing) — which zone
+  // WITHIN roomName this user is currently standing in (e.g. "Meeting
+  // Room", "CEO Office"), if any. Undefined/absent means "not in any named
+  // zone right now" — the room-level label is still accurate on its own,
+  // this only adds the finer-grained location on top of it.
+  zoneName?: string;
 }
 
 // The live delta broadcast (ROSTER_UPDATED) — `online: false` entries omit
 // roomSlug/roomName (there's nothing to report), `online: true` always
 // carries them.
 export type RosterUpdate =
-  | { userId: string; online: true; roomSlug: string; roomName: string }
+  | { userId: string; online: true; roomSlug: string; roomName: string; zoneName?: string }
   | { userId: string; online: false };
 
 // All socket event names used between client and server
