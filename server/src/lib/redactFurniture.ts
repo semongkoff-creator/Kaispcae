@@ -1,4 +1,4 @@
-import { Furniture, RoomTile } from '@virtualmeet/shared';
+import { Furniture, RoomTile, DoorAreaRect } from '@virtualmeet/shared';
 
 // Fitur 15B — two Interactive Object types carry a real "secret" a normal
 // player must never see in their own client's data (both password and
@@ -44,4 +44,18 @@ export function redactDoorPasswords(tiles: RoomTile[][]): RoomTile[][] {
     }
     return t;
   }));
+}
+
+// "Door Area" — same reasoning/guarantee as redactDoorPasswords above,
+// applied to DoorAreaRect instead of RoomTile. Verification is
+// INTERACTIVE_DOOR_AREA_PASSWORD_CHECK in roomHandler.ts, which re-reads the
+// room's own stored layerData fresh, same as the tile version.
+export function redactDoorAreaPasswords(rects: DoorAreaRect[]): DoorAreaRect[] {
+  return rects.map((r) => {
+    if (r.doorPassword != null) {
+      const { doorPassword: _drop, ...rest } = r;
+      return rest;
+    }
+    return r;
+  });
 }

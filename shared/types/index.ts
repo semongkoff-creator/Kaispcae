@@ -1,6 +1,6 @@
 import type { Role } from '../permissions';
 import type { RoomTemplateId } from '../defaultRoomLayout';
-import type { ReferenceImageData, ImpassableAreaRect } from '../mapLayers';
+import type { ReferenceImageData, ImpassableAreaRect, DoorAreaRect } from '../mapLayers';
 
 // Direction the avatar is facing or moving
 export type Direction = 'up' | 'down' | 'left' | 'right';
@@ -252,6 +252,13 @@ export interface RoomState {
   // their own, since this is the one flavor GameCanvas.tsx actually draws —
   // an Impassable Area proper stays invisible on purpose.
   wallAreaRects?: ImpassableAreaRect[];
+  // Follow-up — "Door Area" tool (resizable-area successor to the per-tile
+  // 'door' TileEffect). Same client-prediction posture as
+  // impassableAreaRects above (server re-checks authoritatively — see
+  // movementHandler.ts); doorPassword itself is stripped before this ever
+  // reaches a normal player (redactDoorAreaPasswords), same guarantee the
+  // per-tile version already has.
+  doorAreaRects?: DoorAreaRect[];
   theme?: RoomTheme;
   // Which layout this room was created with (see defaultRoomLayout.ts's
   // ROOM_TEMPLATES) — undefined for rooms created before this field
@@ -735,6 +742,16 @@ export enum SocketEvents {
   // still deferred), so this is a notification only — not a synced door
   // sprite/state.
   DOOR_UNLOCKED_NOTICE = 'door:unlocked_notice',
+  // Follow-up — "Door Area" tool. Same shape/verification posture as the
+  // tile-based pair above, keyed by area id instead of (x,y) since a door
+  // area is an AreaEffect, not a TileEffect. A correct attempt unlocks that
+  // area id for the rest of this socket's session (see doorLock.ts's
+  // isDoorAreaUnlocked) — reflected as "the whole rectangle stops blocking",
+  // not a further event.
+  INTERACTIVE_DOOR_AREA_PASSWORD_CHECK = 'interactive:door_area_password_check',
+  INTERACTIVE_DOOR_AREA_PASSWORD_RESULT = 'interactive:door_area_password_result',
+  // Area-id counterpart to DOOR_UNLOCKED_NOTICE above.
+  DOOR_AREA_UNLOCKED_NOTICE = 'door:area_unlocked_notice',
   // Fitur 15B — same request/reply shape as the password pair above, for
   // Multiple choice pop-up's isCorrect flags.
   INTERACTIVE_CHOICE_CHECK = 'interactive:choice_check',
@@ -1491,6 +1508,21 @@ export interface InteractiveDoorPasswordResultPayload {
   failureMessage?: string;
 }
 
+// "Door Area" — area-id counterpart to the (x,y)-keyed payloads above.
+export interface InteractiveDoorAreaPasswordCheckPayload {
+  areaId: string;
+  attempt: string;
+}
+export interface DoorAreaUnlockedNoticePayload {
+  areaId: string;
+  byName: string;
+}
+export interface InteractiveDoorAreaPasswordResultPayload {
+  areaId: string;
+  correct: boolean;
+  failureMessage?: string;
+}
+
 export interface InteractiveChoiceCheckPayload {
   furnitureId: string;
   selectedIndex: number;
@@ -1872,14 +1904,17 @@ export interface RoomUpdatePayload {
   // so the legacy path can never wipe a client's already-known rects.
   impassableAreaRects?: ImpassableAreaRect[];
   wallAreaRects?: ImpassableAreaRect[];
+  // Same "absent on the legacy socket ROOM_UPDATE path, present on every
+  // save through layerDataToLegacy" posture as impassableAreaRects above.
+  doorAreaRects?: DoorAreaRect[];
 }
 
 export { createDefaultOfficeLayout, createKaitechOfficeLayout, findSpawnPixel, createRoomLayoutFromTemplate, ROOM_TEMPLATES } from '../defaultRoomLayout';
 export type { RoomTemplateId } from '../defaultRoomLayout';
 export { BLOCKED_TILES, isTileBlocked, isDoorTile, findZoneEntryTile, findAdjacentFreeTile, isPointInImpassableArea, doesRectOverlapImpassableArea } from '../tileCollision';
 // ZEP Room Editor — Potong 1 layered map format + legacy adaptors.
-export { MAP_FORMAT_VERSION, legacyToLayerData, layerDataToLegacy, AVATAR_SCALE_MIN, AVATAR_SCALE_MAX, getImpassableAreaRects } from '../mapLayers';
-export type { LayerData, TileEffect, AreaEffect, CustomAssetEntry, ReferenceImageData, ImpassableAreaRect } from '../mapLayers';
+export { MAP_FORMAT_VERSION, legacyToLayerData, layerDataToLegacy, AVATAR_SCALE_MIN, AVATAR_SCALE_MAX, getImpassableAreaRects, getDoorAreaRects } from '../mapLayers';
+export type { LayerData, TileEffect, AreaEffect, CustomAssetEntry, ReferenceImageData, ImpassableAreaRect, DoorAreaRect } from '../mapLayers';
 export type { Role, FeatureKey } from '../permissions';
 export { roleAtLeast, hasFeatureAccess, FEATURE_MIN_ROLE } from '../permissions';
 export type { ShiftDef, AttendanceStatus, WorkTotals, Geofence, Coords, GeofenceResult } from '../attendanceRules';

@@ -6,7 +6,7 @@ import { AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@virtualmeet/shared';
 // distinct from the older per-tile 'impassable' above (same distinction as
 // 'mapLocation'/'privateArea' being rectangles vs. e.g. 'door' being a point).
 // Maps to AreaEffect.effect: 'impassable' (see mapLayers.ts).
-export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat' | 'restrictedArea';
+export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat' | 'restrictedArea' | 'doorArea';
 
 // Follow-up — a "Kursi Diklaim" marker used to be stamped wherever the admin
 // clicked, completely independent of any Furniture piece, so it could
@@ -205,7 +205,7 @@ interface EditorState {
   // effect it actually means, same principle as zones already not being
   // hit-testable by the point-effect tools.
   areaAt: (x: number, y: number, effect?: AreaEffect['effect']) => AreaEffect | null;
-  addArea: (effect: 'mapLocation' | 'privateArea' | 'impassable' | 'focusArea' | 'meetingArea' | 'wallArea' | 'restrictedArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean, capacity?: number, memberOnly?: boolean) => string;
+  addArea: (effect: 'mapLocation' | 'privateArea' | 'impassable' | 'focusArea' | 'meetingArea' | 'wallArea' | 'restrictedArea' | 'doorArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean, capacity?: number, memberOnly?: boolean) => string;
   removeAreaAt: (x: number, y: number, effect?: AreaEffect['effect']) => void;
   // Item #9 — select/move/resize/delete an EXISTING Impassable Area rectangle
   // (RoomEditorPage.tsx's drag-body / drag-handle / Delete-key interactions).
@@ -225,6 +225,9 @@ interface EditorState {
   // entry per call, same as updateSelectedObject for furniture.
   doorEffectAt: (x: number, y: number) => TileEffect | null;
   updateDoorTileEffect: (x: number, y: number, patch: Partial<Pick<TileEffect, 'doorPasswordEnabled' | 'doorPassword' | 'doorPasswordDescription' | 'doorFailureMessage' | 'doorTriggerMethod'>>) => void;
+  // Same settings-panel pattern as updateDoorTileEffect above, but patches a
+  // free-resize Door Area (d.areas[idx]) instead of a single stamped tile.
+  updateDoorAreaEffect: (areaId: string, patch: Partial<Pick<AreaEffect, 'doorPasswordEnabled' | 'doorPassword' | 'doorPasswordDescription' | 'doorFailureMessage' | 'doorTriggerMethod'>>) => void;
   // Same "settings panel for an EXISTING stamped tile" pattern as door above
   // — the Sittable Settings panel (Select tool + an existing sittable tile)
   // patches its one field, the direction the avatar faces once seated there.
@@ -585,6 +588,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const snap = snapshot();
       d.tileEffects[idx] = { ...d.tileEffects[idx], ...patch };
       effectsDirty = true;
+      pushHistory(snap); commit();
+    },
+    updateDoorAreaEffect: (areaId, patch) => {
+      const d = get().doc; if (!d) return;
+      const idx = d.areas.findIndex((a) => a.id === areaId && a.effect === 'doorArea');
+      if (idx < 0) return;
+      const snap = snapshot();
+      d.areas[idx] = { ...d.areas[idx], ...patch };
+      areasDirty = true;
       pushHistory(snap); commit();
     },
     sittableEffectAt: (x, y) => {

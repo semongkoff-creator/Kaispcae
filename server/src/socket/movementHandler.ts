@@ -1,7 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointInImpassableArea, RoomTile, JumpEvent, NudgeEvent, PlayerMovePayload, PlayerMovedPayload, PlayerStoppedPayload } from '@virtualmeet/shared';
-import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas, getCachedZones, getCachedPlayers } from '../store/roomStore';
-import { isDoorUnlocked, clearUnlockedDoors } from './doorLock';
+import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas, getCachedDoorAreaRects, getCachedZones, getCachedPlayers } from '../store/roomStore';
+import { isDoorUnlocked, isDoorAreaUnlocked, clearUnlockedDoors } from './doorLock';
 import { isDoorOverrideActive } from './roomHandler';
 import { createStoppedPayload } from './movementPayload';
 import { socketRateLimit } from '../middleware/rateLimit';
@@ -40,6 +40,19 @@ function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string,
     // room, bypassing the normal per-socket unlock entirely.
     if (isDoorOverrideActive(room)) return false;
     return !isDoorUnlocked(socketId, room, tileX, tileY);
+  }
+  // Follow-up — "Door Area" tool, the resizable-area sibling of the
+  // per-tile check just above. Reuses isPointInImpassableArea AS-IS (same
+  // pixel-space rect shape, see mapLayers.ts's DoorAreaRect) against only
+  // the subset of door areas that are actually still locked for THIS
+  // socket — an unlocked or override-bypassed one is simply left out of
+  // the list handed in, rather than teaching isPointInImpassableArea a new
+  // per-socket concept it has no business knowing about.
+  if (!isDoorOverrideActive(room)) {
+    const lockedDoorAreas = getCachedDoorAreaRects(room).filter(
+      (r) => r.doorPasswordEnabled && r.doorPassword && !isDoorAreaUnlocked(socketId, room, r.id),
+    );
+    if (lockedDoorAreas.length > 0 && isPointInImpassableArea(lockedDoorAreas, pixelX, pixelY)) return true;
   }
   if (isTileOccupiedInPrivateArea(room, tileX, tileY, socketId)) return true;
   return false;

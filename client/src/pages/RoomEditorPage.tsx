@@ -26,7 +26,7 @@ type LoadError = 'auth' | 'forbidden' | 'notfound' | 'generic';
 const OBJ_CATEGORIES: { key: 'furniture' | 'decor' | 'electronics'; label: string }[] = [
   { key: 'furniture', label: 'Furniture' }, { key: 'decor', label: 'Decor' }, { key: 'electronics', label: 'Electronics' },
 ];
-const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat' | 'restrictedArea'; label: string; color: string; hint: string }[] = [
+const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat' | 'restrictedArea' | 'doorArea'; label: string; color: string; hint: string }[] = [
   { id: 'startingPoint', label: 'Starting point', color: 'rgba(16,185,129,0.9)', hint: 'Stamp per tile = titik spawn (bisa banyak; pemain muncul di salah satunya).' },
   { id: 'impassable', label: 'Impassable', color: 'rgba(239,68,68,0.85)', hint: 'Stamp per tile = penghalang tak terlihat (memblok gerak, tanpa tekstur).' },
   { id: 'impassableArea', label: 'Impassable Area', color: 'rgba(220,38,38,0.6)', hint: 'Drag di area kosong = buat area kotak baru, ukuran bebas (tidak ikut grid). Klik area yang sudah ada = pilih (muncul handle) — drag badan untuk pindah, tarik pojok/sisi untuk resize, Delete untuk hapus. Saat main, penghalangnya tetap memblok tile penuh mana pun yang tersentuh kotak ini — invisible, sama seperti Impassable per-tile.' },
@@ -38,6 +38,7 @@ const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateAr
   { id: 'restrictedArea', label: 'Restricted area', color: 'rgba(220,38,38,0.85)', hint: 'Drag area lalu beri nama (mis. "CEO Office") — hanya ADMIN yang bisa langsung masuk. Orang lain yang menyentuh area ini langsung disodori form antrean "Ngobrol dengan CEO" untuk dapat giliran masuk sendiri.' },
   { id: 'portal', label: 'Portal', color: 'rgba(124,58,237,0.95)', hint: 'Stamp klik tile portal → pilih tujuan room lain, atau klik titik tujuan di room ini. Pemain tekan F untuk pindah.' },
   { id: 'door', label: 'Door', color: 'rgba(212,160,86,0.9)', hint: 'Stamp per tile = pintu yang bisa dilewati. Pilih tool Select lalu klik pintu untuk atur Password (opsional, mirip ZEP).' },
+  { id: 'doorArea', label: 'Door Area', color: 'rgba(212,160,86,0.6)', hint: 'Sama seperti Impassable Area (drag = buat, klik = pilih/resize/pindah, Delete = hapus, ukuran bebas), TAPI hanya memblok kalau Password diaktifkan dan belum dibuka. Klik area yang sudah dibuat untuk atur Password, Deskripsi, Pesan gagal, dan cara memicu (otomatis saat masuk area, atau tekan F dulu).' },
   { id: 'sittable', label: 'Sittable', color: 'rgba(56,189,248,0.9)', hint: 'Stamp per tile = kursi tanpa objek (mis. kursi yang cuma gambar di reference image). Pilih tool Select lalu klik tile untuk atur arah hadap.' },
   { id: 'claimableSeat', label: 'Kursi Diklaim', color: 'rgba(250,204,21,0.95)', hint: 'Stamp per tile = titik kursi yang bisa DIKLAIM pemain saat main (nama pemilik muncul realtime, klik kursi sendiri buat teleport ke situ). Pindahkan = Eraser lalu Stamp di posisi baru.' },
 ];
@@ -612,6 +613,71 @@ function DoorSettingsPanel({
   );
 }
 
+// Door Area — the free-resize (Impassable Area-style) counterpart to
+// DoorSettingsPanel above. Same fields, same behavior, but bound to a
+// selected AREA (updateDoorAreaEffect) instead of a stamped tile.
+function DoorAreaSettingsPanel({
+  areaId, doorArea, onBack,
+}: {
+  areaId: string;
+  doorArea: AreaEffect | null;
+  onBack: () => void;
+}) {
+  if (!doorArea) return null;
+  const patch = (p: Partial<Pick<AreaEffect, 'doorPasswordEnabled' | 'doorPassword' | 'doorPasswordDescription' | 'doorFailureMessage' | 'doorTriggerMethod'>>) =>
+    useEditorStore.getState().updateDoorAreaEffect(areaId, p);
+  const enabled = !!doorArea.doorPasswordEnabled;
+  const pressF = doorArea.doorTriggerMethod === 'press_f';
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <button onClick={onBack} title="Kembali ke daftar efek" className="w-6 h-6 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer text-white/70">←</button>
+        <p className="text-xs uppercase tracking-wider text-white/40">Door Area Settings</p>
+      </div>
+      <p className="text-[11px] text-white/50 mb-3">Drag badan area untuk pindah, tarik pojok/sisi untuk resize, Delete untuk hapus.</p>
+
+      <label className="flex items-center gap-2 text-xs text-white/70 mb-3 cursor-pointer">
+        <input type="checkbox" checked={enabled} onChange={(e) => patch({ doorPasswordEnabled: e.target.checked })} />
+        Enable password
+      </label>
+
+      {enabled && (
+        <>
+          <label className="flex items-center gap-2 text-xs text-white/70 mb-3 cursor-pointer">
+            <input
+              type="checkbox" checked={pressF}
+              onChange={(e) => patch({ doorTriggerMethod: e.target.checked ? 'press_f' : 'automatic' })}
+            />
+            Butuh tekan F dulu (bukan langsung muncul otomatis)
+          </label>
+          <p className="text-[11px] text-white/50 mb-1.5">Password Description</p>
+          <input
+            type="text" value={doorArea.doorPasswordDescription ?? ''}
+            onChange={(e) => patch({ doorPasswordDescription: e.target.value })}
+            placeholder="Ditampilkan di prompt (opsional)"
+            className="w-full mb-1.5 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
+          />
+          <p className="text-[11px] text-white/50 mb-1.5">Password</p>
+          <input
+            type="text" value={doorArea.doorPassword ?? ''}
+            onChange={(e) => patch({ doorPassword: e.target.value })}
+            placeholder="Please enter the password"
+            className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
+          />
+          <p className="text-[11px] text-white/50 mb-1.5">Pesan gagal (opsional)</p>
+          <input
+            type="text" value={doorArea.doorFailureMessage ?? ''}
+            onChange={(e) => patch({ doorFailureMessage: e.target.value })}
+            placeholder="Password salah."
+            className="w-full mb-1.5 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400"
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
 // Sittable tile — a seat with no Furniture piece at all (see TileEffect's
 // doc comment), same "settings panel for an existing stamped tile" pattern
 // as DoorSettingsPanel above. Direction is picked directly (Bawah/Atas/Kiri/
@@ -758,6 +824,16 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
         ctx.fillStyle = 'rgba(20,184,166,0.16)'; ctx.fillRect(zx, zy, zw, zh);
         ctx.strokeStyle = 'rgba(20,184,166,0.95)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(zx, zy, zw, zh); ctx.setLineDash([]);
         ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px sans-serif'; ctx.fillText(`🎥 ${isolated ? '🔇' : '🔊'} ${a.name || 'Meeting'}`, zx + 4, zy + 14);
+        continue;
+      }
+      if (a.effect === 'doorArea') {
+        // Tan, matching the per-tile Door effect's color — only blocks
+        // movement while a password is set AND unlocked for that socket
+        // (see movementHandler.ts), so it's drawn lighter than the always-
+        // blocking Impassable/Wall Area above.
+        ctx.fillStyle = 'rgba(212,160,86,0.16)'; ctx.fillRect(zx, zy, zw, zh);
+        ctx.strokeStyle = 'rgba(212,160,86,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(zx, zy, zw, zh); ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px sans-serif'; ctx.fillText(`🚪${a.doorPasswordEnabled ? ' 🔒' : ''} ${a.name || 'Door Area'}`, zx + 4, zy + 14);
         continue;
       }
       if (a.effect === 'restrictedArea') {
@@ -1013,11 +1089,13 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const customAssets = useEditorStore((s) => s.doc?.customAssets ?? []);
   const selectedEffect = useEditorStore((s) => s.selectedEffect);
   const setSelectedEffect = useEditorStore((s) => s.setSelectedEffect);
+  const selectedAreaId = useEditorStore((s) => s.selectedAreaId);
+  const selectedDoorArea = useEditorStore((s) => s.doc?.areas.find((a) => a.id === s.selectedAreaId && a.effect === 'doorArea') ?? null);
   // Item #9 — switching away from the Impassable Area tool drops the current
   // selection so its handles don't linger on screen while some other tool is
   // active (they'd be unreachable/unclickable anyway once selectedEffect
   // no longer gates the mousedown branch that hit-tests them).
-  useEffect(() => { if (selectedEffect !== 'impassableArea' && selectedEffect !== 'wallArea') useEditorStore.getState().clearSelectedArea(); }, [selectedEffect]);
+  useEffect(() => { if (selectedEffect !== 'impassableArea' && selectedEffect !== 'wallArea' && selectedEffect !== 'doorArea') useEditorStore.getState().clearSelectedArea(); }, [selectedEffect]);
   const selection = useEditorStore((s) => s.selection);
   const selectedObjectId = useEditorStore((s) => s.selectedObjectId);
   const clipboard = useEditorStore((s) => s.clipboard);
@@ -1036,7 +1114,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     // Which free-resize rect flavor an 'impassableAreaRect' drag creates —
     // Impassable Area (invisible) or Wall Area (visible) share the exact
     // same drag/create UX, distinguished only by this.
-    effect?: 'impassable' | 'wallArea';
+    effect?: 'impassable' | 'wallArea' | 'doorArea';
   } | null>(null);
   const hoverTileRef = useRef<{ x: number; y: number } | null>(null); // paste ghost anchor
 
@@ -1140,8 +1218,8 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             if (sel) { ctx.fillStyle = 'rgba(124,58,237,0.18)'; ctx.fillRect(sel.x * TILE_SIZE, sel.y * TILE_SIZE, sel.w * TILE_SIZE, sel.h * TILE_SIZE); ctx.strokeStyle = 'rgba(167,139,250,0.95)'; ctx.lineWidth = 2 / z; ctx.setLineDash([6 / z, 4 / z]); ctx.strokeRect(sel.x * TILE_SIZE, sel.y * TILE_SIZE, sel.w * TILE_SIZE, sel.h * TILE_SIZE); ctx.setLineDash([]); }
             // Item #9 — drag/resize handles for the selected Impassable Area
             // (and, same free-resize UX, a selected Wall Area).
-            if (st.activeLayer === 'effects' && (st.selectedEffect === 'impassableArea' || st.selectedEffect === 'wallArea') && st.selectedAreaId) {
-              const wantEffect = st.selectedEffect === 'wallArea' ? 'wallArea' : 'impassable';
+            if (st.activeLayer === 'effects' && (st.selectedEffect === 'impassableArea' || st.selectedEffect === 'wallArea' || st.selectedEffect === 'doorArea') && st.selectedAreaId) {
+              const wantEffect = st.selectedEffect === 'wallArea' ? 'wallArea' : st.selectedEffect === 'doorArea' ? 'doorArea' : 'impassable';
               const selArea = doc.areas.find((a) => a.id === st.selectedAreaId && a.effect === wantEffect);
               if (selArea) drawAreaHandles(ctx, selArea, z);
             }
@@ -1203,7 +1281,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       else if (e.key === 'Delete' || e.key === 'Backspace') {
         if ((s.activeLayer === 'floor' || s.activeLayer === 'wall') && s.selection) { e.preventDefault(); s.fillSelection('erase'); }
         else if ((s.activeLayer === 'objects' || s.activeLayer === 'top') && s.selectedObjectId) { e.preventDefault(); s.deleteSelected(s.activeLayer === 'top' ? 'top' : 'objects'); }
-        else if (s.activeLayer === 'effects' && (s.selectedEffect === 'impassableArea' || s.selectedEffect === 'wallArea') && s.selectedAreaId) { e.preventDefault(); s.removeArea(s.selectedAreaId); }
+        else if (s.activeLayer === 'effects' && (s.selectedEffect === 'impassableArea' || s.selectedEffect === 'wallArea' || s.selectedEffect === 'doorArea') && s.selectedAreaId) { e.preventDefault(); s.removeArea(s.selectedAreaId); }
       } else if (e.key === 'Enter' && (s.activeLayer === 'floor' || s.activeLayer === 'wall') && s.selection) { e.preventDefault(); s.fillSelection('stamp'); }
     };
     const onUp = (e: KeyboardEvent) => { if (e.code === 'Space') spaceHeldRef.current = false; };
@@ -1363,7 +1441,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             portalOriginRef.current = { x: t.x, y: t.y }; setPortalHint(true);
           }
         }, DIALOG_DEFER_MS);
-      } else if (eff === 'impassableArea' || eff === 'wallArea') {
+      } else if (eff === 'impassableArea' || eff === 'wallArea' || eff === 'doorArea') {
         // Item #9 (free-resize follow-up) — select/move/resize/create, in
         // that priority order (a handle on the currently-selected area
         // always wins over starting a new rectangle or re-selecting
@@ -1378,7 +1456,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         // select/move/resize/create UX — only the stored `effect` and its
         // rendering differ (see mapLayers.ts / GameCanvas.tsx) — rather than
         // duplicating ~40 lines of near-identical drag handling.
-        const targetEffect: 'impassable' | 'wallArea' = eff === 'wallArea' ? 'wallArea' : 'impassable';
+        const targetEffect: 'impassable' | 'wallArea' | 'doorArea' = eff === 'wallArea' ? 'wallArea' : eff === 'doorArea' ? 'doorArea' : 'impassable';
         const wp0 = worldPointAt(e.clientX, e.clientY);
         const fx = wp0.x / TILE_SIZE, fy = wp0.y / TILE_SIZE;
         if (s.activeTool === 'eraser') { s.removeAreaAt(fx, fy, targetEffect); return; }
@@ -1561,7 +1639,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       // tile" floor like the grid-snapped rectangles get) — skip creating a
       // degenerate, invisible area instead of silently adding a zero-size one.
       if (sel && sel.w > 0.05 && sel.h > 0.05) {
-        s.addArea(targetEffect, sel, targetEffect === 'wallArea' ? 'Wall Area' : 'Impassable Area');
+        s.addArea(targetEffect, sel, targetEffect === 'wallArea' ? 'Wall Area' : targetEffect === 'doorArea' ? 'Pintu' : 'Impassable Area');
         s.selectAreaAt(sel.x, sel.y, targetEffect);
       }
     }
@@ -1660,7 +1738,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   // Effects — not Objects (their size is the palette entry's own tilesW/H),
   // Portal (two-click dialog), or mapLocation/privateArea (rectangle drag).
   const brushApplicable = activeLayer === 'floor' || activeLayer === 'wall'
-    || (activeLayer === 'effects' && !mediaMode && !!selectedEffect && selectedEffect !== 'portal' && selectedEffect !== 'mapLocation' && selectedEffect !== 'privateArea' && selectedEffect !== 'impassableArea' && selectedEffect !== 'restrictedArea');
+    || (activeLayer === 'effects' && !mediaMode && !!selectedEffect && selectedEffect !== 'portal' && selectedEffect !== 'mapLocation' && selectedEffect !== 'privateArea' && selectedEffect !== 'impassableArea' && selectedEffect !== 'restrictedArea' && selectedEffect !== 'doorArea');
 
   if (error) {
     const msg = error === 'auth' ? 'Kamu harus login dulu untuk membuka editor.' : error === 'forbidden' ? 'Akses ditolak — hanya admin room ini yang boleh membuka editor.' : error === 'notfound' ? 'Room tidak ditemukan.' : 'Gagal memuat editor.';
@@ -1876,6 +1954,15 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             />
           )}
 
+          {activeLayer === 'effects' && selectedEffect === 'doorArea' && selectedAreaId && selectedDoorArea && (
+            <DoorAreaSettingsPanel
+              key={selectedAreaId}
+              areaId={selectedAreaId}
+              doorArea={selectedDoorArea}
+              onBack={() => useEditorStore.getState().clearSelectedArea()}
+            />
+          )}
+
           {activeLayer === 'effects' && selectedSittableTile && (
             <SittableSettingsPanel
               key={`${selectedSittableTile.x},${selectedSittableTile.y}`}
@@ -1885,7 +1972,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             />
           )}
 
-          {activeLayer === 'effects' && !selectedDoorTile && !selectedSittableTile && (
+          {activeLayer === 'effects' && !selectedDoorTile && !selectedSittableTile && !(selectedEffect === 'doorArea' && selectedAreaId && selectedDoorArea) && (
             <>
               <p className="text-xs uppercase tracking-wider text-white/40 mb-2">Tile Effects</p>
               <div className="space-y-1.5">

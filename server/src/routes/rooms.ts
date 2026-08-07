@@ -10,9 +10,9 @@ import { canEnterRoom } from '../lib/roomMembership';
 import { convertLegacyRoom } from '../lib/convertLegacyRoom';
 import { isRoomLocked } from '../socket/roomHandler';
 import { isValidMediaPayload, isUploadUrl } from '../socket/mediaHandler';
-import { redactInteractiveSecrets, redactDoorPasswords } from '../lib/redactFurniture';
+import { redactInteractiveSecrets, redactDoorPasswords, redactDoorAreaPasswords } from '../lib/redactFurniture';
 import { deleteUploadedFile, storage as uploadStorage } from './uploads';
-import { setCachedTiles, setCachedImpassableAreas, setCachedZones, getPlayers, updatePlayerPosition } from '../store/roomStore';
+import { setCachedTiles, setCachedImpassableAreas, setCachedDoorAreaRects, setCachedZones, getPlayers, updatePlayerPosition } from '../store/roomStore';
 
 // Client shape for a MapMediaObject row (mirrors mediaHandler.toClientShape).
 function mediaShape(r: { id: string; roomId: string; type: string; x: number; y: number; createdBy: string; createdByName: string; createdAt: Date; expiresAt: Date | null; payload: unknown }) {
@@ -363,8 +363,9 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
     const derived = layerDataToLegacy(layerData);
     setCachedTiles(room.slug, derived.tiles);
     setCachedImpassableAreas(room.slug, derived.impassableAreaRects);
+    setCachedDoorAreaRects(room.slug, derived.doorAreaRects);
     setCachedZones(room.slug, derived.zones);
-    ioRef?.to(room.slug).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones, impassableAreaRects: derived.impassableAreaRects, wallAreaRects: derived.wallAreaRects });
+    ioRef?.to(room.slug).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones, impassableAreaRects: derived.impassableAreaRects, wallAreaRects: derived.wallAreaRects, doorAreaRects: redactDoorAreaPasswords(derived.doorAreaRects) });
 
     // Focus area — the first time an admin saves a room with at least one
     // Focus-type zone (Room Editor's "Focus area" tile effect), lazily

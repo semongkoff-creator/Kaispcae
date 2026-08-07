@@ -33,7 +33,7 @@ import { avatarColor } from '@/components/ui/ChatAvatar';
 // mapRender.ts so the editor can render the map identically. GameCanvas's usage
 // is unchanged.
 import { drawTile, drawFloorTile, drawWallTile, drawFurnitureLayer, TILE_COLORS } from './mapRender';
-import { drawMiniTileType, drawMiniZoneBackground, MINI_FURNITURE, MINI_WALL_AREA } from './miniRender';
+import { drawMiniTileType, drawMiniZoneBackground, MINI_FURNITURE, MINI_WALL_AREA, MINI_DOOR } from './miniRender';
 
 // Kept proportional to TILE_SIZE (same ratio as AvatarSprite.ts's own copy of
 // this constant) so decorations positioned relative to it — crown, speaker
@@ -186,6 +186,8 @@ interface GameCanvasProps {
   // the local player gets adjacent to a password-protected door they
   // haven't unlocked yet this session.
   onDoorPasswordTrigger: (x: number, y: number) => void;
+  // "Door Area" — area-id counterpart to onDoorPasswordTrigger above.
+  onDoorAreaPasswordTrigger: (areaId: string) => void;
   // QA (Kompat checklist item 7, "Low-spec") — Sidebar's "Simplify" toggle.
   // Previously purely cosmetic (hid HUD panels only, per App.tsx's own
   // usage) — never reached this component at all, so it did nothing for
@@ -297,7 +299,7 @@ function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: numb
   return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, onDoorAreaPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -311,6 +313,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const onMediaOpenRef = useRef(onMediaOpen); onMediaOpenRef.current = onMediaOpen;
   const onInteractiveTriggerRef = useRef(onInteractiveTrigger); onInteractiveTriggerRef.current = onInteractiveTrigger;
   const onDoorPasswordTriggerRef = useRef(onDoorPasswordTrigger); onDoorPasswordTriggerRef.current = onDoorPasswordTrigger;
+  const onDoorAreaPasswordTriggerRef = useRef(onDoorAreaPasswordTrigger); onDoorAreaPasswordTriggerRef.current = onDoorAreaPasswordTrigger;
   const emitSitRef = useRef(emitSit); emitSitRef.current = emitSit;
   const emitFollowUnfollowRef = useRef(emitFollowUnfollow); emitFollowUnfollowRef.current = emitFollowUnfollow;
 
@@ -325,6 +328,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // ref-mirroring as impassableAreaRects above so the draw loop reads a
   // fresh value every frame without depending on React re-renders.
   const wallAreaRects = useGameStore((s) => s.wallAreaRects);
+  // "Door Area" tool — same ref-mirroring reasoning as impassableAreaRects
+  // above. unlockedDoorAreaIds is the per-session unlock Set (client-local
+  // prediction copy of the server's own doorLock.ts state) that decides
+  // WHICH of doorAreaRects currently still block — mirrors unlockedDoors
+  // (tile-based) just below.
+  const doorAreaRects = useGameStore((s) => s.doorAreaRects);
+  const unlockedDoorAreaIds = useGameStore((s) => s.unlockedDoorAreaIds);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const theme = useGameStore((s) => s.theme);
@@ -368,6 +378,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const tilesRef = useRef(tiles);
   const impassableAreaRectsRef = useRef(impassableAreaRects);
   const wallAreaRectsRef = useRef(wallAreaRects);
+  const doorAreaRectsRef = useRef(doorAreaRects);
+  const unlockedDoorAreaIdsRef = useRef(unlockedDoorAreaIds);
   const themeRef = useRef(theme);
   const followInfoRef = useRef(followInfo);
   const locateRequestRef = useRef(locateRequest);
@@ -395,6 +407,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // Re-arm the auto-trigger on leaving/re-entering range, same as
   // autoTriggeredIdsRef below for 'automatic' Interactive Objects.
   const doorAutoTriggeredRef = useRef(new Set<string>());
+  const doorAreaAutoTriggeredRef = useRef(new Set<string>());
   const nudgedPlayersRef = useRef(nudgedPlayers);
   const nudgerPlayersRef = useRef(nudgerPlayers);
   const playingSoundboardRef = useRef(playingSoundboard);
@@ -493,6 +506,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     tilesRef.current = tiles;
     impassableAreaRectsRef.current = impassableAreaRects;
     wallAreaRectsRef.current = wallAreaRects;
+    doorAreaRectsRef.current = doorAreaRects;
+    unlockedDoorAreaIdsRef.current = unlockedDoorAreaIds;
     themeRef.current = theme;
     followInfoRef.current = followInfo;
     locateRequestRef.current = locateRequest;
@@ -580,12 +595,26 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     useGameStore.getState().setLocalPlayer({ x, y, direction, isMoving: true });
   });
 
+  // "Door Area" — client-side prediction only (the server independently
+  // enforces the same thing authoritatively, see movementHandler.ts's
+  // isBlockedForSocket). Reuses useMovement's existing Impassable Area
+  // collision path AS-IS (same {x,y,w,h} rect shape) rather than teaching it
+  // a new per-socket concept — this just returns the SUBSET of door areas
+  // that are still locked right now, same trick the server's own filter
+  // uses. Item #9 — emergency override mirrors the server's own bypass.
+  const getLockedDoorAreas = useCallback(() => {
+    if (doorOverrideRef.current) return [];
+    return doorAreaRectsRef.current.filter(
+      (r) => r.doorPasswordEnabled && !unlockedDoorAreaIdsRef.current.has(r.id),
+    );
+  }, []);
+
   const { update, setPosition, updateFollow } = useMovement({
     isBlocked,
     onMove: onMoveRef.current,
     isFrozen: () => useGameStore.getState().localPlayer.isSitting === true,
     isDoor,
-    getImpassableAreas: () => impassableAreaRectsRef.current,
+    getImpassableAreas: () => [...impassableAreaRectsRef.current, ...getLockedDoorAreas()],
   });
 
   useEffect(() => {
@@ -628,7 +657,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // sub-tile and never rasterized into the tile grid itself (see
   // wouldCollide's own separate check in useMovement.ts).
   const computeWalkWaypoints = useCallback((targetTileX: number, targetTileY: number) => {
-    const areas = impassableAreaRectsRef.current;
+    // Locked door areas route around like any other obstacle, same as a
+    // locked per-tile door already does via isBlocked below — click-to-move
+    // must not path straight through a door nobody's unlocked yet.
+    const areas = [...impassableAreaRectsRef.current, ...getLockedDoorAreas()];
     const pathBlocked = (tx: number, ty: number) => {
       if (isBlocked(tx, ty)) return true;
       if (areas.length === 0) return false;
@@ -653,7 +685,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       y: n.y * TILE_SIZE + TILE_SIZE / 2,
     }));
     return waypoints.length > 0 ? waypoints : null;
-  }, [isBlocked]);
+  }, [isBlocked, getLockedDoorAreas]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -720,6 +752,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // only mean one thing at a time — same posture nearbyInteractiveRef itself
   // already has.
   const nearbyDoorRef = useRef<{ x: number; y: number } | null>(null);
+  // Area-id counterpart to nearbyDoorRef above, for a 'press_f' Door Area.
+  const nearbyDoorAreaRef = useRef<{ id: string; x: number; y: number } | null>(null);
   // 'automatic' pieces fire once per range-ENTRY, not once ever and not every
   // frame while still inside — tracked as a set of currently-inside ids so
   // leaving and re-entering fires it again, matching "Automatically trigger"'s
@@ -898,6 +932,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         } else if (nearbyDoorRef.current) {
           e.preventDefault();
           onDoorPasswordTriggerRef.current(nearbyDoorRef.current.x, nearbyDoorRef.current.y);
+        } else if (nearbyDoorAreaRef.current) {
+          e.preventDefault();
+          onDoorAreaPasswordTriggerRef.current(nearbyDoorAreaRef.current.id);
         }
         return;
       }
@@ -1252,6 +1289,35 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       for (const k of doorAutoTriggeredRef.current) if (!stillNearDoor.has(k)) doorAutoTriggeredRef.current.delete(k);
       nearbyDoorRef.current = bestDoor;
 
+      // Follow-up — "Door Area" trigger scan, same auto-trigger/re-arm shape
+      // as the per-tile scan just above, checked against each area's rect
+      // padded by one tile (so standing just outside the boundary still
+      // counts, matching the point door's 3x3 neighborhood) instead of a
+      // fixed tile neighborhood — an area can be far bigger than one tile.
+      const stillNearDoorArea = new Set<string>();
+      let bestDoorArea: { id: string; x: number; y: number } | null = null;
+      let bestDoorAreaDist = Infinity;
+      for (const area of doorAreaRectsRef.current) {
+        if (!area.doorPasswordEnabled || doorOverrideRef.current) continue;
+        if (unlockedDoorAreaIdsRef.current.has(area.id)) continue;
+        const padLeft = area.x - TILE_SIZE, padTop = area.y - TILE_SIZE;
+        const padRight = area.x + area.w + TILE_SIZE, padBottom = area.y + area.h + TILE_SIZE;
+        if (playerX < padLeft || playerX >= padRight || playerY < padTop || playerY >= padBottom) continue;
+        const centerX = area.x + area.w / 2, centerY = area.y + area.h / 2;
+        if (area.doorTriggerMethod === 'press_f') {
+          const d = Math.hypot(playerX - centerX, playerY - centerY);
+          if (d < bestDoorAreaDist) { bestDoorAreaDist = d; bestDoorArea = { id: area.id, x: centerX, y: area.y }; }
+          continue;
+        }
+        stillNearDoorArea.add(area.id);
+        if (!doorAreaAutoTriggeredRef.current.has(area.id)) {
+          doorAreaAutoTriggeredRef.current.add(area.id);
+          onDoorAreaPasswordTriggerRef.current(area.id);
+        }
+      }
+      for (const id of doorAreaAutoTriggeredRef.current) if (!stillNearDoorArea.has(id)) doorAreaAutoTriggeredRef.current.delete(id);
+      nearbyDoorAreaRef.current = bestDoorArea;
+
       // Potong 6 — nearest YouTube tile within YT_EMBED_RADIUS auto-embeds its
       // player (muted). Toggled via React state only when it changes, so the
       // overlay swaps thumbnail↔iframe without re-rendering every frame.
@@ -1368,6 +1434,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         ctx.fillStyle = MINI_WALL_AREA;
         ctx.fillRect(rsx, rsy, rect.w, rect.h);
       }
+      for (const rect of doorAreaRectsRef.current) {
+        const rsx = rect.x - cameraX;
+        const rsy = rect.y - cameraY;
+        if (rsx + rect.w < 0 || rsx > worldViewW || rsy + rect.h < 0 || rsy > worldViewH) continue;
+        ctx.fillStyle = MINI_DOOR;
+        ctx.fillRect(rsx, rsy, rect.w, rect.h);
+      }
     } else {
       for (let row = startRow; row < endRow; row++) {
         for (let col = startCol; col < endCol; col++) {
@@ -1438,6 +1511,29 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         ctx.strokeStyle = 'rgba(17,24,39,0.9)';
         ctx.lineWidth = 2;
         ctx.strokeRect(rsx, rsy, rect.w, rect.h);
+      }
+
+      // Follow-up — "Door Area" tool. Tan fill (matching the Room Editor's
+      // own door color and the "Press F" prompt background above) so a door
+      // area reads as a doorway, not another wall/hazard. A 🔒 badge only
+      // shows while it's actually still locked for THIS viewer — the same
+      // rect keeps rendering once unlocked, just without the badge, so the
+      // doorway itself stays a visible, permanent map feature either way.
+      for (const rect of doorAreaRectsRef.current) {
+        const rsx = rect.x - cameraX;
+        const rsy = rect.y - cameraY;
+        if (rsx + rect.w < 0 || rsx > worldViewW || rsy + rect.h < 0 || rsy > worldViewH) continue;
+        const locked = !!rect.doorPasswordEnabled && !unlockedDoorAreaIdsRef.current.has(rect.id) && !doorOverrideRef.current;
+        ctx.fillStyle = 'rgba(212,160,86,0.35)';
+        ctx.fillRect(rsx, rsy, rect.w, rect.h);
+        ctx.strokeStyle = 'rgba(212,160,86,0.9)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(rsx, rsy, rect.w, rect.h);
+        if (locked) {
+          ctx.fillStyle = 'rgba(255,255,255,0.95)';
+          ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+          ctx.fillText('🔒', rsx + rect.w / 2, rsy + rect.h / 2 + 4);
+        }
       }
 
       drawLiveReferenceImage(ctx, liveReferenceImageRef.current, cameraX, cameraY);
@@ -2039,6 +2135,29 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       ctx.quadraticCurveTo(bx, by, bx + rr, by); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#ffffff';
       ctx.fillText(text, dsx, by + 13);
+    }
+
+    // Follow-up — same "Press F" prompt as the per-tile door one just
+    // above, for a press_f Door Area. nearbyDoorAreaRef's x/y are already
+    // world PIXELS (DoorAreaRect, not tile coords) — no TILE_SIZE multiply.
+    if (!nearbyPortalRef.current && !nearbyInteractiveRef.current && !nearbyDoorRef.current && nearbyDoorAreaRef.current) {
+      const { x: dax, y: day } = nearbyDoorAreaRef.current;
+      const dasx = dax - cameraX;
+      const dasy = day - cameraY;
+      const bob = Math.sin(timestamp * 0.005) * 2;
+      const text = 'F — Buka Pintu';
+      ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+      const tw = ctx.measureText(text).width;
+      const bx = dasx - tw / 2 - 8, by = dasy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
+      ctx.fillStyle = 'rgba(212, 160, 86, 0.95)';
+      ctx.beginPath();
+      ctx.moveTo(bx + rr, by); ctx.lineTo(bx + bw - rr, by);
+      ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + rr); ctx.lineTo(bx + bw, by + bh - rr);
+      ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - rr, by + bh); ctx.lineTo(bx + rr, by + bh);
+      ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - rr); ctx.lineTo(bx, by + rr);
+      ctx.quadraticCurveTo(bx, by, bx + rr, by); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(text, dasx, by + 13);
     }
 
     // Fitur 15B — 'show_name' Interactive Object: floating name label for

@@ -1,4 +1,4 @@
-import { Avatar, RoomState, AvatarConfig, RoomTile, WorkMode, ImpassableAreaRect, Zone } from '@virtualmeet/shared';
+import { Avatar, RoomState, AvatarConfig, RoomTile, WorkMode, ImpassableAreaRect, DoorAreaRect, Zone } from '@virtualmeet/shared';
 import { Redis } from 'ioredis';
 import { clearLivePlayerMovement, mergeLivePlayerMovement, setLivePlayerMovement } from './playerLiveState';
 
@@ -346,6 +346,21 @@ export function setCachedImpassableAreas(roomId: string, rects: ImpassableAreaRe
 
 export function getCachedImpassableAreas(roomId: string): ImpassableAreaRect[] {
   return impassableAreaCache.get(roomId) ?? [];
+}
+
+// "Door Area" — same cache shape as impassableAreaCache above, but kept
+// separate: unlike an impassable rect, whether one of these blocks a given
+// mover is conditional (see doorLock.ts's isDoorAreaUnlocked), so
+// movementHandler.ts needs to filter this list itself rather than the
+// unconditional impassableAreaCache already covering it.
+const doorAreaCache = new Map<string, DoorAreaRect[]>();
+
+export function setCachedDoorAreaRects(roomId: string, rects: DoorAreaRect[]): void {
+  doorAreaCache.set(roomId, rects);
+}
+
+export function getCachedDoorAreaRects(roomId: string): DoorAreaRect[] {
+  return doorAreaCache.get(roomId) ?? [];
 }
 
 // Zones — same populate-on-join/refresh-on-save lifecycle, in-memory-only

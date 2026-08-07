@@ -151,7 +151,15 @@ export interface AreaEffect {
   // everyone else. Converts to a plain Zone like every other non-impassable
   // area below; the actual restriction lives server-side, not on this
   // object, so there is nothing extra to round-trip here.
-  effect: 'privateArea' | 'mapLocation' | 'impassable' | 'focusArea' | 'wallArea' | 'meetingArea' | 'restrictedArea';
+  // 'doorArea' — the resizable-area successor to the old per-tile 'door'
+  // TileEffect (still supported unchanged — this is additive, not a
+  // replacement). Same collision shape as 'impassable'/'wallArea' (a
+  // pixel-space rect, see getDoorAreaRects below) but CONDITIONAL: it only
+  // blocks a given socket while doorPasswordEnabled is on AND that socket
+  // hasn't unlocked THIS area id yet (see server/src/socket/doorLock.ts's
+  // isDoorAreaUnlocked). Excluded from the zones list like impassable/
+  // wallArea (never a chat/audio zone).
+  effect: 'privateArea' | 'mapLocation' | 'impassable' | 'focusArea' | 'wallArea' | 'meetingArea' | 'restrictedArea' | 'doorArea';
   name: string;
   x: number;
   y: number;
@@ -175,6 +183,17 @@ export interface AreaEffect {
   // See Zone.memberOnly (QA #8). Only ever set on 'privateArea' (prompted at
   // creation time, same as capacity above); absent/false = open to guests.
   memberOnly?: boolean;
+  // 'doorArea' password fields — same names/semantics as TileEffect's own
+  // door* fields (see its doc comment); duplicated here rather than shared
+  // because an Area and a TileEffect are stored in different arrays with
+  // different identity (id vs x,y). doorPassword must NEVER reach a normal
+  // player's client — see redactDoorAreaPasswords, mirroring
+  // redactDoorPasswords for the tile version.
+  doorPasswordEnabled?: boolean;
+  doorPassword?: string;
+  doorPasswordDescription?: string;
+  doorFailureMessage?: string;
+  doorTriggerMethod?: 'automatic' | 'press_f';
 }
 
 export interface LayerData {
@@ -288,7 +307,7 @@ export function legacyToLayerData(tiles: RoomTile[][], furniture: Furniture[], z
 }
 
 // Read-time adaptor: reconstruct the exact runtime shape from LayerData.
-export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[]; impassableAreaRects: ImpassableAreaRect[]; wallAreaRects: ImpassableAreaRect[] } {
+export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[]; impassableAreaRects: ImpassableAreaRect[]; wallAreaRects: ImpassableAreaRect[]; doorAreaRects: DoorAreaRect[] } {
   const { width, height, floor, wall } = ld;
   const effAt = new Map<string, TileEffect>();
   for (const e of ld.tileEffects) effAt.set(`${e.x},${e.y}`, e);
@@ -379,8 +398,9 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
   // editor" for the same posture on every other effect drawn there).
   // 'wallArea' is excluded the same way (it's not a chat/audio zone either)
   // but — unlike 'impassable' — it IS meant to be visible, via the separate
-  // `wallAreaRects` list below instead of the Zone system.
-  const zones: Zone[] = ld.areas.filter((a) => a.effect !== 'impassable' && a.effect !== 'wallArea').map((a) => {
+  // `wallAreaRects` list below instead of the Zone system. 'doorArea' is
+  // excluded for the same reason, visible via its own `doorAreaRects` below.
+  const zones: Zone[] = ld.areas.filter((a) => a.effect !== 'impassable' && a.effect !== 'wallArea' && a.effect !== 'doorArea').map((a) => {
     // ZEP areaId → shared zone.id so same-areaId private areas are ONE audio
     // group (useProximity compares zone.id). Converted areas have no areaId, so
     // their id is unchanged — the Potong-1 round-trip stays byte-identical.
@@ -409,6 +429,12 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     tiles, furniture, zones,
     impassableAreaRects: [...getImpassableAreaRects(ld), ...getFurnitureBlockRects(ld), ...getWallAreaRects(ld)],
     wallAreaRects: getWallAreaRects(ld),
+    // Deliberately NOT merged into impassableAreaRects above — that list is
+    // unconditional (blocks everyone, always); a door area only blocks a
+    // given socket while locked FOR THEM (see isDoorAreaUnlocked), so it
+    // needs its own list a caller can filter by unlock state before doing
+    // the same point/rect-overlap check impassableAreaRects already uses.
+    doorAreaRects: getDoorAreaRects(ld),
   };
 }
 
@@ -433,6 +459,35 @@ export function getWallAreaRects(ld: LayerData): ImpassableAreaRect[] {
   return ld.areas
     .filter((a) => a.effect === 'wallArea')
     .map((a) => ({ x: a.x * TILE_SIZE, y: a.y * TILE_SIZE, w: a.width * TILE_SIZE, h: a.height * TILE_SIZE }));
+}
+
+// 'doorArea' rects — the resizable-area successor to the per-tile 'door'
+// TileEffect. Same pixel-space shape as ImpassableAreaRect (so a caller can
+// reuse isPointInImpassableArea/doesRectOverlapImpassableArea as-is against
+// a filtered — currently-locked-for-this-socket — subset of these, rather
+// than needing a whole new collision primitive) PLUS the door's own
+// identity/config, since unlike a plain impassable rect, whether one of
+// these blocks depends on WHO's asking (see doorLock.ts's
+// isDoorAreaUnlocked) and there needs to be an id to check that against.
+export interface DoorAreaRect extends ImpassableAreaRect {
+  id: string;
+  name: string;
+  doorPasswordEnabled?: boolean;
+  doorPassword?: string;
+  doorPasswordDescription?: string;
+  doorFailureMessage?: string;
+  doorTriggerMethod?: 'automatic' | 'press_f';
+}
+export function getDoorAreaRects(ld: LayerData): DoorAreaRect[] {
+  return ld.areas
+    .filter((a) => a.effect === 'doorArea')
+    .map((a) => ({
+      id: a.id, name: a.name,
+      x: a.x * TILE_SIZE, y: a.y * TILE_SIZE, w: a.width * TILE_SIZE, h: a.height * TILE_SIZE,
+      doorPasswordEnabled: a.doorPasswordEnabled, doorPassword: a.doorPassword,
+      doorPasswordDescription: a.doorPasswordDescription, doorFailureMessage: a.doorFailureMessage,
+      doorTriggerMethod: a.doorTriggerMethod,
+    }));
 }
 
 // Bug — Furniture has NEVER actually blocked movement anywhere in this

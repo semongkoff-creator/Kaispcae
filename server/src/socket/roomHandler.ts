@@ -2,10 +2,10 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone, zoneKeyholderOf, admitUserToZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, findSpawnPixel, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH, RosterEntry, RosterUpdate } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, findSpawnPixel, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, DoorAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveDoorAreaPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH, RosterEntry, RosterUpdate } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerMic, updatePlayerHidden, updatePlayerWorkMode, updatePlayerSpotlight, updatePlayerSitting,
-  setCachedTiles, getCachedTiles, setCachedImpassableAreas, setCachedZones, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
+  setCachedTiles, getCachedTiles, setCachedImpassableAreas, setCachedDoorAreaRects, setCachedZones, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
 } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';
 import { resolveEntry } from '../lib/roomMembership';
@@ -13,8 +13,8 @@ import { admitCalledEntry, advanceQueue } from '../lib/roomQueue';
 import { refreshZoneRestrictionCache } from '../lib/zoneMembership';
 import { logActivity } from '../lib/larkBase';
 import { socketRateLimit } from '../middleware/rateLimit';
-import { redactInteractiveSecrets, redactDoorPasswords } from '../lib/redactFurniture';
-import { unlockDoor, clearUnlockedDoorsForRoom } from './doorLock';
+import { redactInteractiveSecrets, redactDoorPasswords, redactDoorAreaPasswords } from '../lib/redactFurniture';
+import { unlockDoor, unlockDoorArea, clearUnlockedDoorsForRoom } from './doorLock';
 import { getNearbyRecipients } from './proximityBroadcast';
 import { sendUserDm } from '../lib/larkIm';
 import { relayBroadcastToLark } from '../lib/larkChatSync';
@@ -777,6 +777,8 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // savedImpassableAreaRects above, resolved from the same layerDataToLegacy
     // call.
     let savedWallAreaRects: ImpassableAreaRect[] = [];
+    // "Door Area" tool — same [] -on-legacy-rooms posture as the two above.
+    let savedDoorAreaRects: DoorAreaRect[] = [];
     // ZEP Room Editor (Potong 1) — once a room is converted, layerData is its
     // source of truth. The adaptor reconstructs the EXACT same runtime shape
     // (tiles/furniture/zones), so everything downstream — render, collision,
@@ -789,6 +791,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       savedZones = derived.zones;
       savedImpassableAreaRects = derived.impassableAreaRects;
       savedWallAreaRects = derived.wallAreaRects;
+      savedDoorAreaRects = derived.doorAreaRects;
     } else {
       if (dbRoom?.tilemapData && Array.isArray(dbRoom.tilemapData) && (dbRoom.tilemapData as any[]).length > 0) {
         savedTiles = (dbRoom.tilemapData as any[]).map((row: any[], y: number) =>
@@ -913,6 +916,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       // comment there).
       setCachedTiles(room, tiles);
       setCachedImpassableAreas(room, savedImpassableAreaRects);
+      setCachedDoorAreaRects(room, savedDoorAreaRects);
       setCachedZones(room, savedZones || fallback!.zones);
 
       // "Ngobrol dengan CEO" queue, zone-level — load this room's
@@ -947,6 +951,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         ...state, tiles: redactDoorPasswords(tiles), furniture: redactInteractiveSecrets(savedFurniture || fallback!.furniture), zones: savedZones || fallback!.zones, players: playersWithMeta,
         impassableAreaRects: savedImpassableAreaRects,
         wallAreaRects: savedWallAreaRects,
+        doorAreaRects: redactDoorAreaPasswords(savedDoorAreaRects),
         adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId, staffUserIds: Array.from(rs.staffUserIds), theme, template,
         notice: roomNoticeMap.get(room) ?? null,
         locked: !!rs.locked,
@@ -1112,6 +1117,34 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     }
   });
 
+  // "Door Area" — same verification shape as the tile-based check just
+  // above, keyed by area id (AreaEffect, not TileEffect) instead of (x,y).
+  socket.on(SocketEvents.INTERACTIVE_DOOR_AREA_PASSWORD_CHECK, async (data: InteractiveDoorAreaPasswordCheckPayload) => {
+    if (!canCheckInteractive(socket.id)) return;
+    const room = currentRoom; if (!room) return;
+    if (isRestrictedSocket(socket, room)) return;
+    const areaId = data?.areaId, attempt = data?.attempt;
+    if (typeof areaId !== 'string' || !areaId || typeof attempt !== 'string') return;
+    try {
+      const dbRoom = await getPrisma().room.findUnique({ where: { slug: room }, select: { layerData: true } });
+      if (!dbRoom?.layerData) return;
+      const ld = dbRoom.layerData as unknown as LayerData;
+      const area = ld.areas.find((a) => a.id === areaId && a.effect === 'doorArea');
+      if (!area?.doorPasswordEnabled) return;
+      const correct = (area.doorPassword ?? '') === attempt;
+      if (correct) {
+        unlockDoorArea(socket.id, room, areaId);
+        socket.to(room).emit(SocketEvents.DOOR_AREA_UNLOCKED_NOTICE, { areaId, byName: getPlayerName(socket.id) });
+      }
+      socket.emit(SocketEvents.INTERACTIVE_DOOR_AREA_PASSWORD_RESULT, {
+        areaId, correct,
+        failureMessage: correct ? undefined : (area.doorFailureMessage || 'Password salah.'),
+      });
+    } catch (e) {
+      console.warn('[room] door area password check error:', e);
+    }
+  });
+
   // Fitur 15B — Multiple choice pop-up verification. Same shape as the
   // password check above: re-read the room's own stored layerData fresh,
   // never trust the client's own copy of which option is correct (that's
@@ -1225,8 +1258,9 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         const derived = layerDataToLegacy(ld);
         setCachedTiles(room, derived.tiles);
         setCachedImpassableAreas(room, derived.impassableAreaRects);
+        setCachedDoorAreaRects(room, derived.doorAreaRects);
         setCachedZones(room, derived.zones);
-        io.to(room).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones, impassableAreaRects: derived.impassableAreaRects, wallAreaRects: derived.wallAreaRects });
+        io.to(room).emit(SocketEvents.ROOM_UPDATED, { tiles: redactDoorPasswords(derived.tiles), furniture: redactInteractiveSecrets(derived.furniture), zones: derived.zones, impassableAreaRects: derived.impassableAreaRects, wallAreaRects: derived.wallAreaRects, doorAreaRects: redactDoorAreaPasswords(derived.doorAreaRects) });
       }
     } catch (e) {
       console.warn('[room] change object error:', e);

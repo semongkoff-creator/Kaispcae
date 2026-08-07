@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@virtualmeet/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 import { appendMovementSnapshot, MovementSnapshot, sampleMovementSnapshots } from './movementSmoothing';
@@ -156,6 +156,22 @@ export interface GameState {
   // impassable rect, unlike a plain Impassable Area which stays invisible.
   wallAreaRects: ImpassableAreaRect[];
   setWallAreaRects: (rects: ImpassableAreaRect[]) => void;
+
+  // "Door Area" tool — the resizable-area successor to the per-tile 'door'
+  // TileEffect. Conditional collision (only blocks a socket that hasn't
+  // unlocked this specific area id — see unlockedDoorAreaIds below), so
+  // unlike impassableAreaRects it's NOT pre-merged for collision here;
+  // GameCanvas.tsx filters it by unlock state itself before checking.
+  doorAreaRects: DoorAreaRect[];
+  setDoorAreaRects: (rects: DoorAreaRect[]) => void;
+  // Client-local, per-session unlock tracking (mirrors the per-tile
+  // unlockedDoors Set already in GameCanvas.tsx, just promoted to the store
+  // so App.tsx's password-check response handler can update it) — the
+  // server independently enforces the same thing authoritatively
+  // (movementHandler.ts's isDoorAreaUnlocked); this is purely so the local
+  // avatar's own collision prediction matches without a round trip.
+  unlockedDoorAreaIds: Set<string>;
+  unlockDoorAreaLocally: (areaId: string) => void;
 
   // Room meta
   roomId: string;
@@ -528,6 +544,9 @@ export interface GameState {
   // validation; this is purely the client's own UI-responsiveness copy.
   unlockedDoors: Set<string>;
   unlockDoorClientSide: (x: number, y: number) => void;
+  // "Door Area" — area-id counterpart to the two fields above.
+  interactiveDoorAreaPasswordResult: InteractiveDoorAreaPasswordResultPayload | null;
+  setInteractiveDoorAreaPasswordResult: (result: InteractiveDoorAreaPasswordResultPayload | null) => void;
 
   // §6 — Add Media. Full list synced from MEDIA_LIST (on join) then kept
   // live via MEDIA_ADDED/MEDIA_REMOVED; whiteboard strokes are mutated
@@ -822,6 +841,14 @@ export const useGameStore = create<GameState>((set, get) => ({
   setImpassableAreaRects: (rects) => set({ impassableAreaRects: rects }),
   wallAreaRects: [],
   setWallAreaRects: (rects) => set({ wallAreaRects: rects }),
+  doorAreaRects: [],
+  setDoorAreaRects: (rects) => set({ doorAreaRects: rects }),
+  unlockedDoorAreaIds: new Set(),
+  unlockDoorAreaLocally: (areaId) => set((s) => {
+    if (s.unlockedDoorAreaIds.has(areaId)) return {};
+    const next = new Set(s.unlockedDoorAreaIds); next.add(areaId);
+    return { unlockedDoorAreaIds: next };
+  }),
 
   roomId: 'default',
   roomName: 'Default Room',
@@ -1223,6 +1250,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       next.add(`${x},${y}`);
       return { unlockedDoors: next };
     }),
+  interactiveDoorAreaPasswordResult: null,
+  setInteractiveDoorAreaPasswordResult: (result) => set({ interactiveDoorAreaPasswordResult: result }),
 
   followerUserIds: [],
   setFollowerUserIds: (ids) => set({ followerUserIds: ids }),
@@ -1514,6 +1543,13 @@ export const useGameStore = create<GameState>((set, get) => ({
       zones: roomState.zones ?? prev.zones,
       impassableAreaRects: roomState.impassableAreaRects ?? prev.impassableAreaRects,
       wallAreaRects: roomState.wallAreaRects ?? prev.wallAreaRects,
+      doorAreaRects: roomState.doorAreaRects ?? prev.doorAreaRects,
+      // A fresh join starts with every door area locked again, same as the
+      // per-tile Set in GameCanvas.tsx — the server's own per-socket unlock
+      // state is ALSO fresh on a new connection (doorLock.ts is keyed by
+      // socket id), so this stays in sync rather than optimistically
+      // carrying over a previous session's unlocks.
+      unlockedDoorAreaIds: new Set(),
       playerRecords: records,
       isAdmin: localIsAdmin,
       adminPlayerIds: adminIds,

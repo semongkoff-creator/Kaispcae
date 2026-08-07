@@ -41,3 +41,24 @@ export function clearUnlockedDoorsForRoom(socketId: string, room: string): void 
   const prefix = `${room}:`;
   for (const k of set) if (k.startsWith(prefix)) set.delete(k);
 }
+
+// "Door Area" — same per-socket, per-session unlock tracking as the
+// tile-keyed functions above, deliberately reusing the SAME underlying map
+// (key `${room}:area:${areaId}`, distinguishable from a tile key's
+// `${room}:${x}:${y}` by the literal "area" segment) rather than a parallel
+// Map — clearUnlockedDoors/clearUnlockedDoorsForRoom above already clear
+// every key for a socket/room with no changes needed, since both still
+// start with the same `${room}:` prefix.
+function areaKey(room: string, areaId: string): string {
+  return `${room}:area:${areaId}`;
+}
+
+export function isDoorAreaUnlocked(socketId: string, room: string, areaId: string): boolean {
+  return unlockedDoors.get(socketId)?.has(areaKey(room, areaId)) ?? false;
+}
+
+export function unlockDoorArea(socketId: string, room: string, areaId: string): void {
+  let set = unlockedDoors.get(socketId);
+  if (!set) { set = new Set(); unlockedDoors.set(socketId, set); }
+  set.add(areaKey(room, areaId));
+}
