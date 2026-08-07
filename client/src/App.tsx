@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
-import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, PersonPlusFill, DoorOpenFill, VolumeUpFill } from 'react-bootstrap-icons';
-import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, Role, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents } from '@virtualmeet/shared';
+import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill } from 'react-bootstrap-icons';
+import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -135,7 +135,7 @@ const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', 
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
   const [showEditor, setShowEditor] = useState(false);
   // QA #1/#6/#7 — reopen the first-run walkthrough on demand (Sidebar's
@@ -464,6 +464,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const currentZoneIdRef = useRef<string | null>(null);
   const [currentZone, setCurrentZone] = useState<{ id: string; name: string } | null>(null);
   const localRole = useGameStore((s) => s.localRole);
+  const localIsCeo = useGameStore((s) => s.localIsCeo);
   const zoneLock = useZoneLock(socketRef, authUserId, roomSlug);
   // "Ngobrol dengan CEO" queue, zone-level — the map's own visual "tile
   // effect" (a lock badge on the zone's banner, see GameCanvas.tsx), so a
@@ -539,14 +540,19 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       }
       // "Ngobrol dengan CEO" queue, zone-level — a restricted zone (Room
       // Editor's "Restricted area" tool) must physically hold out anyone who
-      // doesn't meet its minRole AND hasn't been called/admitted into their
-      // queue slot, same bounce as a manual lock above, mirroring the exact
-      // authoritative check zoneHandler.ts's ZONE_ENTER does server-side
-      // (role, then an active/called ticket for THIS zone) so the decision
-      // is instant and client-only — no round trip, no brief "stood inside
-      // it" flash before the server's own ZONE_LOCKED_DENIED came back.
+      // isn't the room owner or explicitly granted CEO access, AND hasn't
+      // been called/admitted into their queue slot, same bounce as a manual
+      // lock above, mirroring the exact authoritative check
+      // zoneHandler.ts's ZONE_ENTER does server-side so the decision is
+      // instant and client-only — no round trip, no brief "stood inside it"
+      // flash before the server's own ZONE_LOCKED_DENIED came back.
+      //
+      // Deliberately NOT role-based (no roleAtLeast/minRole check) — an
+      // ordinary room admin must queue like anyone else here; only the room
+      // owner and whoever's been granted CEO access (see gameStore's
+      // localIsCeo, roomHandler.ts's ceoUserIds) bypass.
       const restriction = zoneLock.restrictionOf(zoneId);
-      if (restriction && !roleAtLeast(localRole, (restriction.minRole as Role) || 'staff')) {
+      if (restriction && localRole !== 'owner' && !localIsCeo) {
         const ticket = zoneLock.zoneQueueTicket;
         const admitted = ticket?.zoneId === zoneId && (ticket.status === 'called' || ticket.status === 'active');
         if (!admitted) {
@@ -801,6 +807,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     api.decideJoinRequest(req.roomSlug, req.userId, decision).catch((e) => {
       console.error('[join-request] decide from popup failed:', e);
     });
+  }, []);
+
+  // "Ngobrol dengan CEO" queue, zone-level — same "persists until an
+  // explicit decision" shape as incomingJoinRequests above.
+  const incomingQueueRequests = useGameStore((s) => s.incomingQueueRequests);
+  const decideIncomingQueueRequest = useCallback((req: { entryId: string; roomSlug: string }, decision: 'approve' | 'reject') => {
+    useGameStore.getState().removeIncomingQueueRequest(req.entryId);
+    const call = decision === 'approve' ? api.approveQueueEntry(req.roomSlug, req.entryId) : api.skipQueueEntry(req.roomSlug, req.entryId);
+    call.catch((e) => console.error('[queue-request] decide from popup failed:', e));
   }, []);
 
   const followResult = useGameStore((s) => s.followResult);
@@ -1576,6 +1591,22 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             +{incomingJoinRequests.length - 3} permintaan bergabung lainnya
           </div>
         )}
+        {/* "Ngobrol dengan CEO" queue, zone-level — same stacked-toast shape
+            as the join-request popups above (capped at 3 + "+N lainnya"). */}
+        {isAdmin && incomingQueueRequests.slice(0, 3).map((req) => (
+          <PendingRequestToast
+            key={req.entryId}
+            icon={<BriefcaseFill size={13} className="text-amber-600" />}
+            message={<><span className="font-medium">{req.name}</span> minta antre ngobrol di <span className="font-medium">{req.zoneName}</span>{req.topic ? <> — &quot;{req.topic}&quot;</> : null} ({req.durationMin}m)</>}
+            onAccept={() => decideIncomingQueueRequest(req, 'approve')}
+            onDecline={() => decideIncomingQueueRequest(req, 'reject')}
+          />
+        ))}
+        {isAdmin && incomingQueueRequests.length > 3 && (
+          <div className="bg-slate-800/90 text-white text-xs font-medium px-3 py-1.5 rounded-full shadow pointer-events-none">
+            +{incomingQueueRequests.length - 3} antrean lainnya
+          </div>
+        )}
         {/* Guest Link & Ruang Tunggu — same stacked-toast shape as the
             member join-request queue above, distinct tint so the two are
             visually distinguishable (a guest has no account behind them). */}
@@ -1821,6 +1852,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onRevokeAdmin={(userId) => emitAdminRevoke(userId)}
           onGrantStaff={(userId) => emitStaffGrant(userId)}
           onRevokeStaff={(userId) => emitStaffRevoke(userId)}
+          onGrantCeo={(userId) => emitCeoGrant(userId)}
+          onRevokeCeo={(userId) => emitCeoRevoke(userId)}
         />
       )}
 

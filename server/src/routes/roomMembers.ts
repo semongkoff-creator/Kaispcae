@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { Server } from 'socket.io';
+import { Prisma } from '@prisma/client';
 import { getPrisma } from '../lib/prisma';
 import { hasFeatureAccess, SocketEvents, Zone, LayerData, layerDataToLegacy } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
@@ -553,8 +554,31 @@ roomMembers.post('/rooms/:slug/queue/join', authenticateToken, async (req: AuthR
 
     // Opportunistic — if the room/zone's slot happens to be free right now
     // (e.g. this is the only person waiting), this is what actually calls
-    // them rather than making them wait for the next 20s sweep tick.
+    // them rather than making them wait for the next 20s sweep tick. A no-op
+    // for zone-level entries now (see advanceQueue's own doc comment) —
+    // those wait on the ZONE_QUEUE_REQUESTED push just below instead.
     await advanceQueue(prisma, room.id, zoneId);
+
+    // "Ngobrol dengan CEO" queue, zone-level — approval-gated (see
+    // advanceQueue above), so this is the ONLY signal an admin gets that
+    // someone's waiting; fanned out to every admin socket currently
+    // connected to the room, same posture as JOIN_REQUESTED.
+    if (zoneId && ioRef) {
+      const adminSocketIds = getConnectedAdminSocketIds(room.slug);
+      for (const sid of adminSocketIds) {
+        ioRef.to(sid).emit(SocketEvents.ZONE_QUEUE_REQUESTED, {
+          entryId: created.id,
+          userId: req.userId!,
+          name: created.name,
+          topic,
+          durationMin,
+          roomSlug: room.slug,
+          roomName: room.name,
+          zoneId,
+          zoneName: zoneName ?? zoneId,
+        });
+      }
+    }
 
     return res.status(201).json({ status: 'waiting', id: created.id });
   } catch (err) {
@@ -660,6 +684,41 @@ roomMembers.post('/rooms/:slug/queue/:entryId/skip', authenticateToken, async (r
   } catch (err) {
     console.error('[roomMembers] queue skip error:', err);
     return res.status(500).json({ error: 'Gagal mengubah antrean' });
+  }
+});
+
+// POST /api/rooms/:slug/queue/:entryId/approve — admin explicitly admits a
+// 'waiting' zone-level entry (see roomQueue.ts's advanceQueue — zone-level
+// no longer auto-advances, this is the replacement). SERIALIZABLE
+// transaction for the same reason advanceQueue itself uses one: two admins
+// approving different people at the same instant must not both succeed
+// against a single-occupant slot.
+roomMembers.post('/rooms/:slug/queue/:entryId/approve', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    if (error === 404) return res.status(404).json({ error: 'Room not found' });
+    if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa menyetujui antrean' });
+
+    const entry = await prisma.roomQueueEntry.findUnique({ where: { id: req.params.entryId } });
+    if (!entry || entry.roomId !== room!.id || entry.status !== 'waiting') {
+      return res.status(404).json({ error: 'Antrean ini sudah tidak berlaku' });
+    }
+
+    const approved = await prisma.$transaction(async (tx) => {
+      const occupied = await tx.roomQueueEntry.findFirst({
+        where: { roomId: room!.id, zoneId: entry.zoneId, status: { in: ['called', 'active'] } },
+      });
+      if (occupied) return false;
+      await tx.roomQueueEntry.update({ where: { id: entry.id }, data: { status: 'called', calledAt: new Date() } });
+      return true;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (!approved) return res.status(409).json({ error: 'Slot sedang terisi orang lain' });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[roomMembers] queue approve error:', err);
+    return res.status(500).json({ error: 'Gagal menyetujui antrean' });
   }
 });
 

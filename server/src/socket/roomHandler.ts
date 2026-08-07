@@ -183,6 +183,21 @@ interface RoomAdminState {
   // grant/revoke plumbing exists now so those features can reuse it later
   // instead of each inventing their own mid-tier role.
   staffUserIds: Set<string>;
+  // "Ngobrol dengan CEO" restricted-area bypass — deliberately NOT part of
+  // the Role hierarchy (see shared/permissions.ts's ROLE_ORDER): dozens of
+  // unrelated features gate on role >= admin/staff/etc, and inserting a new
+  // tier there would silently touch every one of them. This is a separate,
+  // narrowly-scoped allowlist, same pattern as adminUserIds/staffUserIds
+  // above, but persisted via its OWN RoomMember.isCeo boolean column (see
+  // persistCeoGrant below) rather than another `role` value — `role` is a
+  // single mutually-exclusive tier (granting 'admin' clears staff), and
+  // isCeo must be able to stack with any role instead of overwriting it.
+  // Grants NOTHING except walking straight past a Restricted Area (App.tsx's
+  // zone-crossing bounce, zoneHandler.ts's ZONE_ENTER check) without
+  // queuing. A ceo-tagged member still resolves to plain 'member' everywhere
+  // else (getRole below never checks this Set), so it can't be used to
+  // sneak into any other admin/staff-gated feature.
+  ceoUserIds: Set<string>;
   loadedFromDb: boolean;
   // Akses & Password Pintu audit item #9 — emergency door override (see
   // SocketEvents.DOOR_OVERRIDE_SET). When true, movementHandler.ts's
@@ -258,13 +273,20 @@ export function getRoleInRoom(room: string, uid: string | undefined): Role {
   return getRole(getRoomAdmin(room), uid);
 }
 
+// zoneHandler.ts's ZONE_ENTER restriction check — see RoomAdminState.ceoUserIds'
+// doc comment for why this is a separate allowlist, not a Role check.
+export function isCeoInRoom(room: string, uid: string | undefined): boolean {
+  if (!uid) return false;
+  return getRoomAdmin(room).ceoUserIds.has(uid);
+}
+
 // One pinned Notice per room (see shared/types/index.ts's Notice doc
 // comment) — in-memory, same convention as roomAdminMap above.
 const roomNoticeMap = new Map<string, Notice>();
 
 function getRoomAdmin(room: string): RoomAdminState {
   if (!roomAdminMap.has(room)) {
-    roomAdminMap.set(room, { masterAdminUserId: '', adminUserIds: new Set(), staffUserIds: new Set(), restrictedTierUserIds: new Set(), loadedFromDb: false });
+    roomAdminMap.set(room, { masterAdminUserId: '', adminUserIds: new Set(), staffUserIds: new Set(), ceoUserIds: new Set(), restrictedTierUserIds: new Set(), loadedFromDb: false });
   }
   return roomAdminMap.get(room)!;
 }
@@ -292,6 +314,8 @@ async function initRoomAdminFromDb(room: string): Promise<RoomAdminState> {
       for (const m of members) {
         if (m.role === 'admin') rs.adminUserIds.add(m.userId);
         else if (m.role === 'staff') rs.staffUserIds.add(m.userId);
+        // Independent of the role chain above — isCeo stacks with any role.
+        if (m.isCeo) rs.ceoUserIds.add(m.userId);
       }
     }
   } catch (e) {
@@ -318,6 +342,25 @@ async function persistRoleGrant(roomSlug: string, userId: string, role: 'admin' 
     });
   } catch (e) {
     console.error('[room] failed to persist role grant:', e);
+  }
+}
+
+// Same persistence shape as persistRoleGrant above, but for the separate
+// isCeo column (see RoomMember's doc comment for why it's not another
+// `role` value) — upsert never touches `role`, so this can never demote an
+// existing admin/staff grant, and vice versa.
+async function persistCeoGrant(roomSlug: string, userId: string, isCeo: boolean): Promise<void> {
+  try {
+    const prisma = getPrisma();
+    const dbRoom = await prisma.room.findUnique({ where: { slug: roomSlug }, select: { id: true } });
+    if (!dbRoom) return;
+    await prisma.roomMember.upsert({
+      where: { userId_roomId: { userId, roomId: dbRoom.id } },
+      create: { userId, roomId: dbRoom.id, isCeo },
+      update: { isCeo },
+    });
+  } catch (e) {
+    console.error('[room] failed to persist CEO grant:', e);
   }
 }
 
@@ -351,6 +394,7 @@ function broadcastAdmin(io: Server, room: string, rs: RoomAdminState) {
     adminUserIds: Array.from(rs.adminUserIds),
     masterAdminUserId: rs.masterAdminUserId,
     staffUserIds: Array.from(rs.staffUserIds),
+    ceoUserIds: Array.from(rs.ceoUserIds),
   });
 }
 
@@ -897,10 +941,14 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         impassableAreaRects: savedImpassableAreaRects,
         wallAreaRects: savedWallAreaRects,
         doorAreaRects: redactDoorAreaPasswords(savedDoorAreaRects),
-        adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId, staffUserIds: Array.from(rs.staffUserIds), theme, template,
+        adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId, staffUserIds: Array.from(rs.staffUserIds), ceoUserIds: Array.from(rs.ceoUserIds), theme, template,
         notice: roomNoticeMap.get(room) ?? null,
         doorOverride: !!rs.doorOverride,
         role: getRole(rs, uid),
+        // "Ngobrol dengan CEO" bypass (see RoomAdminState.ceoUserIds) — the
+        // receiving socket's own membership, same "resolved server-side, not
+        // re-derived client-side from the raw Set" posture as `role` above.
+        isCeo: rs.ceoUserIds.has(uid),
         // Fitur 15 — this room's custom Floor/Wall/Object uploads. Every
         // joining player needs these registered into PALETTE_BY_ID (see
         // useSocket.ts's ROOM_STATE handler) before `tiles`/`furniture` above
@@ -1290,6 +1338,42 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     rs.staffUserIds.delete(data.targetUserId);
     broadcastAdmin(io, room, rs);
     persistRoleGrant(room, data.targetUserId, 'member');
+  });
+
+  // "Ngobrol dengan CEO" restricted-area bypass — independent of admin/staff
+  // (see RoomAdminState.ceoUserIds' doc comment), so adds/removes from its
+  // own Set and persists to its own isCeo column rather than touching role
+  // at all. Deliberately reuses the 'staff:grant'/'staff:revoke' permission
+  // keys rather than adding dedicated 'ceo:grant'/'ceo:revoke' ones — both
+  // already resolve to the same admin-tier gate this needs; if
+  // staff:grant's own tier ever changes, this coupling means CEO_GRANT's
+  // required tier silently changes with it.
+  socket.on(SocketEvents.CEO_GRANT, (data: { targetUserId: string }) => {
+    if (!canChangeAdmin(socket.id)) return;
+    const room = currentRoom; if (!room) return;
+    const senderUid = findUserIdBySocket(socket.id);
+    const rs = getRoomAdmin(room);
+    if (!canAccess(rs, senderUid, 'staff:grant')) {
+      socket.emit('admin:error', { message: 'Only admins can grant CEO access' });
+      return;
+    }
+    rs.ceoUserIds.add(data.targetUserId);
+    broadcastAdmin(io, room, rs);
+    persistCeoGrant(room, data.targetUserId, true);
+  });
+
+  socket.on(SocketEvents.CEO_REVOKE, (data: { targetUserId: string }) => {
+    if (!canChangeAdmin(socket.id)) return;
+    const room = currentRoom; if (!room) return;
+    const senderUid = findUserIdBySocket(socket.id);
+    const rs = getRoomAdmin(room);
+    if (!canAccess(rs, senderUid, 'staff:revoke')) {
+      socket.emit('admin:error', { message: 'Only admins can revoke CEO access' });
+      return;
+    }
+    rs.ceoUserIds.delete(data.targetUserId);
+    broadcastAdmin(io, room, rs);
+    persistCeoGrant(room, data.targetUserId, false);
   });
 
   // §4 — Teleport. Resolves the real x/y from the location's OWN stored

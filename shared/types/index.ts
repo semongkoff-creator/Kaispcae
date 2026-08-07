@@ -239,6 +239,10 @@ export interface RoomState {
   adminUserIds?: string[];
   masterAdminUserId?: string;
   staffUserIds?: string[];
+  // "Ngobrol dengan CEO" restricted-area bypass (see roomHandler.ts's
+  // RoomAdminState.ceoUserIds doc comment) — independent of admin/staff,
+  // NOT part of the Role hierarchy.
+  ceoUserIds?: string[];
   furniture?: Furniture[];
   zones?: Zone[];
   // Item #9 (precise-collision follow-up) — pixel-space Impassable Area
@@ -276,6 +280,9 @@ export interface RoomState {
   // broadcast, so a client always gets its own current tier without
   // re-deriving it from adminUserIds/masterAdminUserId/staffUserIds itself.
   role?: Role;
+  // The RECEIVING socket's own CEO-bypass membership — same "resolved
+  // server-side, not re-derived from ceoUserIds" posture as `role` above.
+  isCeo?: boolean;
   // Floor-plan reference image, forwarded ONLY when the admin opted into
   // ReferenceImageData.showInGame (see roomHandler.ts's ROOM_STATE emit and
   // mapLayers.ts) — null whenever the room has none, or has one that's
@@ -597,6 +604,12 @@ export enum SocketEvents {
   STAFF_GRANT = 'staff:grant',
   STAFF_REVOKE = 'staff:revoke',
 
+  // "Ngobrol dengan CEO" restricted-area bypass (see roomHandler.ts's
+  // RoomAdminState.ceoUserIds doc comment) — independent of admin/staff,
+  // same ADMIN_CHANGED broadcast shape (payload also carries ceoUserIds).
+  CEO_GRANT = 'ceo:grant',
+  CEO_REVOKE = 'ceo:revoke',
+
   // §4 — Teleport. One request event for both admin locations and owner
   // bookmarks (payload's `kind` distinguishes them — see TeleportRequest);
   // server resolves the real x/y from its own stored data rather than
@@ -890,6 +903,16 @@ export enum SocketEvents {
   // shape one level up (persistent config instead of an ephemeral lock).
   ZONE_RESTRICTIONS = 'zone:restrictions',
 
+  // "Ngobrol dengan CEO" queue, zone-level — someone joined a zone's queue
+  // (RoomQueueEntry with zoneId set). Fanned out to every admin socket
+  // currently connected to the room (getConnectedAdminSocketIds, same
+  // "only currently-connected admins" posture as JOIN_REQUESTED), with
+  // Setujui/Tolak right on the toast — approving is what actually promotes
+  // the entry to 'called' (see routes/roomMembers.ts's new
+  // /queue/:entryId/approve; zone-level entries no longer auto-advance,
+  // see roomQueue.ts's advanceQueue).
+  ZONE_QUEUE_REQUESTED = 'zone:queue_requested',
+
   // QA (Presence checklist item #8, "Member list akurat") — workspace-wide "who's online + which room" roster (NOT the
   // in-room ParticipantPanel, which only ever sees people standing in the
   // SAME room). Named `roster:` rather than reusing the existing `presence:`
@@ -992,6 +1015,19 @@ export interface JoinRequestPopupPayload {
   name: string;
   roomSlug: string;
   roomName: string;
+}
+
+// "Ngobrol dengan CEO" queue, zone-level — see SocketEvents.ZONE_QUEUE_REQUESTED.
+export interface ZoneQueueRequestedPayload {
+  entryId: string;
+  userId: string;
+  name: string;
+  topic: string | null;
+  durationMin: number;
+  roomSlug: string;
+  roomName: string;
+  zoneId: string;
+  zoneName: string;
 }
 
 export interface SummonRespondPayload {

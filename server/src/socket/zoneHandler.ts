@@ -1,9 +1,9 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, hasFeatureAccess, Role, roleAtLeast } from '@virtualmeet/shared';
+import { SocketEvents, hasFeatureAccess } from '@virtualmeet/shared';
 import { mayEnterZone, isZoneLocked, isSealedIn } from './zoneLock';
 import { sendMusicStateToSocket } from './musicHandler';
 import { getCachedZones, getCachedZoneRestriction } from '../store/roomStore';
-import { getConnectedAdminSocketIds, getRoleInRoom, getPlayerName, updateRosterZone } from './roomHandler';
+import { getConnectedAdminSocketIds, getRoleInRoom, isCeoInRoom, getPlayerName, updateRosterZone } from './roomHandler';
 import { getPrisma } from '../lib/prisma';
 import { admitCalledEntry, advanceQueue } from '../lib/roomQueue';
 
@@ -140,7 +140,11 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
         socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'restricted' });
         return;
       }
-      if (!roleAtLeast(getRoleInRoom(room, uid), (restriction.minRole as Role) ?? 'staff')) {
+      // Deliberately NOT role-based (see RoomAdminState.ceoUserIds' doc
+      // comment) — an ordinary room admin must queue here like anyone
+      // else; only the room owner and whoever's been granted CEO access
+      // bypass.
+      if (getRoleInRoom(room, uid) !== 'owner' && !isCeoInRoom(room, uid)) {
         try {
           const prisma = getPrisma();
           const dbRoom = await prisma.room.findUnique({ where: { slug: room }, select: { id: true } });

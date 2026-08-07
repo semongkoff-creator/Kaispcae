@@ -797,6 +797,16 @@ model RoomMember {
   role     String   @default("member")
   joinedAt DateTime @default(now())
 
+  // "Ngobrol dengan CEO" restricted-area bypass — deliberately its OWN
+  // column, not another `role` value, because `role` is a single mutually-
+  // exclusive tier (granting 'admin' clears staff, see roomHandler.ts's
+  // ADMIN_GRANT). CEO access must be independent of — and stackable with —
+  // admin/staff, so an admin who's also the CEO doesn't lose admin the
+  // moment they're granted this. Grants NOTHING beyond that one bypass
+  // (see roomHandler.ts's RoomAdminState.ceoUserIds doc comment); resolving
+  // someone's general Role never looks at this field.
+  isCeo Boolean @default(false)
+
   // Membership approval. 'active' is the default so every row that existed
   // before this column keeps working exactly as it did — this is additive,
   // it does not retroactively suspend anyone.

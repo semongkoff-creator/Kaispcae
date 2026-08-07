@@ -59,6 +59,12 @@ export async function admitCalledEntry(prisma: PrismaClient, roomId: string, zon
 // same "opportunistic, the next sweep tick will catch it" posture this
 // function already had, not a real failure worth surfacing to the caller).
 export async function advanceQueue(prisma: PrismaClient, roomId: string, zoneId: string | null): Promise<{ userId: string; name: string } | null> {
+  // "Ngobrol dengan CEO" queue, zone-level — now requires an explicit admin
+  // approval (see routes/roomMembers.ts's new /queue/:entryId/approve)
+  // instead of being auto-promoted, so this is a no-op for every zone-level
+  // queue. Room-level (zoneId === null) is untouched — it still auto-
+  // advances FCFS exactly as before.
+  if (zoneId !== null) return null;
   try {
     return await prisma.$transaction(async (tx) => {
       const occupied = await tx.roomQueueEntry.findFirst({ where: { roomId, zoneId, status: { in: ['called', 'active'] } } });

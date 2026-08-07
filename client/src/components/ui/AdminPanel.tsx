@@ -1,4 +1,4 @@
-import { StarFill, AwardFill, PersonBadgeFill } from 'react-bootstrap-icons';
+import { StarFill, AwardFill, PersonBadgeFill, BriefcaseFill } from 'react-bootstrap-icons';
 import { useGameStore } from '@/stores/gameStore';
 import { Role, roleAtLeast } from '@virtualmeet/shared';
 
@@ -7,6 +7,11 @@ interface AdminPanelProps {
   onRevokeAdmin: (userId: string) => void;
   onGrantStaff: (userId: string) => void;
   onRevokeStaff: (userId: string) => void;
+  // "Ngobrol dengan CEO" restricted-area bypass — deliberately independent
+  // of role (see roomHandler.ts's RoomAdminState.ceoUserIds doc comment),
+  // so this is a toggle alongside role, not a tier within it.
+  onGrantCeo: (userId: string) => void;
+  onRevokeCeo: (userId: string) => void;
 }
 
 // Resolves a specific player's role from the room's raw admin/staff sets —
@@ -20,13 +25,15 @@ function resolveRole(uid: string, masterAdminUserId: string, adminIds: Set<strin
   return 'member';
 }
 
-export function AdminPanel({ onGrantAdmin, onRevokeAdmin, onGrantStaff, onRevokeStaff }: AdminPanelProps) {
+export function AdminPanel({ onGrantAdmin, onRevokeAdmin, onGrantStaff, onRevokeStaff, onGrantCeo, onRevokeCeo }: AdminPanelProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const adminPlayerIds = useGameStore((s) => s.adminPlayerIds);
   const staffPlayerIds = useGameStore((s) => s.staffPlayerIds);
+  const ceoPlayerIds = useGameStore((s) => s.ceoPlayerIds);
   const masterAdminUserId = useGameStore((s) => s.masterAdminUserId);
   const localUserId = useGameStore((s) => s.localUserId);
   const localRole = useGameStore((s) => s.localRole);
+  const localIsCeo = useGameStore((s) => s.localIsCeo);
 
   const players = Object.values(playerRecords);
 
@@ -44,18 +51,21 @@ export function AdminPanel({ onGrantAdmin, onRevokeAdmin, onGrantStaff, onRevoke
           name={useGameStore.getState().localPlayer.name}
           color={useGameStore.getState().localPlayer.color}
           role={localRole}
+          isCeo={localIsCeo}
           isLocal
         />
 
         {players.map((p) => {
           const uid = p.userId ?? p.id;
           const role = resolveRole(uid, masterAdminUserId, adminPlayerIds, staffPlayerIds);
+          const isCeo = ceoPlayerIds.has(uid);
           return (
             <PlayerRow
               key={p.id}
               name={p.name}
               color={p.color}
               role={role}
+              isCeo={isCeo}
               isLocal={false}
               // Granting/revoking a tier requires being strictly above the
               // target's CURRENT tier's own grant requirement — mirrors the
@@ -66,9 +76,16 @@ export function AdminPanel({ onGrantAdmin, onRevokeAdmin, onGrantStaff, onRevoke
               canRevokeAdmin={roleAtLeast(localRole, 'owner') && role === 'admin'}
               canGrantStaff={roleAtLeast(localRole, 'admin') && role === 'member'}
               canRevokeStaff={roleAtLeast(localRole, 'admin') && role === 'staff'}
+              // Independent of role (see AdminPanelProps' doc comment) —
+              // gated the same way staff grants are, just a toggle rather
+              // than a tier.
+              canGrantCeo={roleAtLeast(localRole, 'admin') && !isCeo}
+              canRevokeCeo={roleAtLeast(localRole, 'admin') && isCeo}
               onGrantAdmin={() => onGrantAdmin(uid)}
               onRevokeAdmin={() => onRevokeAdmin(uid)}
               onGrantStaff={() => onGrantStaff(uid)}
+              onGrantCeo={() => onGrantCeo(uid)}
+              onRevokeCeo={() => onRevokeCeo(uid)}
               onRevokeStaff={() => onRevokeStaff(uid)}
             />
           );
@@ -89,42 +106,65 @@ function PlayerRow({
   name,
   color,
   role,
+  isCeo,
   isLocal,
   canGrantAdmin,
   canRevokeAdmin,
   canGrantStaff,
   canRevokeStaff,
+  canGrantCeo,
+  canRevokeCeo,
   onGrantAdmin,
   onRevokeAdmin,
   onGrantStaff,
   onRevokeStaff,
+  onGrantCeo,
+  onRevokeCeo,
 }: {
   name: string;
   color: string;
   role: Role;
+  // "Ngobrol dengan CEO" restricted-area bypass — independent of role, see
+  // AdminPanelProps' doc comment.
+  isCeo?: boolean;
   isLocal: boolean;
   canGrantAdmin?: boolean;
   canRevokeAdmin?: boolean;
   canGrantStaff?: boolean;
   canRevokeStaff?: boolean;
+  canGrantCeo?: boolean;
+  canRevokeCeo?: boolean;
   onGrantAdmin?: () => void;
   onRevokeAdmin?: () => void;
   onGrantStaff?: () => void;
   onRevokeStaff?: () => void;
+  onGrantCeo?: () => void;
+  onRevokeCeo?: () => void;
 }) {
-  const highlighted = role === 'owner' || role === 'admin' || role === 'staff';
+  const highlighted = role === 'owner' || role === 'admin' || role === 'staff' || isCeo;
   return (
     <div className={`flex items-center justify-between px-2 py-1 rounded gap-1 ${highlighted ? 'bg-amber-100' : 'bg-purple-50/50 dark:bg-gray-700/50'}`}>
       <div className="flex items-center gap-2 min-w-0">
         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
         <span className="text-gray-700 dark:text-gray-300 text-xs truncate">{name}</span>
         {!isLocal && <RoleBadge role={role} />}
+        {!isLocal && isCeo && <BriefcaseFill className="text-amber-600" size={11} title="Akses CEO" />}
       </div>
       <div className="flex items-center gap-1 shrink-0">
         {isLocal ? (
           <span className="text-gray-400 dark:text-gray-500 text-[10px]">You</span>
         ) : (
           <>
+            {canGrantCeo && (
+              <button onClick={onGrantCeo} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 hover:bg-amber-200 cursor-pointer">
+                +CEO
+              </button>
+            )}
+            {canRevokeCeo && (
+              <button onClick={onRevokeCeo} className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 hover:bg-red-200 cursor-pointer">
+                −CEO
+              </button>
+            )}
             {canGrantStaff && (
               <button onClick={onGrantStaff} className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 hover:bg-purple-200 cursor-pointer">
                 +Staff

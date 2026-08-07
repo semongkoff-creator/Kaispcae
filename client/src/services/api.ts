@@ -415,6 +415,14 @@ export const api = {
       body: JSON.stringify({ decision }),
     }),
 
+  // "Ngobrol dengan CEO" queue, zone-level — the toast's Setujui/Tolak
+  // buttons (see App.tsx's ZONE_QUEUE_REQUESTED handling). Reject reuses
+  // the same admin skip endpoint the Admin Console's queue manager uses.
+  approveQueueEntry: (slug: string, entryId: string) =>
+    request<{ ok: boolean }>(`/rooms/${slug}/queue/${entryId}/approve`, { method: 'POST' }),
+  skipQueueEntry: (slug: string, entryId: string) =>
+    request<{ ok: boolean }>(`/rooms/${slug}/queue/${entryId}/skip`, { method: 'POST' }),
+
   getRoom: (slug: string) => request<RoomInfo>(`/rooms/${slug}`),
 
   // ── Guest Link & Ruang Tunggu ────────────────────────────────────

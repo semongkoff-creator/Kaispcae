@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, JoinRequestPopupPayload, ZoneQueueRequestedPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@virtualmeet/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 import { appendMovementSnapshot, MovementSnapshot, sampleMovementSnapshots } from './movementSmoothing';
@@ -505,6 +505,12 @@ export interface GameState {
   incomingJoinRequests: JoinRequestPopupPayload[];
   addIncomingJoinRequest: (req: JoinRequestPopupPayload) => void;
   removeIncomingJoinRequest: (userId: string, roomSlug: string) => void;
+  // "Ngobrol dengan CEO" queue, zone-level — same "array, persists until
+  // acted on" shape as incomingJoinRequests above, popped up for admins via
+  // SocketEvents.ZONE_QUEUE_REQUESTED.
+  incomingQueueRequests: ZoneQueueRequestedPayload[];
+  addIncomingQueueRequest: (req: ZoneQueueRequestedPayload) => void;
+  removeIncomingQueueRequest: (entryId: string) => void;
   // Guest Link & Ruang Tunggu — the GUEST'S OWN client-side wait state
   // (App.tsx renders a waiting/rejected screen off this instead of <Game>).
   guestWaitState: 'waiting' | 'admitted' | 'rejected' | null;
@@ -706,7 +712,12 @@ export interface GameState {
   // Staff sits between admin and member (see shared/permissions.ts's Role
   // hierarchy) — tracked the same way adminPlayerIds already is.
   staffPlayerIds: Set<string>;
-  applyAdminChanged: (data: { adminUserIds: string[]; masterAdminUserId: string; staffUserIds?: string[] }) => void;
+  // "Ngobrol dengan CEO" restricted-area bypass — deliberately NOT part of
+  // the Role hierarchy (see roomHandler.ts's RoomAdminState.ceoUserIds doc
+  // comment), tracked the same way staffPlayerIds is.
+  ceoPlayerIds: Set<string>;
+  localIsCeo: boolean;
+  applyAdminChanged: (data: { adminUserIds: string[]; masterAdminUserId: string; staffUserIds?: string[]; ceoUserIds?: string[] }) => void;
   // My own resolved role in this room, straight from the server (see
   // RoomState.role's doc comment) — the authoritative source; isAdmin
   // above is derived from it for existing call sites that only care about
@@ -1209,6 +1220,15 @@ export const useGameStore = create<GameState>((set, get) => ({
   removeIncomingJoinRequest: (userId, roomSlug) => set((s) => ({
     incomingJoinRequests: s.incomingJoinRequests.filter((r) => !(r.userId === userId && r.roomSlug === roomSlug)),
   })),
+  incomingQueueRequests: [],
+  addIncomingQueueRequest: (req) => set((s) => (
+    s.incomingQueueRequests.some((r) => r.entryId === req.entryId)
+      ? s
+      : { incomingQueueRequests: [...s.incomingQueueRequests, req] }
+  )),
+  removeIncomingQueueRequest: (entryId) => set((s) => ({
+    incomingQueueRequests: s.incomingQueueRequests.filter((r) => r.entryId !== entryId),
+  })),
   guestWaitState: null,
   setGuestWaitState: (state) => set({ guestWaitState: state }),
   pendingGuests: [],
@@ -1426,11 +1446,14 @@ export const useGameStore = create<GameState>((set, get) => ({
   masterAdminUserId: '',
   adminPlayerIds: new Set<string>(),
   staffPlayerIds: new Set<string>(),
+  ceoPlayerIds: new Set<string>(),
+  localIsCeo: false,
   localRole: 'member',
   applyAdminChanged: (data) =>
     set((state) => {
       const adminSet = new Set(data.adminUserIds);
       const staffSet = new Set(data.staffUserIds ?? []);
+      const ceoSet = new Set(data.ceoUserIds ?? []);
       const uid = state.localUserId;
       const isAdminNow = adminSet.has(uid);
       const localRole: Role = uid === data.masterAdminUserId ? 'owner' : isAdminNow ? 'admin' : staffSet.has(uid) ? 'staff' : 'member';
@@ -1449,6 +1472,8 @@ export const useGameStore = create<GameState>((set, get) => ({
         masterAdminUserId: data.masterAdminUserId,
         adminPlayerIds: adminSet,
         staffPlayerIds: staffSet,
+        ceoPlayerIds: ceoSet,
+        localIsCeo: ceoSet.has(uid),
         isAdmin: isAdminNow,
         localRole,
         playerRecords: records,
@@ -1515,6 +1540,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
 
     const staffIds = new Set(roomState.staffUserIds ?? []);
+    const ceoIds = new Set(roomState.ceoUserIds ?? []);
 
     set((prev) => ({
       roomId: roomState.id,
@@ -1537,6 +1563,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       isAdmin: localIsAdmin,
       adminPlayerIds: adminIds,
       staffPlayerIds: staffIds,
+      ceoPlayerIds: ceoIds,
+      localIsCeo: roomState.isCeo ?? ceoIds.has(prev.localUserId),
       // roomState.role is the server's own authoritative resolution (see
       // its doc comment) — prefer it, but fall back to re-deriving from
       // the raw sets for the (should-never-happen) case it's missing.
