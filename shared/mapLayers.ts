@@ -109,6 +109,13 @@ export interface TileEffect {
   doorPassword?: string;
   doorPasswordDescription?: string;
   doorFailureMessage?: string;
+  // Follow-up — a password door used to ALWAYS pop the prompt automatically
+  // the moment a player got adjacent, with no way to opt into the "press F"
+  // gate every Interactive Object already supports (see
+  // InteractiveObjectConfig's own triggerMethod). Undefined/'automatic'
+  // keeps every existing door's behavior byte-identical; 'press_f' is the
+  // new opt-in.
+  doorTriggerMethod?: 'automatic' | 'press_f';
 }
 
 // A rectangular region effect. Legacy zones convert to 'privateArea' (the audio
@@ -137,7 +144,14 @@ export interface TileEffect {
 // so GameCanvas.tsx has something to actually draw.
 export interface AreaEffect {
   id: string;
-  effect: 'privateArea' | 'mapLocation' | 'impassable' | 'focusArea' | 'wallArea' | 'meetingArea';
+  // 'restrictedArea' — "Ngobrol dengan CEO" queue (see schema.prisma's
+  // ZoneRestriction) — draws exactly like Map Location, but on creation
+  // RoomEditorPage.tsx also calls the zone-restriction REST endpoint for
+  // this area's id, marking it admin-only with a self-service queue for
+  // everyone else. Converts to a plain Zone like every other non-impassable
+  // area below; the actual restriction lives server-side, not on this
+  // object, so there is nothing extra to round-trip here.
+  effect: 'privateArea' | 'mapLocation' | 'impassable' | 'focusArea' | 'wallArea' | 'meetingArea' | 'restrictedArea';
   name: string;
   x: number;
   y: number;
@@ -312,6 +326,7 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
         if (eff.doorPassword != null) tile.doorPassword = eff.doorPassword;
         if (eff.doorPasswordDescription != null) tile.doorPasswordDescription = eff.doorPasswordDescription;
         if (eff.doorFailureMessage != null) tile.doorFailureMessage = eff.doorFailureMessage;
+        if (eff.doorTriggerMethod != null) tile.doorTriggerMethod = eff.doorTriggerMethod;
       }
       // 'sittable' doesn't touch `type` (see TileEffect's doc comment) — just
       // tags the tile so GameCanvas.tsx's sit-trigger scan can find it

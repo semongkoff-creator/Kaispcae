@@ -6,6 +6,7 @@ import {
   AVATAR_SCALE_MIN, AVATAR_SCALE_MAX,
 } from '@virtualmeet/shared';
 import { api, ApiError } from '@/services/api';
+import { adminApi } from '@/admin/api';
 import { useEditorStore, EDITOR_LAYERS, EDITOR_TOOLS, EditorLayer, EditorTool } from '@/stores/editorStore';
 import { drawFloorTile, drawWallTile, drawFurnitureLayer } from '@/components/canvas/mapRender';
 import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
@@ -25,7 +26,7 @@ type LoadError = 'auth' | 'forbidden' | 'notfound' | 'generic';
 const OBJ_CATEGORIES: { key: 'furniture' | 'decor' | 'electronics'; label: string }[] = [
   { key: 'furniture', label: 'Furniture' }, { key: 'decor', label: 'Decor' }, { key: 'electronics', label: 'Electronics' },
 ];
-const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat'; label: string; color: string; hint: string }[] = [
+const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat' | 'restrictedArea'; label: string; color: string; hint: string }[] = [
   { id: 'startingPoint', label: 'Starting point', color: 'rgba(16,185,129,0.9)', hint: 'Stamp per tile = titik spawn (bisa banyak; pemain muncul di salah satunya).' },
   { id: 'impassable', label: 'Impassable', color: 'rgba(239,68,68,0.85)', hint: 'Stamp per tile = penghalang tak terlihat (memblok gerak, tanpa tekstur).' },
   { id: 'impassableArea', label: 'Impassable Area', color: 'rgba(220,38,38,0.6)', hint: 'Drag di area kosong = buat area kotak baru, ukuran bebas (tidak ikut grid). Klik area yang sudah ada = pilih (muncul handle) — drag badan untuk pindah, tarik pojok/sisi untuk resize, Delete untuk hapus. Saat main, penghalangnya tetap memblok tile penuh mana pun yang tersentuh kotak ini — invisible, sama seperti Impassable per-tile.' },
@@ -34,6 +35,7 @@ const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateAr
   { id: 'privateArea', label: 'Private area', color: 'rgba(96,165,250,0.95)', hint: 'Stamp: drag area + Area ID. Area ber-ID sama = satu grup audio (walau terpisah). Bisa pilih kedap suara atau tidak (default: kedap suara).' },
   { id: 'focusArea', label: 'Focus area', color: 'rgba(245,158,11,0.95)', hint: 'Drag area lalu beri nama. Pemain yang masuk otomatis berstatus Focus + DND (tidak bisa disummon/slap/di-follow, tidak auto-connect proximity), bisa nyetel musik privat sendiri, dan channel chat "Fokus" otomatis kebuka. Visual area tetap normal, tidak digelapkan.' },
   { id: 'meetingArea', label: 'Meeting area', color: 'rgba(20,184,166,0.95)', hint: 'Drag area lalu beri nama. Pemain yang masuk otomatis berstatus "In a meeting" dan muncul tombol Start Meeting (bikin Lark VC meeting sekali klik, auto-record). Bisa pilih kedap suara atau tidak (default: kedap suara, seperti rapat sungguhan).' },
+  { id: 'restrictedArea', label: 'Restricted area', color: 'rgba(220,38,38,0.85)', hint: 'Drag area lalu beri nama (mis. "CEO Office") — hanya ADMIN yang bisa langsung masuk. Orang lain yang menyentuh area ini langsung disodori form antrean "Ngobrol dengan CEO" untuk dapat giliran masuk sendiri.' },
   { id: 'portal', label: 'Portal', color: 'rgba(124,58,237,0.95)', hint: 'Stamp klik tile portal → pilih tujuan room lain, atau klik titik tujuan di room ini. Pemain tekan F untuk pindah.' },
   { id: 'door', label: 'Door', color: 'rgba(212,160,86,0.9)', hint: 'Stamp per tile = pintu yang bisa dilewati. Pilih tool Select lalu klik pintu untuk atur Password (opsional, mirip ZEP).' },
   { id: 'sittable', label: 'Sittable', color: 'rgba(56,189,248,0.9)', hint: 'Stamp per tile = kursi tanpa objek (mis. kursi yang cuma gambar di reference image). Pilih tool Select lalu klik tile untuk atur arah hadap.' },
@@ -550,9 +552,10 @@ function DoorSettingsPanel({
   onBack: () => void;
 }) {
   if (!doorEffect) return null;
-  const patch = (p: Partial<Pick<TileEffect, 'doorPasswordEnabled' | 'doorPassword' | 'doorPasswordDescription' | 'doorFailureMessage'>>) =>
+  const patch = (p: Partial<Pick<TileEffect, 'doorPasswordEnabled' | 'doorPassword' | 'doorPasswordDescription' | 'doorFailureMessage' | 'doorTriggerMethod'>>) =>
     useEditorStore.getState().updateDoorTileEffect(tile.x, tile.y, p);
   const enabled = !!doorEffect.doorPasswordEnabled;
+  const pressF = doorEffect.doorTriggerMethod === 'press_f';
 
   return (
     <div>
@@ -568,6 +571,16 @@ function DoorSettingsPanel({
 
       {enabled && (
         <>
+          {/* Follow-up — previously always auto-fired the moment a player
+              got adjacent, with no way to require an explicit press first.
+              Unchecked (default) = exact old behavior. */}
+          <label className="flex items-center gap-2 text-xs text-white/70 mb-3 cursor-pointer">
+            <input
+              type="checkbox" checked={pressF}
+              onChange={(e) => patch({ doorTriggerMethod: e.target.checked ? 'press_f' : 'automatic' })}
+            />
+            Butuh tekan F dulu (bukan langsung muncul otomatis)
+          </label>
           <p className="text-[11px] text-white/50 mb-1.5">Password Description</p>
           <input
             type="text" value={doorEffect.doorPasswordDescription ?? ''}
@@ -745,6 +758,15 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
         ctx.fillStyle = 'rgba(20,184,166,0.16)'; ctx.fillRect(zx, zy, zw, zh);
         ctx.strokeStyle = 'rgba(20,184,166,0.95)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(zx, zy, zw, zh); ctx.setLineDash([]);
         ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px sans-serif'; ctx.fillText(`🎥 ${isolated ? '🔇' : '🔊'} ${a.name || 'Meeting'}`, zx + 4, zy + 14);
+        continue;
+      }
+      if (a.effect === 'restrictedArea') {
+        // "Ngobrol dengan CEO" queue — red, matching the 🔒 lock badge
+        // GameCanvas.tsx draws on this zone's in-game banner, so the editor
+        // preview reads as the same "restricted" area at a glance.
+        ctx.fillStyle = 'rgba(220,38,38,0.14)'; ctx.fillRect(zx, zy, zw, zh);
+        ctx.strokeStyle = 'rgba(220,38,38,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(zx, zy, zw, zh); ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px sans-serif'; ctx.fillText(`🔒 ${a.name || 'Restricted'}`, zx + 4, zy + 14);
         continue;
       }
       const isPriv = a.effect === 'privateArea';
@@ -1384,8 +1406,8 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         s.clearSelectedArea();
         s.setSelection({ x: fx, y: fy, w: 0, h: 0 });
         dragRef.current = { mode: 'impassableAreaRect', anchor: { x: fx, y: fy }, effect: targetEffect };
-      } else { // mapLocation | privateArea | focusArea | meetingArea — rectangular
-        if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y, eff as 'mapLocation' | 'privateArea' | 'focusArea' | 'meetingArea'); }
+      } else { // mapLocation | privateArea | focusArea | meetingArea | restrictedArea — rectangular
+        if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y, eff as 'mapLocation' | 'privateArea' | 'focusArea' | 'meetingArea' | 'restrictedArea'); }
         else { s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 }); dragRef.current = { mode: 'areaRect', anchor: { x: t.x, y: t.y } }; }
       }
     }
@@ -1506,6 +1528,20 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             // happening just outside its walls.
             const isolate = window.confirm('Area ini KEDAP SUARA?\n\nOK = ya — orang di luar area ini tidak akan saling dengar dengan yang di dalam.\nBatal = tidak — cuma jarak biasa yang menentukan siapa dengar siapa.');
             s.addArea('meetingArea', sel, name || 'Meeting', undefined, isolate);
+          } else if (s.selectedEffect === 'restrictedArea') {
+            const name = (window.prompt('Nama area (mis. "CEO Office"):', 'CEO Office') ?? '').trim();
+            const id = s.addArea('restrictedArea', sel, name || 'Restricted Area');
+            // "Ngobrol dengan CEO" queue (see server/src/lib/zoneMembership.ts)
+            // — always admin-only with the self-service queue on, matching
+            // "admin aja + langsung isi form" exactly; no extra prompts here
+            // (unlike Private Area above) since there's nothing else useful
+            // to ask at creation time. The restriction itself lives in a
+            // separate table (ZoneRestriction), not on this area/zone object,
+            // so it needs its own request right after the area is created.
+            adminApi.setZoneRestriction(slug, id, { enabled: true, minRole: 'admin', queueEnabled: true }).catch((err) => {
+              console.error('[room-editor] failed to mark area restricted:', err);
+              window.alert('Area berhasil dibuat, tapi gagal menandainya sebagai restricted. Hapus area ini (Eraser) lalu gambar ulang untuk coba lagi.');
+            });
           }
           dialogPendingRef.current = false;
         }, DIALOG_DEFER_MS);
@@ -1624,7 +1660,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   // Effects — not Objects (their size is the palette entry's own tilesW/H),
   // Portal (two-click dialog), or mapLocation/privateArea (rectangle drag).
   const brushApplicable = activeLayer === 'floor' || activeLayer === 'wall'
-    || (activeLayer === 'effects' && !mediaMode && !!selectedEffect && selectedEffect !== 'portal' && selectedEffect !== 'mapLocation' && selectedEffect !== 'privateArea' && selectedEffect !== 'impassableArea');
+    || (activeLayer === 'effects' && !mediaMode && !!selectedEffect && selectedEffect !== 'portal' && selectedEffect !== 'mapLocation' && selectedEffect !== 'privateArea' && selectedEffect !== 'impassableArea' && selectedEffect !== 'restrictedArea');
 
   if (error) {
     const msg = error === 'auth' ? 'Kamu harus login dulu untuk membuka editor.' : error === 'forbidden' ? 'Akses ditolak — hanya admin room ini yang boleh membuka editor.' : error === 'notfound' ? 'Room tidak ditemukan.' : 'Gagal memuat editor.';

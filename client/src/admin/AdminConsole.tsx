@@ -1,24 +1,27 @@
 import { useEffect, useState } from 'react';
-import { XLg, People, ShieldLock, ClockHistory, Diagram3, Sliders, BarChartFill, CalendarEvent, PersonCheck, CloudDownload } from 'react-bootstrap-icons';
+import { XLg, People, ShieldLock, ClockHistory, Sliders, BarChartFill, CalendarEvent, PersonCheck, CloudDownload } from 'react-bootstrap-icons';
 import { WORKSPACE_ROLE_LABELS } from '@virtualmeet/shared';
 import { CurrentUser } from '@/hooks/useCurrentUser';
 import { ApprovalPanel } from './ApprovalPanel';
 import { MembersPanel } from './MembersPanel';
-import { DepartmentsPanel } from './DepartmentsPanel';
 import { PolicyPanel } from './PolicyPanel';
 import { AuditLogViewer } from './AuditLogViewer';
-import { AttendanceSettings } from './AttendanceSettings';
 import { AttendanceReport } from './AttendanceReport';
 import { CalendarSettings } from './CalendarSettings';
 import { BackupPanel } from './BackupPanel';
 
-type Tab = 'members' | 'approvals' | 'departments' | 'attendance' | 'report' | 'calendar' | 'policy' | 'audit' | 'backup';
+// Departemen/Absensi tabs removed per explicit request — department and
+// attendance are both already managed through Lark (Lark org chart / Lark
+// Attendance sync), so a second, separate management UI for the same data
+// here was redundant. The underlying data/sync (Department model,
+// AttendanceRecord, lib/larkAttendance.ts) is untouched — only these two
+// admin-console SETTINGS surfaces are gone. DepartmentsPanel/
+// AttendanceSettings component files are left in place, just unused here.
+type Tab = 'members' | 'approvals' | 'report' | 'calendar' | 'policy' | 'audit' | 'backup';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'members', label: 'Anggota', icon: <People size={14} /> },
   { id: 'approvals', label: 'Persetujuan', icon: <PersonCheck size={14} /> },
-  { id: 'departments', label: 'Departemen', icon: <Diagram3 size={14} /> },
-  { id: 'attendance', label: 'Absensi', icon: <ClockHistory size={14} /> },
   { id: 'report', label: 'Laporan', icon: <BarChartFill size={14} /> },
   { id: 'calendar', label: 'Ruang & Kalender', icon: <CalendarEvent size={14} /> },
   { id: 'policy', label: 'Kebijakan', icon: <Sliders size={14} /> },
@@ -93,8 +96,6 @@ export function AdminConsole({ currentUser, onClose }: { currentUser: CurrentUse
       <div className="flex-1 overflow-y-auto p-4">
         {tab === 'members' && <MembersPanel currentUser={currentUser} />}
         {tab === 'approvals' && <ApprovalPanel />}
-        {tab === 'departments' && <DepartmentsPanel />}
-        {tab === 'attendance' && <AttendanceSettings />}
         {tab === 'report' && <AttendanceReport />}
         {tab === 'calendar' && <CalendarSettings />}
         {tab === 'policy' && <PolicyPanel />}

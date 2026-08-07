@@ -169,6 +169,11 @@ export interface RoomTile {
   doorPassword?: string;
   doorPasswordDescription?: string;
   doorFailureMessage?: string;
+  // Follow-up — undefined/'automatic' fires the password prompt the moment
+  // a player gets adjacent (original, unchanged behavior); 'press_f'
+  // requires an explicit F press instead, same mechanism Interactive
+  // Objects already use (see Furniture.triggerMethod).
+  doorTriggerMethod?: 'automatic' | 'press_f';
   // Sittable tile effect (see mapLayers.ts's TileEffect) — a seat with no
   // Furniture piece at all, for rooms traced entirely over a reference-image
   // photo. GameCanvas.tsx's sit-trigger scan treats this the same as an

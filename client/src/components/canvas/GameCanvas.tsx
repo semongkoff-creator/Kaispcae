@@ -714,6 +714,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // per-piece — see the recompute below). Drives the "Press F" prompt;
   // KeyF fires it same as the portal branch does, whichever is present.
   const nearbyInteractiveRef = useRef<{ id: string; tileX: number; tileY: number } | null>(null);
+  // Follow-up — same "press_f only arms it, KeyF fires it" idea as
+  // nearbyInteractiveRef above, for a 'press_f' password door. Only ever
+  // holds ONE door (the nearest one still requiring a press) since KeyF can
+  // only mean one thing at a time — same posture nearbyInteractiveRef itself
+  // already has.
+  const nearbyDoorRef = useRef<{ x: number; y: number } | null>(null);
   // 'automatic' pieces fire once per range-ENTRY, not once ever and not every
   // frame while still inside — tracked as a set of currently-inside ids so
   // leaving and re-entering fires it again, matching "Automatically trigger"'s
@@ -882,10 +888,16 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           return;
         }
         // Fitur 15B — no portal claiming F this tile: press_f Interactive
-        // Objects get it instead.
+        // Objects get it instead. Follow-up — a press_f door is the same
+        // idea, checked after (portal and Interactive Objects both predate
+        // this and keep first claim, matching the pre-existing priority
+        // order here).
         if (nearbyInteractiveRef.current) {
           e.preventDefault();
           onInteractiveTriggerRef.current(nearbyInteractiveRef.current.id);
+        } else if (nearbyDoorRef.current) {
+          e.preventDefault();
+          onDoorPasswordTriggerRef.current(nearbyDoorRef.current.x, nearbyDoorRef.current.y);
         }
         return;
       }
@@ -1212,7 +1224,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       // 'automatic' Interactive Objects above, checked over the 3x3
       // neighborhood (a door is a single tile, not a scannable list like
       // furniture) instead of iterating the whole map every frame.
+      // Follow-up — a 'press_f' door instead just arms nearbyDoorRef,
+      // mirroring bestInteractive above; it does NOT auto-fire.
       const stillNearDoor = new Set<string>();
+      let bestDoor: { x: number; y: number } | null = null;
+      let bestDoorDist = Infinity;
       const doorTiles = tilesRef.current;
       for (let ty = baseTileY - 1; ty <= baseTileY + 1; ty++) {
         for (let tx = baseTileX - 1; tx <= baseTileX + 1; tx++) {
@@ -1221,6 +1237,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           if (dt?.type !== 'door' || !dt.doorPasswordEnabled || doorOverrideRef.current) continue;
           const doorKey = `${tx},${ty}`;
           if (unlockedDoorsRef.current.has(doorKey)) continue;
+          if (dt.doorTriggerMethod === 'press_f') {
+            const d = Math.max(Math.abs(tx - baseTileX), Math.abs(ty - baseTileY));
+            if (d < bestDoorDist) { bestDoorDist = d; bestDoor = { x: tx, y: ty }; }
+            continue;
+          }
           stillNearDoor.add(doorKey);
           if (!doorAutoTriggeredRef.current.has(doorKey)) {
             doorAutoTriggeredRef.current.add(doorKey);
@@ -1229,6 +1250,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         }
       }
       for (const k of doorAutoTriggeredRef.current) if (!stillNearDoor.has(k)) doorAutoTriggeredRef.current.delete(k);
+      nearbyDoorRef.current = bestDoor;
 
       // Potong 6 — nearest YouTube tile within YT_EMBED_RADIUS auto-embeds its
       // player (muted). Toggled via React state only when it changes, so the
@@ -1993,6 +2015,30 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       ctx.quadraticCurveTo(bx, by, bx + rr, by); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#ffffff';
       ctx.fillText(text, isx, by + 13);
+    }
+
+    // Follow-up — same "Press F" prompt as the Interactive Object one just
+    // above, for a press_f password door. Same priority order (portal, then
+    // Interactive Object, then door) — all three claim the same key, only
+    // one can ever be nearest at once in practice.
+    if (!nearbyPortalRef.current && !nearbyInteractiveRef.current && nearbyDoorRef.current) {
+      const { x: dtx, y: dty } = nearbyDoorRef.current;
+      const dsx = dtx * TILE_SIZE - cameraX + TILE_SIZE / 2;
+      const dsy = dty * TILE_SIZE - cameraY;
+      const bob = Math.sin(timestamp * 0.005) * 2;
+      const text = 'F — Buka Pintu';
+      ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+      const tw = ctx.measureText(text).width;
+      const bx = dsx - tw / 2 - 8, by = dsy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
+      ctx.fillStyle = 'rgba(212, 160, 86, 0.95)';
+      ctx.beginPath();
+      ctx.moveTo(bx + rr, by); ctx.lineTo(bx + bw - rr, by);
+      ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + rr); ctx.lineTo(bx + bw, by + bh - rr);
+      ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - rr, by + bh); ctx.lineTo(bx + rr, by + bh);
+      ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - rr); ctx.lineTo(bx, by + rr);
+      ctx.quadraticCurveTo(bx, by, bx + rr, by); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(text, dsx, by + 13);
     }
 
     // Fitur 15B — 'show_name' Interactive Object: floating name label for

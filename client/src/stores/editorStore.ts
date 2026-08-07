@@ -6,7 +6,7 @@ import { AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@virtualmeet/shared';
 // distinct from the older per-tile 'impassable' above (same distinction as
 // 'mapLocation'/'privateArea' being rectangles vs. e.g. 'door' being a point).
 // Maps to AreaEffect.effect: 'impassable' (see mapLayers.ts).
-export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat';
+export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat' | 'restrictedArea';
 
 // Follow-up — a "Kursi Diklaim" marker used to be stamped wherever the admin
 // clicked, completely independent of any Furniture piece, so it could
@@ -205,7 +205,7 @@ interface EditorState {
   // effect it actually means, same principle as zones already not being
   // hit-testable by the point-effect tools.
   areaAt: (x: number, y: number, effect?: AreaEffect['effect']) => AreaEffect | null;
-  addArea: (effect: 'mapLocation' | 'privateArea' | 'impassable' | 'focusArea' | 'meetingArea' | 'wallArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean, capacity?: number, memberOnly?: boolean) => string;
+  addArea: (effect: 'mapLocation' | 'privateArea' | 'impassable' | 'focusArea' | 'meetingArea' | 'wallArea' | 'restrictedArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean, capacity?: number, memberOnly?: boolean) => string;
   removeAreaAt: (x: number, y: number, effect?: AreaEffect['effect']) => void;
   // Item #9 — select/move/resize/delete an EXISTING Impassable Area rectangle
   // (RoomEditorPage.tsx's drag-body / drag-handle / Delete-key interactions).
@@ -224,7 +224,7 @@ interface EditorState {
   // selected and the Select tool clicks an existing door tile). One history
   // entry per call, same as updateSelectedObject for furniture.
   doorEffectAt: (x: number, y: number) => TileEffect | null;
-  updateDoorTileEffect: (x: number, y: number, patch: Partial<Pick<TileEffect, 'doorPasswordEnabled' | 'doorPassword' | 'doorPasswordDescription' | 'doorFailureMessage'>>) => void;
+  updateDoorTileEffect: (x: number, y: number, patch: Partial<Pick<TileEffect, 'doorPasswordEnabled' | 'doorPassword' | 'doorPasswordDescription' | 'doorFailureMessage' | 'doorTriggerMethod'>>) => void;
   // Same "settings panel for an EXISTING stamped tile" pattern as door above
   // — the Sittable Settings panel (Select tool + an existing sittable tile)
   // patches its one field, the direction the avatar faces once seated there.
@@ -635,9 +635,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const zoneType = effect === 'focusArea' ? 'focus' : effect === 'meetingArea' ? 'meeting' : 'desk';
       // GameCanvas.tsx's in-game banner falls back to purple (#7c3aed) when
       // a zone has no color — fine for every other area type (they've always
-      // been purple), but a meeting area gets its own teal so it reads as
-      // visually distinct in-game too, not just in the editor's overlay.
-      const color = effect === 'meetingArea' ? '#14b8a6' : undefined;
+      // been purple), but a meeting area gets its own teal, and a restricted
+      // area its own red (matching the 🔒 lock badge GameCanvas.tsx already
+      // draws for it), so both read as visually distinct in-game, not just
+      // in the editor's own overlay.
+      const color = effect === 'meetingArea' ? '#14b8a6' : effect === 'restrictedArea' ? '#dc2626' : undefined;
       d.areas.push({ id, effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, color, zoneType, areaId, audioIsolated, capacity, memberOnly });
       areasDirty = true; pushHistory(snap); commit();
       return id;
