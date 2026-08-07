@@ -9,7 +9,7 @@ import { resolveEntry } from '../lib/roomMembership';
 import { resolveZoneEntry, refreshZoneRestrictionCache } from '../lib/zoneMembership';
 import { groupConversationId } from '../lib/conversations';
 import { requireWorkspace } from '../lib/workspace';
-import { getConnectedAdminSocketIds, forceLeaveForQueue, forceZoneExitForQueue } from '../socket/roomHandler';
+import { getConnectedAdminSocketIds, getConnectedCeoSocketIds, forceLeaveForQueue, forceZoneExitForQueue } from '../socket/roomHandler';
 import { advanceQueue, QUEUE_MIN_MINUTES, QUEUE_MAX_MINUTES } from '../lib/roomQueue';
 
 // Reads a room's current zone list regardless of which map format it's
@@ -44,6 +44,22 @@ async function requireRoomAdmin(prisma: ReturnType<typeof getPrisma>, slug: stri
   const role = await resolveRoomRole(prisma, userId, room.id, room.ownerId);
   if (!hasFeatureAccess(role, 'room:update')) return { error: 403 as const, room };
   return { error: null, room };
+}
+
+// "Ngobrol dengan CEO" queue — same shape as requireRoomAdmin above, but
+// also passes for whoever's been granted CEO access (RoomMember.isCeo),
+// even though that grant deliberately carries no other room-admin
+// privilege (see roomHandler.ts's RoomAdminState.ceoUserIds doc comment).
+// It's their queue to approve/reject — an ordinary admin can still act on
+// it too (moderation override), this only widens who ALSO can.
+async function requireRoomAdminOrCeo(prisma: ReturnType<typeof getPrisma>, slug: string, userId: string) {
+  const room = await prisma.room.findUnique({ where: { slug } });
+  if (!room) return { error: 404 as const, room: null };
+  const role = await resolveRoomRole(prisma, userId, room.id, room.ownerId);
+  if (hasFeatureAccess(role, 'room:update')) return { error: null, room };
+  const member = await prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId: room.id } }, select: { isCeo: true } });
+  if (member?.isCeo) return { error: null, room };
+  return { error: 403 as const, room };
 }
 
 // POST /api/rooms/:slug/join-request — what an invite link actually does now.
@@ -560,12 +576,14 @@ roomMembers.post('/rooms/:slug/queue/join', authenticateToken, async (req: AuthR
     await advanceQueue(prisma, room.id, zoneId);
 
     // "Ngobrol dengan CEO" queue, zone-level — approval-gated (see
-    // advanceQueue above), so this is the ONLY signal an admin gets that
-    // someone's waiting; fanned out to every admin socket currently
-    // connected to the room, same posture as JOIN_REQUESTED.
+    // advanceQueue above), so this is the ONLY signal anyone gets that
+    // someone's waiting. Goes to whoever's actually been granted CEO
+    // access for this room, NOT every room admin — it's their queue to
+    // decide, same "only currently-connected, actually-relevant people"
+    // posture JOIN_REQUESTED has for admins.
     if (zoneId && ioRef) {
-      const adminSocketIds = getConnectedAdminSocketIds(room.slug);
-      for (const sid of adminSocketIds) {
+      const ceoSocketIds = getConnectedCeoSocketIds(room.slug);
+      for (const sid of ceoSocketIds) {
         ioRef.to(sid).emit(SocketEvents.ZONE_QUEUE_REQUESTED, {
           entryId: created.id,
           userId: req.userId!,
@@ -657,7 +675,7 @@ roomMembers.get('/rooms/:slug/queue', authenticateToken, async (req: AuthRequest
 roomMembers.post('/rooms/:slug/queue/:entryId/skip', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdminOrCeo(prisma, req.params.slug, req.userId!);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa mengubah antrean' });
 
@@ -696,7 +714,7 @@ roomMembers.post('/rooms/:slug/queue/:entryId/skip', authenticateToken, async (r
 roomMembers.post('/rooms/:slug/queue/:entryId/approve', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdminOrCeo(prisma, req.params.slug, req.userId!);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa menyetujui antrean' });
 

@@ -436,6 +436,20 @@ export function getConnectedAdminSocketIds(roomSlug: string): string[] {
   return ids;
 }
 
+// "Ngobrol dengan CEO" queue, zone-level — ZONE_QUEUE_REQUESTED goes to
+// whoever's actually been granted CEO access (ceoUserIds), not every room
+// admin, same shape as getConnectedAdminSocketIds above.
+export function getConnectedCeoSocketIds(roomSlug: string): string[] {
+  const rs = roomAdminMap.get(roomSlug);
+  if (!rs) return [];
+  const ids: string[] = [];
+  for (const uid of rs.ceoUserIds) {
+    const sid = userSocketMap.get(uid);
+    if (sid) ids.push(sid);
+  }
+  return ids;
+}
+
 // "Ngobrol dengan CEO" queue — force-remove a user whose timed slot just
 // ended (called from queueSweep.ts, which lives outside this file and has
 // no socket of its own). Reuses handleLeave's exact cleanup, same reasoning

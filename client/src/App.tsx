@@ -1592,8 +1592,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           </div>
         )}
         {/* "Ngobrol dengan CEO" queue, zone-level — same stacked-toast shape
-            as the join-request popups above (capped at 3 + "+N lainnya"). */}
-        {isAdmin && incomingQueueRequests.slice(0, 3).map((req) => (
+            as the join-request popups above (capped at 3 + "+N lainnya").
+            Gated on localIsCeo, NOT isAdmin — the server only ever sends
+            this to whoever's actually been granted CEO access (see
+            roomHandler.ts's getConnectedCeoSocketIds), so it's their queue
+            to decide, not every room admin's. */}
+        {localIsCeo && incomingQueueRequests.slice(0, 3).map((req) => (
           <PendingRequestToast
             key={req.entryId}
             icon={<BriefcaseFill size={13} className="text-amber-600" />}
@@ -1602,7 +1606,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             onDecline={() => decideIncomingQueueRequest(req, 'reject')}
           />
         ))}
-        {isAdmin && incomingQueueRequests.length > 3 && (
+        {localIsCeo && incomingQueueRequests.length > 3 && (
           <div className="bg-slate-800/90 text-white text-xs font-medium px-3 py-1.5 rounded-full shadow pointer-events-none">
             +{incomingQueueRequests.length - 3} antrean lainnya
           </div>
