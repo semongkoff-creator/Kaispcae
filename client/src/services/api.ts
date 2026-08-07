@@ -387,6 +387,12 @@ export const api = {
   cancelQueue: (slug: string, zoneId?: string) =>
     request<{ ok: true }>(`/rooms/${slug}/queue/cancel`, { method: 'POST', body: JSON.stringify({ zoneId }) }),
 
+  // Item 13, "Panic/report user" — see server/src/routes/users.ts's own
+  // doc comment. Open to every real member; the server re-checks (not
+  // yourself, non-empty reason, rate-limited).
+  reportUser: (userId: string, reason: string, roomSlug?: string) =>
+    request<{ ok: true }>(`/users/${userId}/report`, { method: 'POST', body: JSON.stringify({ reason, roomSlug }) }),
+
   getJoinRequests: (slug: string) =>
     request<{ requests: { userId: string; displayName: string; email: string; requestedAt: number }[] }>(
       `/rooms/${slug}/join-requests`,

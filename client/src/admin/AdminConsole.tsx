@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { XLg, People, ShieldLock, ClockHistory, Diagram3, Sliders, BarChartFill, CalendarEvent, PersonCheck } from 'react-bootstrap-icons';
+import { XLg, People, ShieldLock, ClockHistory, Diagram3, Sliders, BarChartFill, CalendarEvent, PersonCheck, CloudDownload } from 'react-bootstrap-icons';
 import { WORKSPACE_ROLE_LABELS } from '@virtualmeet/shared';
 import { CurrentUser } from '@/hooks/useCurrentUser';
 import { ApprovalPanel } from './ApprovalPanel';
@@ -10,8 +10,9 @@ import { AuditLogViewer } from './AuditLogViewer';
 import { AttendanceSettings } from './AttendanceSettings';
 import { AttendanceReport } from './AttendanceReport';
 import { CalendarSettings } from './CalendarSettings';
+import { BackupPanel } from './BackupPanel';
 
-type Tab = 'members' | 'approvals' | 'departments' | 'attendance' | 'report' | 'calendar' | 'policy' | 'audit';
+type Tab = 'members' | 'approvals' | 'departments' | 'attendance' | 'report' | 'calendar' | 'policy' | 'audit' | 'backup';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'members', label: 'Anggota', icon: <People size={14} /> },
@@ -22,6 +23,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'calendar', label: 'Ruang & Kalender', icon: <CalendarEvent size={14} /> },
   { id: 'policy', label: 'Kebijakan', icon: <Sliders size={14} /> },
   { id: 'audit', label: 'Audit log', icon: <ClockHistory size={14} /> },
+  { id: 'backup', label: 'Backup', icon: <CloudDownload size={14} /> },
 ];
 
 // The workspace admin console. Rendering is gated here AND every route it
@@ -97,6 +99,7 @@ export function AdminConsole({ currentUser, onClose }: { currentUser: CurrentUse
         {tab === 'calendar' && <CalendarSettings />}
         {tab === 'policy' && <PolicyPanel />}
         {tab === 'audit' && <AuditLogViewer />}
+        {tab === 'backup' && <BackupPanel />}
       </div>
     </div>
   );

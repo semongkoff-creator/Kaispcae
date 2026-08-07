@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill, MegaphoneFill, MicMuteFill, GeoAltFill, Search, VolumeMuteFill, VolumeUpFill } from 'react-bootstrap-icons';
+import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill, MegaphoneFill, MicMuteFill, GeoAltFill, Search, VolumeMuteFill, VolumeUpFill, FlagFill } from 'react-bootstrap-icons';
 import { roleAtLeast, Role, WorkMode } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
@@ -46,6 +46,13 @@ interface ParticipantPanelProps {
   // useChannelChat.ts's startDm. Undefined for rows with no account id
   // (unreachable today — login is mandatory before joining a room).
   onStartDm?: (targetUserId: string) => void;
+  // Item 13, "Panic/report user" — open to every real member (not
+  // admin-gated, unlike Kick/Force Mute below): reporting someone's
+  // behavior is exactly the tool the person WITHOUT moderation power needs.
+  // Undefined only when there's no account id to report against (guest
+  // rows) or the viewer is a guest themselves (isGuest gate at the call
+  // site, same convention as onSummon/onSlap).
+  onReport?: (targetUserId: string, name: string) => void;
   // Temporary removal from the room, admin+ only (see shared/permissions.ts's
   // 'room:kick') — not a ban, the target can rejoin any time.
   emitKick?: (targetUserId: string) => void;
@@ -73,7 +80,7 @@ interface ParticipantPanelProps {
 
 const MAX_VIDEO_THUMBS = 3;
 
-export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, emitKick, emitForceMute, emitForcePull, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
+export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, onReport, emitKick, emitForceMute, emitForcePull, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
@@ -104,7 +111,14 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollo
   const canSpotlight = roleAtLeast(localRole, 'admin');
   const canForcePull = roleAtLeast(localRole, 'admin');
 
-  const remotePlayers = Object.values(playerRecords);
+  // Ghost mode follow-up — hidden must mean actually gone from every
+  // "who's here" surface, not just the game canvas/minimap (which already
+  // did this — see GameCanvas.tsx/Minimap.tsx's own canSeeHidden). This
+  // panel was the gap: it listed hidden players regardless of viewer role.
+  // Admin+ (the only role that can even use Ghost mode — see App.tsx's
+  // HiddenButton gate) still sees everyone, same as the canvas/minimap.
+  const canSeeHidden = roleAtLeast(localRole, 'admin');
+  const remotePlayers = Object.values(playerRecords).filter((p) => !p.hidden || canSeeHidden);
   const totalOnline = remotePlayers.length + 1;
 
   // Locate ("Temukan") — search by name, then walk the local player toward
@@ -222,6 +236,7 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollo
                 isMuted={!!p.userId && mutedUserIds.has(p.userId)}
                 onToggleMute={p.userId ? () => (mutedUserIds.has(p.userId!) ? unmuteUser(p.userId!) : muteUser(p.userId!)) : undefined}
                 onMessage={p.userId && !p.isGuest && onStartDm ? () => onStartDm(p.userId!) : undefined}
+                onReport={isGuest || !p.userId || !onReport ? undefined : () => onReport(p.userId!, p.name)}
                 isGuest={p.isGuest}
                 onKick={canKick && p.userId && emitKick ? () => emitKick(p.userId!) : undefined}
                 onForceMute={canForceMute && p.userId && emitForceMute && !p.micMuted ? () => emitForceMute(p.userId!) : undefined}
@@ -258,6 +273,7 @@ function ParticipantRow({
   isMuted,
   onToggleMute,
   onMessage,
+  onReport,
   onKick,
   onForceMute,
   onForcePull,
@@ -313,6 +329,9 @@ function ParticipantRow({
   onToggleMute?: () => void;
   // Opens a persisted 1:1 DM with this participant (see useChannelChat.ts).
   onMessage?: () => void;
+  // Item 13, "Panic/report user" — open to everyone, like Slap/Summon, not
+  // an admin-only action (undefined only for guest rows/viewers).
+  onReport?: () => void;
   // Temporary removal from the room — undefined (not just a no-op) when I'm
   // below admin, same "hide, don't disable" convention as onSummon above.
   onKick?: () => void;
@@ -392,7 +411,7 @@ function ParticipantRow({
   // leaving it open over a row whose state just changed reads as if the
   // click didn't register.
   const pick = (fn?: () => void) => () => { closeMenu(); fn?.(); };
-  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onToggleMute || onMessage || onKick || onForceMute || onForcePull || onSpotlight || onLocate);
+  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onToggleMute || onMessage || onReport || onKick || onForceMute || onForcePull || onSpotlight || onLocate);
 
   return (
     <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50 dark:bg-gray-700/50">
@@ -509,6 +528,9 @@ function ParticipantRow({
                     label={spotlightActive ? 'Matikan Spotlight' : 'Nyalakan Spotlight'}
                     onClick={pick(onSpotlight)}
                   />
+                )}
+                {onReport && (
+                  <MenuItem icon={<FlagFill size={11} />} label="Laporkan" danger onClick={pick(onReport)} />
                 )}
                 {(onForceMute || onKick) && (
                   <div className="my-1 border-t border-gray-100 dark:border-gray-700" />

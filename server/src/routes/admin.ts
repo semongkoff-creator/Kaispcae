@@ -322,4 +322,51 @@ admin.get('/admin/audit', authenticateToken, requireWorkspace('workspace:viewAud
   }
 });
 
+// ─── Backup & recovery ─────────────────────────────────────────────
+//
+// Item 12, "Tak Terpikir" checklist — manual export, not a scheduled job:
+// admin clicks a button in the Admin Console whenever they want a snapshot,
+// downloaded straight to their machine rather than stored on the server
+// (nothing new to secure/rotate/prune server-side). Covers everything that
+// is actually PERSISTED: room notes (DeskNote), Minutes of Meeting
+// (MomRecord), and attendance. "Pengumuman" (room notices) is deliberately
+// NOT included — see roomHandler.ts's roomNoticeMap doc comment: a pinned
+// notice is in-memory only by design (a live banner, not a historical
+// record), so there is nothing durable to back up there.
+admin.get('/admin/backup/export', authenticateToken, requireWorkspace('workspace:exportBackup'), async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const [notes, moms, attendance] = await Promise.all([
+      prisma.deskNote.findMany({ orderBy: { createdAt: 'asc' } }),
+      prisma.momRecord.findMany({ orderBy: { createdAt: 'asc' } }),
+      // Deliberately excludes clockIn/clockOut lat/lng/accuracy — that data
+      // already has its own dedicated auto-purge retention sweep
+      // (lib/larkAttendance's LOCATION_RETENTION_DAYS); a manual export
+      // would otherwise create an unmanaged copy that outlives it.
+      prisma.attendanceRecord.findMany({
+        orderBy: { date: 'asc' },
+        select: {
+          id: true, userId: true, date: true, clockIn: true, clockOut: true, shiftId: true,
+          status: true, workMinutes: true, overtimeMinutes: true, clockInMethod: true, note: true, createdAt: true,
+        },
+      }),
+    ]);
+
+    await writeAudit(getPrisma(), {
+      actorId: req.userId!, action: 'backup:export', targetType: 'workspace',
+      meta: { noteCount: notes.length, momCount: moms.length, attendanceCount: attendance.length },
+      ip: clientIp(req),
+    });
+
+    const backup = { exportedAt: new Date().toISOString(), exportedBy: req.userId, notes, moms, attendance };
+    const filename = `meetkai-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(JSON.stringify(backup, null, 2));
+  } catch (err) {
+    console.error('[admin] backup export error:', err);
+    return res.status(500).json({ error: 'Gagal membuat backup' });
+  }
+});
+
 export default admin;

@@ -56,6 +56,7 @@ import { TutorialModal } from './components/ui/TutorialModal';
 import { StatusPickModal } from './components/ui/StatusPickModal';
 import { MemberListPanel } from './components/ui/MemberListPanel';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
+import { ReportUserModal } from './components/ui/ReportUserModal';
 import { SoundboardPanel } from './components/ui/SoundboardPanel';
 import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
 import { AwayReasonModal } from './components/ui/AwayReasonModal';
@@ -836,6 +837,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // QA #7/#8/#9 — clicking a note marker opens it. Same "just the id,
   // resolve the rest at render time" shape as triggeredInteractiveId above.
   const [noteEditingId, setNoteEditingId] = useState<string | null>(null);
+  // Item 13, "Panic/report user" — who ParticipantPanel's "Laporkan" was
+  // clicked for, if anyone; the modal itself does the actual submit.
+  const [reportTarget, setReportTarget] = useState<{ userId: string; name: string } | null>(null);
   const localRole = useGameStore((s) => s.localRole);
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -1472,7 +1476,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             </p>
           </div>
           <div className="absolute top-14 left-16 flex items-start gap-2 pointer-events-none">
-            <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} isGuest={isGuest} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
+            <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} isGuest={isGuest} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} onReport={(userId, name) => setReportTarget({ userId, name })} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
             {/* QA (Akses tamu checklist item 2, "Guest terbatas") — Soundboard
                 playback is now also server-rejected for guests
                 (roomHandler.ts's SOUNDBOARD_PLAY), so hiding the panel too
@@ -1888,6 +1892,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         />
       )}
 
+      {reportTarget && (
+        <ReportUserModal target={reportTarget} roomSlug={roomSlug} onClose={() => setReportTarget(null)} />
+      )}
+
       {noteEditingId && (
         <NoteModal
           noteId={noteEditingId}
@@ -1988,7 +1996,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             PLAYER_HAND/PLAYER_HIDDEN). Mic/Camera/Screen Share stay —
             those are the kept-open meeting-participation set. */}
         {!isGuest && <HandButton raised={!!localPlayer.handRaised} onToggle={handleHandToggle} />}
-        {!isGuest && <HiddenButton hidden={!!localPlayer.hidden} onToggle={handleHiddenToggle} />}
+        {/* Ghost mode follow-up — admin+ only now (see shared/permissions.ts's
+            'player:hide'), not just "any non-guest member" — the server
+            already re-checks this itself, this just keeps the button from
+            showing to someone who'd be rejected for clicking it. */}
+        {roleAtLeast(localRole, 'admin') && <HiddenButton hidden={!!localPlayer.hidden} onToggle={handleHiddenToggle} />}
         <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
         <NotificationSettings />
       </div>

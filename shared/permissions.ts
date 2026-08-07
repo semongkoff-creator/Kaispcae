@@ -86,6 +86,12 @@ export const FEATURE_MIN_ROLE = {
   // kicking them outright. Same admin tier as Kick — silencing someone
   // without their consent is at least as disruptive as removing them.
   'room:force_mute': 'admin',
+  // "Ghost mode" (Avatar.hidden) — previously self-service for any real
+  // (non-guest) member, which meant anyone could lurk unseen by ordinary
+  // members. Restricted to admin+: seeing "who's ACTUALLY here" matters for
+  // moderation/safety, and Ghost mode should be a tool admins use, not
+  // something every member can turn on for themselves.
+  'player:hide': 'admin',
   // Zoom-style "Lock Meeting" — an admin/owner toggles the room closed so
   // no new non-admin can enter (people already inside stay). In-memory only
   // (see roomHandler.ts's RoomAdminState.locked), resets on server restart.

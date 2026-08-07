@@ -36,7 +36,7 @@ import attendanceRoutes from './routes/attendance';
 import attendanceAdminRoutes from './routes/attendanceAdmin';
 import calendarRoutes, { setCalendarIo } from './routes/calendar';
 import meetingRoomRoutes from './routes/meetingRooms';
-import userRoutes from './routes/users';
+import userRoutes, { setUsersIo } from './routes/users';
 import larkRoutes from './routes/lark';
 import attendanceLarkRoutes from './routes/attendanceLark';
 import meetingRoutes, { setMeetingIo, startRecordingPoller } from './routes/meeting';
@@ -159,6 +159,7 @@ setSessionKickIo(io);
 setMembersIo(io);
 setChatIo(io);
 setAdminIo(io);
+setUsersIo(io);
 setCalendarIo(io);
 setMeetingIo(io);
 

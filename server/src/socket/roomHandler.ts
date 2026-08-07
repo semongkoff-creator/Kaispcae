@@ -1782,15 +1782,22 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   });
 
   // Manual "hide myself" toggle — same relay+persist shape as mic above.
-  // Purely a broadcast flag; enforcing it (skipping render for non-admin
-  // viewers) is entirely client-side (see GameCanvas.tsx) — the server
-  // doesn't gate anything on it.
+  // Purely a broadcast flag; enforcing WHO gets to see a hidden avatar
+  // (skipping render for non-admin viewers) is entirely client-side (see
+  // GameCanvas.tsx/Minimap.tsx/ParticipantPanel.tsx) — the server doesn't
+  // gate visibility. It DOES gate who may use Ghost mode at all, below.
   socket.on(SocketEvents.PLAYER_HIDDEN, async (hidden: boolean) => {
     const room = currentRoom; if (!room) return;
-    // QA (Akses tamu checklist item 2) — a guest going invisible to regular
-    // members has no legitimate use case and only invites abuse (lurking
-    // unseen in someone else's room).
-    if (isRestrictedSocket(socket, room)) return;
+    // Ghost mode is admin+ only (see shared/permissions.ts's 'player:hide')
+    // — this single check already covers guests/restricted-tier too, since
+    // isRestrictedSocket's whole point was clamping them below 'member',
+    // well under 'admin'.
+    const senderUid = findUserIdBySocket(socket.id);
+    const rs = getRoomAdmin(room);
+    if (!canAccess(rs, senderUid, 'player:hide')) {
+      socket.emit('admin:error', { message: 'Hanya admin yang bisa pakai mode ghost' });
+      return;
+    }
     const val = !!hidden;
     socket.to(room).emit(SocketEvents.PLAYER_HIDDEN_UPDATED, { id: socket.id, hidden: val });
     updatePlayerHidden(room, socket.id, val);

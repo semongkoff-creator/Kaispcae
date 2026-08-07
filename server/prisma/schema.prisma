@@ -121,6 +121,8 @@ model User {
   docVersions             DocVersion[]              @relation("DocVersionAuthor")
   roomMembers             RoomMember[]
   roomQueueEntries        RoomQueueEntry[]
+  reportsMade             UserReport[]              @relation("ReportReporter")
+  reportsReceived         UserReport[]              @relation("ReportReported")
   ownedRooms              Room[]
   sentChatMessages        ChatMessage[]
   chatReads               ChatRead[]
@@ -175,6 +177,33 @@ model AuditLog {
   @@index([targetUserId, createdAt])
   @@index([targetType, targetId])
   @@index([action, createdAt])
+}
+
+// Item 13, "Tak Terpikir" checklist ("Panic/report user") — a user reporting
+// another user's BEHAVIOR (not a room-scoped moderation action like Kick,
+// which already exists and stays instant/self-service for admins). Reporting
+// is deliberately open to every real member, not just admins — the person
+// experiencing bad behavior is rarely the one holding the Kick button.
+// Persisted (not just a fire-and-forget notification) so there is a durable
+// record an admin can refer back to, even though — per product decision —
+// there is no dedicated review dashboard yet; the admin Notification created
+// alongside this row (see routes/users.ts) is the only surface today, and an
+// admin acts on it manually (DM, kick, etc.) via tools that already exist.
+model UserReport {
+  id           String    @id @default(cuid())
+  reporterId   String
+  reporter     User      @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedId   String
+  reported     User      @relation("ReportReported", fields: [reportedId], references: [id], onDelete: Cascade)
+  // Which room this happened in, if reported from inside one (the Report
+  // action is also reachable from a DM/profile, where there's no room).
+  roomSlug     String?
+  reason       String    @db.Text
+  status       String    @default("open") // open | reviewed | dismissed
+  createdAt    DateTime  @default(now())
+
+  @@index([status, createdAt])
+  @@index([reportedId, createdAt])
 }
 
 // Workspace-wide policy, a single row (id = "singleton"). Admin-editable;
