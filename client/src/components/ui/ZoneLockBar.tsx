@@ -1,8 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { LockFill, HandIndexThumbFill, PersonBadgeFill, HourglassSplit, PeopleFill } from 'react-bootstrap-icons';
 import { ZoneKnockRequest, ZoneLockState, ZoneApprovalRequest } from '@virtualmeet/shared';
 
 const ZONE_QUEUE_DURATION_OPTIONS = [15, 30, 45, 60];
+
+// mm:ss remaining, floored at 0 so a just-expired ticket (sweep hasn't
+// caught up yet, runs every 20s — see queueSweep.ts) never shows a negative
+// time.
+function formatCountdown(msRemaining: number): string {
+  const totalSec = Math.max(0, Math.floor(msRemaining / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 // All the zone-lock UI, kept in one strip above the HUD so it never collides
 // with the room's own controls (the floating Chat button already taught us
@@ -36,8 +46,9 @@ export function ZoneLockBar({
   onDecide: (k: ZoneKnockRequest, admit: boolean) => void;
   onCancelApproval: () => void;
   onDecideApproval: (r: ZoneApprovalRequest, admit: boolean) => void;
-  // "Ngobrol dengan CEO" queue, zone-level (see useZoneLock.ts).
-  zoneQueueTicket: { zoneId: string; status: 'waiting' | 'called' | 'active'; durationMin: number; position: number | null } | null;
+  // "Ngobrol dengan CEO" queue, zone-level (see useZoneLock.ts). `endsAt`
+  // (epoch ms) is only meaningful once `status === 'active'`.
+  zoneQueueTicket: { zoneId: string; status: 'waiting' | 'called' | 'active'; durationMin: number; position: number | null; endsAt: number | null } | null;
   zoneQueueBusy: boolean;
   zoneQueueError: string;
   onJoinZoneQueue: (zoneId: string, durationMin: number, topic?: string) => void;
@@ -47,6 +58,18 @@ export function ZoneLockBar({
   const [queueTopic, setQueueTopic] = useState('');
 
   const queueingHere = zoneQueueTicket && zoneQueueTicket.zoneId === deniedZoneId;
+
+  // Live countdown while a session is active — a local 1s tick purely to
+  // re-render (no server round trip, no polling); the actual remaining time
+  // is always recomputed fresh from `endsAt`, so it can't drift even if a
+  // tab was backgrounded for a while.
+  const isActiveSession = zoneQueueTicket?.status === 'active' && zoneQueueTicket.endsAt != null;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isActiveSession) return;
+    const iv = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, [isActiveSession]);
 
   return (
     <>
@@ -120,6 +143,16 @@ export function ZoneLockBar({
           <button onClick={onCancelApproval} className="w-full py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium cursor-pointer">
             Cancel
           </button>
+        </div>
+      ) : queueingHere && zoneQueueTicket && zoneQueueTicket.status === 'active' ? (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-purple-200 dark:border-gray-700 p-3">
+          <p className="text-xs text-gray-800 dark:text-gray-100 inline-flex items-center gap-1.5">
+            <HourglassSplit size={11} className="text-purple-600" /> Sesi di {deniedZoneName ?? 'zona ini'} aktif
+          </p>
+          <p className="text-lg font-semibold text-purple-600 dark:text-purple-400 tabular-nums">
+            {zoneQueueTicket.endsAt != null ? formatCountdown(zoneQueueTicket.endsAt - now) : `${zoneQueueTicket.durationMin}:00`}
+          </p>
+          <p className="text-[10px] text-gray-400">Waktu tersisa — keluar zona kapan saja untuk mengakhiri lebih awal.</p>
         </div>
       ) : queueingHere && zoneQueueTicket ? (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-purple-200 dark:border-gray-700 p-3">

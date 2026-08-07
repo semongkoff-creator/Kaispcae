@@ -17,8 +17,12 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
   // fetching right after joining the queue; null otherwise (including "no
   // ticket at all yet", which is the common case so this doesn't default to
   // 'loading' the way JoinGate's room-level version does).
+  // `endsAt` (epoch ms) is only meaningful once `status === 'active'` (set by
+  // admitCalledEntry the moment the holder actually walks in — see
+  // roomQueue.ts) — null while still 'waiting'/'called'. ZoneLockBar uses it
+  // to render a live countdown without polling the server every second.
   const [zoneQueueTicket, setZoneQueueTicket] = useState<{
-    zoneId: string; status: 'waiting' | 'called' | 'active'; durationMin: number; position: number | null;
+    zoneId: string; status: 'waiting' | 'called' | 'active'; durationMin: number; position: number | null; endsAt: number | null;
   } | null>(null);
   const [zoneQueueBusy, setZoneQueueBusy] = useState(false);
   const [zoneQueueError, setZoneQueueError] = useState('');
@@ -188,7 +192,7 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
           if (deniedZoneId === zoneId) setDeniedZoneId(null);
           return;
         }
-        setZoneQueueTicket({ zoneId, status: entry.status, durationMin: entry.durationMin, position: entry.position });
+        setZoneQueueTicket({ zoneId, status: entry.status, durationMin: entry.durationMin, position: entry.position, endsAt: entry.endsAt });
         if (entry.status === 'called') {
           socketRef.current?.emit(SocketEvents.ZONE_ENTER, zoneId);
         }
@@ -212,7 +216,7 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     try {
       await api.joinQueue(roomSlug, durationMin, topic, zoneId);
       const { entry } = await api.getMyQueueStatus(roomSlug, zoneId);
-      if (entry) setZoneQueueTicket({ zoneId, status: entry.status, durationMin: entry.durationMin, position: entry.position });
+      if (entry) setZoneQueueTicket({ zoneId, status: entry.status, durationMin: entry.durationMin, position: entry.position, endsAt: entry.endsAt });
     } catch (e) {
       setZoneQueueError(e instanceof Error ? e.message : 'Gagal mendaftar antrean');
     } finally {
