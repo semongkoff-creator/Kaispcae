@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, KnockRequestPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, JoinRequestPopupPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@virtualmeet/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 import { appendMovementSnapshot, MovementSnapshot, sampleMovementSnapshots } from './movementSmoothing';
@@ -267,19 +267,11 @@ export interface GameState {
   sessionTakenOverNotice: string | null;
   setSessionTakenOverNotice: (notice: string | null) => void;
 
-  // Zoom-style "Lock Meeting" (see shared SocketEvents.ROOM_LOCK_SET).
-  // roomLocked drives the 🔒 indicator + the owner's Lock/Unlock control;
-  // roomLockedNotice bounces a denied joiner back to the Lobby, same
-  // mechanism as roomDeletedNotice/kickedNotice above.
-  roomLocked: boolean;
-  setRoomLocked: (locked: boolean) => void;
-  roomLockedNotice: string | null;
-  setRoomLockedNotice: (notice: string | null) => void;
   // QA (Load checklist item 1, "Concurrency tim penuh") — mirrors
-  // roomLockedNotice's shape, for the room-full denial (JOIN_DENIED with
-  // reason 'room-full'). No "knock to enter" option makes sense here (the
-  // room being full isn't the host's call to override) — just an
-  // informative message and a way back to the Lobby.
+  // sessionTakenOverNotice's shape above, for the room-full denial
+  // (JOIN_DENIED with reason 'room-full'). No "knock to enter" option makes
+  // sense here (the room being full isn't the host's call to override) —
+  // just an informative message and a way back to the Lobby.
   roomFullNotice: string | null;
   setRoomFullNotice: (notice: string | null) => void;
 
@@ -506,9 +498,6 @@ export interface GameState {
   setFollowResult: (result: FollowResultPayload | null) => void;
   incomingSummonRequest: SummonRequestPayload | null;
   setIncomingSummonRequest: (req: SummonRequestPayload | null) => void;
-  // A locked-room "knock" shown to admins (see shared KnockRequestPayload).
-  incomingKnock: KnockRequestPayload | null;
-  setIncomingKnock: (req: KnockRequestPayload | null) => void;
   // Item #5 — room-join requests popped up for admins (see
   // JoinRequestPopupPayload). An array, not a single slot like the others
   // above: several people can request to join at once and every one of them
@@ -882,10 +871,6 @@ export const useGameStore = create<GameState>((set, get) => ({
   sessionTakenOverNotice: null,
   setSessionTakenOverNotice: (notice) => set({ sessionTakenOverNotice: notice }),
 
-  roomLocked: false,
-  setRoomLocked: (locked) => set({ roomLocked: locked }),
-  roomLockedNotice: null,
-  setRoomLockedNotice: (notice) => set({ roomLockedNotice: notice }),
   roomFullNotice: null,
   setRoomFullNotice: (notice) => set({ roomFullNotice: notice }),
 
@@ -1213,8 +1198,6 @@ export const useGameStore = create<GameState>((set, get) => ({
   setFollowResult: (result) => set({ followResult: result }),
   incomingSummonRequest: null,
   setIncomingSummonRequest: (req) => set({ incomingSummonRequest: req }),
-  incomingKnock: null,
-  setIncomingKnock: (req) => set({ incomingKnock: req }),
   incomingJoinRequests: [],
   addIncomingJoinRequest: (req) => set((s) => ({
     // Re-posting while pending is idempotent server-side (see roomMembers.ts),
@@ -1560,7 +1543,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       localRole: roomState.role ?? (localIsAdmin ? 'admin' : prev.localRole),
       masterAdminUserId: roomState.masterAdminUserId ?? prev.masterAdminUserId,
       notice: roomState.notice !== undefined ? roomState.notice : prev.notice,
-      roomLocked: roomState.locked ?? false,
       doorOverride: roomState.doorOverride ?? false,
       liveReferenceImage: roomState.referenceImage ?? null,
       avatarScale: roomState.avatarScale ?? 1,

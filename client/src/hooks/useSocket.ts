@@ -891,25 +891,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().setSessionTakenOverNotice('Sesi ini diambil alih oleh tab atau perangkat lain.');
     });
 
-    socket.on(SocketEvents.ROOM_LOCK_UPDATED, (data: { locked: boolean }) => {
-      useGameStore.getState().setRoomLocked(!!data.locked);
-      useGameStore.getState().addActivity(data.locked ? '🔒 Room locked' : '🔓 Room unlocked');
-    });
-
     // Item #9 — emergency door override toggled by an admin; everyone in the
     // room (including the toggler) gets this so the banner + the admin's own
     // control stay in sync.
     socket.on(SocketEvents.DOOR_OVERRIDE_UPDATED, (data: { active: boolean }) => {
       useGameStore.getState().setDoorOverride(!!data.active);
       useGameStore.getState().addActivity(data.active ? '🚨 Semua pintu dibuka (mode darurat)' : '🔒 Mode darurat pintu dimatikan');
-    });
-
-    socket.on(SocketEvents.ROOM_LOCKED_DENIED, () => {
-      // Unlike roomDeletedNotice/kickedNotice, this does NOT auto-bounce — the
-      // denied overlay (App.tsx) offers "Knock to enter" as well as leaving,
-      // so we just surface the state and let the user choose.
-      console.warn('[socket] join denied — room is locked');
-      useGameStore.getState().setRoomLockedNotice('This room is locked — ask the host to let you in.');
     });
 
     // QA (Load checklist item 1, "Concurrency tim penuh") — JOIN_ROOM's
@@ -926,10 +913,6 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
         console.warn('[socket] join denied — room is full');
         useGameStore.getState().setRoomFullNotice('Room ini sudah penuh. Coba lagi nanti.');
       }
-    });
-
-    socket.on(SocketEvents.ROOM_KNOCK_REQUEST, (payload: { userId: string; name: string }) => {
-      useGameStore.getState().setIncomingKnock(payload);
     });
 
     // Item #5 — a room-join request, popped up for every admin currently
@@ -949,37 +932,15 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       }
     });
 
-    // The knocker cancelled before we responded — but only clear OUR toast if
-    // it's still showing THIS SAME knock; a newer knock from someone else may
-    // have already overwritten incomingKnock by the time this arrives (it's a
-    // single-value slot, not a queue), and this must not dismiss that one.
-    socket.on(SocketEvents.ROOM_KNOCK_CANCELLED, (payload: { userId: string }) => {
-      const current = useGameStore.getState().incomingKnock;
-      if (current && current.userId === payload.userId) {
-        useGameStore.getState().setIncomingKnock(null);
-      }
-    });
-
-    socket.on(SocketEvents.ROOM_KNOCK_ADMITTED, () => {
-      // The host let us in — retry the join (this time the server's lock gate
-      // finds us on the allowlist) and clear the denied overlay.
-      console.log('[socket] admitted after knock — rejoining');
-      const config = loadAvatarConfig();
-      const uid = authUserId || localStorage.getItem('vm_userId') || socket.id;
-      const displayName = authUserName || config.name || 'Player';
-      socket.emit(SocketEvents.JOIN_ROOM, roomSlug, displayName, config, uid);
-      useGameStore.getState().setRoomLockedNotice(null);
-    });
-
     // Guest Link & Ruang Tunggu — this socket's OWN JOIN_ROOM landed it in
     // the waiting room (see roomHandler.ts's guest branch).
     socket.on(SocketEvents.GUEST_JOIN_WAITING, () => {
       useGameStore.getState().setGuestWaitState('waiting');
     });
 
-    // An admin admitted this guest — same "retry the exact same JOIN_ROOM"
-    // mechanic as ROOM_KNOCK_ADMITTED above; this time the server finds it
-    // on guestAllowlist and lets it fall through to a normal join.
+    // An admin admitted this guest — retry the exact same JOIN_ROOM; this
+    // time the server finds it on guestAllowlist and lets it fall through
+    // to a normal join.
     socket.on(SocketEvents.GUEST_JOIN_ADMITTED, () => {
       console.log('[socket] guest admitted — rejoining');
       const config = loadAvatarConfig();
@@ -1000,8 +961,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     });
 
     // The guest left/disconnected before a decision was made — drop it from
-    // the admin's pending list, same "stale request" cleanup as
-    // ROOM_KNOCK_CANCELLED above.
+    // the admin's pending list.
     socket.on(SocketEvents.GUEST_JOIN_CANCELLED, (payload: { guestId: string }) => {
       useGameStore.getState().removePendingGuest(payload.guestId);
     });
@@ -1316,26 +1276,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.PLAYER_FORCE_MUTE, { targetUserId });
   }, []);
 
-  const emitRoomLock = useCallback((locked: boolean) => {
-    socketRef.current?.emit(SocketEvents.ROOM_LOCK_SET, { locked });
-  }, []);
-
   const emitDoorOverride = useCallback((active: boolean) => {
     socketRef.current?.emit(SocketEvents.DOOR_OVERRIDE_SET, { active });
-  }, []);
-
-  const emitKnock = useCallback((roomId: string) => {
-    socketRef.current?.emit(SocketEvents.ROOM_KNOCK, { roomId });
-  }, []);
-
-  // Withdraw a knock before the host responds — no payload needed, the
-  // server already knows which pending knock is ours (keyed by this socket).
-  const emitKnockCancel = useCallback(() => {
-    socketRef.current?.emit(SocketEvents.ROOM_KNOCK_CANCEL);
-  }, []);
-
-  const emitKnockAdmit = useCallback((userId: string) => {
-    socketRef.current?.emit(SocketEvents.ROOM_KNOCK_ADMIT, { userId });
   }, []);
 
   const emitGuestJoinDecide = useCallback((guestId: string, admit: boolean) => {
@@ -1426,5 +1368,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitForceMute, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
+  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitRoomDelete, emitKick, emitForceMute, emitDoorOverride, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
 }

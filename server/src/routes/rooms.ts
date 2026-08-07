@@ -8,7 +8,6 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
 import { canEnterRoom } from '../lib/roomMembership';
 import { convertLegacyRoom } from '../lib/convertLegacyRoom';
-import { isRoomLocked } from '../socket/roomHandler';
 import { isValidMediaPayload, isUploadUrl } from '../socket/mediaHandler';
 import { redactInteractiveSecrets, redactDoorPasswords, redactDoorAreaPasswords } from '../lib/redactFurniture';
 import { deleteUploadedFile, storage as uploadStorage } from './uploads';
@@ -86,7 +85,6 @@ rooms.get('/rooms', async (_req, res: Response) => {
         maxPlayers: r.maxPlayers,
         theme: r.theme,
         createdAt: r.createdAt,
-        locked: isRoomLocked(r.slug),
       })),
     });
   } catch (err) {
@@ -120,7 +118,6 @@ rooms.get('/rooms/:slug', async (req, res: Response) => {
       maxPlayers: room.maxPlayers,
       isPublic: room.isPublic,
       theme: room.theme,
-      locked: isRoomLocked(room.slug),
     });
   } catch (err) {
     console.error('[rooms] get error:', err);

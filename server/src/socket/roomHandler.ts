@@ -25,7 +25,6 @@ const canTeleport = socketRateLimit(2); // max 2 teleport requests/sec per socke
 const canUpdateRoom = socketRateLimit(2); // max 2 room:update (DB write) calls/sec per socket
 const canSummonUser = socketRateLimit(3); // max 3 single-target summon requests/sec per socket
 const canForcePull = socketRateLimit(3); // "Tarik Paksa" — same burst guard as Summon above
-const canKnock = socketRateLimit(1); // max 1 knock/sec per socket — no spamming the host
 const canSlap = socketRateLimit(3); // A10 — burst guard; the real limit is the 30s/target cooldown below
 const canCheckInteractive = socketRateLimit(3); // Fitur 15B — throttle brute-force guessing of a password/multiple-choice prompt
 const canApiCall = socketRateLimit(1); // Fitur 15B — API call hits a THIRD-PARTY server; heavier than a DB compare, so a tighter cap
@@ -82,28 +81,6 @@ function clearPendingSummon(targetSocketId: string) {
     pendingSummons.delete(targetSocketId);
   }
 }
-
-// A pending "knock to enter" — keyed by the KNOCKER's own socket id (unlike
-// pendingSummons, there's no single "target": a knock fans out to every
-// connected admin at once, so this remembers exactly which admin sockets
-// were told, so a cancel (or the knocker disconnecting) can tell precisely
-// those same sockets to drop it — never a broadcast to the whole room.
-interface PendingKnock {
-  uid: string;
-  name: string;
-  notifiedAdminSocketIds: string[];
-}
-const pendingKnocks = new Map<string, PendingKnock>();
-
-function cancelKnock(knockerSocketId: string, io: Server) {
-  const pending = pendingKnocks.get(knockerSocketId);
-  if (!pending) return;
-  pendingKnocks.delete(knockerSocketId);
-  for (const adminSocketId of pending.notifiedAdminSocketIds) {
-    io.to(adminSocketId).emit(SocketEvents.ROOM_KNOCK_CANCELLED, { userId: pending.uid });
-  }
-}
-
 
 const AVATAR_COLORS = ['#4ecdc4', '#ffe66d', '#a786df', '#6bcb77', '#4d96ff', '#ff6b6b'];
 
@@ -207,15 +184,6 @@ interface RoomAdminState {
   // instead of each inventing their own mid-tier role.
   staffUserIds: Set<string>;
   loadedFromDb: boolean;
-  // Zoom-style "Lock Meeting" (see SocketEvents.ROOM_LOCK_SET) — when true,
-  // JOIN_ROOM denies any non-admin. In-memory only, so a server restart
-  // reopens every room; that's intentional (a lock is a live moderation
-  // action for an ongoing session, not persistent room config).
-  locked?: boolean;
-  // Uids admitted past the lock via "Knock to enter" (see
-  // SocketEvents.ROOM_KNOCK_ADMIT). Cleared whenever the room is unlocked, so
-  // a re-lock requires knocking again.
-  knockAllowlist?: Set<string>;
   // Akses & Password Pintu audit item #9 — emergency door override (see
   // SocketEvents.DOOR_OVERRIDE_SET). When true, movementHandler.ts's
   // isBlockedForSocket lets EVERY password door through regardless of
@@ -234,8 +202,8 @@ interface RoomAdminState {
   // admin has explicitly admitted via GUEST_JOIN_DECIDE. Checked on every
   // guest JOIN_ROOM: absent → held in the waiting room; present → proceeds
   // like a normal join. Revoked the instant the guest leaves (handleLeave)
-  // — same "one-time entry pass, not a standing grant" rule as
-  // knockAllowlist, so a returning guest is re-vetted every visit.
+  // — a one-time entry pass, not a standing grant, so a returning guest is
+  // re-vetted every visit.
   guestAllowlist?: Set<string>;
   // Guest requests currently awaiting an admin decision, keyed by guestId.
   // notifiedAdminSocketIds mirrors PendingKnock's own field — remembered so
@@ -399,26 +367,18 @@ export function getPlayerColor(id: string): string {
   return playerColors.get(id) || '#4ecdc4';
 }
 
-// Read-only lock check for the REST rooms list (routes/rooms.ts) so the Lobby
-// can show a 🔒 badge. Deliberately does NOT use getRoomAdmin() — that would
-// CREATE an empty admin-state entry for every room merely listed, and a room
-// with no in-memory state has never been locked, so treat missing as false.
-export function isRoomLocked(slug: string): boolean {
-  return roomAdminMap.get(slug)?.locked === true;
-}
-
-// Read-only check for movementHandler.ts's isBlockedForSocket — same
-// missing-means-false posture as isRoomLocked above (a room with no
-// in-memory admin state has never had its emergency override turned on).
+// Read-only check for movementHandler.ts's isBlockedForSocket — missing
+// (a room with no in-memory admin state) means false, since that room has
+// never had its emergency door override turned on.
 export function isDoorOverrideActive(slug: string): boolean {
   return roomAdminMap.get(slug)?.doorOverride === true;
 }
 
 // Item #5 — live admin sockets currently connected to a room, so a REST route
 // (roomMembers.ts's join-request handler, which has no socket of its own) can
-// fan a popup out directly to them exactly like ROOM_KNOCK_REQUEST does,
-// instead of broadcasting to the whole room and relying on client-side
-// gating. Read-only, same convention as isRoomLocked above: never creates a
+// fan a popup out directly to them instead of broadcasting to the whole room
+// and relying on client-side gating. Read-only, same missing-means-nothing-
+// to-notify convention as isDoorOverrideActive above: never creates a
 // roomAdminMap entry for a room nobody has joined this server lifetime — no
 // admin has ever connected there, so there's nothing to notify.
 export function getConnectedAdminSocketIds(roomSlug: string): string[] {
@@ -491,9 +451,9 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // notify every admin currently connected to this room, then STOP:
         // nothing below this block runs until an admin admits (see
         // GUEST_JOIN_DECIDE further down), at which point the guest's own
-        // client re-emits this exact same JOIN_ROOM — same "ping + client
-        // retries" mechanic as ROOM_KNOCK_ADMITTED — and this time
-        // guestAllowlist.has(guestId) is true, so it falls through instead.
+        // client re-emits this exact same JOIN_ROOM — a "ping + client
+        // retries" mechanic — and this time guestAllowlist.has(guestId) is
+        // true, so it falls through instead.
         const guestName = (socket.data as { guestName?: string }).guestName || 'Guest';
         if (!rs.pendingGuests) rs.pendingGuests = new Map();
         const notifiedAdminSocketIds = getConnectedAdminSocketIds(room);
@@ -699,21 +659,6 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
     const isAdmin = rs.adminUserIds.has(uid);
     const isMasterAdmin = uid === rs.masterAdminUserId;
-
-    // Zoom-style "Lock Meeting" gate — a locked room turns away any non-admin
-    // BEFORE they're added to the player store or announced to the room, so a
-    // denied joiner never appears to anyone (no ghost avatar, no PLAYER_JOINED
-    // broadcast). Admins/owner always get in (someone has to be able to unlock
-    // it, and moderators need to reach a room they're managing). We undo the
-    // socket.join(room) done at the top of this handler and clear currentRoom
-    // so this socket receives no further room traffic.
-    if (rs.locked && !isAdmin && !rs.knockAllowlist?.has(uid)) {
-      console.log(`[room] denied ${name} (${socket.id}) — ${room} is locked`);
-      socket.emit(SocketEvents.ROOM_LOCKED_DENIED, { roomId: room });
-      socket.leave(room);
-      currentRoom = null;
-      return;
-    }
 
     // Fetch the saved room once — reused for spawn point lookup below and
     // for the tiles/furniture/zones sent in room:state once player data is ready.
@@ -954,7 +899,6 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         doorAreaRects: redactDoorAreaPasswords(savedDoorAreaRects),
         adminUserIds: Array.from(rs.adminUserIds), masterAdminUserId: rs.masterAdminUserId, staffUserIds: Array.from(rs.staffUserIds), theme, template,
         notice: roomNoticeMap.get(room) ?? null,
-        locked: !!rs.locked,
         doorOverride: !!rs.doorOverride,
         role: getRole(rs, uid),
         // Fitur 15 — this room's custom Floor/Wall/Object uploads. Every
@@ -1007,31 +951,9 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     });
   });
 
-  socket.on(SocketEvents.ROOM_LOCK_SET, (data: { locked: boolean }) => {
-    const room = currentRoom; if (!room) return;
-    const senderUid = findUserIdBySocket(socket.id);
-    const rs = getRoomAdmin(room);
-    if (!canAccess(rs, senderUid, 'room:lock')) {
-      socket.emit('admin:error', { message: 'Only admins can lock the room' });
-      return;
-    }
-    rs.locked = !!data?.locked;
-    // Unlocking wipes the knock allowlist — a fresh lock shouldn't silently
-    // still admit whoever was let in during a previous lock session.
-    if (!rs.locked) rs.knockAllowlist?.clear();
-    // Everyone in the room (including the toggler) gets the new state so the
-    // 🔒 indicator and the owner's Lock/Unlock control stay in sync.
-    io.to(room).emit(SocketEvents.ROOM_LOCK_UPDATED, { locked: rs.locked });
-    // Also tell every Lobby socket so its 🔒 badge updates live, same channel
-    // the playerCount/removed lobby events already use (see Lobby.tsx).
-    io.emit('lobby:room_lock', { roomId: room, locked: rs.locked });
-    console.log(`[room] ${room} ${rs.locked ? 'LOCKED' : 'unlocked'} by uid=${senderUid}`);
-  });
-
-  // Akses & Password Pintu audit item #9 — emergency door override. Same
-  // shape as ROOM_LOCK_SET above: admin+ only, broadcasts the new state to
-  // everyone in the room (including the toggler) so the banner + the
-  // admin's own toggle control stay in sync.
+  // Akses & Password Pintu audit item #9 — emergency door override. Admin+
+  // only, broadcasts the new state to everyone in the room (including the
+  // toggler) so the banner + the admin's own toggle control stay in sync.
   socket.on(SocketEvents.DOOR_OVERRIDE_SET, (data: { active: boolean }) => {
     const room = currentRoom; if (!room) return;
     const senderUid = findUserIdBySocket(socket.id);
@@ -1088,10 +1010,15 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   // the actual "can walk through now" enforcement lives there, not here.
   socket.on(SocketEvents.INTERACTIVE_DOOR_PASSWORD_CHECK, async (data: InteractiveDoorPasswordCheckPayload) => {
     if (!canCheckInteractive(socket.id)) return;
-    // QA (Akses tamu checklist item 2) — same reasoning as the furniture
-    // password check above.
+    // Bug fix — unlike the furniture password check above, a door's whole
+    // point is letting THROUGH anyone who knows the password, guest link
+    // visitors included (a locked door in a real office doesn't care who's
+    // holding the key). isRestrictedSocket's "guest can only use a small
+    // feature set" gate was silently swallowing every attempt from a guest
+    // socket here (no isRestrictedSocket call means Submit does nothing —
+    // no INTERACTIVE_DOOR_PASSWORD_RESULT ever comes back), so it's
+    // deliberately NOT applied to this handler.
     const room = currentRoom; if (!room) return;
-    if (isRestrictedSocket(socket, room)) return;
     const x = data?.x, y = data?.y, attempt = data?.attempt;
     if (!Number.isInteger(x) || !Number.isInteger(y) || typeof attempt !== 'string') return;
     try {
@@ -1121,8 +1048,10 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   // above, keyed by area id (AreaEffect, not TileEffect) instead of (x,y).
   socket.on(SocketEvents.INTERACTIVE_DOOR_AREA_PASSWORD_CHECK, async (data: InteractiveDoorAreaPasswordCheckPayload) => {
     if (!canCheckInteractive(socket.id)) return;
+    // Bug fix — same reasoning as INTERACTIVE_DOOR_PASSWORD_CHECK above: a
+    // door lets through anyone who knows the password, guests included, so
+    // this deliberately doesn't gate on isRestrictedSocket.
     const room = currentRoom; if (!room) return;
-    if (isRestrictedSocket(socket, room)) return;
     const areaId = data?.areaId, attempt = data?.attempt;
     if (typeof areaId !== 'string' || !areaId || typeof attempt !== 'string') return;
     try {
@@ -1267,72 +1196,11 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     }
   });
 
-  socket.on(SocketEvents.ROOM_KNOCK, (data: { roomId: string }) => {
-    if (!canKnock(socket.id)) return; // rate-limited: no knock-spamming the host
-    const room = data?.roomId;
-    if (!room || typeof room !== 'string') return;
-    const rs = getRoomAdmin(room);
-    if (!rs.locked) return; // nothing to knock on
-    const uid = (socket.data as { userId?: string }).userId || socket.id;
-    const name = playerNames.get(socket.id) || 'Someone';
-    // Ring only the admins currently connected to that room (resolved via the
-    // uid→socket map) — the knock UI is admin-only, so this avoids leaking the
-    // knocker's identity to every member. Remembered (by the KNOCKER's own
-    // socket id) so a later ROOM_KNOCK_CANCEL — or the knocker simply
-    // disconnecting — can tell exactly these same admin sockets to drop it,
-    // instead of leaving a stale "X is knocking" toast up after they changed
-    // their mind or left.
-    const notifiedAdminSocketIds: string[] = [];
-    for (const adminUid of rs.adminUserIds) {
-      const adminSocketId = userSocketMap.get(adminUid);
-      if (adminSocketId && io.sockets.sockets.get(adminSocketId)) {
-        io.to(adminSocketId).emit(SocketEvents.ROOM_KNOCK_REQUEST, { userId: uid, name });
-        notifiedAdminSocketIds.push(adminSocketId);
-      }
-    }
-    pendingKnocks.set(socket.id, { uid, name, notifiedAdminSocketIds });
-    console.log(`[room] ${name} (uid=${uid}) knocked on ${room} — ${notifiedAdminSocketIds.length} admin(s) notified`);
-  });
-
-  // The knocker changed their mind before the host responded — tell every
-  // admin socket that got the original ROOM_KNOCK_REQUEST to drop it, so the
-  // host can't admit/reject a request that's already been withdrawn.
-  socket.on(SocketEvents.ROOM_KNOCK_CANCEL, () => {
-    cancelKnock(socket.id, io);
-  });
-
-  socket.on(SocketEvents.ROOM_KNOCK_ADMIT, (data: { userId: string }) => {
-    const room = currentRoom; if (!room) return;
-    const senderUid = findUserIdBySocket(socket.id);
-    const rs = getRoomAdmin(room);
-    if (!canAccess(rs, senderUid, 'room:lock')) {
-      socket.emit('admin:error', { message: 'Only admins can admit knockers' });
-      return;
-    }
-    if (typeof data?.userId !== 'string') return;
-    // Only honor this if there's still a matching PENDING knock — closes the
-    // race where the knocker cancels the instant the host clicks Admit. A
-    // cancelled request must never be approvable, not just visually hidden.
-    let matchedSid: string | null = null;
-    for (const [sid, pk] of pendingKnocks) { if (pk.uid === data.userId) { matchedSid = sid; break; } }
-    if (!matchedSid) {
-      socket.emit('admin:error', { message: 'Permintaan ini sudah dibatalkan' });
-      return;
-    }
-    pendingKnocks.delete(matchedSid);
-    if (!rs.knockAllowlist) rs.knockAllowlist = new Set();
-    rs.knockAllowlist.add(data.userId);
-    // Ping the knocker's socket so their client can auto-retry the join.
-    const knockerSocketId = userSocketMap.get(data.userId);
-    if (knockerSocketId) io.to(knockerSocketId).emit(SocketEvents.ROOM_KNOCK_ADMITTED, { roomId: room });
-    console.log(`[room] uid=${data.userId} admitted to ${room} by uid=${senderUid}`);
-  });
-
   // Guest Link & Ruang Tunggu — admin decides a pending guest request (see
   // JOIN_ROOM's guest branch above). admit adds the guestId to
   // guestAllowlist and pings the guest's own socket to retry JOIN_ROOM
-  // (identical mechanic to ROOM_KNOCK_ADMIT/ADMITTED above); reject just
-  // tells the guest's socket why, with no allowlist entry created.
+  // (a "ping + client retries" mechanic); reject just tells the guest's
+  // socket why, with no allowlist entry created.
   socket.on(SocketEvents.GUEST_JOIN_DECIDE, (data: { guestId: string; admit: boolean }) => {
     const room = currentRoom; if (!room) return;
     const senderUid = findUserIdBySocket(socket.id);
@@ -2253,20 +2121,13 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
       console.error('[room] queue leave-complete error:', e),
     );
 
-    // A knock-admitted user's allowlist entry is a one-time entry pass, not
-    // a standing grant — otherwise once let in, they (and anyone reading
-    // their uid off the wire) could leave and walk straight back into a
-    // still-locked room with no further host approval, defeating the whole
-    // point of locking it. Revoke it the instant they leave (for ANY
-    // reason — LEAVE_ROOM, disconnect, or PLAYER_KICK all funnel through
-    // here); admins/owner never needed the allowlist to begin with (see the
-    // JOIN_ROOM gate's own `!isAdmin` check), so this never affects them.
+    // A guest's admission allowlist entry is a one-time entry pass, not a
+    // standing grant — leaving revokes it (for ANY reason — LEAVE_ROOM,
+    // disconnect, or PLAYER_KICK all funnel through here), so a returning
+    // guest (even the same guestId, if their JWT is still valid) is
+    // re-vetted through the waiting room every visit rather than silently
+    // walking back in.
     const rs = getRoomAdmin(room);
-    rs.knockAllowlist?.delete(leavingUid);
-    // Same one-time-pass rule for a guest's admission — leaving revokes it,
-    // so a returning guest (even the same guestId, if their JWT is still
-    // valid) is re-vetted through the waiting room every visit rather than
-    // silently walking back in.
     if (isGuestUid(leavingUid)) rs.guestAllowlist?.delete(leavingUid.slice(GUEST_UID_PREFIX.length));
   }
   // Same "revoke the instant they leave" rule as the knock allowlist above —
@@ -2301,10 +2162,4 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
   for (const [targetId, pending] of pendingSummons) {
     if (pending.fromSocketId === socket.id) clearPendingSummon(targetId);
   }
-
-  // Same reasoning for a pending knock: if the knocker left/disconnected
-  // before the host responded, the admin's "X is knocking" toast is now
-  // stale (there's no one left to admit) — same cleanup as an explicit
-  // ROOM_KNOCK_CANCEL.
-  cancelKnock(socket.id, io);
 }

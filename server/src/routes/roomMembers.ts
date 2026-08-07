@@ -101,8 +101,8 @@ roomMembers.post('/rooms/:slug/join-request', authenticateToken, async (req: Aut
     // Item #5 — pop this up on every admin's screen right now, instead of
     // relying on the manual queue (or the 20s badge poll) to ever be opened.
     // Targeted at exactly the admin sockets currently connected to this room
-    // (same fan-out as ROOM_KNOCK_REQUEST) rather than a room-wide broadcast:
-    // a non-admin bystander must never receive this. An admin who isn't
+    // (via getConnectedAdminSocketIds) rather than a room-wide broadcast: a
+    // non-admin bystander must never receive this. An admin who isn't
     // connected right now just gets nothing here — their request is still
     // safe in the queue for whenever they do open it.
     if (ioRef) {

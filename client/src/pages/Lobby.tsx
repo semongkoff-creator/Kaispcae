@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, LockFill } from 'react-bootstrap-icons';
+import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2 } from 'react-bootstrap-icons';
 import { io } from 'socket.io-client';
 import { RoomTheme, RoomTemplateId, ROOM_TEMPLATES } from '@virtualmeet/shared';
 import { api, RoomInfo } from '@/services/api';
@@ -77,11 +77,6 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
     });
     socket.on('lobby:room_removed', (data: { roomId: string }) => {
       setRooms((prev) => prev.filter((r) => r.id !== data.roomId && r.slug !== data.roomId));
-    });
-    socket.on('lobby:room_lock', (data: { roomId: string; locked: boolean }) => {
-      setRooms((prev) => prev.map((r) =>
-        (r.id === data.roomId || r.slug === data.roomId) ? { ...r, locked: data.locked } : r
-      ));
     });
     return () => { socket.removeAllListeners(); socket.disconnect(); };
   }, []);
@@ -289,11 +284,6 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
               >
                 <div className="flex items-start justify-between mb-1">
                   <h3 className="font-semibold text-sm text-gray-900 dark:text-gray-100 inline-flex items-center gap-1.5">
-                    {room.locked && (
-                      <span title="Locked — knock to enter" className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 shrink-0">
-                        <LockFill size={9} />
-                      </span>
-                    )}
                     {room.name}
                   </h3>
                   <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono">{room.slug.slice(0, 8)}</span>

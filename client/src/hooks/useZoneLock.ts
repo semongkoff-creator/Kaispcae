@@ -220,6 +220,18 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     }
   }, [roomSlug]);
 
+  // App.tsx's zone-crossing effect calls this the moment it detects US
+  // voluntarily walking out of a zone we hold an 'active' ticket for —
+  // client-only, no server round trip (the server already closed the ticket
+  // itself, see zoneHandler.ts's completeActiveZoneQueueEntry on ZONE_EXIT).
+  // Without this, zoneQueueTicket would keep reporting 'active' forever
+  // (the poll effect above deliberately stops polling once active), so
+  // walking back in during the same session would misread the stale status
+  // as still-admitted and skip the restricted-zone bounce entirely.
+  const clearZoneQueueTicketOnExit = useCallback((zoneId: string) => {
+    setZoneQueueTicket((t) => (t && t.zoneId === zoneId && t.status === 'active' ? null : t));
+  }, []);
+
   const cancelZoneQueue = useCallback(async () => {
     if (!zoneQueueTicket) return;
     setZoneQueueBusy(true);
@@ -297,15 +309,17 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     lockOf, setLock, knock, cancelKnock, decide, isKeyholder, isAdmitted, requestEntry, cancelApproval, decideApproval,
     // "Ngobrol dengan CEO" queue, zone-level.
     zoneRestrictions, restrictionOf, zoneQueueTicket, zoneQueueBusy, zoneQueueError, joinZoneQueue, cancelZoneQueue,
+    clearZoneQueueTicketOnExit,
     clearDenied: () => setDeniedZoneId(null),
     // App.tsx's client-side entry check calls this directly (no server round
     // trip needed — the physical block already happened locally) to surface
-    // the same "knock to enter" prompt a server-side denial would show. Only
-    // ever used for a zone already known to be manually locked (mirrored
-    // zoneLocks state) — member_only has no local pre-check, it always goes
-    // through the server round trip (onDenied above) — so 'locked' here is
-    // never wrong, and importantly overwrites any stale reason left over
-    // from an earlier, different denial.
-    denyEntry: (zoneId: string) => { setDeniedZoneId(zoneId); setDeniedReason('locked'); },
+    // the same "knock to enter"/"join queue" prompt a server-side denial
+    // would show. Used for a zone already known to be manually locked
+    // (mirrored zoneLocks state, reason defaults to 'locked') AND now also
+    // for a restricted zone's own local pre-check (reason explicitly passed
+    // as 'restricted'/'queue', mirroring zoneHandler.ts's ZONE_ENTER denial
+    // reasons exactly) — member_only still has no local pre-check, it always
+    // goes through the server round trip (onDenied above).
+    denyEntry: (zoneId: string, reason: 'locked' | 'restricted' | 'queue' = 'locked') => { setDeniedZoneId(zoneId); setDeniedReason(reason); },
   };
 }

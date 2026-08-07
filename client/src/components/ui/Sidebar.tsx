@@ -55,16 +55,9 @@ interface SidebarProps {
   meetingViewActive: boolean;
   onToggleMeetingView: () => void;
 
-  // Zoom-style "Lock Meeting" — canLock gates the toggle to admins/owner;
-  // roomLocked reflects the current state (shown to everyone as an indicator,
-  // but only admins get the actionable row).
-  roomLocked: boolean;
-  canLock: boolean;
-  onToggleLock: () => void;
-
-  // Akses & Password Pintu audit item #9 — emergency door override, same
-  // shape as the Room Lock row above (canDoorOverride gates it to
-  // admins/owner; doorOverride reflects the current state).
+  // Akses & Password Pintu audit item #9 — emergency door override
+  // (canDoorOverride gates it to admins/owner; doorOverride reflects the
+  // current state).
   doorOverride: boolean;
   canDoorOverride: boolean;
   onToggleDoorOverride: () => void;
@@ -88,10 +81,9 @@ interface SidebarProps {
   // channels/DM).
   isGuest?: boolean;
 
-  // Zone-aware lock: while you're standing inside a zone, this same row locks
-  // THAT zone instead of the whole room — "Lock Room" means the room you're
-  // in. Anyone in the zone may lock it (they become its keyholder); locking
-  // the whole map stays admin-only.
+  // Zone-aware lock: shown only while standing inside a zone, locks THAT
+  // zone. Anyone in the zone may lock it and becomes its keyholder — unlike
+  // a room-wide gate, this isn't admin-only.
   currentZoneName: string | null;
   zoneLocked: boolean;
   zoneLockedByName: string | null;
@@ -200,9 +192,6 @@ export function Sidebar({
   onMySeat,
   meetingViewActive,
   onToggleMeetingView,
-  roomLocked,
-  canLock,
-  onToggleLock,
   doorOverride,
   canDoorOverride,
   onToggleDoorOverride,
@@ -374,7 +363,7 @@ export function Sidebar({
               <MenuRow icon={<ShieldLock size={15} />} label={adminViewActive ? 'Tutup Konsol Admin' : 'Konsol Admin'} active={adminViewActive} onClick={closeAnd(onToggleAdminView)} />
             )}
 
-            {(isAdmin || canTeleport || canLock) && <MenuDivider />}
+            {(isAdmin || canTeleport) && <MenuDivider />}
             {/* Standing in a zone → this locks the ZONE (Meeting Room B, …).
                 Anyone inside may lock it and becomes its keyholder; people who
                 walk in afterwards must knock and be admitted BY THEM. */}
@@ -396,29 +385,9 @@ export function Sidebar({
                 }
               />
             )}
-            {/* Bug 4 — restored. The whole-room "Lock Room" row was removed
-                earlier in favor of the per-zone lock above, on the reasoning
-                that per-zone was what people actually meant by "lock the
-                room". But per-zone only ever gated THAT zone's audio/chat
-                membership — it never touched JOIN_ROOM, so it can't stop a
-                stranger from walking into the room at all. The server-side
-                whole-room gate (roomHandler.ts's JOIN_ROOM handler) was
-                always there and always correct; it just had no way to
-                actually be switched on. canLock is already isAdmin-gated
-                (App.tsx), matching who bypasses the lock server-side. */}
-            {canLock && (
-              <MenuRow
-                icon={roomLocked ? <LockFill size={15} /> : <UnlockFill size={15} />}
-                label={roomLocked ? 'Buka Room' : 'Kunci Room'}
-                active={roomLocked}
-                onClick={closeAnd(onToggleLock)}
-                title={roomLocked ? 'Buka room ini supaya siapa pun bisa bergabung lagi' : 'Kunci room ini — orang baru tidak bisa bergabung sampai dibuka lagi'}
-              />
-            )}
             {/* Akses & Password Pintu audit item #9 — emergency override:
                 unlocks EVERY password door in the room at once, bypassing
-                doorLock.ts's normal per-socket unlock entirely. Same
-                admin-gated toggle shape as Lock Room above. */}
+                doorLock.ts's normal per-socket unlock entirely. */}
             {canDoorOverride && (
               <MenuRow
                 icon={doorOverride ? <DoorOpenFill size={15} /> : <DoorClosedFill size={15} />}

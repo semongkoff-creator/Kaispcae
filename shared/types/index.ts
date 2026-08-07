@@ -267,13 +267,9 @@ export interface RoomState {
   // template instead of always falling back to Main Office.
   template?: RoomTemplateId;
   notice?: Notice | null;
-  // Zoom-style meeting lock (see SocketEvents.ROOM_LOCK_SET) — true means no
-  // new non-admin can join. In-memory server state, sent so a joining
-  // client's UI shows the 🔒 indicator immediately.
-  locked?: boolean;
   // Emergency door override (see SocketEvents.DOOR_OVERRIDE_SET) — true means
-  // every password door in the room is currently open for everyone. Same
-  // "resend on join" precedent as `locked` above.
+  // every password door in the room is currently open for everyone.
+  // In-memory server state, resent fresh every time a client joins.
   doorOverride?: boolean;
   // The RECEIVING socket's own resolved role in this room (see
   // shared/permissions.ts) — computed server-side per-socket, not
@@ -406,49 +402,23 @@ export enum SocketEvents {
   MEETING_STARTED = 'meeting:started',
   MEETING_ENDED = 'meeting:ended',
 
-  // Zoom-style "Lock Meeting": admin toggles ROOM_LOCK_SET, everyone in the
-  // room gets ROOM_LOCK_UPDATED (for the 🔒 indicator + owner control state),
-  // and a NON-admin who tries to join a locked room gets ROOM_LOCKED_DENIED
-  // instead of room:state and is bounced back to the Lobby.
-  ROOM_LOCK_SET = 'room:lock_set',
-  ROOM_LOCK_UPDATED = 'room:lock_updated',
-  ROOM_LOCKED_DENIED = 'room:locked_denied',
-
   // Akses & Password Pintu audit item #9 — emergency override: an admin
   // toggles EVERY password door in the room open at once, bypassing
   // doorLock.ts's normal per-socket unlock entirely (see movementHandler.ts's
-  // isBlockedForSocket). Same broadcast shape as ROOM_LOCK_SET/UPDATED above
-  // (everyone in the room, including the toggler, gets the new state so a
-  // banner + the admin's own toggle control stay in sync) and resent fresh
-  // in ROOM_STATE on join, same precedent as `locked`.
+  // isBlockedForSocket). Everyone in the room, including the toggler, gets
+  // the new state so a banner + the admin's own toggle control stay in sync,
+  // and it's resent fresh in ROOM_STATE on join.
   DOOR_OVERRIDE_SET = 'door:override_set',
   DOOR_OVERRIDE_UPDATED = 'door:override_updated',
 
-  // "Knock to enter": a denied joiner can knock (ROOM_KNOCK) — admins in the
-  // room get ROOM_KNOCK_REQUEST and may admit (ROOM_KNOCK_ADMIT), which
-  // adds them to the lock allowlist and pings the knocker (ROOM_KNOCK_ADMITTED)
-  // to auto-retry the join. ROOM_KNOCK_CANCEL is the knocker withdrawing a
-  // request before the host responds (no payload — the server already knows
-  // which pending knock is theirs, keyed by their own socket); every admin
-  // who got the original ROOM_KNOCK_REQUEST gets ROOM_KNOCK_CANCELLED so
-  // their approval toast can't act on a request that's already gone.
-  ROOM_KNOCK = 'room:knock',
-  ROOM_KNOCK_REQUEST = 'room:knock_request',
-  ROOM_KNOCK_CANCEL = 'room:knock_cancel',
-  ROOM_KNOCK_CANCELLED = 'room:knock_cancelled',
-  ROOM_KNOCK_ADMIT = 'room:knock_admit',
-  ROOM_KNOCK_ADMITTED = 'room:knock_admitted',
-
   // Guest Link & Ruang Tunggu — a guest socket's JOIN_ROOM (see roomHandler.ts)
   // either lands them in this waiting room (GUEST_JOIN_WAITING, fans
-  // GUEST_JOIN_REQUESTED out to every admin currently connected to the room,
-  // same "only currently-connected admins" posture as ROOM_KNOCK_REQUEST
-  // above) or — if already on the room's in-memory guestAllowlist from a
-  // prior GUEST_JOIN_DECIDE admit — proceeds straight through like a normal
-  // member join. GUEST_JOIN_ADMITTED pings the waiting guest's own socket to
-  // retry JOIN_ROOM (identical mechanic to ROOM_KNOCK_ADMITTED),
-  // GUEST_JOIN_REJECTED ends it with a reason, GUEST_JOIN_CANCELLED tells
-  // notified admins the guest left/disconnected before a decision was made.
+  // GUEST_JOIN_REQUESTED out to every admin currently connected to the room)
+  // or — if already on the room's in-memory guestAllowlist from a prior
+  // GUEST_JOIN_DECIDE admit — proceeds straight through like a normal member
+  // join. GUEST_JOIN_ADMITTED pings the waiting guest's own socket to retry
+  // JOIN_ROOM, GUEST_JOIN_REJECTED ends it with a reason, GUEST_JOIN_CANCELLED
+  // tells notified admins the guest left/disconnected before a decision was made.
   GUEST_JOIN_WAITING = 'guest:join_waiting',
   GUEST_JOIN_REQUESTED = 'guest:join_requested',
   GUEST_JOIN_DECIDE = 'guest:join_decide',
@@ -821,9 +791,9 @@ export enum SocketEvents {
   JOIN_DENIED = 'room:join_denied',
   // Item #5 — JOIN_REQUESTED used to be a room-wide broadcast nobody actually
   // listened for (the badge in App.tsx polled instead). It's now targeted
-  // directly at each admin socket currently connected to the room (mirrors
-  // ROOM_KNOCK_REQUEST's fan-out in roomHandler.ts) and carries enough to
-  // render a popup without a follow-up fetch — see JoinRequestPopupPayload.
+  // directly at each admin socket currently connected to the room and
+  // carries enough to render a popup without a follow-up fetch — see
+  // JoinRequestPopupPayload.
   JOIN_REQUESTED = 'room:join_requested',
   JOIN_DECISION = 'room:join_decision',
   JOIN_QUEUE_CHANGED = 'room:join_queue_changed',
@@ -1010,14 +980,6 @@ export const CONSENT_REQUEST_TIMEOUT_MS = 20 * 1000;
 export interface SummonRequestPayload {
   requestId: string;
   actorName: string;
-}
-
-// A locked-room knock, shown to admins with Admit/Ignore (see
-// SocketEvents.ROOM_KNOCK_REQUEST). userId is the knocker's account id —
-// what an admit adds to the lock allowlist.
-export interface KnockRequestPayload {
-  userId: string;
-  name: string;
 }
 
 // Item #5 — a room-join request, shown to every currently-connected admin of

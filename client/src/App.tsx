@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
-import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill, PersonPlusFill, DoorOpenFill, VolumeUpFill } from 'react-bootstrap-icons';
-import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents } from '@virtualmeet/shared';
+import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, PersonPlusFill, DoorOpenFill, VolumeUpFill } from 'react-bootstrap-icons';
+import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, Role, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -135,7 +135,7 @@ const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', 
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitForceMute, emitRoomLock, emitDoorOverride, emitKnock, emitKnockCancel, emitKnockAdmit, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
   const [showEditor, setShowEditor] = useState(false);
   // QA #1/#6/#7 — reopen the first-run walkthrough on demand (Sidebar's
@@ -241,7 +241,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const sittingFurnitureId = useGameStore((s) => s.sittingFurnitureId);
   const furniture = useGameStore((s) => s.furniture);
   const notes = useGameStore((s) => s.notes);
-  const roomLocked = useGameStore((s) => s.roomLocked);
   const doorOverride = useGameStore((s) => s.doorOverride);
   const localUserId = useGameStore((s) => s.localUserId);
   const sittingItem = sittingFurnitureId ? furniture.find((f) => f.id === sittingFurnitureId) : undefined;
@@ -464,6 +463,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // it changes. State (not a ref) so the Private tab can actually appear.
   const currentZoneIdRef = useRef<string | null>(null);
   const [currentZone, setCurrentZone] = useState<{ id: string; name: string } | null>(null);
+  const localRole = useGameStore((s) => s.localRole);
   const zoneLock = useZoneLock(socketRef, authUserId, roomSlug);
   // "Ngobrol dengan CEO" queue, zone-level — the map's own visual "tile
   // effect" (a lock badge on the zone's banner, see GameCanvas.tsx), so a
@@ -513,6 +513,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         return;
       }
       emitZoneExit(leaving);
+      // "Ngobrol dengan CEO" queue — leaving early completes the ticket
+      // server-side (zoneHandler.ts's completeActiveZoneQueueEntry), but
+      // nothing else ever refreshes our own cached zoneQueueTicket once its
+      // status is 'active' (useZoneLock.ts's poll deliberately stops once
+      // active — there's nothing left to wait for while genuinely inside).
+      // Without dropping it here, walking back in during the same session
+      // would read the stale 'active' status as still-admitted and skip the
+      // restricted-zone bounce below entirely, even though the server has
+      // already closed that ticket and will deny the re-entry.
+      zoneLock.clearZoneQueueTicketOnExit(leaving);
     }
 
     // A locked zone also holds people OUT — not just chat/AV membership, the
@@ -526,6 +536,25 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         useGameStore.getState().setLocalPlayer({ x: back.x, y: back.y, isMoving: false });
         zoneLock.denyEntry(zoneId);
         return;
+      }
+      // "Ngobrol dengan CEO" queue, zone-level — a restricted zone (Room
+      // Editor's "Restricted area" tool) must physically hold out anyone who
+      // doesn't meet its minRole AND hasn't been called/admitted into their
+      // queue slot, same bounce as a manual lock above, mirroring the exact
+      // authoritative check zoneHandler.ts's ZONE_ENTER does server-side
+      // (role, then an active/called ticket for THIS zone) so the decision
+      // is instant and client-only — no round trip, no brief "stood inside
+      // it" flash before the server's own ZONE_LOCKED_DENIED came back.
+      const restriction = zoneLock.restrictionOf(zoneId);
+      if (restriction && !roleAtLeast(localRole, (restriction.minRole as Role) || 'staff')) {
+        const ticket = zoneLock.zoneQueueTicket;
+        const admitted = ticket?.zoneId === zoneId && (ticket.status === 'called' || ticket.status === 'active');
+        if (!admitted) {
+          const back = lastAllowedPosRef.current;
+          useGameStore.getState().setLocalPlayer({ x: back.x, y: back.y, isMoving: false });
+          zoneLock.denyEntry(zoneId, restriction.queueEnabled ? 'queue' : 'restricted');
+          return;
+        }
       }
       emitZoneEnter(zoneId);
     }
@@ -666,22 +695,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     return () => clearTimeout(timer);
   }, [sessionTakenOverNotice, onLeave]);
 
-  // Join denied because the room is locked (Zoom-style "Lock Meeting", see
-  // shared SocketEvents.ROOM_LOCKED_DENIED). Unlike the deleted/kicked
-  // notices this does NOT auto-bounce — the overlay lets the user "Knock to
-  // enter" or leave. `knocked` tracks the waiting-for-host state after a knock.
-  const roomLockedNotice = useGameStore((s) => s.roomLockedNotice);
-  const [knocked, setKnocked] = useState(false);
-  useEffect(() => { if (!roomLockedNotice) setKnocked(false); }, [roomLockedNotice]);
-  const handleKnock = useCallback(() => {
-    emitKnock(roomSlug);
-    setKnocked(true);
-  }, [emitKnock, roomSlug]);
-  const handleKnockCancel = useCallback(() => {
-    emitKnockCancel();
-    setKnocked(false);
-  }, [emitKnockCancel]);
-
   // Guest Link & Ruang Tunggu — prompt-based, same lightweight "quick admin
   // config" convention as the Room Editor's door-password/capacity prompts,
   // rather than a dedicated management panel. api.revokeGuestInvite exists
@@ -776,16 +789,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     return () => clearTimeout(timer);
   }, [incomingFollowRequest]);
 
-  // A locked-room knock, shown to admins with Admit/Ignore. Auto-clears on
-  // the same consent-timeout clock as the summon/follow requests above so a
-  // stale knock toast doesn't linger after the knocker has given up.
-  const incomingKnock = useGameStore((s) => s.incomingKnock);
-  useEffect(() => {
-    if (!incomingKnock) return;
-    const timer = setTimeout(() => useGameStore.getState().setIncomingKnock(null), CONSENT_REQUEST_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, [incomingKnock]);
-
   // Item #5 — room-join requests popped up for admins. No auto-clear timer
   // like the knock/summon/follow toasts above: those have a matching
   // server-side auto-decline (CONSENT_REQUEST_TIMEOUT_MS), but a join request
@@ -843,7 +846,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // Item 13, "Panic/report user" — who ParticipantPanel's "Laporkan" was
   // clicked for, if anyone; the modal itself does the actual submit.
   const [reportTarget, setReportTarget] = useState<{ userId: string; name: string } | null>(null);
-  const localRole = useGameStore((s) => s.localRole);
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
@@ -1321,64 +1323,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
   const allPlayers = { [localPlayerId]: useGameStore.getState().localPlayer, ...playerRecords };
 
-  // Locked-room denial overlay (see roomLockedNotice above). Extracted so it
-  // can render in BOTH the pre-room:state loading gate below AND the main
-  // view — a denied join never receives room:state, so without rendering it
-  // in the loading branch the user would sit forever on "Joining room…".
-  const lockedDeniedOverlay = roomLockedNotice ? (
-    <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
-        <p className="text-2xl mb-1">🔒</p>
-        <p className="text-gray-900 dark:text-gray-100 text-sm font-medium mb-1">{roomLockedNotice}</p>
-        {knocked ? (
-          <>
-            <p className="text-gray-400 dark:text-gray-500 text-xs mb-4">🔔 Knocked — waiting for the host to let you in…</p>
-            <div className="flex gap-2">
-              <button
-                onClick={handleKnockCancel}
-                className="flex-1 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={onLeave}
-                className="flex-1 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium cursor-pointer"
-              >
-                Back to Lobby
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="text-gray-400 dark:text-gray-500 text-xs mb-4">Knock and the host can let you in.</p>
-            <div className="flex gap-2">
-              <button
-                onClick={handleKnock}
-                className="flex-1 px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium cursor-pointer"
-              >
-                🔔 Knock to enter
-              </button>
-              <button
-                onClick={onLeave}
-                className="flex-1 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium cursor-pointer"
-              >
-                Back to Lobby
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  ) : null;
-
   // Until the real room:state for THIS room arrives, `roomState` in the
   // store is still whatever App() seeded at startup (always the Main
   // Office layout, regardless of which room/template was actually joined
   // — see gameStore.ts's roomStateReceived doc comment). Render a plain
   // loading placeholder instead of GameCanvas rather than briefly showing
   // the wrong room shape (and risking a spawn tile that's a wall in the
-  // real layout). If we were denied entry (locked room), show that overlay
-  // here instead — room:state will never come, so this is the final state.
+  // real layout).
   //
   // Guest Link & Ruang Tunggu — a guest waiting on GUEST_JOIN_DECIDE (or
   // already rejected) also never gets room:state, so it needs the exact
@@ -1436,7 +1387,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             </p>
           </div>
         )}
-        {lockedDeniedOverlay}
       </div>
     );
   }
@@ -1608,14 +1558,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             onDecline={() => { emitFollowRespond(incomingFollowRequest.requestId, false); useGameStore.getState().setIncomingFollowRequest(null); }}
           />
         )}
-        {incomingKnock && (
-          <PendingRequestToast
-            icon={<LockFill size={13} className="text-amber-500" />}
-            message={<><span className="font-medium">{incomingKnock.name}</span> is knocking to enter the locked room</>}
-            onAccept={() => { emitKnockAdmit(incomingKnock.userId); useGameStore.getState().setIncomingKnock(null); }}
-            onDecline={() => { useGameStore.getState().setIncomingKnock(null); }}
-          />
-        )}
         {/* Item #5 — stacked join-request popups. Capped at 3 visible cards
             (a "+N lainnya" pill for the rest) so several simultaneous
             requests can't fill the whole screen; isAdmin is defense-in-depth
@@ -1726,9 +1668,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onMySeat={handleMySeat}
         meetingViewActive={meetingViewActive}
         onToggleMeetingView={() => openPanel('meeting')}
-        roomLocked={roomLocked}
-        canLock={isAdmin}
-        onToggleLock={() => emitRoomLock(!roomLocked)}
         doorOverride={doorOverride}
         canDoorOverride={isAdmin}
         onToggleDoorOverride={() => emitDoorOverride(!doorOverride)}
@@ -2208,22 +2147,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </div>
       )}
 
-      {lockedDeniedOverlay}
-
-      {/* Everyone in a locked room sees this pill so the closed state is
-          obvious (not just the admin who toggled it). Hidden in Simplified
-          View, same as the notice banner below. */}
-      {roomLocked && !simplifiedView && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center gap-1.5 bg-amber-500/95 text-white text-xs font-medium px-3 py-1 rounded-full shadow-sm">
-          <LockFill size={11} /> Room locked
-        </div>
-      )}
-
-      {/* Item #9 — same "everyone sees this, not just the admin who toggled
-          it" reasoning as the room-lock pill above, styled as a clear danger
-          state since it means every password door is currently bypassable. */}
+      {/* Item #9 — everyone sees this, not just the admin who toggled it,
+          styled as a clear danger state since it means every password door
+          is currently bypassable. Hidden in Simplified View, same as the
+          notice banner below. */}
       {doorOverride && !simplifiedView && (
-        <div className="absolute top-9 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center gap-1.5 bg-red-600/95 text-white text-xs font-medium px-3 py-1 rounded-full shadow-sm">
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center gap-1.5 bg-red-600/95 text-white text-xs font-medium px-3 py-1 rounded-full shadow-sm">
           <DoorOpenFill size={11} /> Mode darurat: semua pintu terbuka
         </div>
       )}
