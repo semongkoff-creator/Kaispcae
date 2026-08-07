@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, JoinRequestPopupPayload, ZoneQueueRequestedPayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@virtualmeet/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 import { appendMovementSnapshot, MovementSnapshot, sampleMovementSnapshots } from './movementSmoothing';
@@ -511,6 +511,16 @@ export interface GameState {
   incomingQueueRequests: ZoneQueueRequestedPayload[];
   addIncomingQueueRequest: (req: ZoneQueueRequestedPayload) => void;
   removeIncomingQueueRequest: (entryId: string) => void;
+  // "Ngobrol dengan CEO" queue, zone-level — currently-active sessions
+  // keyed by userId, so GameCanvas can look up "is this avatar mid-session"
+  // while drawing and render a small floating countdown above them (works
+  // for both the requester and whoever they're visiting, e.g. the CEO).
+  // Seeded from ROOM_STATE.activeZoneSessions on join, kept live via
+  // ZONE_QUEUE_SESSION_ACTIVE / ZONE_QUEUE_SESSION_CLEARED.
+  activeZoneSessions: Map<string, ZoneQueueSessionActivePayload>;
+  setActiveZoneSessions: (sessions: ZoneQueueSessionActivePayload[]) => void;
+  upsertActiveZoneSession: (session: ZoneQueueSessionActivePayload) => void;
+  clearActiveZoneSessionByZone: (zoneId: string) => void;
   // Guest Link & Ruang Tunggu — the GUEST'S OWN client-side wait state
   // (App.tsx renders a waiting/rejected screen off this instead of <Game>).
   guestWaitState: 'waiting' | 'admitted' | 'rejected' | null;
@@ -1229,6 +1239,29 @@ export const useGameStore = create<GameState>((set, get) => ({
   removeIncomingQueueRequest: (entryId) => set((s) => ({
     incomingQueueRequests: s.incomingQueueRequests.filter((r) => r.entryId !== entryId),
   })),
+  activeZoneSessions: new Map<string, ZoneQueueSessionActivePayload>(),
+  setActiveZoneSessions: (sessions) => set({
+    activeZoneSessions: new Map(sessions.map((s) => [s.userId, s])),
+  }),
+  upsertActiveZoneSession: (session) => set((s) => {
+    const next = new Map(s.activeZoneSessions);
+    next.set(session.userId, session);
+    return { activeZoneSessions: next };
+  }),
+  // Cleared by zoneId, not userId — the sweep/skip/admin paths that fire
+  // ZONE_QUEUE_SESSION_CLEARED only know which zone freed up, not who was
+  // sitting in it (they may not even still be connected).
+  clearActiveZoneSessionByZone: (zoneId) => set((s) => {
+    let changed = false;
+    const next = new Map(s.activeZoneSessions);
+    for (const [userId, session] of next) {
+      if (session.zoneId === zoneId) {
+        next.delete(userId);
+        changed = true;
+      }
+    }
+    return changed ? { activeZoneSessions: next } : s;
+  }),
   guestWaitState: null,
   setGuestWaitState: (state) => set({ guestWaitState: state }),
   pendingGuests: [],
@@ -1565,6 +1598,11 @@ export const useGameStore = create<GameState>((set, get) => ({
       staffPlayerIds: staffIds,
       ceoPlayerIds: ceoIds,
       localIsCeo: roomState.isCeo ?? ceoIds.has(prev.localUserId),
+      // Seed from ROOM_STATE for late-joiners/refreshes; live updates after
+      // this come from ZONE_QUEUE_SESSION_ACTIVE/CLEARED via useSocket.ts.
+      activeZoneSessions: roomState.activeZoneSessions
+        ? new Map(roomState.activeZoneSessions.map((s) => [s.userId, s]))
+        : prev.activeZoneSessions,
       // roomState.role is the server's own authoritative resolution (see
       // its doc comment) — prefer it, but fall back to re-deriving from
       // the raw sets for the (should-never-happen) case it's missing.

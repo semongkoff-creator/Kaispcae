@@ -587,8 +587,18 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     currentZoneIdRef.current = zoneId;
     setCurrentZone(zone ? { id: zone.id, name: zone.name } : null);
     lastAllowedPosRef.current = { x: localPlayer.x, y: localPlayer.y };
-    // Walking out of the zone you were bounced from clears the knock prompt.
-    if (!zoneId) zoneLock.clearDenied();
+    // Reaching this line at all means the crossing succeeded (every denial
+    // branch above returns early) — whether that landed us in no zone or a
+    // completely different one, whatever we were previously denied from is
+    // no longer relevant, so the knock/queue-form card should go away.
+    //
+    // Bug fix — this used to only clear when zoneId was null (no zone at
+    // all), so walking straight from a CEO Office denial into a DIFFERENT
+    // zone (e.g. a neighboring "AI Team" area) skipped this entirely — the
+    // stale "isi form antrean" card for CEO Office stayed on screen
+    // indefinitely, since the player never passed through a genuine
+    // "in no zone" gap to trigger the old guard.
+    zoneLock.clearDenied();
   }, [localPlayer.x, localPlayer.y, zones, emitZoneEnter, emitZoneExit]);
 
   // "Ngobrol dengan CEO" queue, zone-level — our timed slot in a restricted

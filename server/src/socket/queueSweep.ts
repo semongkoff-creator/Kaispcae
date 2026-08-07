@@ -1,7 +1,7 @@
 import { Server } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
 import { advanceQueue, QUEUE_CALL_GRACE_MS } from '../lib/roomQueue';
-import { forceLeaveForQueue, forceZoneExitForQueue } from './roomHandler';
+import { forceLeaveForQueue, forceZoneExitForQueue, broadcastZoneQueueSessionCleared } from './roomHandler';
 
 // "Ngobrol dengan CEO" queue — two timers a sweep has to enforce, since
 // neither can be a plain setTimeout (a server restart would silently drop
@@ -40,6 +40,7 @@ async function sweepOnce(io: Server): Promise<void> {
         // keep occupying.
         if (e.zoneId) {
           await forceZoneExitForQueue(io, e.userId, e.room.slug, e.zoneId, e.zoneName ?? e.zoneId);
+          broadcastZoneQueueSessionCleared(io, e.room.slug, e.zoneId);
         } else {
           await forceLeaveForQueue(io, e.userId, e.room.slug, e.room.name);
         }

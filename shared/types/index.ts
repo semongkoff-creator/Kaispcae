@@ -283,6 +283,12 @@ export interface RoomState {
   // The RECEIVING socket's own CEO-bypass membership — same "resolved
   // server-side, not re-derived from ceoUserIds" posture as `role` above.
   isCeo?: boolean;
+  // "Ngobrol dengan CEO" queue, zone-level — any currently-'active' session
+  // in this room at the moment of joining, so a late joiner (or a page
+  // refresh) still sees the floating countdown above whoever's in there,
+  // not just clients that were already connected for the live
+  // ZONE_QUEUE_SESSION_ACTIVE broadcast.
+  activeZoneSessions?: ZoneQueueSessionActivePayload[];
   // Floor-plan reference image, forwarded ONLY when the admin opted into
   // ReferenceImageData.showInGame (see roomHandler.ts's ROOM_STATE emit and
   // mapLayers.ts) — null whenever the room has none, or has one that's
@@ -913,6 +919,17 @@ export enum SocketEvents {
   // see roomQueue.ts's advanceQueue).
   ZONE_QUEUE_REQUESTED = 'zone:queue_requested',
 
+  // "Ngobrol dengan CEO" queue, zone-level — broadcast to the WHOLE room
+  // (not just the ticket holder) the moment a queue entry becomes 'active',
+  // so every client can render a small floating countdown above that
+  // player's own avatar (GameCanvas.tsx/AvatarSprite.ts) — not just the
+  // holder's own ZoneLockBar card. CLEARED fires the moment that session
+  // ends, whichever way it ends (early leave, admin skip, or the 20s expiry
+  // sweep) — see roomHandler.ts's broadcastZoneQueueSessionCleared, the one
+  // shared helper every one of those paths calls.
+  ZONE_QUEUE_SESSION_ACTIVE = 'zone:queue_session_active',
+  ZONE_QUEUE_SESSION_CLEARED = 'zone:queue_session_cleared',
+
   // QA (Presence checklist item #8, "Member list akurat") — workspace-wide "who's online + which room" roster (NOT the
   // in-room ParticipantPanel, which only ever sees people standing in the
   // SAME room). Named `roster:` rather than reusing the existing `presence:`
@@ -1028,6 +1045,19 @@ export interface ZoneQueueRequestedPayload {
   roomName: string;
   zoneId: string;
   zoneName: string;
+}
+
+// See SocketEvents.ZONE_QUEUE_SESSION_ACTIVE — room-wide, so every client
+// can render a countdown above the right avatar regardless of whether
+// that's their own or someone else's (e.g. the CEO's).
+export interface ZoneQueueSessionActivePayload {
+  zoneId: string;
+  userId: string;
+  playerName: string;
+  endsAt: number;
+}
+export interface ZoneQueueSessionClearedPayload {
+  zoneId: string;
 }
 
 export interface SummonRespondPayload {

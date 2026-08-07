@@ -9,7 +9,7 @@ import { resolveEntry } from '../lib/roomMembership';
 import { resolveZoneEntry, refreshZoneRestrictionCache } from '../lib/zoneMembership';
 import { groupConversationId } from '../lib/conversations';
 import { requireWorkspace } from '../lib/workspace';
-import { getConnectedAdminSocketIds, getConnectedCeoSocketIds, forceLeaveForQueue, forceZoneExitForQueue } from '../socket/roomHandler';
+import { getConnectedAdminSocketIds, getConnectedCeoSocketIds, forceLeaveForQueue, forceZoneExitForQueue, broadcastZoneQueueSessionCleared } from '../socket/roomHandler';
 import { advanceQueue, QUEUE_MIN_MINUTES, QUEUE_MAX_MINUTES } from '../lib/roomQueue';
 
 // Reads a room's current zone list regardless of which map format it's
@@ -692,6 +692,7 @@ roomMembers.post('/rooms/:slug/queue/:entryId/skip', authenticateToken, async (r
     if (wasActive && ioRef) {
       if (entry.zoneId) {
         forceZoneExitForQueue(ioRef, entry.userId, room!.slug, entry.zoneId, entry.zoneName ?? entry.zoneId);
+        broadcastZoneQueueSessionCleared(ioRef, room!.slug, entry.zoneId);
       } else {
         await forceLeaveForQueue(ioRef, entry.userId, room!.slug, room!.name);
       }

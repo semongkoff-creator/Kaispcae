@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, RoomBroadcast, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveDoorAreaPasswordResultPayload, DoorAreaUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, ZoneQueueRequestedPayload, GuestJoinRequest, PlayerMovedPayload, PlayerStoppedPayload, DeskNoteData, RosterEntry, RosterUpdate } from '@virtualmeet/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, RoomBroadcast, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveDoorAreaPasswordResultPayload, DoorAreaUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, ZoneQueueSessionClearedPayload, GuestJoinRequest, PlayerMovedPayload, PlayerStoppedPayload, DeskNoteData, RosterEntry, RosterUpdate } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
@@ -927,6 +927,17 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // filtered by role" posture as JOIN_REQUESTED above.
     socket.on(SocketEvents.ZONE_QUEUE_REQUESTED, (payload: ZoneQueueRequestedPayload) => {
       useGameStore.getState().addIncomingQueueRequest(payload);
+    });
+
+    // "Ngobrol dengan CEO" queue, zone-level — broadcast to the WHOLE room
+    // (not just the ticket holder), so every client can render the floating
+    // countdown badge above the right avatar, self or otherwise (e.g. the
+    // CEO's own avatar, from every other player's point of view).
+    socket.on(SocketEvents.ZONE_QUEUE_SESSION_ACTIVE, (payload: ZoneQueueSessionActivePayload) => {
+      useGameStore.getState().upsertActiveZoneSession(payload);
+    });
+    socket.on(SocketEvents.ZONE_QUEUE_SESSION_CLEARED, (payload: ZoneQueueSessionClearedPayload) => {
+      useGameStore.getState().clearActiveZoneSessionByZone(payload.zoneId);
     });
 
     // A decision was made — via the manual queue panel, or another admin's

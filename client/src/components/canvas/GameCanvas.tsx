@@ -279,6 +279,17 @@ function drawSpark(ctx: CanvasRenderingContext2D, x: number, y: number, size: nu
 // JUMP_DURATION_MS has elapsed, so a stale/never-cleared jumpingPlayers
 // entry (e.g. its player left mid-jump) just silently stops contributing
 // anything rather than needing to be pruned.
+// "Ngobrol dengan CEO" queue countdown badge — same mm:ss format as
+// ZoneLockBar.tsx's own formatCountdown, kept as a separate copy since that
+// one lives in a React component's render (ticks off a useState 'now') while
+// this one ticks off Date.now() directly inside the imperative draw loop.
+function formatQueueCountdown(msRemaining: number): string {
+  const totalSec = Math.max(0, Math.floor(msRemaining / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 function getJumpOffset(startTimestamp: number | undefined, timestamp: number): number {
   if (startTimestamp === undefined) return 0;
   const elapsed = timestamp - startTimestamp;
@@ -473,6 +484,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // every other per-frame draw-loop value on this page.
   const avatarScale = useGameStore((s) => s.avatarScale);
   const avatarScaleRef = useRef(avatarScale);
+  // "Ngobrol dengan CEO" queue countdown — keyed by userId (see
+  // gameStore.ts's activeZoneSessions), read fresh via .getState() in the
+  // ref-sync effect below like playerRecordsRef, not a subscribed hook,
+  // since the draw loop recomputes the mm:ss text itself every frame off
+  // Date.now() rather than needing a React re-render per tick.
+  const activeZoneSessionsRef = useRef(useGameStore.getState().activeZoneSessions);
   // Potong 6 — which YouTube tile is close enough to auto-embed (proximity).
   const [ytEmbedId, setYtEmbedId] = useState<string | null>(null);
   const ytEmbedRef = useRef<string | null>(null);
@@ -530,6 +547,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     claimableSeatsRef.current = claimableSeats;
     liveReferenceImageRef.current = liveReferenceImage;
     avatarScaleRef.current = avatarScale;
+    activeZoneSessionsRef.current = useGameStore.getState().activeZoneSessions;
   });
 
   const proximityRef = useRef(proximityData); proximityRef.current = proximityData;
@@ -1827,9 +1845,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const jumpOffset = getJumpOffset(jumpingPlayersRef.current.get(avatar.id), now);
       const nudgeStart = nudgedPlayersRef.current.get(avatar.id);
       const nudgeOffset = getNudgeShakeOffset(nudgeStart, now);
+      const zoneSession = activeZoneSessionsRef.current.get(avatar.userId ?? avatar.id);
+      const queueCountdown = zoneSession ? `⏳ ${formatQueueCountdown(zoneSession.endsAt - Date.now())}` : undefined;
       drawAvatar(ctx, { avatar, x: sx + nudgeOffset, y: sy, isLocal, timestamp,
         walkAnimOffset: bobOffset + jumpOffset,
         scale: avatarScaleRef.current,
+        queueCountdown,
       });
 
       // Locate ("Temukan") highlight — a pulsing ring so the searcher can

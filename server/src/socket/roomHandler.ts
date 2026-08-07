@@ -398,6 +398,16 @@ function broadcastAdmin(io: Server, room: string, rs: RoomAdminState) {
   });
 }
 
+// "Ngobrol dengan CEO" queue, zone-level — the one shared call every path
+// that ends an active session (early voluntary leave, admin skip, the 20s
+// expiry sweep) uses to tell the whole room to clear that zone's floating
+// countdown badge. Deliberately NOT scoped to a specific userId — a client
+// just drops whatever it has cached for this zoneId, so it's correct
+// regardless of which of the three paths triggered it.
+export function broadcastZoneQueueSessionCleared(io: Server, room: string, zoneId: string): void {
+  io.to(room).emit(SocketEvents.ZONE_QUEUE_SESSION_CLEARED, { zoneId });
+}
+
 function broadcastRoomCount(io: Server, room: string) {
   const count = io.sockets.adapter.rooms.get(room)?.size ?? 0;
   io.emit('lobby:room_updated', { roomId: room, playerCount: count });
@@ -950,6 +960,19 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         ? await getPrisma().deskNote.findMany({ where: { roomId: dbRoom.id } }).catch((e) => { console.warn('[room] failed to load desk notes:', e); return []; })
         : [];
 
+      // "Ngobrol dengan CEO" queue, zone-level — a late joiner (or a page
+      // refresh) needs to see any ALREADY-running countdown too, not just
+      // whoever's connected at the exact moment ZONE_QUEUE_SESSION_ACTIVE
+      // was broadcast. Cheap: at most a handful of restricted zones per
+      // room, and 'active' rows are rare (one per zone at a time, by design).
+      const activeZoneSessions = dbRoom
+        ? await getPrisma().roomQueueEntry.findMany({
+            where: { roomId: dbRoom.id, zoneId: { not: null }, status: 'active' },
+            select: { zoneId: true, userId: true, name: true, endsAt: true },
+          }).then((rows) => rows.map((r) => ({ zoneId: r.zoneId as string, userId: r.userId, playerName: r.name, endsAt: r.endsAt!.getTime() })))
+            .catch((e) => { console.warn('[room] failed to load active zone queue sessions:', e); return []; })
+        : [];
+
       socket.emit(SocketEvents.ROOM_STATE, {
         ...state, tiles: redactDoorPasswords(tiles), furniture: redactInteractiveSecrets(savedFurniture || fallback!.furniture), zones: savedZones || fallback!.zones, players: playersWithMeta,
         impassableAreaRects: savedImpassableAreaRects,
@@ -963,6 +986,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // receiving socket's own membership, same "resolved server-side, not
         // re-derived client-side from the raw Set" posture as `role` above.
         isCeo: rs.ceoUserIds.has(uid),
+        activeZoneSessions,
         // Fitur 15 — this room's custom Floor/Wall/Object uploads. Every
         // joining player needs these registered into PALETTE_BY_ID (see
         // useSocket.ts's ROOM_STATE handler) before `tiles`/`furniture` above

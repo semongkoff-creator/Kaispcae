@@ -3,7 +3,7 @@ import { SocketEvents, hasFeatureAccess } from '@virtualmeet/shared';
 import { mayEnterZone, isZoneLocked, isSealedIn } from './zoneLock';
 import { sendMusicStateToSocket } from './musicHandler';
 import { getCachedZones, getCachedZoneRestriction } from '../store/roomStore';
-import { getConnectedAdminSocketIds, getRoleInRoom, isCeoInRoom, getPlayerName, updateRosterZone } from './roomHandler';
+import { getConnectedAdminSocketIds, getRoleInRoom, isCeoInRoom, getPlayerName, updateRosterZone, broadcastZoneQueueSessionCleared } from './roomHandler';
 import { getPrisma } from '../lib/prisma';
 import { admitCalledEntry, advanceQueue } from '../lib/roomQueue';
 
@@ -73,13 +73,14 @@ function isGuestApprovedForZone(room: string, zoneId: string, guestId: string): 
 
 // "Ngobrol dengan CEO" queue, zone-level — see ZONE_EXIT/DISCONNECT's own
 // call sites. Mirrors roomHandler.ts's completeActiveQueueEntryOnLeave.
-async function completeActiveZoneQueueEntry(roomSlug: string, zoneId: string, userId: string): Promise<void> {
+async function completeActiveZoneQueueEntry(io: Server, roomSlug: string, zoneId: string, userId: string): Promise<void> {
   const prisma = getPrisma();
   const dbRoom = await prisma.room.findUnique({ where: { slug: roomSlug }, select: { id: true } });
   if (!dbRoom) return;
   const entry = await prisma.roomQueueEntry.findFirst({ where: { roomId: dbRoom.id, zoneId, userId, status: 'active' } });
   if (!entry) return;
   await prisma.roomQueueEntry.update({ where: { id: entry.id }, data: { status: 'done', completedAt: new Date() } });
+  broadcastZoneQueueSessionCleared(io, roomSlug, zoneId);
   await advanceQueue(prisma, dbRoom.id, zoneId);
 }
 
@@ -159,8 +160,15 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
           }
           // Their turn — this is the actual moment they walk in, so it's
           // the right place (not the poll that got them here) to start the
-          // session clock. No-ops if already 'active' (a reconnect).
-          await admitCalledEntry(prisma, dbRoom.id, zoneId, uid);
+          // session clock. No-ops (returns null) if already 'active' (a
+          // reconnect) — nothing new to broadcast in that case, everyone in
+          // the room already got the original ZONE_QUEUE_SESSION_ACTIVE.
+          const endsAt = await admitCalledEntry(prisma, dbRoom.id, zoneId, uid);
+          if (endsAt) {
+            io.to(room).emit(SocketEvents.ZONE_QUEUE_SESSION_ACTIVE, {
+              zoneId, userId: uid, playerName: getPlayerName(socket.id), endsAt: endsAt.getTime(),
+            });
+          }
         } catch (e) {
           console.error('[zone] restriction check failed:', e);
           socket.emit(SocketEvents.ZONE_LOCKED_DENIED, { zoneId, reason: 'restricted' });
@@ -201,7 +209,7 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
     // cache check so an ordinary zone-exit never pays a DB round trip.
     const uid = socket.data.userId as string | undefined;
     if (uid && getCachedZoneRestriction(room, zoneId)) {
-      completeActiveZoneQueueEntry(room, zoneId, uid).catch((e) => console.error('[zone] queue leave-complete error:', e));
+      completeActiveZoneQueueEntry(io, room, zoneId, uid).catch((e) => console.error('[zone] queue leave-complete error:', e));
     }
   });
 
@@ -275,7 +283,7 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
     const lastZone = socketZone.get(socket.id);
     const uid = socket.data.userId as string | undefined;
     if (uid && lastZone && getCachedZoneRestriction(lastZone.room, lastZone.zoneId)) {
-      completeActiveZoneQueueEntry(lastZone.room, lastZone.zoneId, uid).catch((e) =>
+      completeActiveZoneQueueEntry(io, lastZone.room, lastZone.zoneId, uid).catch((e) =>
         console.error('[zone] queue disconnect-complete error:', e),
       );
     }

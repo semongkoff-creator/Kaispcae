@@ -31,14 +31,19 @@ export const QUEUE_CALL_GRACE_MS = 5 * 60 * 1000;
 //
 // `zoneId`: null for a room-level queue, a Zone.id for a zone-level one —
 // see RoomQueueEntry's own doc comment for why the two never collide.
-export async function admitCalledEntry(prisma: PrismaClient, roomId: string, zoneId: string | null, userId: string): Promise<void> {
+// Returns the freshly-computed endsAt (so callers can broadcast a countdown
+// without a second DB round trip) — null on the no-op paths above (already
+// active, or gone).
+export async function admitCalledEntry(prisma: PrismaClient, roomId: string, zoneId: string | null, userId: string): Promise<Date | null> {
   const entry = await prisma.roomQueueEntry.findFirst({ where: { roomId, zoneId, userId, status: 'called' } });
-  if (!entry) return;
+  if (!entry) return null;
   const now = new Date();
+  const endsAt = new Date(now.getTime() + entry.durationMin * 60000);
   await prisma.roomQueueEntry.update({
     where: { id: entry.id },
-    data: { status: 'active', startedAt: now, endsAt: new Date(now.getTime() + entry.durationMin * 60000) },
+    data: { status: 'active', startedAt: now, endsAt },
   });
+  return endsAt;
 }
 
 // Pull the next 'waiting' entry into 'called' if the room/zone's single slot

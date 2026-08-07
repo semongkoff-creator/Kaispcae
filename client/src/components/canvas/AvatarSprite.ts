@@ -25,13 +25,19 @@ interface DrawAvatarOptions {
   // sprite; badges/labels above the head are positioned relative to `r`
   // below, so they naturally follow the character outward as it grows.
   scale?: number;
+  // "Ngobrol dengan CEO" queue countdown, e.g. "⏳ 4:32" — pre-formatted by
+  // the caller (GameCanvas.tsx, ticking every frame off activeZoneSessions'
+  // endsAt) since this module has no timer/clock access of its own. Shown
+  // for BOTH sides of an active session: the visitor and whoever they're
+  // visiting (e.g. the CEO), from every other player's point of view too.
+  queueCountdown?: string;
 }
 
 export function drawAvatar(
   ctx: CanvasRenderingContext2D,
   options: DrawAvatarOptions,
 ) {
-  const { avatar, x, y, isLocal, walkAnimOffset, timestamp = 0, scale = 1 } = options;
+  const { avatar, x, y, isLocal, walkAnimOffset, timestamp = 0, scale = 1, queueCountdown } = options;
   const config = avatar.avatarConfig;
   const color = config?.color || avatar.color || DEFAULT_COLOR;
   const accessory = config?.accessory || 'none';
@@ -132,6 +138,13 @@ export function drawAvatar(
     ctx.textBaseline = 'middle';
     ctx.fillText('✋', 0, 0);
     ctx.restore();
+  }
+
+  // ─── "Ngobrol dengan CEO" queue countdown — topmost, since it's the
+  // most time-sensitive cue on screen for both the visitor and whoever
+  // they're visiting (e.g. the CEO). ──────────────────────────────────
+  if (queueCountdown) {
+    drawQueueCountdownPill(ctx, cx, nextBadgeY, queueCountdown);
   }
 }
 
@@ -740,6 +753,39 @@ function drawPresencePill(
 
   ctx.fillStyle = '#ffffff';
   ctx.fillText(status, x, baseY);
+}
+
+// "Ngobrol dengan CEO" queue countdown — amber pill so it reads distinctly
+// from the purple presence pill above, drawn over BOTH avatars in an
+// active session (the visitor and whoever they're visiting) for everyone
+// in the room, not just the two of them.
+function drawQueueCountdownPill(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  baseY: number,
+  label: string,
+) {
+  ctx.font = 'bold 9px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+
+  const metrics = ctx.measureText(label);
+  const tw = metrics.width;
+  const padX = 5;
+  const padY = 1;
+  const h = 13;
+
+  const bgX = x - tw / 2 - padX;
+  const bgY = baseY - h + padY;
+  const bgW = tw + padX * 2;
+
+  ctx.fillStyle = '#d97706';
+  ctx.beginPath();
+  roundRect(ctx, bgX, bgY, bgW, h, 5);
+  ctx.fill();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(label, x, baseY);
 }
 
 // ─── Color helpers ────────────────────────────────────────────────
