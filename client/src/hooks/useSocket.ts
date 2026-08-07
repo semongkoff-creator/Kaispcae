@@ -99,6 +99,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // of just "roomState exists" (App.tsx seeds a hardcoded placeholder
     // room before any socket connection exists at all).
     useGameStore.getState().setRoomStateReceived(false);
+    // A stale 'room-full' notice from a PREVIOUS denied join must not keep
+    // showing for this new attempt (different room, or a retry of the same
+    // one) — gameStore is a global singleton that outlives any one
+    // useSocket instance, so nothing else would ever clear this otherwise.
+    useGameStore.getState().setRoomFullNotice(null);
     // Same reasoning for the Activity Feed — without this, portal travel or
     // leaving-and-rejoining a different room left the previous room's
     // events mixed in with the new room's own (see clearActivity's doc
@@ -861,6 +866,22 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       // so we just surface the state and let the user choose.
       console.warn('[socket] join denied — room is locked');
       useGameStore.getState().setRoomLockedNotice('This room is locked — ask the host to let you in.');
+    });
+
+    // QA (Load checklist item 1, "Concurrency tim penuh") — JOIN_ROOM's
+    // other denial reasons ('needs-request'/'pending'/'rejected'/'error')
+    // are already surfaced through the separate REST pre-check
+    // (App.tsx's JoinGate, api.getMembership) before the socket even
+    // connects — only 'room-full' has no equivalent pre-check (capacity can
+    // only be known live, socket-side), so only that reason is handled
+    // here. Without this, a full room fell through to the generic 12s
+    // "can't reach server" timeout (see App.tsx's joinTimedOut) with a
+    // misleading "check your internet" message instead of the real reason.
+    socket.on(SocketEvents.JOIN_DENIED, (data: { roomSlug: string; reason: string }) => {
+      if (data?.reason === 'room-full') {
+        console.warn('[socket] join denied — room is full');
+        useGameStore.getState().setRoomFullNotice('Room ini sudah penuh. Coba lagi nanti.');
+      }
     });
 
     socket.on(SocketEvents.ROOM_KNOCK_REQUEST, (payload: { userId: string; name: string }) => {

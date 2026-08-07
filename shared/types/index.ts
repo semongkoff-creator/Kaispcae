@@ -480,6 +480,23 @@ export enum SocketEvents {
   // RtcScreenSharePayload.
   RTC_SCREEN_SHARE = 'rtc:screen-share',
 
+  // QA (Load checklist item 3, "War Room share massal") — a room-scoped
+  // cap on SIMULTANEOUS screen shares (see rtcHandler.ts's activeScreeners
+  // map), previously nonexistent — starting a share was pure client-side
+  // getDisplayMedia + broadcast, unbounded. The client asks BEFORE opening
+  // the OS screen picker (no point prompting for permission just to deny
+  // it after); the server answers directly to the asking socket only,
+  // never broadcast. RTC_SCREEN_SHARE (above) is unchanged — it's still
+  // how a GRANTED share is announced/retracted to the rest of the room.
+  RTC_SCREEN_SHARE_REQUEST = 'rtc:screen_share_request',
+  RTC_SCREEN_SHARE_GRANTED = 'rtc:screen_share_granted',
+  RTC_SCREEN_SHARE_DENIED = 'rtc:screen_share_denied',
+  // QA (Stabilitas checklist item 12) — fire-and-forget, one per peer
+  // connection that ended up relaying through TURN (see webrtcService's
+  // reportSelectedPath). No payload, no response — purely a counter tick
+  // for /api/health visibility (see rtcHandler.ts).
+  TURN_RELAY_USED = 'rtc:turn_relay_used',
+
   CHAT_BUBBLE = 'chat:bubble',
   EMOTE_PLAY = 'emote:play',
 

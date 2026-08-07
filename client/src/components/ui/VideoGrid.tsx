@@ -569,7 +569,20 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
       {featured && (
         <ScreenSharePanel key={featured.key} name={featured.name} stream={featured.stream} isLocal={featured.isLocal} mirror={featured.mirror} onClose={() => setFeaturedKey(null)} onMaximizedChange={setHidden} />
       )}
-      <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 pointer-events-none">
+      {/* QA (Load checklist item 3, "War Room share massal") — this column
+          previously had no scroll/max-height at all: enough simultaneous
+          screen shares (plus the camera tiles stacked below them) could
+          overflow past the bottom of the viewport with genuinely no way to
+          reach whatever fell off-screen. overflow-y-auto + max-h bounds it
+          to a scrollable strip instead — MeetingView.tsx's own thumbnail
+          strip already scrolls the same way, this just brings the ordinary
+          HUD view in line with it. pointer-events-auto (was -none) so
+          wheel/scrollbar events actually reach this element — a
+          pointer-events-none element is excluded from hit-testing
+          entirely, including wheel scroll. The column has no real empty
+          space of its own beyond its children (flex-col sizes to content),
+          so this doesn't reintroduce a dead click-through zone over the map. */}
+      <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 max-h-[calc(100vh-6rem)] overflow-y-auto pointer-events-auto">
         {hideButton}
         {/* Every share that isn't currently the focus lives here as a
             thumbnail. An explicit button rather than a click-anywhere tile:

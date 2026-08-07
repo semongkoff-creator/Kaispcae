@@ -6,6 +6,50 @@ import { getConfig } from '../config';
 // try/catch, and log with a [youtube] prefix on any failure.
 const YT_BASE = 'https://www.googleapis.com/youtube/v3';
 
+// QA (Stabilitas checklist item 12, "Kuota biaya API") — the free tier's
+// default daily budget is 10,000 units; search.list costs 100/call,
+// videos.list (duration lookup) costs 1. Previously the ONLY guard was
+// musicHandler.ts's 10s-per-socket cooldown, which bounds burst rate but
+// not total daily volume — a single account alone could still exhaust the
+// entire day's quota well before anyone noticed (100 units/call means the
+// free tier's whole budget is only ~100 searches/day). This is a
+// PROACTIVE, in-memory (not per-account — global, matching how the quota
+// itself is billed per API key/project, not per user) counter that refuses
+// a call BEFORE it's made once the budget's gone, rather than only
+// reacting to Google's own 403 after the fact (searchYoutube/
+// getVideoDurationSec below still keep that reactive handling too, as a
+// backstop for whatever this estimate doesn't perfectly track). Resets at
+// WIB midnight — arbitrary but consistent with this codebase's other
+// daily-boundary conventions (see larkAttendance.ts's own wibToday).
+// Conservative default (80% of the free tier) leaves headroom for the
+// duration-lookup calls layered on top of every search.
+const DAILY_UNIT_BUDGET = Number(process.env.YOUTUBE_DAILY_UNIT_BUDGET) || 8000;
+const SEARCH_COST_UNITS = 100;
+const DURATION_LOOKUP_COST_UNITS = 1;
+
+function wibToday(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+}
+
+let quotaDay = wibToday();
+let unitsUsedToday = 0;
+
+function tryReserveUnits(cost: number): boolean {
+  const today = wibToday();
+  if (today !== quotaDay) { quotaDay = today; unitsUsedToday = 0; }
+  if (unitsUsedToday + cost > DAILY_UNIT_BUDGET) return false;
+  unitsUsedToday += cost;
+  return true;
+}
+
+// Exposed for /api/health (see index.ts) — an operator watching for
+// runaway usage otherwise has no visibility into this at all.
+export function getYoutubeQuotaStatus(): { unitsUsedToday: number; dailyBudget: number; day: string } {
+  const today = wibToday();
+  if (today !== quotaDay) { quotaDay = today; unitsUsedToday = 0; }
+  return { unitsUsedToday, dailyBudget: DAILY_UNIT_BUDGET, day: quotaDay };
+}
+
 export type YoutubeSearchResult =
   | { ok: true; videoId: string; title: string; thumbnail: string }
   | { ok: false; reason: 'not_configured' | 'no_results' | 'quota_exceeded' | 'error' };
@@ -13,6 +57,10 @@ export type YoutubeSearchResult =
 export async function searchYoutube(query: string): Promise<YoutubeSearchResult> {
   const cfg = getConfig();
   if (!cfg.YOUTUBE_API_KEY) return { ok: false, reason: 'not_configured' };
+  if (!tryReserveUnits(SEARCH_COST_UNITS)) {
+    console.warn('[youtube] daily unit budget reached — refusing search before calling the API');
+    return { ok: false, reason: 'quota_exceeded' };
+  }
   try {
     const url = `${YT_BASE}/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=1&key=${cfg.YOUTUBE_API_KEY}`;
     const res = await fetch(url);
@@ -49,6 +97,10 @@ export async function searchYoutube(query: string): Promise<YoutubeSearchResult>
 export async function getVideoDurationSec(videoId: string): Promise<number | null> {
   const cfg = getConfig();
   if (!cfg.YOUTUBE_API_KEY) return null;
+  if (!tryReserveUnits(DURATION_LOOKUP_COST_UNITS)) {
+    console.warn('[youtube] daily unit budget reached — skipping duration lookup');
+    return null;
+  }
   try {
     const res = await fetch(`${YT_BASE}/videos?part=contentDetails&id=${encodeURIComponent(videoId)}&key=${cfg.YOUTUBE_API_KEY}`);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

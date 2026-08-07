@@ -242,6 +242,13 @@ export interface GameState {
   setRoomLocked: (locked: boolean) => void;
   roomLockedNotice: string | null;
   setRoomLockedNotice: (notice: string | null) => void;
+  // QA (Load checklist item 1, "Concurrency tim penuh") — mirrors
+  // roomLockedNotice's shape, for the room-full denial (JOIN_DENIED with
+  // reason 'room-full'). No "knock to enter" option makes sense here (the
+  // room being full isn't the host's call to override) — just an
+  // informative message and a way back to the Lobby.
+  roomFullNotice: string | null;
+  setRoomFullNotice: (notice: string | null) => void;
 
   // Akses & Password Pintu audit item #9 — emergency door override (see
   // shared SocketEvents.DOOR_OVERRIDE_SET). When true, every password door
@@ -831,6 +838,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   setRoomLocked: (locked) => set({ roomLocked: locked }),
   roomLockedNotice: null,
   setRoomLockedNotice: (notice) => set({ roomLockedNotice: notice }),
+  roomFullNotice: null,
+  setRoomFullNotice: (notice) => set({ roomFullNotice: notice }),
 
   doorOverride: false,
   setDoorOverride: (active) => set({ doorOverride: active }),

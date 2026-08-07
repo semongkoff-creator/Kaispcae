@@ -75,6 +75,51 @@ const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
   frameRate: { ideal: 30 },
 };
 
+// QA (Load checklist item 1, "Concurrency tim penuh") — a mesh's cost is
+// O(n) simultaneous peer connections per client, each up to 3 tracks
+// (mic/camera/screen). Previously fully unbounded: 25 people packed
+// together meant up to 24 connections per client, ~300 system-wide. Two
+// caps, applied in priority order (closest/zone-mates first — see
+// useWebRTC's updateProximity, the only caller that decides rank):
+// - MAX_TOTAL_PEERS: hard ceiling on simultaneous connections at all.
+//   Anyone beyond this simply isn't connected to (silently retried by the
+//   next proximity tick, same as the existing "local media not ready yet"
+//   case) — self-healing as people move, never a hard error.
+// - MAX_VIDEO_PEERS (<= MAX_TOTAL_PEERS): of those connected, only this
+//   many closest ALSO get a camera track added — the rest are audio-only.
+//   Voice chat (the cheap track) still works at full range up to the total
+//   cap; video (the expensive one) is reserved for whoever's actually
+//   nearest. Decided once at connection time, not renegotiated later if
+//   rank shifts mid-call — see updateProximity's own comment for why.
+export const MAX_TOTAL_PEERS = 16;
+export const MAX_VIDEO_PEERS = 8;
+
+// QA (Load checklist item 3, "War Room share massal") — previously
+// unbounded: getDisplayMedia({video: true}) with no constraints at all lets
+// the browser capture at native display resolution/framerate (easily
+// 4K/60fps on a modern monitor), and every viewer decodes that same full
+// stream regardless of whether it's their featured tile or a ~96px
+// thumbnail — there's no per-viewer quality tier in a plain mesh (that
+// needs an SFU/simulcast this app doesn't have). Bounding the SENDER's
+// resolution/framerate caps the worst case for every viewer uniformly.
+// 1080p/15fps is still plenty readable for a shared screen (text, slides,
+// browser windows) while cutting encode cost and bitrate substantially
+// versus an unbounded native capture.
+const SCREEN_SHARE_CONSTRAINTS: MediaTrackConstraints = {
+  width: { max: 1920 },
+  height: { max: 1080 },
+  frameRate: { ideal: 15, max: 15 },
+};
+// Applied via RTCRtpSender.setParameters — a hard ceiling on encoded
+// bitrate per peer connection, independent of the constraints above (which
+// only bound capture resolution/framerate, not what the encoder actually
+// sends once network conditions are factored in). 2.5 Mbps is comfortably
+// enough for 1080p/15fps screen content (mostly static regions — text,
+// slides — compress far better than natural video) while keeping a single
+// share's total mesh cost (this × however many peers) bounded and
+// predictable rather than opportunistically maxing out available bandwidth.
+const SCREEN_SHARE_MAX_BITRATE_BPS = 2_500_000;
+
 // ── DIAGNOSTIC INSTRUMENTATION (temporary) ───────────────────────────────
 // Purely observational: added to locate where two-way audio breaks, after
 // two code-reading fixes failed to resolve it. Remove once the real cause is
@@ -145,12 +190,26 @@ interface PeerConnection {
   // LATER addTrack (screen share) be allowed to trigger an automatic
   // renegotiation offer.
   initialNegotiationDone: boolean;
+  // MAX_VIDEO_PEERS — this peer's rank was within the video cap at
+  // connection time. Gates BOTH createPeer's own initial camera addTrack
+  // (see includeVideo there) AND enableCamera()'s later per-peer loop
+  // (turning the camera on well after this peer already connected
+  // audio-only must not silently bypass the same cap).
+  videoEligible: boolean;
 }
 
 class WebRTCService {
   private peers = new Map<string, PeerConnection>();
   private localStream: MediaStream | null = null;
   private screenStream: MediaStream | null = null;
+  // MAX_VIDEO_PEERS — ids ranked within the video cap as of the most recent
+  // proximity tick (see useWebRTC's updateProximity, the sole writer via
+  // setVideoEligibleIds). Consulted by BOTH connectToPlayer (we initiate the
+  // offer) and handleOffer (they do, via glare-avoidance's lower-socket-id
+  // rule) so the cap holds regardless of which side happens to create the
+  // offer for a given pair — a purely per-call flag would only have covered
+  // the outbound half.
+  private videoEligibleIds = new Set<string>();
   // §7 — lazily created per peer being recorded, so a peer's audioGain (fed
   // by their mic, already routed to the speakers) can ALSO fan out into a
   // capturable MediaStream for MediaRecorder — Web Audio nodes support
@@ -194,6 +253,13 @@ class WebRTCService {
   // signalling runs on — see the rebind effect in useWebRTC.
   getBoundSocket(): Socket | null {
     return this.socket;
+  }
+
+  // MAX_VIDEO_PEERS — called once per proximity tick from useWebRTC, BEFORE
+  // that tick's connectToPlayer calls, so both connectToPlayer and any
+  // inbound handleOffer that lands afterward see the current ranking.
+  setVideoEligibleIds(ids: Iterable<string>) {
+    this.videoEligibleIds = new Set(ids);
   }
 
   setOnRemoteStream(cb: (id: string, stream: MediaStream) => void) {
@@ -479,6 +545,12 @@ class WebRTCService {
     // renegotiation at all — instant, and it can't disturb the audio m-line.
     // addTrack is only needed the first time, when no camera sender exists yet.
     for (const peer of this.peers.values()) {
+      // MAX_VIDEO_PEERS — a peer marked audio-only at connection time (too
+      // far down the priority rank when they connected) stays that way even
+      // if the LOCAL camera gets turned on well after the fact; otherwise
+      // this loop would silently hand every audio-only peer a camera track
+      // and defeat the cap the moment anyone toggled their camera.
+      if (!peer.videoEligible) continue;
       const sender = this.cameraSender(peer);
       if (sender) sender.replaceTrack(track).catch(() => {});
       else this.videoSenders.add(peer.pc.addTrack(track, this.localStream));
@@ -562,6 +634,17 @@ class WebRTCService {
       diag(viaTurn ? 'PATH via TURN (relay)' : 'PATH direct (no TURN needed)', {
         peer: remoteId, localType: local, remoteType: remote,
       });
+      // QA (Stabilitas checklist item 12, "Kuota biaya API") — TURN relay
+      // bandwidth is the one genuinely metered/billable cost in this app's
+      // WebRTC layer, and previously had ZERO visibility beyond this
+      // console-only diagnostic (see this file's own top-of-file comment on
+      // why that's a problem). A rough per-peer-connection COUNT (not
+      // actual bytes — that figure only exists on the TURN server itself,
+      // out of this app's reach) reported once per successful connection,
+      // aggregated server-side and surfaced via /api/health, gives an
+      // operator at least an early trend signal instead of finding out
+      // usage grew only when the TURN provider's bill arrives.
+      if (viaTurn) this.socket?.emit(SocketEvents.TURN_RELAY_USED);
     } catch (err) {
       diag('path check failed', { peer: remoteId, err: String(err) });
     }
@@ -655,7 +738,7 @@ class WebRTCService {
     return this.socket?.id;
   }
 
-  private createPeer(remoteId: string): PeerConnection {
+  private createPeer(remoteId: string, includeVideo: boolean): PeerConnection {
     const pc = new RTCPeerConnection(ICE_SERVERS);
     // A peer can now be created before local media exists (see handleOffer),
     // so the context can't be assumed — without one, this peer would have no
@@ -678,6 +761,7 @@ class WebRTCService {
       manualVolume: 1,
       retryCount: 0,
       remoteDescSet: false,
+      videoEligible: includeVideo,
       iceQueue: [],
       initialNegotiationDone: false,
     };
@@ -685,14 +769,20 @@ class WebRTCService {
     if (this.localStream) {
       const audioTrack = this.localStream.getAudioTracks()[0];
       if (audioTrack) pc.addTrack(audioTrack, this.localStream);
-      const camTrack = this.localStream.getVideoTracks()[0];
+      // MAX_VIDEO_PEERS — audio is cheap and always included up to the
+      // total-peer cap; the camera track (the expensive one) is only added
+      // for whoever was closest at connection time. `enableCamera()`
+      // (turning the camera on AFTER this peer already connected audio-only)
+      // still reaches them separately — see its own addTrack loop below,
+      // which is untouched by this flag.
+      const camTrack = includeVideo ? this.localStream.getVideoTracks()[0] : undefined;
       if (camTrack) pc.addTrack(camTrack, this.localStream);
     }
     // Pick up an already-in-progress screen share when connecting mid-share
     // (e.g. someone joins after sharing already started).
     if (this.screenStream) {
       const screenTrack = this.screenStream.getVideoTracks()[0];
-      if (screenTrack) peer.screenSender = pc.addTrack(screenTrack, this.screenStream);
+      if (screenTrack) peer.screenSender = this.capScreenShareBitrate(pc.addTrack(screenTrack, this.screenStream));
     }
 
     pc.onicecandidate = (event) => {
@@ -884,13 +974,26 @@ class WebRTCService {
   // it connected regardless meant that anyone whose media was still being
   // acquired when a neighbour first came into range was never connected to
   // for the rest of the session: no audio, no video, no error, no retry.
+  //
+  // MAX_TOTAL_PEERS — the caller (useWebRTC's updateProximity) is the only
+  // place that knows everyone's proximity rank, so it implicitly decides
+  // "should this connect at all" by only calling this for peers within the
+  // total cap; "should this one get video" is read from videoEligibleIds
+  // (set by that same caller just before, via setVideoEligibleIds) rather
+  // than a per-call param, so the SAME decision applies whether we end up
+  // as the offerer (this method) or the answerer (handleOffer, below).
   connectToPlayer(remoteId: string): boolean {
     if (this.peers.has(remoteId)) return true;
     if (!this.socket?.connected) return false;
     if (!this.localStream) return false;
+    if (this.peers.size >= MAX_TOTAL_PEERS) {
+      console.log('[webrtc] at MAX_TOTAL_PEERS, refusing new connection to', remoteId);
+      return false;
+    }
 
-    console.log('[webrtc] connecting to', remoteId);
-    const peer = this.createPeer(remoteId);
+    const includeVideo = this.videoEligibleIds.has(remoteId);
+    console.log('[webrtc] connecting to', remoteId, includeVideo ? '(with video)' : '(audio-only)');
+    const peer = this.createPeer(remoteId, includeVideo);
     this.peers.set(remoteId, peer);
 
     // Someone walking up mid-presentation missed the original announcement —
@@ -944,7 +1047,15 @@ class WebRTCService {
     // through, so it must NOT assume "first offer ever".
     let peer = this.peers.get(fromId);
     if (!peer) {
-      peer = this.createPeer(fromId);
+      // MAX_VIDEO_PEERS applies symmetrically here too — glare-avoidance
+      // (lower socket id offers) means roughly half of all pairs land in
+      // THIS path rather than connectToPlayer's, and the cap must hold
+      // either way, not just for pairs we happened to initiate ourselves.
+      // MAX_TOTAL_PEERS is deliberately NOT enforced on this inbound path —
+      // there's no clean way to "politely refuse" an offer already in
+      // flight (the sender would just see it silently time out), and the
+      // outbound half already keeps the count bounded in practice.
+      peer = this.createPeer(fromId, this.videoEligibleIds.has(fromId));
       this.peers.set(fromId, peer);
     }
     const pc = peer.pc;
@@ -1069,14 +1180,64 @@ class WebRTCService {
     return !!this.screenStream;
   }
 
+  // QA (Load checklist item 3) — asks the server for a slot BEFORE opening
+  // the OS screen picker at all, so a denial (room already at
+  // MAX_SCREEN_SHARES_PER_ROOM) never even prompts for screen-capture
+  // permission. socket.once (not .on) — this is a one-shot request/response,
+  // not an ongoing subscription; a stray timeout-path response arriving
+  // late must not leak a listener that fires again on some later unrelated
+  // grant/deny. The 4s timeout is a pure safety net (server unreachable,
+  // request dropped) — treated as "granted" so a Lark/socket hiccup can
+  // never permanently block a legitimate share, matching this app's
+  // existing "a check that can't be verified fails open, not closed"
+  // posture elsewhere (see roomHandler.ts's own approval-gate comments).
+  private requestScreenShareSlot(): Promise<{ granted: boolean; reason?: string }> {
+    return new Promise((resolve) => {
+      const socket = this.socket;
+      if (!socket?.connected) { resolve({ granted: true }); return; }
+      const timer = setTimeout(() => {
+        socket.off(SocketEvents.RTC_SCREEN_SHARE_GRANTED, onGranted);
+        socket.off(SocketEvents.RTC_SCREEN_SHARE_DENIED, onDenied);
+        resolve({ granted: true });
+      }, 4000);
+      const onGranted = () => { clearTimeout(timer); socket.off(SocketEvents.RTC_SCREEN_SHARE_DENIED, onDenied); resolve({ granted: true }); };
+      const onDenied = (data: { reason?: string }) => { clearTimeout(timer); socket.off(SocketEvents.RTC_SCREEN_SHARE_GRANTED, onGranted); resolve({ granted: false, reason: data?.reason }); };
+      socket.once(SocketEvents.RTC_SCREEN_SHARE_GRANTED, onGranted);
+      socket.once(SocketEvents.RTC_SCREEN_SHARE_DENIED, onDenied);
+      socket.emit(SocketEvents.RTC_SCREEN_SHARE_REQUEST);
+    });
+  }
+
+  // QA (Load checklist item 3) — bounds encoded bitrate regardless of
+  // network conditions; without this, WebRTC's own congestion control will
+  // happily use however much bandwidth is available, which is exactly the
+  // "one uncapped stream × N peers" cost the checklist item flags. Shared
+  // by both places a screen track gets added to a peer connection
+  // (starting a fresh share, and picking up an already-in-progress one when
+  // a new peer connects mid-share — see createPeer). setParameters on a
+  // sender that hasn't sent a frame yet still needs an `encodings` entry to
+  // exist first — RTCRtpSender always has one after addTrack, so this is
+  // safe without waiting on a negotiation round trip.
+  private capScreenShareBitrate(sender: RTCRtpSender): RTCRtpSender {
+    const params = sender.getParameters();
+    if (!params.encodings?.length) params.encodings = [{}];
+    params.encodings[0].maxBitrate = SCREEN_SHARE_MAX_BITRATE_BPS;
+    sender.setParameters(params).catch((e) => console.warn('[webrtc] setParameters (screen bitrate cap) failed:', e));
+    return sender;
+  }
+
   // §6 — adds the screen capture as its OWN sender/track on every existing
   // peer connection (triggers onnegotiationneeded above), rather than
   // replaceTrack()-ing the camera sender — camera and screen now travel as
   // 2 independent tracks so both render as separate boxes simultaneously,
   // instead of screen share replacing the camera view entirely.
   async startScreenShare(): Promise<{ success: boolean; error?: string }> {
+    const slot = await this.requestScreenShareSlot();
+    if (!slot.granted) {
+      return { success: false, error: slot.reason || 'Room ini sudah penuh yang share layar.' };
+    }
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: SCREEN_SHARE_CONSTRAINTS });
       this.screenStream = stream;
       const screenTrack = stream.getVideoTracks()[0];
       screenTrack.onended = () => this.stopScreenShare();
@@ -1086,7 +1247,7 @@ class WebRTCService {
       this.socket?.emit(SocketEvents.RTC_SCREEN_SHARE, { streamId: stream.id });
 
       for (const peer of this.peers.values()) {
-        peer.screenSender = peer.pc.addTrack(screenTrack, stream);
+        peer.screenSender = this.capScreenShareBitrate(peer.pc.addTrack(screenTrack, stream));
       }
       return { success: true };
     } catch (err: unknown) {

@@ -330,7 +330,11 @@ export function Sidebar({
                 title={miniModeSupported ? undefined : 'May not be supported in this browser — needs Chrome or Edge 116+'}
               />
             )}
-            <MenuRow icon={<EyeFill size={15} />} label="Simplify" onClick={closeAnd(onToggleSimplifiedView)} />
+            {/* QA (Kompat checklist item 7, "Low-spec") — used to be purely
+                cosmetic (hide HUD panels only); now also caps rendering
+                cost (GameCanvas.tsx's lowSpecMode: no retina scaling,
+                ~30fps cap) for a low-RAM/integrated-GPU device. */}
+            <MenuRow icon={<EyeFill size={15} />} label="Simplify" onClick={closeAnd(onToggleSimplifiedView)} title="Sembunyikan panel HUD dan kurangi beban render — cocok untuk perangkat low-spec" />
             {!isGuest && (
               <MenuRow icon={<TableIcon size={15} />} label={dailyTaskActive ? 'Tutup Daily Task' : 'Daily Task'} active={dailyTaskActive} onClick={closeAnd(onToggleDailyTask)} />
             )}

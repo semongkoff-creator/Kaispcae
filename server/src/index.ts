@@ -47,6 +47,8 @@ import { startLarkEventStream } from './lib/larkWs';
 import { subscribeLeaveApproval } from './lib/larkApproval';
 import { startReminderSweep } from './socket/reminderSweep';
 import { startAttendanceSweep } from './socket/attendanceSweep';
+import { getYoutubeQuotaStatus } from './lib/youtubeService';
+import { getTurnRelayStatus } from './socket/rtcHandler';
 
 loadConfig();
 const config = getConfig();
@@ -162,12 +164,26 @@ setMeetingIo(io);
 // ── REST routes ──────────────────────────────────────────────────
 app.get('/api/health', async (_req, res) => {
   const redis = await getRedis();
+  // QA (Stabilitas checklist item 12, "Kuota biaya API") — previously this
+  // endpoint reported nothing about which paid/metered integrations were
+  // even configured, let alone their usage — an operator had to grep
+  // startup logs to know what was active at all, and nothing tracked usage
+  // trend over a day. `configured` is a cheap presence check (env vars
+  // set); the quota/relay fields are the actual in-memory counters (see
+  // youtubeService.ts / rtcHandler.ts — Lark itself has no per-call quota
+  // to track, it's an enterprise SSO/workspace API, not billed per
+  // request, so it only gets a configured flag here, not a usage counter).
   res.json({
     status: 'ok',
     dbConnected: true,
     redisConnected: !!redis,
     uptime: process.uptime(),
     timestamp: Date.now(),
+    integrations: {
+      lark: { configured: !!(config.LARK_APP_ID && config.LARK_APP_SECRET) },
+      youtube: { configured: !!config.YOUTUBE_API_KEY, ...getYoutubeQuotaStatus() },
+      turn: getTurnRelayStatus(),
+    },
   });
 });
 

@@ -186,7 +186,27 @@ interface GameCanvasProps {
   // the local player gets adjacent to a password-protected door they
   // haven't unlocked yet this session.
   onDoorPasswordTrigger: (x: number, y: number) => void;
+  // QA (Kompat checklist item 7, "Low-spec") — Sidebar's "Simplify" toggle.
+  // Previously purely cosmetic (hid HUD panels only, per App.tsx's own
+  // usage) — never reached this component at all, so it did nothing for
+  // actual render cost despite the name. Now caps devicePixelRatio (no
+  // retina scaling — cuts backing-store pixel count substantially on a
+  // high-DPI low-end screen) and throttles the draw loop to ~30fps (down
+  // from uncapped, i.e. the display's own refresh rate — often 60+).
+  lowSpecMode?: boolean;
 }
+
+// QA (Kompat checklist item 7) — devicePixelRatio is capped even OUTSIDE
+// lowSpecMode: a few very high-DPI setups (3x Windows scaling, some
+// external 4K/5K monitors) report values well past what any visible
+// sharpness gain justifies for pixel-art sprites at this size — 2x is
+// already indistinguishable from native on a normal display. lowSpecMode
+// drops this further to 1x (no retina scaling at all).
+function effectiveDpr(lowSpecMode: boolean): number {
+  const raw = window.devicePixelRatio || 1;
+  return Math.min(raw, lowSpecMode ? 1 : 2);
+}
+const LOW_SPEC_FRAME_INTERVAL_MS = 1000 / 30;
 
 const MEDIA_ICON: Record<string, string> = { image: '🖼️', youtube: '▶️', whiteboard: '📝', file: '📎', website: '🔗', bgm: '🎵' };
 // Potong 6 — how close (tiles, Chebyshev) a player must be for a YouTube tile to
@@ -270,7 +290,7 @@ function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: numb
   return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, lowSpecMode = false }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -492,6 +512,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
 
   const proximityRef = useRef(proximityData); proximityRef.current = proximityData;
   const localSpeakingRef = useRef(localSpeaking); localSpeakingRef.current = localSpeaking;
+  const lowSpecModeRef = useRef(lowSpecMode); lowSpecModeRef.current = lowSpecMode;
+  const lastDrawTimeRef = useRef(0);
   const speakingPlayersRef = useRef(speakingPlayers); speakingPlayersRef.current = speakingPlayers;
   const micMutedRef = useRef(micMuted); micMutedRef.current = micMuted;
   const cameraOnRef = useRef(cameraOn); cameraOnRef.current = cameraOn;
@@ -890,7 +912,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // happens between backing store and display box.
     const cssWidth = Math.round(rect.width);
     const cssHeight = Math.round(rect.height);
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = effectiveDpr(lowSpecModeRef.current);
     canvas.width = cssWidth * dpr;
     canvas.height = cssHeight * dpr;
     canvas.style.width = `${cssWidth}px`;
@@ -907,6 +929,22 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   }, []);
 
   const draw = useCallback((timestamp: number) => {
+    // QA (Kompat checklist item 7, "Low-spec") — this callback is PURE
+    // rendering (movement/input each run their own independent loop
+    // elsewhere — useMovement.ts, keyboard handlers — so skipping a draw
+    // here never drops or delays actual game state, only how often the
+    // picture updates). Uncapped, this ran at whatever the display's own
+    // refresh rate is (60Hz+ on most modern screens); Simplify mode caps
+    // it to ~30fps by skipping every other frame's worth of work — cuts
+    // canvas redraw cost roughly in half on a weak GPU/CPU. Still
+    // reschedules the SAME rAF loop either way, just returns before doing
+    // any actual drawing work on a skipped frame.
+    if (lowSpecModeRef.current && timestamp - lastDrawTimeRef.current < LOW_SPEC_FRAME_INTERVAL_MS) {
+      rafRef.current = requestAnimationFrame(draw);
+      return;
+    }
+    lastDrawTimeRef.current = timestamp;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -920,7 +958,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // every existing screenX/screenY draw call below is written in pre-zoom
     // "logical" pixels and needs no change; this one setTransform call is
     // the only thing that actually scales them to the zoomed-in/out size.
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = effectiveDpr(lowSpecModeRef.current);
     const rawZoom = useGameStore.getState().mapZoom;
     const logicalW = canvas.width / dpr;
     const logicalH = canvas.height / dpr;
@@ -2240,6 +2278,16 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     return () => { cancelAnimationFrame(rafRef.current); observer.disconnect(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // QA (Kompat checklist item 7) — resizeCanvas itself reads lowSpecMode via
+  // a ref (effectiveDpr(lowSpecModeRef.current)) so it always uses the
+  // CURRENT value whenever it runs — but toggling Simplify mid-session
+  // doesn't fire an actual window/container resize, so without this the new
+  // DPR cap would only take effect on the next unrelated resize. Re-invokes
+  // resizeCanvas on the toggle itself so it applies immediately.
+  useEffect(() => {
+    resizeCanvas();
+  }, [lowSpecMode, resizeCanvas]);
 
   return (
     <div ref={containerRef} className={`w-full h-full absolute inset-0 ${editorMode ? 'ring-2 ring-orange-500 ring-inset z-10' : ''}`}>

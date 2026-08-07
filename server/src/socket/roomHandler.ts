@@ -603,10 +603,33 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
     // Fetch the saved room once — reused for spawn point lookup below and
     // for the tiles/furniture/zones sent in room:state once player data is ready.
-    let dbRoom: { id: string; name?: string; tilemapData: unknown; furniture: unknown; zones: unknown; theme?: string | null; template?: string | null; layerData?: unknown } | null = null;
+    let dbRoom: { id: string; name?: string; maxPlayers?: number; tilemapData: unknown; furniture: unknown; zones: unknown; theme?: string | null; template?: string | null; layerData?: unknown } | null = null;
     try {
       dbRoom = await getPrisma().room.findUnique({ where: { slug: room } });
     } catch (e) { console.warn('[room] failed to load room from db:', e); }
+
+    // QA (Load checklist item 1, "Concurrency tim penuh") — `maxPlayers` has
+    // existed on the Room record since the editor first offered to set it,
+    // but was NEVER actually enforced anywhere — a room could be joined by
+    // arbitrarily many sockets regardless of this field. Same "joined then
+    // denied then leave" shape as the room-lock check above (this socket
+    // already did socket.join(room) earlier in this handler, so the adapter
+    // count here INCLUDES it — that's intentional: "size > cap" correctly
+    // reads as "this join is what pushed it over," not "it was already
+    // over before I got here"). Admins/owner are exempt, same reasoning as
+    // the lock check: someone has to be able to get in to free up space
+    // (kick an idle session, raise the cap) when a room is genuinely full.
+    if (!isAdmin) {
+      const cap = dbRoom?.maxPlayers ?? 50;
+      const currentSize = io.sockets.adapter.rooms.get(room)?.size ?? 0;
+      if (currentSize > cap) {
+        console.log(`[room] denied ${name} (${socket.id}) — ${room} is full (${currentSize}/${cap})`);
+        socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'room-full' });
+        socket.leave(room);
+        currentRoom = null;
+        return;
+      }
+    }
 
     // QA (Presence checklist item #8, "Member list akurat") — record this
     // (real, non-guest) account as online in `room`, and tell everyone else

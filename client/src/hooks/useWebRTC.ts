@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { Socket } from 'socket.io-client';
 import { ProximityPlayer, DISCONNECT_DEBOUNCE_MS } from '@virtualmeet/shared';
-import { webrtcService } from '@/services/webrtcService';
+import { webrtcService, MAX_VIDEO_PEERS } from '@/services/webrtcService';
 import { calcGain } from './useProximity';
 
 interface UseWebRTCOptions {
@@ -14,6 +14,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   const initRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
   const disconnectTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const screenShareErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Mic starts muted / camera starts off — matches webrtcService disabling
   // both tracks right after acquiring them, so the UI doesn't show "live"
@@ -25,6 +26,13 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // the UI explain why the mic/camera buttons aren't doing anything instead
   // of failing silently. Cleared on a successful (re)acquire.
   const [mediaError, setMediaError] = useState<string | null>(null);
+  // QA (Load checklist item 3, "War Room share massal") — set when
+  // startScreenShare is denied (room already at MAX_SCREEN_SHARES_PER_ROOM)
+  // or otherwise fails, so the room-full case actually has a "pesan jelas"
+  // instead of the button just silently doing nothing — previously
+  // startScreenShare's own {success, error} result was discarded entirely
+  // by toggleScreenShare below (only the boolean survived).
+  const [screenShareError, setScreenShareError] = useState<string | null>(null);
   // QA (Fallback checklist item 9) — ids of peers whose WebRTC connection
   // has failed permanently (retried once, still failed) — see
   // webrtcService's onPeerConnectionStatus. Consumed by VideoGrid to show a
@@ -111,36 +119,61 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // just dimmed); only 'not_visible' disconnects. Disconnect is debounced
   // the same as before so a brief flicker across a tier boundary doesn't
   // tear the connection down and immediately rebuild it.
+  //
+  // QA (Load checklist item 1, "Concurrency tim penuh") — `sorted` below
+  // gives priority to zone/table-mates (an intentional grouping, same as
+  // before this change — always connect, always full volume/video) and
+  // then to whoever's physically closest, NOT the order they happened to
+  // enter proximity. In a crowded room this decides who gets one of the
+  // limited MAX_TOTAL_PEERS/MAX_VIDEO_PEERS slots (see webrtcService)
+  // FIRST. Deliberately does NOT evict an already-connected peer just
+  // because someone else's rank improved mid-call — only NEW connection
+  // attempts respect the ranking, so an ongoing conversation is never
+  // interrupted by someone else walking closer. This trades perfect
+  // fairness for stability, which matters more for a call already in
+  // progress than for who wins a not-yet-made connection.
   const updateProximity = useCallback((nearby: ProximityPlayer[]) => {
-    const inRangeIds = new Set(nearby.filter((p) => p.visibility !== 'not_visible').map((p) => p.id));
+    const visible = nearby.filter((p) => p.visibility !== 'not_visible');
+    const sorted = [...visible].sort((a, b) => {
+      if (!!a.viaZone !== !!b.viaZone) return a.viaZone ? -1 : 1;
+      return a.distanceTiles - b.distanceTiles;
+    });
+    const inRangeIds = new Set(visible.map((p) => p.id));
     const connectedIds = connectedRef.current;
 
-    for (const p of nearby) {
-      if (p.visibility !== 'not_visible') {
-        // Clear any pending disconnect timer
-        const timer = disconnectTimers.current.get(p.id);
-        if (timer) {
-          clearTimeout(timer);
-          disconnectTimers.current.delete(p.id);
-        }
+    // Recomputed fresh every tick from the CURRENT ranking — only takes
+    // effect for a peer not yet connected (webrtcService locks
+    // videoEligible in once at connection time and never revokes it, to
+    // avoid camera flicker on an ongoing call — see its own comment).
+    webrtcService.setVideoEligibleIds(sorted.slice(0, MAX_VIDEO_PEERS).map((p) => p.id));
 
-        if (!connectedIds.has(p.id)) {
-          // Only mark them connected if the attempt actually started — when
-          // local media isn't ready yet connectToPlayer is a no-op, and
-          // marking them anyway meant this branch never ran again for that
-          // player, stranding them silent for the rest of the session.
-          // Leaving them unmarked lets the next proximity tick retry.
-          // [webrtc-diag] Proximity fired for this player — did a connection
-          // attempt actually start, or was it refused (no local media / no
-          // socket)? A refusal here means nothing downstream ever runs.
-          const started = webrtcService.connectToPlayer(p.id);
-          console.log('[webrtc-diag] proximity connect', { peer: p.id, started, visibility: p.visibility });
-          if (started) connectedIds.add(p.id);
-        }
-
-        // Zone-mates always get full volume; otherwise fall off with distance.
-        webrtcService.setAudioVolume(p.id, p.viaZone ? 1 : calcGain(p.distanceTiles));
+    for (const p of sorted) {
+      // Clear any pending disconnect timer
+      const timer = disconnectTimers.current.get(p.id);
+      if (timer) {
+        clearTimeout(timer);
+        disconnectTimers.current.delete(p.id);
       }
+
+      if (!connectedIds.has(p.id)) {
+        // Only mark them connected if the attempt actually started — when
+        // local media isn't ready yet, or MAX_TOTAL_PEERS is already
+        // reached, connectToPlayer is a no-op, and marking them anyway
+        // meant this branch never ran again for that player, stranding
+        // them silent for the rest of the session. Leaving them unmarked
+        // lets the next proximity tick retry — same self-healing shape
+        // whether the reason is "media not ready yet" or "room's crowded
+        // right now, try again once someone else leaves range".
+        // [webrtc-diag] Proximity fired for this player — did a connection
+        // attempt actually start, or was it refused (no local media / no
+        // socket / at cap)? A refusal here means nothing downstream ever runs.
+        const started = webrtcService.connectToPlayer(p.id);
+        console.log('[webrtc-diag] proximity connect', { peer: p.id, started, visibility: p.visibility });
+        if (started) connectedIds.add(p.id);
+      }
+
+      // Zone-mates always get full volume; otherwise fall off with distance.
+      webrtcService.setAudioVolume(p.id, p.viaZone ? 1 : calcGain(p.distanceTiles));
     }
 
     // Debounced disconnect for players out of range
@@ -216,6 +249,16 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     }
     const result = await webrtcService.startScreenShare();
     setIsScreenSharing(result.success);
+    if (screenShareErrorTimerRef.current) clearTimeout(screenShareErrorTimerRef.current);
+    if (result.success) {
+      setScreenShareError(null);
+    } else {
+      // Self-dismissing one-off toast, same convention as App.tsx's
+      // miniModeError — a denial/failure is a moment-in-time thing to
+      // acknowledge, not a persistent state to keep displaying.
+      setScreenShareError(result.error ?? 'Gagal memulai share layar.');
+      screenShareErrorTimerRef.current = setTimeout(() => setScreenShareError(null), 6000);
+    }
     return result.success;
   }, []);
 
@@ -228,6 +271,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
       clearTimeout(timer);
     }
     disconnectTimers.current.clear();
+    if (screenShareErrorTimerRef.current) clearTimeout(screenShareErrorTimerRef.current);
     webrtcService.destroy();
     connectedRef.current.clear();
     initRef.current = false;
@@ -245,6 +289,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     isCameraOn,
     isScreenSharing,
     mediaError,
+    screenShareError,
     failedPeers,
     setManualVolume,
     destroy,

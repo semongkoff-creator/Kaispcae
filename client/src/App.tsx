@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, LockFill, PersonPlusFill, DoorOpenFill, VolumeUpFill } from 'react-bootstrap-icons';
 import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode } from '@virtualmeet/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
@@ -15,7 +15,12 @@ import { MeetingControl } from './components/ui/MeetingControl';
 import { DailyTaskPanel } from './components/ui/DailyTaskPanel';
 import { LeavePanel } from './components/ui/LeavePanel';
 import { LarkSyncPanel } from './components/ui/LarkSyncPanel';
-import { AdminConsole } from './admin/AdminConsole';
+// QA (Kompat checklist item 7) — same reasoning as RoomEditorPage above:
+// only a workspace admin ever opens this (AdminConsole itself re-gates on
+// workspaceRole, see its own file), so splitting it out means the far more
+// common case (an ordinary member who never opens it) never pays for its
+// code at all.
+const AdminConsole = lazy(() => import('./admin/AdminConsole').then((m) => ({ default: m.AdminConsole })));
 import { CalendarApp } from './components/Calendar/CalendarApp';
 import { AttendanceApp } from './components/Attendance/AttendanceApp';
 import { LarkAttendancePanel } from './components/Attendance/LarkAttendancePanel';
@@ -33,7 +38,15 @@ import { EmoteWheel } from './components/ui/EmoteWheel';
 import { Minimap } from './components/hud/Minimap';
 import { AdminPanel } from './components/ui/AdminPanel';
 import { TeleportPanel } from './components/ui/TeleportPanel';
-import { RoomEditorPage } from './pages/RoomEditorPage';
+// QA (Kompat checklist item 7, "Low-spec") — lazy: the Room Editor (tile
+// palette, canvas editing tools, etc.) only ever renders behind the
+// ?roomEditor= query-param gate below, in its own tab per this file's own
+// doc comment — an ordinary player visiting the room to just walk around
+// and chat has zero use for any of that code, but was downloading and
+// JIT-compiling it as part of the single main bundle regardless (see
+// TESTING.md's "no code-splitting" gap). Splitting it into its own chunk
+// means only whoever actually opens the editor pays that cost.
+const RoomEditorPage = lazy(() => import('./pages/RoomEditorPage').then((m) => ({ default: m.RoomEditorPage })));
 import { useBgm } from './hooks/useBgm';
 import { AddMediaPanel } from './components/ui/AddMediaPanel';
 import { MediaViewerModal } from './components/ui/MediaViewerModal';
@@ -152,6 +165,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     isCameraOn,
     isScreenSharing,
     mediaError,
+    screenShareError,
     failedPeers,
     setManualVolume,
     destroy,
@@ -201,6 +215,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const roomStateReceived = useGameStore((s) => s.roomStateReceived);
   const isSocketConnected = useGameStore((s) => s.isConnected);
+  const roomFullNotice = useGameStore((s) => s.roomFullNotice);
   // QA (Fallback checklist item 9, "Server down: status jelas, auto-retry,
   // tak hang") — before this, an unreachable server (down, or a network
   // that can't complete the handshake at all) left the user staring at a
@@ -1262,7 +1277,18 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   if (!roomStateReceived) {
     return (
       <div className="relative w-screen h-screen bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
-        {isGuest && guestWaitState === 'waiting' ? (
+        {roomFullNotice ? (
+          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
+            <p className="text-2xl mb-1">🚪</p>
+            <p className="text-gray-900 dark:text-gray-100 text-sm font-medium mb-1">{roomFullNotice}</p>
+            <button
+              onClick={onLeave}
+              className="mt-3 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium cursor-pointer"
+            >
+              Kembali ke Lobby
+            </button>
+          </div>
+        ) : isGuest && guestWaitState === 'waiting' ? (
           <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
             <p className="text-2xl mb-1">⏳</p>
             <p className="text-gray-900 dark:text-gray-100 text-sm font-medium mb-1">Menunggu persetujuan admin…</p>
@@ -1340,6 +1366,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onInteractiveTrigger={handleInteractiveTrigger}
         onNoteOpen={setNoteEditingId}
         onDoorPasswordTrigger={handleDoorPasswordTrigger}
+        lowSpecMode={simplifiedView}
       />
 
       {/* A5 — meeting controls, only while standing inside a meeting-type zone */}
@@ -1675,7 +1702,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           and the launcher offsets itself by pl-14 to clear it. */}
       {dailyTaskActive && <DailyTaskPanel onClose={closePanel} />}
       {leaveActive && <LeavePanel onClose={closePanel} />}
-      {adminViewActive && <AdminConsole currentUser={currentUser} onClose={closePanel} />}
+      {adminViewActive && (
+        <Suspense fallback={null}>
+          <AdminConsole currentUser={currentUser} onClose={closePanel} />
+        </Suspense>
+      )}
       {attendanceViewActive && <AttendanceApp onClose={closePanel} />}
       {larkAttendanceActive && <LarkAttendancePanel onClose={closePanel} />}
       {larkSyncActive && <LarkSyncPanel roomSlug={roomSlug} onClose={closePanel} />}
@@ -1898,6 +1929,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {miniModeError && !moduleOpen && (
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/80 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none max-w-md text-center">
           {miniModeError}
+        </div>
+      )}
+
+      {/* QA (Load checklist item 3) — screen-share denial (room already at
+          MAX_SCREEN_SHARES_PER_ROOM) or any other startScreenShare failure.
+          Self-dismisses inside useWebRTC's own toggleScreenShare, same
+          one-off-action-failure treatment as miniModeError above. */}
+      {screenShareError && !moduleOpen && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 bg-red-50 dark:bg-red-900/80 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-200 text-xs px-3 py-1.5 rounded-full shadow-sm pointer-events-none max-w-md text-center">
+          {screenShareError}
         </div>
       )}
 
@@ -2544,6 +2585,12 @@ function MainApp() {
 // wrapper picks the page WITHOUT conditional hooks in either component.
 export default function App() {
   const editorSlug = new URLSearchParams(window.location.search).get('roomEditor');
-  if (editorSlug) return <RoomEditorPage slug={editorSlug} />;
+  if (editorSlug) {
+    return (
+      <Suspense fallback={<div className="w-screen h-screen bg-gradient-to-br from-white to-purple-50 flex items-center justify-center text-gray-500 text-sm">Memuat Room Editor…</div>}>
+        <RoomEditorPage slug={editorSlug} />
+      </Suspense>
+    );
+  }
   return <MainApp />;
 }
