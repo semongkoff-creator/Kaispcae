@@ -5,7 +5,12 @@ import { api } from '@/services/api';
 
 // Client state for per-zone locks. The server is authoritative for every
 // decision here — this hook only mirrors what it broadcasts and sends intents.
-export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId: string, roomSlug: string) {
+// `onAdmitted` — "Ngobrol dengan CEO" queue — called the moment our own
+// ticket flips to 'called', so App.tsx (which owns the avatar's position
+// and currentZoneIdRef) can teleport us straight in instead of this hook
+// blindly re-emitting ZONE_ENTER itself, which used to leave the avatar
+// standing wherever it was bounced to and currentZoneIdRef never updated.
+export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId: string, roomSlug: string, onAdmitted?: (zoneId: string) => void) {
   const [zoneLocks, setZoneLocks] = useState<ZoneLockState[]>([]);
   const [knocks, setKnocks] = useState<ZoneKnockRequest[]>([]);
   // "Ngobrol dengan CEO" queue, zone-level (see schema.prisma's
@@ -174,12 +179,10 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
 
   // "Ngobrol dengan CEO" queue, zone-level — poll our own ticket while
   // there's a live one to watch, same 5s convention as JoinGate's room-level
-  // poll. The moment status flips to 'called', re-emit ZONE_ENTER ourselves:
-  // the avatar has been standing at the zone's edge the whole time (same
-  // "optimistic visual entry, server round-trip decides membership" posture
-  // the member_only case already has), so this is what actually walks us in
-  // — the server transitions called -> active and starts the clock right
-  // there (see zoneHandler.ts's ZONE_ENTER handler).
+  // poll. The moment status flips to 'called', hand off to onAdmitted —
+  // App.tsx teleports the avatar straight in and emits ZONE_ENTER itself
+  // (see its own doc comment for why this used to be a raw emit here
+  // instead, and what that broke).
   useEffect(() => {
     if (!zoneQueueTicket || zoneQueueTicket.status === 'active') return;
     const zoneId = zoneQueueTicket.zoneId;
@@ -194,7 +197,7 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
         }
         setZoneQueueTicket({ zoneId, status: entry.status, durationMin: entry.durationMin, position: entry.position, endsAt: entry.endsAt });
         if (entry.status === 'called') {
-          socketRef.current?.emit(SocketEvents.ZONE_ENTER, zoneId);
+          onAdmitted?.(zoneId);
         }
       } catch {
         // Transient failure — keep waiting rather than dropping the ticket.

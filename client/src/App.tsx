@@ -465,7 +465,27 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const [currentZone, setCurrentZone] = useState<{ id: string; name: string } | null>(null);
   const localRole = useGameStore((s) => s.localRole);
   const localIsCeo = useGameStore((s) => s.localIsCeo);
-  const zoneLock = useZoneLock(socketRef, authUserId, roomSlug);
+  // "Ngobrol dengan CEO" queue — teleport the avatar straight into the zone
+  // the instant our ticket is called, instead of requiring a manual walk-in.
+  // Also fixes a real desync: the old behavior (useZoneLock.ts's poll doing
+  // a raw ZONE_ENTER re-emit) never touched currentZoneIdRef, so it stayed
+  // stale — which is exactly what onZoneSessionEnded's own "are we even
+  // still in that zone" guard below relies on, so a session-end notice
+  // could silently no-op instead of walking the avatar back out.
+  const enterZoneNow = useCallback((zoneId: string) => {
+    const z = zones.find((x) => x.id === zoneId);
+    if (z) {
+      useGameStore.getState().setLocalPlayer({
+        x: (z.x + z.width / 2) * TILE_SIZE,
+        y: (z.y + z.height / 2) * TILE_SIZE,
+        isMoving: false,
+      });
+      setCurrentZone({ id: z.id, name: z.name });
+    }
+    currentZoneIdRef.current = zoneId;
+    emitZoneEnter(zoneId);
+  }, [zones, emitZoneEnter]);
+  const zoneLock = useZoneLock(socketRef, authUserId, roomSlug, enterZoneNow);
   // "Ngobrol dengan CEO" queue, zone-level — the map's own visual "tile
   // effect" (a lock badge on the zone's banner, see GameCanvas.tsx), so a
   // restricted area like "CEO Office" is visibly marked from a distance
@@ -581,11 +601,18 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // triggered. Not pixel-perfect (no attempt to find the nearest actually-
   // walkable tile), but the access control itself already happened
   // server-side regardless of where the avatar visually lands.
+  //
+  // Bug fix — this used to bail out entirely if currentZoneIdRef didn't
+  // already match msg.zoneId, on the assumption that meant we'd already
+  // left. But the server is authoritative here (it only sends this because
+  // IT still had our ticket as active) — trusting a possibly-stale local
+  // ref instead meant a real desync (e.g. the ref never getting set at all
+  // on some entry path) could make this silently no-op forever, leaving
+  // the avatar stuck inside a zone whose session had already ended.
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket) return;
     const onZoneSessionEnded = (msg: { zoneId: string; zoneName: string }) => {
-      if (currentZoneIdRef.current !== msg.zoneId) return;
       const z = zones.find((x) => x.id === msg.zoneId);
       if (z) {
         useGameStore.getState().setLocalPlayer({
