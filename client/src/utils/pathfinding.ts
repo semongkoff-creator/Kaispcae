@@ -1,20 +1,33 @@
-// Grid-based A* for double-click-to-move (see GameCanvas.tsx's
+// Grid-based A* for click-to-move (see GameCanvas.tsx's
 // walkTargetRef). That feature used to just walk in a straight line toward
 // the clicked tile with the normal per-axis collision slide — fine on open
 // floor, but a desk sitting between the player and the target just stopped
-// the walk dead instead of routing around it. This runs 8-directional A*
+// the walk dead instead of routing around it. This runs 4-directional A*
 // over the tile grid once, up front (not per frame), and hands back a
-// waypoint list to walk through instead of a single target point.
+// waypoint list to walk through instead of a single target point. Keeping
+// the route cardinal makes click-to-move feel like WASD instead of drifting
+// diagonally across tile centers.
 
 export interface TileNode {
   x: number;
   y: number;
 }
 
-const SQRT2 = Math.SQRT2;
+export interface WorldPoint {
+  x: number;
+  y: number;
+}
+
 // Packs (x,y) into one number for a fast Map/Set key — tile coordinates on
 // any real map are a few hundred at most, nowhere near overflowing this.
 const KEY_SHIFT = 100000;
+const CARDINAL_NEIGHBORS: TileNode[] = [
+  { x: 0, y: -1 },
+  { x: -1, y: 0 },
+  { x: 1, y: 0 },
+  { x: 0, y: 1 },
+];
+
 function key(x: number, y: number): number {
   return x * KEY_SHIFT + y;
 }
@@ -23,10 +36,8 @@ function decode(k: number): TileNode {
   return { x, y: k - x * KEY_SHIFT };
 }
 
-function octileHeuristic(ax: number, ay: number, bx: number, by: number): number {
-  const dx = Math.abs(ax - bx);
-  const dy = Math.abs(ay - by);
-  return Math.max(dx, dy) + (SQRT2 - 1) * Math.min(dx, dy);
+function manhattanHeuristic(ax: number, ay: number, bx: number, by: number): number {
+  return Math.abs(ax - bx) + Math.abs(ay - by);
 }
 
 // `blocked(tx, ty)` must reflect the SAME walkability real movement
@@ -36,7 +47,7 @@ function octileHeuristic(ax: number, ay: number, bx: number, by: number): number
 // then reject on arrival.
 //
 // Grid is small (a typical office map is a few thousand tiles at most) and
-// this only ever runs once per double-click, not per frame — a plain
+// this only ever runs once per click, not per frame — a plain
 // linear scan for the lowest f-score each iteration is simpler than a
 // binary heap and still comfortably fast enough at this scale.
 export function findTilePath(
@@ -58,7 +69,7 @@ export function findTilePath(
   const gScore = new Map<number, number>([[startKey, 0]]);
   const cameFrom = new Map<number, number>();
   const open = new Map<number, TileNode>([[startKey, { x: startX, y: startY }]]);
-  const fScore = new Map<number, number>([[startKey, octileHeuristic(startX, startY, targetX, targetY)]]);
+  const fScore = new Map<number, number>([[startKey, manhattanHeuristic(startX, startY, targetX, targetY)]]);
   const closed = new Set<number>();
 
   const maxIter = cols * rows + 10;
@@ -79,29 +90,20 @@ export function findTilePath(
     open.delete(currentKey);
     closed.add(currentKey);
 
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (dx === 0 && dy === 0) continue;
-        const nx = currentNode.x + dx;
-        const ny = currentNode.y + dy;
-        if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
-        if (blocked(nx, ny)) continue;
-        const isDiagonal = dx !== 0 && dy !== 0;
-        // No cutting through a solid corner — both orthogonal neighbors of
-        // a diagonal step must also be open, the grid equivalent of the
-        // per-axis collision slide real movement already enforces (it
-        // can't clip a wall's corner either).
-        if (isDiagonal && (blocked(currentNode.x + dx, currentNode.y) || blocked(currentNode.x, currentNode.y + dy))) continue;
+    for (const delta of CARDINAL_NEIGHBORS) {
+      const nx = currentNode.x + delta.x;
+      const ny = currentNode.y + delta.y;
+      if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+      if (blocked(nx, ny)) continue;
 
-        const nKey = key(nx, ny);
-        if (closed.has(nKey)) continue;
-        const tentativeG = (gScore.get(currentKey) ?? Infinity) + (isDiagonal ? SQRT2 : 1);
-        if (tentativeG < (gScore.get(nKey) ?? Infinity)) {
-          cameFrom.set(nKey, currentKey);
-          gScore.set(nKey, tentativeG);
-          fScore.set(nKey, tentativeG + octileHeuristic(nx, ny, targetX, targetY));
-          if (!open.has(nKey)) open.set(nKey, { x: nx, y: ny });
-        }
+      const nKey = key(nx, ny);
+      if (closed.has(nKey)) continue;
+      const tentativeG = (gScore.get(currentKey) ?? Infinity) + 1;
+      if (tentativeG < (gScore.get(nKey) ?? Infinity)) {
+        cameFrom.set(nKey, currentKey);
+        gScore.set(nKey, tentativeG);
+        fScore.set(nKey, tentativeG + manhattanHeuristic(nx, ny, targetX, targetY));
+        if (!open.has(nKey)) open.set(nKey, { x: nx, y: ny });
       }
     }
   }
@@ -120,10 +122,10 @@ export function findTilePath(
   return path;
 }
 
-// Collapses straight runs (including straight diagonal runs) down to their
-// endpoints — a raw grid path has one node per tile, which would otherwise
-// mean a brief stop-and-retarget every single tile once GameCanvas walks
-// waypoint-by-waypoint (see its walkTargetRef loop).
+// Collapses straight cardinal runs down to their endpoints — a raw grid path
+// has one node per tile, which would otherwise mean a brief stop-and-retarget
+// every single tile once GameCanvas walks waypoint-by-waypoint (see its
+// walkTargetRef loop).
 export function simplifyPath(path: TileNode[]): TileNode[] {
   if (path.length <= 2) return path;
   const out: TileNode[] = [path[0]];
@@ -139,4 +141,23 @@ export function simplifyPath(path: TileNode[]): TileNode[] {
   }
   out.push(path[path.length - 1]);
   return out;
+}
+
+export function getCardinalWaypointTarget(currentX: number, currentY: number, waypoint: WorldPoint, epsilonPx = 4): WorldPoint {
+  const dx = waypoint.x - currentX;
+  const dy = waypoint.y - currentY;
+  const absX = Math.abs(dx);
+  const absY = Math.abs(dy);
+
+  if (absX <= epsilonPx && absY <= epsilonPx) return waypoint;
+
+  if (absX >= absY) {
+    return absX > epsilonPx
+      ? { x: waypoint.x, y: currentY }
+      : { x: currentX, y: waypoint.y };
+  }
+
+  return absY > epsilonPx
+    ? { x: currentX, y: waypoint.y }
+    : { x: waypoint.x, y: currentY };
 }

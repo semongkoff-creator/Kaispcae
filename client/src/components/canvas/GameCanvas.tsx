@@ -27,7 +27,7 @@ import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
 import { PALETTE_BY_ID } from '@/data/themeAssets';
 import { isTileBlocked, isDoorTile } from '@/utils/createDefaultRoom';
-import { findTilePath, simplifyPath } from '@/utils/pathfinding';
+import { findTilePath, getCardinalWaypointTarget, simplifyPath } from '@/utils/pathfinding';
 import { avatarColor } from '@/components/ui/ChatAvatar';
 // Bug 16-project (Room Editor) — these map-draw helpers were moved verbatim to
 // mapRender.ts so the editor can render the map identically. GameCanvas's usage
@@ -585,17 +585,17 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     setPosition(localPlayer.x, localPlayer.y);
   }, [localPlayer.x, localPlayer.y, setPosition]);
 
-  // A4 — double-click a non-blocked tile. Refs so the once-attached listener
+  // Click a non-blocked tile. Refs so the once-attached listener
   // always reads current values without re-binding.
   const emitTeleportToRef = useRef(emitTeleportTo); emitTeleportToRef.current = emitTeleportTo;
   const setPositionRef = useRef(setPosition); setPositionRef.current = setPosition;
   // Transient fade rings at teleport source + destination (performance.now()
   // timestamps), drawn + expired in the render loop. Only used by the
   // GENUINELY instant teleports left (Portal via F, clicking your claimed
-  // seat) — double-click-to-move below no longer pushes to this, since it's
+  // seat) — click-to-move below no longer pushes to this, since it's
   // walking there now, not blinking.
   const teleportFlashRef = useRef<{ x: number; y: number; start: number }[]>([]);
-  // Follow-up — double-click now WALKS to the tile (reusing useMovement's
+  // Follow-up — click now WALKS to the tile (reusing useMovement's
   // updateFollow/tryMoveToward, the exact primitive Follow already uses to
   // approach an arbitrary point) instead of teleporting there instantly.
   // Read/driven every frame in the animation loop below, same pattern as
@@ -612,7 +612,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // shifted off on arrival).
   const walkTargetRef = useRef<{ x: number; y: number }[] | null>(null);
 
-  // Shared by double-click-to-move AND Locate (ParticipantPanel's "Temukan"
+  // Shared by click-to-move AND Locate (ParticipantPanel's "Temukan"
   // action, driven by locateRequestRef further down) — both ultimately just
   // need "a waypoint route from here to this tile", so there's one A* call
   // site, not two copies that could drift apart on what counts as blocked.
@@ -634,7 +634,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // QA follow-up — MAP_WIDTH/MAP_HEIGHT are only the default grid size; a
     // resized room (Room Editor's Resize tool, up to 200x200) is bigger than
     // that, so bounding the pathfind to the fixed constants made any
-    // double-click/Locate target past the old edge unreachable (findTilePath
+    // click/Locate target past the old edge unreachable (findTilePath
     // rejects any out-of-bounds target outright) even though it's real,
     // walkable floor. Same real-size derivation as the Overview-mode fix.
     const cols = tilesRef.current[0]?.length || MAP_WIDTH;
@@ -651,7 +651,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const onDblClick = (e: MouseEvent) => {
+    const onCanvasClick = (e: MouseEvent) => {
       if (editorModeRef.current) return; // never move while editing the room
       const store = useGameStore.getState();
       if (store.localPlayer.isSitting) return; // stand up first (movement is frozen)
@@ -665,8 +665,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       if (isBlocked(tileX, tileY)) return; // can't walk onto a wall/desk
       walkTargetRef.current = computeWalkWaypoints(tileX, tileY);
     };
-    canvas.addEventListener('dblclick', onDblClick);
-    return () => canvas.removeEventListener('dblclick', onDblClick);
+    canvas.addEventListener('click', onCanvasClick);
+    return () => canvas.removeEventListener('click', onCanvasClick);
   }, [isBlocked, computeWalkWaypoints]);
 
   // Mouse wheel / trackpad zoom — same factor-per-notch convention as the
@@ -999,7 +999,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       ? Math.min(logicalW / (mapCols * TILE_SIZE), logicalH / (mapRows * TILE_SIZE))
       : rawZoom;
     ctx.setTransform(zoom * dpr, 0, 0, zoom * dpr, 0, 0);
-    // Read by the double-click-to-move and click-to-teleport handlers
+    // Read by the click-to-move and click-to-teleport handlers
     // (outside this render loop) so their screen→world coordinate math
     // matches whatever's actually on screen right now, Overview's computed
     // fit-zoom included — otherwise a click while zoomed out to Overview
@@ -1061,10 +1061,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       }
     }
 
-    // Follow-up — double-click-to-walk, reusing the exact same "approach an
+    // Follow-up — click-to-walk, reusing the exact same "approach an
     // arbitrary point" primitive as Follow above (tryMoveToward/updateFollow)
     // to walk toward the CURRENT waypoint (front of the A*-computed queue —
-    // see findTilePath in utils/pathfinding.ts and the double-click handler
+    // see findTilePath in utils/pathfinding.ts and the click handler
     // above). A real key press ALWAYS wins and cancels the whole route
     // outright (checked against the RAW keyboard result, not
     // effectiveMoveResult, so this can't be left half-cancelled by Follow
@@ -1076,7 +1076,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       } else if (!activeFollow || !effectiveMoveResult.isMoving) {
         const path = walkTargetRef.current;
         const wt = path[0];
-        const walkResult = updateFollow(wt.x, wt.y, dt);
+        const axisTarget = getCardinalWaypointTarget(effectiveMoveResult.x, effectiveMoveResult.y, wt);
+        const walkResult = updateFollow(axisTarget.x, axisTarget.y, dt);
         if (walkResult.isMoving) {
           effectiveMoveResult = walkResult;
         } else if (path.length > 1 && Math.hypot(wt.x - walkResult.x, wt.y - walkResult.y) < 4) {
