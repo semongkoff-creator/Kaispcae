@@ -199,7 +199,7 @@ export function ZoneLockBar({
             onChange={(e) => setQueueTopic(e.target.value)}
             maxLength={300}
             placeholder="Keperluan (opsional)"
-            className="w-full text-xs px-2.5 py-1.5 mb-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus:outline-none focus:ring-1 focus:ring-purple-400"
+            className="w-full text-xs px-2.5 py-1.5 mb-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-400"
           />
           {zoneQueueError && <p className="text-[10px] text-red-500 mb-1.5">{zoneQueueError}</p>}
           <button

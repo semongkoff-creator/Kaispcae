@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 
 // "Ngobrol dengan CEO" queue — DB-only mechanics (see schema.prisma's
 // RoomQueueEntry doc comment for the full status lifecycle). Deliberately
@@ -47,14 +47,32 @@ export async function admitCalledEntry(prisma: PrismaClient, roomId: string, zon
 // expiring, or a fresh join landing in an empty queue. Returns the
 // newly-called entry (for a caller that wants to best-effort notify them)
 // or null if the slot is still occupied / nobody is waiting.
+//
+// Bug fix — two people submitting the join form (or two independent
+// triggers, e.g. the 20s sweep firing right as someone leaves early) around
+// the same moment could both read "nobody occupied" before either write
+// landed, then each call a DIFFERENT waiting entry — letting two people
+// think they were admitted into a slot that's only supposed to hold one.
+// The occupied-check + call-next now run inside a single SERIALIZABLE
+// transaction, so Postgres itself aborts whichever of two racing callers
+// would have double-booked the slot (caught below and treated as a no-op —
+// same "opportunistic, the next sweep tick will catch it" posture this
+// function already had, not a real failure worth surfacing to the caller).
 export async function advanceQueue(prisma: PrismaClient, roomId: string, zoneId: string | null): Promise<{ userId: string; name: string } | null> {
-  const occupied = await prisma.roomQueueEntry.findFirst({ where: { roomId, zoneId, status: { in: ['called', 'active'] } } });
-  if (occupied) return null;
-  const next = await prisma.roomQueueEntry.findFirst({
-    where: { roomId, zoneId, status: 'waiting' },
-    orderBy: { requestedAt: 'asc' },
-  });
-  if (!next) return null;
-  await prisma.roomQueueEntry.update({ where: { id: next.id }, data: { status: 'called', calledAt: new Date() } });
-  return { userId: next.userId, name: next.name };
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const occupied = await tx.roomQueueEntry.findFirst({ where: { roomId, zoneId, status: { in: ['called', 'active'] } } });
+      if (occupied) return null;
+      const next = await tx.roomQueueEntry.findFirst({
+        where: { roomId, zoneId, status: 'waiting' },
+        orderBy: { requestedAt: 'asc' },
+      });
+      if (!next) return null;
+      await tx.roomQueueEntry.update({ where: { id: next.id }, data: { status: 'called', calledAt: new Date() } });
+      return { userId: next.userId, name: next.name };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  } catch (e) {
+    console.warn('[queue] advanceQueue lost a race (safe to ignore, sweep will retry):', e);
+    return null;
+  }
 }
