@@ -4,7 +4,7 @@ import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent,
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
-import { playNudgeSound, playHandRaiseSound, playSoundboardClip } from '@/services/soundEffects';
+import { playNudgeSound, playSlapSound, playHandRaiseSound, playSoundboardClip } from '@/services/soundEffects';
 import { SERVER_URL } from '@/services/serverUrl';
 import { registerCustomAssets } from '@/data/customAssets';
 import { setProfileName } from '@/hooks/useProfiles';
@@ -793,7 +793,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       const slapperUserId = data.fromId ? state.playerRecords[data.fromId]?.userId : undefined;
       if (slapperUserId && state.mutedUserIds.has(slapperUserId)) return;
       navigator.vibrate?.(200);
-      playNudgeSound(true);
+      playSlapSound(true);
       if (state.localPlayerId) state.triggerNudge(state.localPlayerId, Date.now(), data.fromId);
       state.setSlappedBy(data.fromName || 'Seseorang');
     });
@@ -802,7 +802,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // sound so a slap is audible on exactly 2 devices (sender + target) and
     // nowhere else in the room.
     socket.on(SocketEvents.SLAP_SENT, () => {
-      playNudgeSound(false);
+      playSlapSound(false);
     });
 
     // Bug 14 — someone in my zone raised their hand. Server already scoped this

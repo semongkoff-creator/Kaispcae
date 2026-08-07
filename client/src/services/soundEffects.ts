@@ -10,6 +10,7 @@ import { calcGain } from '@/hooks/useProximity';
 
 const NUDGE_SRC = '/assets/sfx/nudge.wav';
 const NUDGE_STRONG_SRC = '/assets/sfx/nudge-strong.wav';
+const SLAP_SRC = '/assets/sfx/slap.mp3';
 
 // Preload one element per clip so the file is fetched/decoded up front; we
 // clone it per play so rapid repeats overlap instead of cutting each other
@@ -28,6 +29,7 @@ function preload(src: string): HTMLAudioElement | null {
 if (typeof window !== 'undefined') {
   preload(NUDGE_SRC);
   preload(NUDGE_STRONG_SRC);
+  preload(SLAP_SRC);
 }
 
 function playClip(src: string, volume: number): void {
@@ -53,6 +55,13 @@ export function playNudgeSound(emphasized = false): void {
   } else {
     playClip(NUDGE_SRC, 0.5);
   }
+}
+
+// A10 — "colek"/slap sound (a punch effect, distinct from the plain nudge
+// clip above), same emphasized/ambient split as playNudgeSound: the target
+// hears it at full volume, the sender hears their own tap slightly softer.
+export function playSlapSound(emphasized = false): void {
+  playClip(SLAP_SRC, emphasized ? 0.9 : 0.5);
 }
 
 // Bug 14 — raise-hand chime for others in the same zone. Reuses the soft nudge
