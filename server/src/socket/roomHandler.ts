@@ -5,13 +5,15 @@ import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, findSpawnPixel, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, DoorAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveDoorAreaPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH, RosterEntry, RosterUpdate } from '@virtualmeet/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerMic, updatePlayerHidden, updatePlayerWorkMode, updatePlayerSpotlight, updatePlayerSitting,
-  setCachedTiles, getCachedTiles, setCachedImpassableAreas, setCachedDoorAreaRects, setCachedZones, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
+  setCachedTiles, getCachedTiles, setCachedImpassableAreas, setCachedDoorAreaRects, setCachedZones, getCachedFurnitureIds, setCachedFurnitureIds, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
 } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';
 import { resolveEntry } from '../lib/roomMembership';
 import { admitCalledEntry, advanceQueue } from '../lib/roomQueue';
 import { refreshZoneRestrictionCache } from '../lib/zoneMembership';
 import { logActivity } from '../lib/larkBase';
+import { openStatusInterval, closeOpenStatusInterval, resolveEffectiveStatus } from '../lib/statusIntervals';
+import { incrementDailyVibeCounter } from '../lib/vibeCounters';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { redactInteractiveSecrets, redactDoorPasswords, redactDoorAreaPasswords } from '../lib/redactFurniture';
 import { unlockDoor, unlockDoorArea, clearUnlockedDoorsForRoom } from './doorLock';
@@ -460,6 +462,36 @@ export function getConnectedCeoSocketIds(roomSlug: string): string[] {
   return ids;
 }
 
+// Productivity Analytics — rooms with at least one connection this server
+// lifetime, for analyticsSweep.ts's proximity-detection tick (which lives
+// outside this file and has no socket of its own, same reasoning as
+// forceZoneExitForQueue below). Deliberately roomAdminMap's key set, not a
+// DB query — a proximity tick runs every ~15-20s and must stay cheap.
+export function getActiveRoomSlugs(): string[] {
+  return Array.from(roomAdminMap.keys());
+}
+
+// Productivity Analytics — Bagian B.3.2's "Anggota aktif" (Team tier). A
+// plain REST handler (routes/analytics.ts) has no socket of its own, same
+// reasoning as getActiveRoomSlugs above — userRoomMap is the same live
+// roster ROSTER_STATE/broadcastRosterUpdate already reads.
+export function getOnlineUserIds(): Set<string> {
+  return new Set(userRoomMap.keys());
+}
+
+// Bagian C.6's weekly Hall of Fame — "papan pengumuman dinding KaiSpace",
+// reusing the existing pinned-announcement primitive (NOTICE_PIN's own
+// handler above) rather than building a new in-game 3D object. Called from
+// analyticsSweep.ts, which has no socket of its own (system-initiated, not
+// a player action), so this bypasses NOTICE_PIN's admin permission check
+// entirely — that check exists to stop a PLAYER from pinning arbitrary
+// text, not to gate the system's own weekly summary.
+export function pinSystemNotice(io: Server, roomSlug: string, text: string, senderName: string): void {
+  const notice: Notice = { messageId: `system-${Date.now()}`, text: text.slice(0, 200), senderName, pinnedByName: 'System', pinnedAt: Date.now() };
+  roomNoticeMap.set(roomSlug, notice);
+  io.to(roomSlug).emit(SocketEvents.NOTICE_UPDATED, notice);
+}
+
 // "Ngobrol dengan CEO" queue — force-remove a user whose timed slot just
 // ended (called from queueSweep.ts, which lives outside this file and has
 // no socket of its own). Reuses handleLeave's exact cleanup, same reasoning
@@ -882,6 +914,16 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     };
 
     console.log(`[room] ${newPlayer.name} (${socket.id}) uid=${uid} ${isAdmin ? isMasterAdmin ? '⭐' : '👑' : ''} joined ${room}`);
+
+    // Productivity Analytics — starts this user's status-time clock. Guests
+    // have no real User row (FK would fail) so they're excluded, same as
+    // every other analytics write in this file. Fire-and-forget: bookkeeping
+    // must never slow down or block the join itself.
+    if (!isGuest) {
+      void openStatusInterval(getPrisma(), uid, room, 'available').catch((e) =>
+        console.error('[analytics] failed to open status interval on join:', e),
+      );
+    }
 
     // Evict any stale entries for the SAME account (uid) before adding this
     // one — a reconnect or refresh comes in on a brand-new socket.id, so the
@@ -1875,6 +1917,14 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       room,
       detail: { to: mode, zoneId: data?.zoneId, reason },
     });
+    // Productivity Analytics — same "never a guest, never blocking" posture
+    // as the JOIN_ROOM hook above. A guest's uid falls back to socket.id
+    // (see the line above), which has no User row, so guard the same way.
+    if (!(socket.data as { guestId?: string }).guestId) {
+      void openStatusInterval(getPrisma(), uid, room, resolveEffectiveStatus(mode)).catch((e) =>
+        console.error('[analytics] failed to open status interval on work mode change:', e),
+      );
+    }
   });
 
   // ZEP-style Spotlight — admin-only, targets another player (unlike
@@ -1972,6 +2022,29 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // next full room rejoin.
     setCachedTiles(room, payload.tiles);
     setCachedZones(room, payload.zones ?? []);
+
+    // Productivity Analytics — Bagian B.5's "furniture_placed" Vibe input.
+    // No discrete placement event exists (this handler overwrites the whole
+    // room every save), so infer placements by diffing this save's furniture
+    // id set against the previous one (see getCachedFurnitureIds' doc
+    // comment for why `undefined` skips diffing entirely).
+    const newFurnitureIds = new Set((payload.furniture ?? []).map((f) => f.id));
+    const previousFurnitureIds = getCachedFurnitureIds(room);
+    if (previousFurnitureIds) {
+      const placerUid = findUserIdBySocket(socket.id);
+      if (placerUid) {
+        const prisma = getPrisma();
+        for (const id of newFurnitureIds) {
+          if (!previousFurnitureIds.has(id)) {
+            void incrementDailyVibeCounter(prisma, placerUid, 'furnitureCount').catch((e) =>
+              console.error('[analytics] failed to increment furnitureCount:', e),
+            );
+          }
+        }
+      }
+    }
+    setCachedFurnitureIds(room, newFurnitureIds);
+
     try {
       getPrisma().room.update({
         where: { slug: room },
@@ -2272,7 +2345,15 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
       // superseded tab's OLD socket calling handleLeave after the NEW tab
       // already re-registered this uid must NOT wipe the new tab's roster
       // entry / broadcast a false "offline" for a user who's still online.
-      if (userRoomMap.delete(uid)) broadcastRosterUpdate(io, { userId: uid, online: false });
+      if (userRoomMap.delete(uid)) {
+        broadcastRosterUpdate(io, { userId: uid, online: false });
+        // Productivity Analytics — same authoritative-socket guard as the
+        // roster broadcast just above (a superseded tab's stale disconnect
+        // must not close the NEW tab's still-open interval).
+        void closeOpenStatusInterval(getPrisma(), uid).catch((e) =>
+          console.error('[analytics] failed to close status interval on leave:', e),
+        );
+      }
       break;
     }
   }

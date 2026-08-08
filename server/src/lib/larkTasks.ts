@@ -26,6 +26,11 @@ export interface DailyTask {
   notes: string | null;
   dueDate: number | null;
   project: { recordId: string; name: string } | null;
+  // Productivity Analytics — the Owner field's open_id(s), needed to resolve
+  // each task to a local User (via User.larkOpenId) for
+  // TaskCompletionSnapshot. Not used by the existing Daily Task widget,
+  // which already knows its own caller's open_id going in.
+  ownerOpenIds: string[];
 }
 
 export interface TaskOptions {
@@ -79,6 +84,7 @@ function mapRecord(r: any): DailyTask {
     notes: asText(f.Notes) || null,
     dueDate: typeof f['Due Date'] === 'number' ? f['Due Date'] : null,
     project,
+    ownerOpenIds: Array.isArray(f.Owner) ? f.Owner.map((o: any) => o?.id).filter(Boolean) : [],
   };
 }
 
@@ -104,6 +110,39 @@ export async function listTodayTasks(ownerOpenId: string): Promise<DailyTask[]> 
   return raw
     .filter((r) => Array.isArray(r.fields?.Owner) && r.fields.Owner.some((o: any) => o?.id === ownerOpenId))
     .map(mapRecord);
+}
+
+// Productivity Analytics — company-wide, NOT scoped to one owner (unlike
+// listTodayTasks above). No date-range filter is sent to Lark's search API —
+// listTodayTasks's own comment already explains why this codebase stays off
+// unverified filter syntax (the User-field Owner match); a Due-Date-range
+// operator was never confirmed against the live Base either, so filtering
+// happens locally instead. Paginated (listTodayTasks never needed to be —
+// "Today" is always a small slice; a full-range query over a busy Base can
+// exceed one page).
+export async function listTasksInRange(startMs: number, endMs: number): Promise<DailyTask[]> {
+  const t = await token();
+  const { app, table } = ids();
+  const all: any[] = [];
+  let pageToken: string | undefined;
+  do {
+    const res = await fetch(
+      `${LARK_OPENAPI_BASE}/bitable/v1/apps/${app}/tables/${table}/records/search?page_size=200`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(pageToken ? { page_token: pageToken } : {}),
+      },
+    );
+    const j: any = await res.json();
+    if (j.code !== 0) throw new Error(`lark-search-failed:${j.code}:${j.msg}`);
+    all.push(...(j.data?.items ?? []));
+    pageToken = j.data?.has_more ? j.data?.page_token : undefined;
+  } while (pageToken);
+
+  return all
+    .map(mapRecord)
+    .filter((task) => typeof task.dueDate === 'number' && task.dueDate >= startMs && task.dueDate <= endMs);
 }
 
 export async function getTaskOptions(): Promise<TaskOptions> {

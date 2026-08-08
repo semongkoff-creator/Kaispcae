@@ -135,6 +135,12 @@ model User {
   // feature was removed (A7) — the Base module was deleted but Notification is
   // shared by many features, so only its Base coupling was dropped.
   baseNotifications       Notification[]            @relation("NotifRecipient")
+  // Productivity Analytics — reverse relations
+  statusIntervals         StatusInterval[]          @relation("StatusIntervalUser")
+  connectionEventsAsA     ConnectionEvent[]          @relation("ConnectionEventUserA")
+  connectionEventsAsB     ConnectionEvent[]          @relation("ConnectionEventUserB")
+  dailyVibeCounters       DailyVibeCounter[]         @relation("DailyVibeCounterUser")
+  taskCompletionSnapshots TaskCompletionSnapshot[]   @relation("TaskCompletionSnapshotUser")
 }
 
 // ─── Workspace foundation (shared by Base / Calendar / Attendance / Docs) ───
@@ -219,6 +225,26 @@ model WorkspacePolicy {
   docsLinkPasswordRequired Boolean  @default(false)
   // Max share-link lifetime in days for both; null = no cap.
   maxShareLinkDays         Int?
+  // Productivity Analytics — all nullable/defaulted so nothing blocks on
+  // missing config; the dashboard shows "belum diisi" until an admin sets
+  // them (see shared/analyticsRules.ts and routes/analytics.ts).
+  analyticsVibeNormalizationFactor          Float @default(10)
+  // Threshold (on the PRECEDING work day's AttendanceRecord.overtimeMinutes)
+  // for Bagian B.4's "habis lembur — dimaklumi" grace on today's lateness.
+  analyticsOvertimeGraceMinMinutes          Int   @default(60)
+  analyticsPlatformMonthlyCostIdr           Int?
+  analyticsAvgHourlyRateIdr                 Int?
+  analyticsSchedulingSavedMinutesPerMeeting Int   @default(5)
+  // Lark chat_id the weekly Hall of Fame announcement is pushed to (see
+  // lib/larkIm.ts's sendGroupText) — null = Lark push skipped, in-app
+  // Notification + in-game Notice pin still happen.
+  analyticsHallOfFameLarkChatId             String?
+  // Which "Status" option value(s) in the Lark Base Daily Task table count
+  // as completed (see lib/larkTasks.ts's listTasksInRange) — the Base's
+  // actual option labels aren't known at build time (Bagian D's own "PERLU
+  // KONFIRMASI" case), so this ships as an admin-editable best-effort
+  // default rather than a hardcoded guess baked into code.
+  analyticsTaskDoneStatusValues              String[] @default(["Done", "Selesai", "Completed"])
   updatedAt                DateTime @updatedAt
   updatedById              String?
 }
@@ -1264,4 +1290,93 @@ model ConversationParticipant {
   // "every conversation this user is in", the messenger's home screen query —
   // it has no room to scope by, which is the whole point.
   @@index([userId])
+}
+
+// ─── Productivity Analytics ─────────────────────────────────────────
+// Game-side activity (focus/meeting time, proximity "connections", vibe,
+// task snapshots) had ZERO persistence before this — everything below is
+// net-new, not a reuse of an existing table. "Jam hadir"/lembur intentionally
+// stay on AttendanceRecord (Bagian B.4's grace rule reads it directly,
+// see shared/analyticsRules.ts) — no separate login/logout session model.
+
+// A.3's 6 mutually-exclusive status categories, as start/end intervals so
+// duration is queryable per period. `endedAt: null` = currently ongoing;
+// closed (endedAt set) the instant a newer interval opens for that user, so
+// there is never more than one open interval per user at a time.
+model StatusInterval {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation("StatusIntervalUser", fields: [userId], references: [id], onDelete: Cascade)
+  roomSlug  String
+  // available_focus | in_meeting | quick_chat | busy | away | offline
+  status    String
+  startedAt DateTime
+  endedAt   DateTime?
+
+  @@index([userId, startedAt])
+  @@index([userId, endedAt])
+}
+
+// Server-detected proximity ("Connections" in the brief) — deliberately NOT
+// derived from Zone co-occupancy (most of the map isn't inside a Zone, which
+// would miss most spontaneous huddles); see analyticsSweep.ts's periodic
+// position-distance tick. One row per (pair, cooldown window), not per tick,
+// so one long conversation doesn't inflate the count.
+model ConnectionEvent {
+  id         String   @id @default(cuid())
+  roomSlug   String
+  userAId    String
+  userA      User     @relation("ConnectionEventUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId    String
+  userB      User     @relation("ConnectionEventUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  occurredAt DateTime @default(now())
+
+  @@index([userAId, occurredAt])
+  @@index([userBId, occurredAt])
+}
+
+// Bagian B.5's Vibe inputs — counts only, never message/emote CONTENT (zone
+// chat stays as ephemeral as it is today; a count is enough for Vibe, and
+// the brief's own "cermin bukan pengawasan" principle argues against
+// silently starting to store private chat text). One row per user per WIB
+// calendar day, incremented in place.
+model DailyVibeCounter {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation("DailyVibeCounterUser", fields: [userId], references: [id], onDelete: Cascade)
+  // 00:00 UTC of the WIB calendar date, same convention as
+  // AttendanceRecord.date / attendanceRules.ts's workDayOf().
+  date           DateTime
+  emoteCount     Int      @default(0)
+  waveCount      Int      @default(0)
+  chatCount      Int      @default(0)
+  furnitureCount Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, date])
+}
+
+// Daily snapshot of Lark Base "Daily Task" completions (see lib/larkTasks.ts's
+// listTasksInRange) — Lark Base itself has no "created date" field and isn't
+// cheap to query company-wide on every dashboard load, so this is synced
+// once/day by analyticsSweep.ts rather than queried live per request.
+model TaskCompletionSnapshot {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation("TaskCompletionSnapshotUser", fields: [userId], references: [id], onDelete: Cascade)
+  date           DateTime
+  // Total tasks with THIS date as their Due Date, any status — the
+  // denominator for Bagian B.3.1's "task selesai / task assigned due".
+  dueCount       Int      @default(0)
+  completedCount Int      @default(0)
+  // Lark Base exposes no completion timestamp (only Due Date — see
+  // lib/larkTasks.ts's module doc comment), so this sweep cannot actually
+  // distinguish "completed on time" from "completed late" — it currently
+  // always equals completedCount. Kept as a separate column (not just
+  // reusing completedCount) so a future real signal can populate it without
+  // another migration.
+  onTimeCount    Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  @@unique([userId, date])
 }

@@ -1949,8 +1949,10 @@ export type { ShiftDef, AttendanceStatus, WorkTotals, Geofence, Coords, Geofence
 export {
   STATUS_LABELS, shiftBounds, isWorkday, lateMinutes, clockInStatus, earlyLeaveMinutes,
   computeTotals, finalStatus, workDayOf, distanceM, checkGeofence, canViewAttendanceOf,
-  MAX_ACCURACY_M, LOCATION_RETENTION_DAYS,
+  canViewAnalyticsOf, MAX_ACCURACY_M, LOCATION_RETENTION_DAYS,
 } from '../attendanceRules';
+export type { OvertimeGraceInput, OvertimeGrace } from '../analyticsRules';
+export { applyOvertimeGrace } from '../analyticsRules';
 export type { CalendarRole, CalendarAction, CalendarCtx, Rsvp } from '../calendarPermissions';
 export { calendarRoleAtLeast, canCalendar, canSeeEventDetails, CALENDAR_ROLE_LABELS, RSVP_LABELS } from '../calendarPermissions';
 export type { EditScope, RecurringMaster, Occurrence } from '../recurrence';

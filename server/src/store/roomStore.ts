@@ -378,6 +378,23 @@ export function getCachedZones(roomId: string): Zone[] {
   return zoneCache.get(roomId) ?? [];
 }
 
+// Productivity Analytics — furniture placement has no discrete server event
+// (ROOM_UPDATE overwrites the whole array every save, see roomHandler.ts),
+// so "who placed what" is inferred by diffing each save's furniture id set
+// against the previous one. `undefined` (never cached — a fresh server
+// process, or this room's first-ever save) deliberately means "unknown
+// baseline, don't diff" rather than "empty" — otherwise every pre-existing
+// piece in the room would look newly placed the moment the server restarts.
+const furnitureIdCache = new Map<string, Set<string>>();
+
+export function getCachedFurnitureIds(roomId: string): Set<string> | undefined {
+  return furnitureIdCache.get(roomId);
+}
+
+export function setCachedFurnitureIds(roomId: string, ids: Set<string>): void {
+  furnitureIdCache.set(roomId, ids);
+}
+
 // "Ngobrol dengan CEO" queue, zone-level (see schema.prisma's
 // ZoneRestriction) — ZONE_ENTER fires on essentially every zone crossing
 // for every player, all day, so it cannot afford a DB round trip for the

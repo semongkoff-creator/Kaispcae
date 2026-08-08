@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill } from 'react-bootstrap-icons';
+import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -138,6 +138,11 @@ interface SidebarProps {
   adminViewActive: boolean;
   onToggleAdminView: () => void;
 
+  // Productivity Analytics — Individual tier, open to every real employee
+  // (not gated by isWorkspaceAdmin, see the MenuRow's own comment).
+  myAnalyticsActive: boolean;
+  onToggleMyAnalytics: () => void;
+
   miniModeSupported: boolean;
   miniModeActive: boolean;
   onToggleMiniMode: () => void;
@@ -227,6 +232,8 @@ export function Sidebar({
   isWorkspaceAdmin,
   adminViewActive,
   onToggleAdminView,
+  myAnalyticsActive,
+  onToggleMyAnalytics,
   miniModeSupported,
   miniModeActive,
   onToggleMiniMode,
@@ -355,6 +362,12 @@ export function Sidebar({
                 checkout here or in the Lark app). */}
             {!isGuest && (
               <MenuRow icon={<ClockHistory size={15} />} label={larkAttendanceActive ? 'Tutup Absensi' : 'Absensi'} active={larkAttendanceActive} onClick={closeAnd(onToggleLarkAttendance)} />
+            )}
+            {/* Productivity Analytics — every real employee's own "cermin
+                evaluasi diri" (see PanelId's doc comment in gameStore.ts for
+                why this is NOT nested inside the admin-only Konsol Admin). */}
+            {!isGuest && (
+              <MenuRow icon={<BarChartFill size={15} />} label={myAnalyticsActive ? 'Tutup Analitik Saya' : 'Analitik Saya'} active={myAnalyticsActive} onClick={closeAnd(onToggleMyAnalytics)} />
             )}
             {isAdmin && (
               <MenuRow icon={<ArrowLeftRight size={15} />} label={larkSyncActive ? 'Tutup Lark Sync' : 'Lark Sync'} active={larkSyncActive} onClick={closeAnd(onToggleLarkSync)} />

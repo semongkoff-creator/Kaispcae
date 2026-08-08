@@ -49,7 +49,15 @@ export type WorkspaceAction =
   //    A7 but the shared policy row + its Docs fields remain) ──
   | 'base:managePolicy'            // public share links allowed? export limits?
   // ── backup & recovery ──
-  | 'workspace:exportBackup';      // download a snapshot of notes/MoM/attendance
+  | 'workspace:exportBackup'       // download a snapshot of notes/MoM/attendance
+  // ── productivity analytics config ──
+  // NOTE: viewing the Individual tier uses canViewAnalyticsOf (self/admin/
+  // manager, see shared/attendanceRules.ts) and the Team tier is scoped by
+  // User.managerId directly (like GET /attendance/team) — NEITHER needs an
+  // action here, since a non-manager naturally gets an empty team. Only the
+  // company-wide tier and cross-tier export are workspace-role gated.
+  | 'analytics:viewAllCompany'
+  | 'analytics:export';
 
 // Every action above is admin-only today. This is kept as an explicit map
 // rather than a bare `role === 'admin'` so that (a) the full surface of
@@ -74,6 +82,8 @@ const ACTION_ROLE: Record<WorkspaceAction, WorkspaceRole> = {
   'docs:takeover': 'admin',
   'base:managePolicy': 'admin',
   'workspace:exportBackup': 'admin',
+  'analytics:viewAllCompany': 'admin',
+  'analytics:export': 'admin',
 };
 
 export interface WorkspaceCtx {

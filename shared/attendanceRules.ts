@@ -143,3 +143,9 @@ export function canViewAttendanceOf(
   if (viewer.workspaceRole === 'admin') return true;   // audit-logged at the call site
   return target.managerId === viewer.id;               // your direct reports
 }
+
+// Productivity Analytics' Individual tier uses the exact same self/admin/
+// direct-manager rule as attendance (Bagian B.1) — same relationship, not
+// attendance-specific, so it's reused under a clearer name rather than
+// duplicated.
+export const canViewAnalyticsOf = canViewAttendanceOf;

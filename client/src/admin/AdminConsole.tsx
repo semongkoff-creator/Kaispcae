@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { XLg, People, ShieldLock, ClockHistory, Sliders, BarChartFill, CalendarEvent, PersonCheck, CloudDownload } from 'react-bootstrap-icons';
+import { XLg, People, ShieldLock, ClockHistory, Sliders, BarChartFill, GraphUp, CalendarEvent, PersonCheck, CloudDownload } from 'react-bootstrap-icons';
 import { WORKSPACE_ROLE_LABELS } from '@virtualmeet/shared';
 import { CurrentUser } from '@/hooks/useCurrentUser';
 import { ApprovalPanel } from './ApprovalPanel';
@@ -9,6 +9,7 @@ import { AuditLogViewer } from './AuditLogViewer';
 import { AttendanceReport } from './AttendanceReport';
 import { CalendarSettings } from './CalendarSettings';
 import { BackupPanel } from './BackupPanel';
+import { AnalyticsTiersPanel } from './AnalyticsTiersPanel';
 
 // Departemen/Absensi tabs removed per explicit request — department and
 // attendance are both already managed through Lark (Lark org chart / Lark
@@ -17,12 +18,16 @@ import { BackupPanel } from './BackupPanel';
 // AttendanceRecord, lib/larkAttendance.ts) is untouched — only these two
 // admin-console SETTINGS surfaces are gone. DepartmentsPanel/
 // AttendanceSettings component files are left in place, just unused here.
-type Tab = 'members' | 'approvals' | 'report' | 'calendar' | 'policy' | 'audit' | 'backup';
+type Tab = 'members' | 'approvals' | 'report' | 'analytics' | 'calendar' | 'policy' | 'audit' | 'backup';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'members', label: 'Anggota', icon: <People size={14} /> },
   { id: 'approvals', label: 'Persetujuan', icon: <PersonCheck size={14} /> },
   { id: 'report', label: 'Laporan', icon: <BarChartFill size={14} /> },
+  // Productivity Analytics — Team/All-Kaitech tiers (Bagian B.1). Separate
+  // from "Laporan" (attendance-only) above; see AnalyticsTiersPanel.tsx's
+  // own doc comment for why the Individual tier here is self-view only.
+  { id: 'analytics', label: 'Analitik', icon: <GraphUp size={14} /> },
   { id: 'calendar', label: 'Ruang & Kalender', icon: <CalendarEvent size={14} /> },
   { id: 'policy', label: 'Kebijakan', icon: <Sliders size={14} /> },
   { id: 'audit', label: 'Audit log', icon: <ClockHistory size={14} /> },
@@ -97,6 +102,7 @@ export function AdminConsole({ currentUser, onClose }: { currentUser: CurrentUse
         {tab === 'members' && <MembersPanel currentUser={currentUser} />}
         {tab === 'approvals' && <ApprovalPanel />}
         {tab === 'report' && <AttendanceReport />}
+        {tab === 'analytics' && <AnalyticsTiersPanel />}
         {tab === 'calendar' && <CalendarSettings />}
         {tab === 'policy' && <PolicyPanel />}
         {tab === 'audit' && <AuditLogViewer />}

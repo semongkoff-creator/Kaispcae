@@ -96,7 +96,14 @@ export type PanelId =
   | 'messenger'
   | 'joinQueue'
   | 'soundboard'
-  | 'larkSync';
+  | 'larkSync'
+  // Productivity Analytics — Bagian B.1's Individual tier is for EVERY
+  // employee ("cermin evaluasi diri"), unlike adminConsole above which is
+  // gated to workspaceRole==='admin' and invisible to ordinary members —
+  // so this is its own panel, not a tab inside AdminConsole. Team/
+  // All-Kaitech tiers land inside AdminConsole instead (Phase 3), since
+  // those really are manager/admin-only surfaces.
+  | 'myAnalytics';
 
 // Keeps the feed skimmable and bounds its memory — old entries just fall
 // off the end rather than needing a separate pruning pass (see

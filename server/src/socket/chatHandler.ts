@@ -3,6 +3,8 @@ import { SocketEvents, ChatMessage } from '@virtualmeet/shared';
 import { getSocketIdsInZone, isSocketInZone } from './zoneHandler';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { isMusicCommand, handleMusicCommand } from './musicHandler';
+import { getPrisma } from '../lib/prisma';
+import { incrementDailyVibeCounter } from '../lib/vibeCounters';
 
 let messageId = 0;
 const canSendChat = socketRateLimit(5); // max 5 chat messages/sec per socket
@@ -75,6 +77,19 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
     recipients.add(socket.id);
     for (const socketId of recipients) {
       io.to(socketId).emit(SocketEvents.CHAT_BROADCAST, msg);
+    }
+
+    // Productivity Analytics — Bagian B.5's Vibe input. Count only, never
+    // the message text (see DailyVibeCounter's doc comment in
+    // schema.prisma) — a guest has no User row, same guard as everywhere
+    // else in this file.
+    if (!isGuest) {
+      const uid = (socket.data as { userId?: string }).userId;
+      if (uid) {
+        void incrementDailyVibeCounter(getPrisma(), uid, 'chatCount').catch((e) =>
+          console.error('[analytics] failed to increment chatCount:', e),
+        );
+      }
     }
   });
 

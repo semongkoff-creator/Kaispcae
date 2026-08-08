@@ -21,6 +21,10 @@ import { LarkSyncPanel } from './components/ui/LarkSyncPanel';
 // common case (an ordinary member who never opens it) never pays for its
 // code at all.
 const AdminConsole = lazy(() => import('./admin/AdminConsole').then((m) => ({ default: m.AdminConsole })));
+// Productivity Analytics — every real employee can open this (see PanelId's
+// doc comment), so it's split out for the same "don't pay for code you
+// never load" reason as AdminConsole above, just for a much larger audience.
+const MyAnalyticsPanel = lazy(() => import('./admin/MyAnalyticsPanel').then((m) => ({ default: m.MyAnalyticsPanel })));
 import { CalendarApp } from './components/Calendar/CalendarApp';
 import { AttendanceApp } from './components/Attendance/AttendanceApp';
 import { LarkAttendancePanel } from './components/Attendance/LarkAttendancePanel';
@@ -906,6 +910,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const dailyTaskActive = activePanel === 'dailyTask';
   const leaveActive = activePanel === 'leave';
   const adminViewActive = activePanel === 'adminConsole';
+  const myAnalyticsActive = activePanel === 'myAnalytics';
   const calendarViewActive = activePanel === 'calendar';
   const attendanceViewActive = activePanel === 'attendance';
   const larkAttendanceActive = activePanel === 'larkAttendance';
@@ -941,7 +946,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // Messenger is deliberately NOT included any more: it docks as a left
   // sidebar now (see MessengerApp.tsx), not a full-screen takeover, so the
   // map/HUD/movement stay live beside it, Gather-style.
-  const moduleOpen = dailyTaskActive || leaveActive || calendarViewActive || adminViewActive || attendanceViewActive || larkSyncActive;
+  const moduleOpen = dailyTaskActive || leaveActive || calendarViewActive || adminViewActive || attendanceViewActive || larkSyncActive || myAnalyticsActive;
 
   // Tab for admin panel. (The old E-for-editor hotkey went with the retired
   // overlay editor — Potong 7; editing now lives on the /?roomEditor= page.)
@@ -1787,6 +1792,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         isWorkspaceAdmin={currentUser.workspaceRole === 'admin'}
         adminViewActive={adminViewActive}
         onToggleAdminView={() => openPanel('adminConsole')}
+        myAnalyticsActive={myAnalyticsActive}
+        onToggleMyAnalytics={() => openPanel('myAnalytics')}
         onToggleDailyTask={() => openPanel('dailyTask')}
         miniModeSupported={isMiniModeSupported()}
         miniModeActive={!!miniModeWindow}
@@ -1846,6 +1853,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {adminViewActive && (
         <Suspense fallback={null}>
           <AdminConsole currentUser={currentUser} onClose={closePanel} />
+        </Suspense>
+      )}
+      {myAnalyticsActive && (
+        <Suspense fallback={null}>
+          <MyAnalyticsPanel onClose={closePanel} />
         </Suspense>
       )}
       {attendanceViewActive && <AttendanceApp onClose={closePanel} />}

@@ -1,5 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, EmoteEvent } from '@virtualmeet/shared';
+import { getPrisma } from '../lib/prisma';
+import { incrementDailyVibeCounter } from '../lib/vibeCounters';
 
 export function registerEmoteHandlers(io: Server, socket: Socket) {
   socket.on(SocketEvents.EMOTE_PLAY, (data: { emote: string; x: number; y: number }) => {
@@ -21,5 +23,20 @@ export function registerEmoteHandlers(io: Server, socket: Socket) {
       timestamp: Date.now(),
     };
     socket.to(gameRoom).emit(SocketEvents.EMOTE_PLAY, event);
+
+    // Productivity Analytics — Bagian B.5's Vibe inputs. Fire-and-forget,
+    // never blocks the live emote broadcast above.
+    const uid = (socket.data as { userId?: string }).userId;
+    if (uid) {
+      const prisma = getPrisma();
+      void incrementDailyVibeCounter(prisma, uid, 'emoteCount').catch((e) =>
+        console.error('[analytics] failed to increment emoteCount:', e),
+      );
+      if (event.emote === 'wave') {
+        void incrementDailyVibeCounter(prisma, uid, 'waveCount').catch((e) =>
+          console.error('[analytics] failed to increment waveCount:', e),
+        );
+      }
+    }
   });
 }

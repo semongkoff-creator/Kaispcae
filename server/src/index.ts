@@ -43,11 +43,13 @@ import meetingRoutes, { setMeetingIo, startRecordingPoller } from './routes/meet
 import larkChatMapRoutes from './routes/larkChatMap';
 import taskRoutes from './routes/tasks';
 import leaveRoutes from './routes/leave';
+import analyticsRoutes from './routes/analytics';
 import { startLarkEventStream } from './lib/larkWs';
 import { subscribeLeaveApproval } from './lib/larkApproval';
 import { startReminderSweep } from './socket/reminderSweep';
 import { startAttendanceSweep } from './socket/attendanceSweep';
 import { startQueueSweep } from './socket/queueSweep';
+import { startAnalyticsSweep } from './socket/analyticsSweep';
 import { getYoutubeQuotaStatus } from './lib/youtubeService';
 import { getTurnRelayStatus } from './socket/rtcHandler';
 
@@ -217,6 +219,7 @@ app.use('/api', attendanceRoutes);
 app.use('/api', attendanceAdminRoutes);
 app.use('/api', calendarRoutes);
 app.use('/api', meetingRoomRoutes);
+app.use('/api', analyticsRoutes);
 
 // ── Socket.IO ────────────────────────────────────────────────────
 async function start() {
@@ -261,6 +264,7 @@ async function start() {
   startReminderSweep(io);
   startAttendanceSweep(io);
   startQueueSweep(io);
+  startAnalyticsSweep(io);
 
   httpServer.listen(config.PORT, () => {
     console.log(`[server] VirtualMeet running on http://localhost:${config.PORT}`);
