@@ -141,6 +141,7 @@ model User {
   connectionEventsAsB     ConnectionEvent[]          @relation("ConnectionEventUserB")
   dailyVibeCounters       DailyVibeCounter[]         @relation("DailyVibeCounterUser")
   taskCompletionSnapshots TaskCompletionSnapshot[]   @relation("TaskCompletionSnapshotUser")
+  pokeResponseSamples     PokeResponseSample[]       @relation("PokeResponseSampleUser")
 }
 
 // ─── Workspace foundation (shared by Base / Calendar / Attendance / Docs) ───
@@ -228,7 +229,23 @@ model WorkspacePolicy {
   // Productivity Analytics — all nullable/defaulted so nothing blocks on
   // missing config; the dashboard shows "belum diisi" until an admin sets
   // them (see shared/analyticsRules.ts and routes/analytics.ts).
+  // v1's Vibe formula factor — kept for backward compatibility (an admin
+  // may have already tuned it), but UNUSED by the v2 formula below, which
+  // uses the 4 weight fields instead.
   analyticsVibeNormalizationFactor          Float @default(10)
+  // v2 Vibe — 4 behavioral components, weighted-average, each 0-1
+  // normalized (see routes/analytics.ts's computeVibe). Weights are
+  // PERLU KONFIRMASI per the brief (no default given beyond "must sum
+  // sensibly") — ship equal-weighted and admin-editable rather than
+  // guessing a "right" emphasis.
+  analyticsVibeWeightEmote                  Float @default(0.25)
+  analyticsVibeWeightPoke                   Float @default(0.25)
+  analyticsVibeWeightVoluntaryCall          Float @default(0.25)
+  analyticsVibeWeightOvertimeInverted       Float @default(0.25)
+  // Poke response latency, in seconds, that normalizes to a 0 score (an
+  // instant response normalizes to 1). PERLU KONFIRMASI — brief gives no
+  // number; 120s (2 minutes) is a reasonable default, not a final answer.
+  analyticsPokeResponseCeilingSeconds       Int   @default(120)
   // Threshold (on the PRECEDING work day's AttendanceRecord.overtimeMinutes)
   // for Bagian B.4's "habis lembur — dimaklumi" grace on today's lateness.
   analyticsOvertimeGraceMinMinutes          Int   @default(60)
@@ -1310,6 +1327,14 @@ model StatusInterval {
   roomSlug  String
   // available_focus | in_meeting | quick_chat | busy | away | offline
   status    String
+  // v2 Bagian B.4's "voluntary call-join rate" needs to know WHICH zone an
+  // in_meeting interval happened in (a Zone's `type` — see shared/types
+  // index.ts — is the closest available voluntary-vs-required signal).
+  // Populated from WORK_MODE_CHANGE's own zoneId payload field when
+  // present; null for the JOIN_ROOM-opened initial 'available' interval
+  // (no zone context at that point) and for any client that doesn't send
+  // one.
+  zoneId    String?
   startedAt DateTime
   endedAt   DateTime?
 
@@ -1379,4 +1404,21 @@ model TaskCompletionSnapshot {
   createdAt      DateTime @default(now())
 
   @@unique([userId, date])
+}
+
+// v2 Bagian B.4 — Vibe's "response time to poke" component. One row per
+// COMPLETED response (poke received -> next tracked action), written once
+// the response is detected (see server/src/socket/movementHandler.ts's
+// PLAYER_NUDGE handler + the closing hooks at every already-instrumented
+// action). A poke with no response within the configured window is
+// discarded entirely, never counted against anyone — silence isn't treated
+// as a signal here.
+model PokeResponseSample {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation("PokeResponseSampleUser", fields: [userId], references: [id], onDelete: Cascade)
+  latencyMs  Int
+  occurredAt DateTime @default(now())
+
+  @@index([userId, occurredAt])
 }

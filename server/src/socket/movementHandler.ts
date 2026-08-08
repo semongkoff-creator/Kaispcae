@@ -6,6 +6,9 @@ import { isDoorOverrideActive } from './roomHandler';
 import { createStoppedPayload } from './movementPayload';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { clearMovementSequence, shouldAcceptMoveSequence } from './movementSequence';
+import { recordPokeReceived } from '../lib/pokeResponse';
+import { getPlayerName } from './roomHandler';
+import { broadcastAnalyticsActivity } from './analyticsFeed';
 
 // Rate limiting: max 20 updates per second per player
 const rateLimitMap = new Map<string, number>();
@@ -274,6 +277,22 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     const event: NudgeEvent = { fromId: socket.id, targetId, timestamp: Date.now() };
     io.to(targetId).emit(SocketEvents.PLAYER_NUDGE, event);
     socket.emit(SocketEvents.PLAYER_NUDGE, event);
+
+    // v2 Bagian B.4 — Vibe's "response time to poke" component starts
+    // here. No findUserIdBySocket export needed: `io` already has direct
+    // access to the target's own socket.data.
+    const targetUserId = io.sockets.sockets.get(targetId)?.data?.userId as string | undefined;
+    if (targetUserId) recordPokeReceived(targetUserId);
+
+    // v2 Bagian B.2 #5 — Office Activity Feed, attributed to the SENDER
+    // (the one taking the action), with the target as `other` for context.
+    const senderUserId = (socket.data as { userId?: string }).userId;
+    if (senderUserId) {
+      broadcastAnalyticsActivity(io, senderUserId, getPlayerName(socket.id), 'poke', undefined, {
+        userId: targetUserId ?? targetId,
+        userName: getPlayerName(targetId),
+      });
+    }
   });
 
   // Clean up rate limit map on disconnect

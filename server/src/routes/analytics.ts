@@ -6,7 +6,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveWorkspaceRole, requireWorkspace } from '../lib/workspace';
 import { writeAudit, clientIp } from '../lib/audit';
 import { getOnlineUserIds } from '../socket/roomHandler';
-import { canViewAnalyticsOf, applyOvertimeGrace, finalStatus, workDayOf, ShiftDef } from '@virtualmeet/shared';
+import { canViewAnalyticsOf, applyOvertimeGrace, finalStatus, workDayOf, ShiftDef, layerDataToLegacy, LayerData, ZoneType } from '@virtualmeet/shared';
 
 const router = Router();
 
@@ -91,12 +91,38 @@ async function computeStatusDistribution(userId: string, start: Date, end: Date)
   };
 }
 
-// Bagian B.5's Vibe score. connectionCount comes from ConnectionEvent (not
-// DailyVibeCounter — see schema.prisma's doc comment), everything else from
-// the per-day counters, summed over the period.
+// v2 Bagian B.4 — resolves a Zone's `type` (the closest available
+// voluntary-vs-required signal — see computeVibe's "voluntary call-join
+// rate" component) from whichever source is authoritative for this room
+// (modern layerData-backed rooms vs legacy `zones` JSON) — same resolution
+// roomHandler.ts's own ROOM_STATE emit already uses, reused here rather
+// than re-derived, so a room converted to the modern editor doesn't
+// silently break this lookup.
+async function resolveZoneType(roomSlug: string, zoneId: string): Promise<ZoneType | undefined> {
+  const prisma = getPrisma();
+  const room = await prisma.room.findUnique({ where: { slug: roomSlug }, select: { zones: true, layerData: true } });
+  if (!room) return undefined;
+  let zones: { id: string; type?: string }[] = [];
+  if (room.layerData) {
+    try { zones = layerDataToLegacy(room.layerData as unknown as LayerData).zones; } catch { zones = []; }
+  } else if (Array.isArray(room.zones)) {
+    zones = room.zones as unknown as { id: string; type?: string }[];
+  }
+  return zones.find((z) => z.id === zoneId)?.type as ZoneType | undefined;
+}
+
+// v2 Bagian B.4 — the new 4-component behavioral Vibe formula, replacing
+// v1's emote/chat/furniture/connection weighted sum. Each component is 0-1
+// normalized; `null` means "no data for this person this period" (not "bad")
+// and is EXCLUDED from the weighted average with its weight redistributed
+// proportionally among the rest — same fairness spirit as Bagian C.4.1's
+// data-sufficiency exclusion, applied per-component instead of per-person.
+// Weights are admin-editable WorkspacePolicy fields (brief flags them as
+// unconfirmed) — never hardcoded "what matters most" assumptions.
 async function computeVibe(userId: string, start: Date, end: Date) {
   const prisma = getPrisma();
-  const [counters, connectionCount, policy] = await Promise.all([
+  const days = Math.max(1, DateTime.fromJSDate(end).diff(DateTime.fromJSDate(start), 'days').days);
+  const [counters, connectionCount, policy, pokeAgg, meetingIntervals, records] = await Promise.all([
     prisma.dailyVibeCounter.aggregate({
       where: { userId, date: bucketedRange(start, end) },
       _sum: { emoteCount: true, waveCount: true, chatCount: true, furnitureCount: true },
@@ -105,15 +131,87 @@ async function computeVibe(userId: string, start: Date, end: Date) {
       where: { occurredAt: { gte: start, lt: end }, OR: [{ userAId: userId }, { userBId: userId }] },
     }),
     prisma.workspacePolicy.findUnique({ where: { id: 'singleton' } }),
+    prisma.pokeResponseSample.aggregate({
+      where: { userId, occurredAt: { gte: start, lt: end } },
+      _avg: { latencyMs: true }, _count: true,
+    }),
+    prisma.statusInterval.findMany({
+      where: { userId, status: 'in_meeting', startedAt: { lt: end }, OR: [{ endedAt: null }, { endedAt: { gt: start } }] },
+      select: { roomSlug: true, zoneId: true, startedAt: true, endedAt: true },
+    }),
+    prisma.attendanceRecord.findMany({ where: { userId, date: bucketedRange(start, end) }, select: { overtimeMinutes: true, status: true } }),
   ]);
+
   const emote = counters._sum.emoteCount ?? 0;
   const wave = counters._sum.waveCount ?? 0;
   const chat = counters._sum.chatCount ?? 0;
   const furniture = counters._sum.furnitureCount ?? 0;
-  const raw = emote * 1 + wave * 1.5 + chat * 0.5 + furniture * 2 + connectionCount * 2;
-  const factor = policy?.analyticsVibeNormalizationFactor ?? 10;
-  const score = Math.round(Math.min(10, raw / (factor || 10)) * 10) / 10;
-  return { score, connectionCount, emote, wave, chat, furniture };
+
+  // 1. Emote engagement — reinterpreted from "positive rate" (Bagian B.4)
+  // since no negative/neutral emote exists to compare against (checked:
+  // EmoteType is wave|clap|laugh|heart|party|think|sleep|fire, all
+  // positive-leaning) — this is normalized engagement frequency instead.
+  const emoteComponent = Math.min(1, (emote / days) / 5);
+
+  // 2. Poke response time — null (excluded, not penalized) if this person
+  // was never poked, or never gave a qualifying response, this period.
+  const ceilingSec = policy?.analyticsPokeResponseCeilingSeconds ?? 120;
+  const pokeComponent = pokeAgg._count > 0 && pokeAgg._avg.latencyMs != null
+    ? Math.max(0, 1 - (pokeAgg._avg.latencyMs / 1000) / ceilingSec)
+    : null;
+
+  // 3. Voluntary call-join rate — in_meeting minutes spent in a 'general'
+  // zone (not a dedicated 'meeting' room) over total in_meeting minutes.
+  const now = new Date();
+  let totalMeetingMs = 0;
+  let voluntaryMeetingMs = 0;
+  const zoneTypeCache = new Map<string, ZoneType | undefined>();
+  for (const iv of meetingIntervals) {
+    const clipStart = iv.startedAt < start ? start : iv.startedAt;
+    const rawEnd = iv.endedAt ?? now;
+    const clipEnd = rawEnd > end ? end : rawEnd;
+    const ms = clipEnd.getTime() - clipStart.getTime();
+    if (ms <= 0) continue;
+    totalMeetingMs += ms;
+    if (iv.zoneId) {
+      const cacheKey = `${iv.roomSlug}:${iv.zoneId}`;
+      if (!zoneTypeCache.has(cacheKey)) zoneTypeCache.set(cacheKey, await resolveZoneType(iv.roomSlug, iv.zoneId));
+      if (zoneTypeCache.get(cacheKey) === 'general') voluntaryMeetingMs += ms;
+    }
+  }
+  const voluntaryComponent = totalMeetingMs > 0 ? voluntaryMeetingMs / totalMeetingMs : null;
+
+  // 4. Overtime frequency, inverted — fraction of present days WITHOUT
+  // overtime; null if there's no attendance to judge this by at all.
+  const presentRecords = records.filter((r) => r.status !== 'absent' && r.status !== 'holiday');
+  const daysWithOvertime = presentRecords.filter((r) => r.overtimeMinutes > 0).length;
+  const overtimeComponent = presentRecords.length > 0 ? 1 - daysWithOvertime / presentRecords.length : null;
+
+  const weighted: { key: string; value: number | null; weight: number }[] = [
+    { key: 'emoteEngagement', value: emoteComponent, weight: policy?.analyticsVibeWeightEmote ?? 0.25 },
+    { key: 'pokeResponse', value: pokeComponent, weight: policy?.analyticsVibeWeightPoke ?? 0.25 },
+    { key: 'voluntaryCallJoin', value: voluntaryComponent, weight: policy?.analyticsVibeWeightVoluntaryCall ?? 0.25 },
+    { key: 'overtimeInverted', value: overtimeComponent, weight: policy?.analyticsVibeWeightOvertimeInverted ?? 0.25 },
+  ];
+  const usable = weighted.filter((c): c is { key: string; value: number; weight: number } => c.value !== null && c.weight > 0);
+  const totalWeight = usable.reduce((s, c) => s + c.weight, 0);
+  const score = totalWeight > 0
+    ? Math.round((usable.reduce((s, c) => s + c.value * c.weight, 0) / totalWeight) * 100) / 10
+    : 0;
+
+  return {
+    score,
+    connectionCount, emote, wave, chat, furniture,
+    // Bagian B.4's "always show the breakdown" requirement — never a bare
+    // score. null components are surfaced as-is (client renders "no data"),
+    // not silently zeroed.
+    breakdown: {
+      emoteEngagement: emoteComponent,
+      pokeResponse: pokeComponent,
+      voluntaryCallJoin: voluntaryComponent,
+      overtimeInverted: overtimeComponent,
+    },
+  };
 }
 
 async function computeTaskCompletion(userId: string, start: Date, end: Date) {
@@ -186,12 +284,97 @@ async function computeMemberSummary(userId: string, start: Date, end: Date) {
   return { distribution, vibe, tasks, attendance };
 }
 
+// v2 Bagian B.2 #4 — Live Meeting List. "Right now" by construction: an
+// open StatusInterval (endedAt null) with status 'in_meeting' IS someone
+// currently in a meeting — no separate live-state tracking needed, this is
+// exactly what the column already means.
+async function computeLiveMeetings(userIds: string[], names: Map<string, string>) {
+  if (!userIds.length) return [];
+  const prisma = getPrisma();
+  const open = await prisma.statusInterval.findMany({
+    where: { userId: { in: userIds }, status: 'in_meeting', endedAt: null },
+    select: { userId: true, roomSlug: true, startedAt: true },
+  });
+  if (!open.length) return [];
+  const rooms = await prisma.room.findMany({ where: { slug: { in: [...new Set(open.map((o) => o.roomSlug))] } }, select: { slug: true, name: true } });
+  const roomNames = new Map(rooms.map((r) => [r.slug, r.name]));
+  const now = Date.now();
+  return open.map((o) => ({
+    userId: o.userId,
+    name: names.get(o.userId) ?? o.userId,
+    roomSlug: o.roomSlug,
+    roomName: roomNames.get(o.roomSlug) ?? o.roomSlug,
+    startedAt: o.startedAt.toISOString(),
+    durationMinutes: Math.round((now - o.startedAt.getTime()) / 60000),
+  }));
+}
+
 // Bagian B.3.1's "Sehat 35-50% dari jam kerja" — focus time as a percentage
 // of jam hadir (attendance work minutes), the closest thing to "jam kerja"
 // this app tracks. 0 if there's no attendance to divide by, not NaN/Infinity.
 function focusPercent(focusMinutes: number, jamHadirMinutes: number): number {
   if (jamHadirMinutes <= 0) return 0;
   return Math.round((focusMinutes / jamHadirMinutes) * 1000) / 10;
+}
+
+// v2 Bagian B.5 #1 — DAU + Peak Concurrent Users. Both computed from the
+// SAME StatusInterval fetch (one query, two derived metrics) rather than a
+// periodic "sample the concurrent count" sweep — a sampling job would add a
+// new table AND only catch peaks that happen to land on a sample tick,
+// missing true peaks between samples. A sweep-line over real interval data
+// is exact and needs no new writes at all.
+async function computeDauAndPeakConcurrent(userIds: string[], start: Date, end: Date): Promise<{
+  dau: { date: string; count: number }[];
+  peakConcurrent: number;
+  peakConcurrentAt: string | null;
+}> {
+  if (!userIds.length) return { dau: [], peakConcurrent: 0, peakConcurrentAt: null };
+  const prisma = getPrisma();
+  const intervals = await prisma.statusInterval.findMany({
+    where: { userId: { in: userIds }, startedAt: { lt: end }, OR: [{ endedAt: null }, { endedAt: { gt: start } }] },
+    select: { userId: true, startedAt: true, endedAt: true },
+  });
+  const now = new Date();
+
+  // DAU: per WIB calendar day in range, count distinct users with any
+  // coverage that day. Day-bucketing an INTERVAL (not a point) isn't a
+  // plain SQL GROUP BY, so this walks day-by-day client-side.
+  const dau: { date: string; count: number }[] = [];
+  let cursor = DateTime.fromJSDate(start).setZone('Asia/Jakarta').startOf('day');
+  const last = DateTime.fromJSDate(end).setZone('Asia/Jakarta');
+  while (cursor < last) {
+    const dayStart = cursor.toJSDate();
+    const dayEnd = cursor.endOf('day').toJSDate();
+    const active = new Set<string>();
+    for (const iv of intervals) {
+      const ivEnd = iv.endedAt ?? now;
+      if (iv.startedAt < dayEnd && ivEnd > dayStart) active.add(iv.userId);
+    }
+    dau.push({ date: cursor.toFormat('yyyy-LL-dd'), count: active.size });
+    cursor = cursor.plus({ days: 1 });
+  }
+
+  // Peak concurrent — classic sweep-line: +1 at each start, -1 at each end,
+  // sorted by time, track the running max.
+  type SweepPoint = { at: number; delta: 1 | -1 };
+  const points: SweepPoint[] = [];
+  for (const iv of intervals) {
+    const s = Math.max(iv.startedAt.getTime(), start.getTime());
+    const e = Math.min((iv.endedAt ?? now).getTime(), end.getTime());
+    if (e <= s) continue;
+    points.push({ at: s, delta: 1 }, { at: e, delta: -1 });
+  }
+  // Ends sort before starts at the same instant, so a back-to-back
+  // handoff (one session ending exactly as another begins) doesn't get
+  // double-counted as +1 concurrency it never actually had.
+  points.sort((a, b) => a.at - b.at || a.delta - b.delta);
+  let running = 0, peak = 0, peakAt: number | null = null;
+  for (const p of points) {
+    running += p.delta;
+    if (running > peak) { peak = running; peakAt = p.at; }
+  }
+
+  return { dau, peakConcurrent: peak, peakConcurrentAt: peakAt ? new Date(peakAt).toISOString() : null };
 }
 
 // Bagian B.3.3's attendance heatmap (jam 0-23 x hari Sen-Min) — any StatusInterval
@@ -245,6 +428,73 @@ async function computeOnTimeTrend(userIds: string[], start: Date, end: Date) {
   }));
 }
 
+// v2 Bagian B.5 #6 — Top Connectors network detail. Built from
+// ConnectionEvent alone (the one genuinely pairwise signal this app
+// tracks — chat is zone-broadcast, not pairwise; see the v2 plan's own
+// note on why poke-pairs weren't added as a second signal, to keep this
+// scoped). One row per unique pair, weight = event count in the period.
+async function computeConnectionNetwork(
+  users: { id: string; displayName: string; departmentId: string | null }[],
+  departments: { id: string; name: string }[],
+  start: Date,
+  end: Date,
+) {
+  const prisma = getPrisma();
+  const ids = users.map((u) => u.id);
+  if (!ids.length) return { nodes: [], edges: [], isolationInsight: null };
+  const idSet = new Set(ids);
+  const events = await prisma.connectionEvent.findMany({
+    where: { occurredAt: { gte: start, lt: end }, OR: [{ userAId: { in: ids } }, { userBId: { in: ids } }] },
+    select: { userAId: true, userBId: true },
+  });
+
+  const userMap = new Map(users.map((u) => [u.id, u]));
+  const edgeMap = new Map<string, { a: string; b: string; weight: number }>();
+  for (const e of events) {
+    if (!idSet.has(e.userAId) || !idSet.has(e.userBId)) continue; // both sides must be in this pool (team/company scope)
+    const key = e.userAId < e.userBId ? `${e.userAId}:${e.userBId}` : `${e.userBId}:${e.userAId}`;
+    const existing = edgeMap.get(key);
+    if (existing) existing.weight += 1;
+    else edgeMap.set(key, { a: e.userAId, b: e.userBId, weight: 1 });
+  }
+  const edges = [...edgeMap.values()].map((e) => {
+    const deptA = userMap.get(e.a)?.departmentId;
+    const deptB = userMap.get(e.b)?.departmentId;
+    return { a: e.a, b: e.b, weight: e.weight, crossDept: !!deptA && !!deptB && deptA !== deptB };
+  });
+  const nodes = users.map((u) => ({ userId: u.id, name: u.displayName, departmentId: u.departmentId }));
+
+  // "Departemen X paling terisolasi" — only meaningful with >=2 departments
+  // (with one department, every edge is trivially same-dept — not a signal).
+  let isolationInsight: string | null = null;
+  const deptIdsPresent = new Set(users.map((u) => u.departmentId).filter((d): d is string => !!d));
+  if (deptIdsPresent.size >= 2) {
+    const byDept = new Map<string, { cross: number; total: number }>();
+    for (const e of edges) {
+      for (const deptId of [userMap.get(e.a)?.departmentId, userMap.get(e.b)?.departmentId]) {
+        if (!deptId) continue;
+        const cur = byDept.get(deptId) ?? { cross: 0, total: 0 };
+        cur.total += e.weight;
+        if (e.crossDept) cur.cross += e.weight;
+        byDept.set(deptId, cur);
+      }
+    }
+    let lowestRatio = Infinity;
+    let mostIsolatedDeptId: string | null = null;
+    for (const [deptId, stat] of byDept) {
+      if (stat.total === 0) continue;
+      const ratio = stat.cross / stat.total;
+      if (ratio < lowestRatio) { lowestRatio = ratio; mostIsolatedDeptId = deptId; }
+    }
+    if (mostIsolatedDeptId) {
+      const deptName = departments.find((d) => d.id === mostIsolatedDeptId)?.name ?? mostIsolatedDeptId;
+      isolationInsight = `Departemen ${deptName} paling terisolasi dari tim lain — ${Math.round(lowestRatio * 100)}% interaksinya lintas-departemen.`;
+    }
+  }
+
+  return { nodes, edges, isolationInsight };
+}
+
 // GET /api/analytics/individual — Bagian B.3.1. Self by default; `userId`
 // param only if canViewAnalyticsOf passes (self / workspace admin / direct
 // manager — same rule attendance already uses). Deliberately never returns
@@ -285,13 +535,65 @@ router.get('/analytics/individual', authenticateToken, async (req: AuthRequest, 
       meetingMinutes: distribution.inMeetingMinutes,
       taskSelesai: tasks,
       connections: { count: vibe.connectionCount },
-      vibe: { score: vibe.score },
+      vibe: { score: vibe.score, breakdown: vibe.breakdown },
       distribution,
       attendanceHistory: attendance.days,
     });
   } catch (err) {
     console.error('[analytics] individual error:', err);
     return res.status(500).json({ error: 'Gagal memuat analytics' });
+  }
+});
+
+// GET /api/analytics/individual/timeline — v2 Bagian B.1 #2, the per-day
+// Gantt view. Same self/canViewAnalyticsOf permission shape as
+// /analytics/individual above (duplicated rather than extracted — this
+// file's established convention, see /analytics/export's own copy of the
+// same check). Returns RAW StatusInterval blocks for one WIB day (not
+// summed totals) — same clip-to-window math as computeStatusDistribution,
+// just returning the blocks themselves instead of aggregating them away.
+router.get('/analytics/individual/timeline', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const targetUserId = typeof req.query.userId === 'string' && req.query.userId ? req.query.userId : req.userId!;
+
+    if (targetUserId !== req.userId) {
+      const [role, target] = await Promise.all([
+        resolveWorkspaceRole(prisma, req.userId!),
+        prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true, managerId: true } }),
+      ]);
+      if (!target || !canViewAnalyticsOf({ id: req.userId!, workspaceRole: role ?? 'member' }, target)) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+
+    const requestedDate = typeof req.query.date === 'string' ? DateTime.fromFormat(req.query.date, 'yyyy-LL-dd', { zone: 'Asia/Jakarta' }) : DateTime.invalid('missing');
+    const day = (requestedDate.isValid ? requestedDate : DateTime.now().setZone('Asia/Jakarta')).startOf('day');
+    const dayStart = day.toJSDate();
+    const dayEnd = day.endOf('day').toJSDate();
+
+    const intervals = await prisma.statusInterval.findMany({
+      where: { userId: targetUserId, startedAt: { lt: dayEnd }, OR: [{ endedAt: null }, { endedAt: { gt: dayStart } }] },
+      orderBy: { startedAt: 'asc' },
+    });
+    const now = new Date();
+    const blocks = intervals
+      .map((iv) => {
+        const clipStart = iv.startedAt < dayStart ? dayStart : iv.startedAt;
+        const rawEnd = iv.endedAt ?? now;
+        const clipEnd = rawEnd > dayEnd ? dayEnd : rawEnd;
+        return {
+          status: iv.status,
+          startMinuteOfDay: Math.round((clipStart.getTime() - dayStart.getTime()) / 60000),
+          endMinuteOfDay: Math.round((clipEnd.getTime() - dayStart.getTime()) / 60000),
+        };
+      })
+      .filter((b) => b.endMinuteOfDay > b.startMinuteOfDay);
+
+    return res.json({ date: day.toFormat('yyyy-LL-dd'), blocks });
+  } catch (err) {
+    console.error('[analytics] timeline error:', err);
+    return res.status(500).json({ error: 'Gagal memuat timeline' });
   }
 });
 
@@ -307,10 +609,12 @@ router.get('/analytics/team', authenticateToken, async (req: AuthRequest, res: R
     const reports = await prisma.user.findMany({ where: { managerId: req.userId! }, select: { id: true, displayName: true } });
     const { type, start, end } = parsePeriod(req.query);
     if (!reports.length) {
-      return res.json({ period: { type, start: start.toISOString(), end: end.toISOString() }, members: [], summary: null });
+      return res.json({ period: { type, start: start.toISOString(), end: end.toISOString() }, members: [], summary: null, liveMeetings: [] });
     }
 
     const onlineIds = getOnlineUserIds();
+    const names = new Map(reports.map((r) => [r.id, r.displayName]));
+    const liveMeetings = await computeLiveMeetings(reports.map((r) => r.id), names);
     const members = await Promise.all(reports.map(async (m) => {
       const s = await computeMemberSummary(m.id, start, end);
       return {
@@ -352,7 +656,7 @@ router.get('/analytics/team', authenticateToken, async (req: AuthRequest, res: R
       vibeTim: Math.round((members.reduce((s, m) => s + m.vibeScore, 0) / members.length) * 10) / 10,
     };
 
-    return res.json({ period: { type, start: start.toISOString(), end: end.toISOString() }, members, summary });
+    return res.json({ period: { type, start: start.toISOString(), end: end.toISOString() }, members, summary, liveMeetings });
   } catch (err) {
     console.error('[analytics] team error:', err);
     return res.status(500).json({ error: 'Gagal memuat analytics tim' });
@@ -419,9 +723,11 @@ router.get('/analytics/company', authenticateToken, requireWorkspace('analytics:
     }
 
     const userIds = users.map((u) => u.id);
-    const [heatmap, trend] = await Promise.all([
+    const [heatmap, trend, dauAndPeak, network] = await Promise.all([
       computeAttendanceHeatmap(userIds, start, end),
       computeOnTimeTrend(userIds, start, end),
+      computeDauAndPeakConcurrent(userIds, start, end),
+      computeConnectionNetwork(users, departments, start, end),
     ]);
 
     return res.json({
@@ -437,6 +743,9 @@ router.get('/analytics/company', authenticateToken, requireWorkspace('analytics:
       utilizationByDept,
       heatmap,
       trend,
+      dau: dauAndPeak.dau,
+      peakConcurrent: { count: dauAndPeak.peakConcurrent, at: dauAndPeak.peakConcurrentAt },
+      network,
     });
   } catch (err) {
     console.error('[analytics] company error:', err);

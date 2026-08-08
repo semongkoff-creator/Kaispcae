@@ -3,6 +3,7 @@ import { DateTime } from 'luxon';
 import { PeopleFill, HourglassSplit, CameraVideo, CheckCircle, EmojiSmile, Download } from 'react-bootstrap-icons';
 import { PeriodPicker, PeriodValue, defaultPeriodValue } from './PeriodPicker';
 import { RankingBoard } from './RankingBoard';
+import { OfficeActivityFeed } from './OfficeActivityFeed';
 
 const API = '/api';
 async function req<T>(path: string): Promise<T> {
@@ -17,6 +18,9 @@ interface TeamMember {
   jamHadirMinutes: number; overtimeMinutes: number; focusMinutes: number; meetingMinutes: number;
   taskDue: number; taskCompleted: number; vibeScore: number; focusPercent: number;
 }
+interface LiveMeeting {
+  userId: string; name: string; roomSlug: string; roomName: string; startedAt: string; durationMinutes: number;
+}
 interface TeamResponse {
   period: { type: string; start: string; end: string };
   members: TeamMember[];
@@ -24,6 +28,7 @@ interface TeamResponse {
     anggotaAktifHariIni: number; totalAnggota: number; avgFocusPercent: number;
     taskOnTimeRate: number | null; anggotaDenganLembur: number; avgMeetingMinutesPerDay: number; vibeTim: number;
   } | null;
+  liveMeetings: LiveMeeting[];
 }
 
 function fmtMinutes(m: number): string {
@@ -44,17 +49,24 @@ export function TeamAnalyticsPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const qs = new URLSearchParams({ period: period.period });
       if (period.period === 'custom') { qs.set('from', period.from); qs.set('to', period.to); }
       setData(await req<TeamResponse>(`/analytics/team?${qs}`));
       setError(null);
-    } catch (e) { setError(e instanceof Error ? e.message : 'Gagal memuat'); }
-    finally { setLoading(false); }
+    } catch (e) { if (!silent) setError(e instanceof Error ? e.message : 'Gagal memuat'); }
+    finally { if (!silent) setLoading(false); }
   }, [period]);
   useEffect(() => { void load(); }, [load]);
+  // Live Meeting List (v2 B.2 #4) — same "polled, badge lag costs nothing"
+  // posture as the app's existing pendingJoinCount polling (App.tsx), not a
+  // dedicated socket push, so it stays fresh without new live infra.
+  useEffect(() => {
+    const iv = setInterval(() => void load(true), 15000);
+    return () => clearInterval(iv);
+  }, [load]);
 
   const exportExcel = async () => {
     const token = localStorage.getItem('vm_token');
@@ -110,6 +122,25 @@ export function TeamAnalyticsPanel() {
               <p className={cardValue}>{data.summary.vibeTim.toFixed(1)}/10</p>
             </div>
           </div>
+
+          <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 mb-1 flex items-center gap-1.5">
+            <CameraVideo size={12} /> Sedang meeting sekarang
+            {data.liveMeetings.length > 0 && <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />}
+          </p>
+          {data.liveMeetings.length === 0 ? (
+            <p className="text-xs text-gray-400 mb-3">Tidak ada anggota yang sedang meeting.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+              {data.liveMeetings.map((m) => (
+                <div key={m.userId} className="bg-green-50 dark:bg-green-900/20 rounded-lg px-2.5 py-1.5 flex items-center justify-between text-xs">
+                  <span className="text-gray-700 dark:text-gray-200 font-medium">{m.name}</span>
+                  <span className="text-gray-500 dark:text-gray-400">{m.roomName} · {m.durationMinutes}m</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="mb-3"><OfficeActivityFeed /></div>
 
           <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 mb-1">Roster anggota</p>
           <div className="overflow-x-auto mb-3">

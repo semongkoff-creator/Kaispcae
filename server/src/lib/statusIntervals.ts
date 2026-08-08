@@ -37,9 +37,10 @@ export async function openStatusInterval(
   roomSlug: string,
   status: AnalyticsStatus,
   at: Date = new Date(),
+  zoneId?: string,
 ): Promise<void> {
   await closeOpenStatusInterval(prisma, userId, at);
-  await prisma.statusInterval.create({ data: { userId, roomSlug, status, startedAt: at } });
+  await prisma.statusInterval.create({ data: { userId, roomSlug, status, startedAt: at, zoneId: zoneId ?? null } });
 }
 
 export async function closeOpenStatusInterval(

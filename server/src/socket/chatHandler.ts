@@ -5,6 +5,8 @@ import { socketRateLimit } from '../middleware/rateLimit';
 import { isMusicCommand, handleMusicCommand } from './musicHandler';
 import { getPrisma } from '../lib/prisma';
 import { incrementDailyVibeCounter } from '../lib/vibeCounters';
+import { recordResponseIfPending } from '../lib/pokeResponse';
+import { broadcastAnalyticsActivity } from './analyticsFeed';
 
 let messageId = 0;
 const canSendChat = socketRateLimit(5); // max 5 chat messages/sec per socket
@@ -86,9 +88,17 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
     if (!isGuest) {
       const uid = (socket.data as { userId?: string }).userId;
       if (uid) {
-        void incrementDailyVibeCounter(getPrisma(), uid, 'chatCount').catch((e) =>
+        const prisma = getPrisma();
+        void incrementDailyVibeCounter(prisma, uid, 'chatCount').catch((e) =>
           console.error('[analytics] failed to increment chatCount:', e),
         );
+        // v2 Bagian B.4 — a chat message is a qualifying "response" too.
+        void recordResponseIfPending(prisma, uid).catch((e) =>
+          console.error('[analytics] failed to record poke response:', e),
+        );
+        // v2 Bagian B.2 #5 — Office Activity Feed. Metadata only (that a
+        // message was sent) — never the text itself, per Bagian A.4.
+        broadcastAnalyticsActivity(io, uid, playerName(), 'chat');
       }
     }
   });

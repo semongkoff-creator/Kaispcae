@@ -930,6 +930,15 @@ export enum SocketEvents {
   ZONE_QUEUE_SESSION_ACTIVE = 'zone:queue_session_active',
   ZONE_QUEUE_SESSION_CLEARED = 'zone:queue_session_cleared',
 
+  // v2 Bagian B.2 #5 — Office Activity Feed. A manager-only live "pulse",
+  // NOT a persisted audit trail (see AuditLog for that) — pushed to
+  // whichever manager sockets are subscribed to `analytics-feed:<managerId>`
+  // (see server/src/socket/analyticsFeed.ts), event-level only (never chat
+  // TEXT — Bagian A.4's privacy rule).
+  ANALYTICS_ACTIVITY = 'analytics:activity',
+  ANALYTICS_FEED_SUBSCRIBE = 'analytics:feed_subscribe',
+  ANALYTICS_FEED_UNSUBSCRIBE = 'analytics:feed_unsubscribe',
+
   // QA (Presence checklist item #8, "Member list akurat") — workspace-wide "who's online + which room" roster (NOT the
   // in-room ParticipantPanel, which only ever sees people standing in the
   // SAME room). Named `roster:` rather than reusing the existing `presence:`
@@ -1058,6 +1067,22 @@ export interface ZoneQueueSessionActivePayload {
 }
 export interface ZoneQueueSessionClearedPayload {
   zoneId: string;
+}
+
+// v2 Bagian B.2 #5 — Office Activity Feed. `detail` is a short, pre-
+// formatted, human-readable fragment (e.g. a zone/room name) — never chat
+// text, never anything else Bagian A.4 would call content rather than
+// metadata.
+export type AnalyticsActivityType = 'status_change' | 'connection' | 'chat' | 'poke';
+export interface AnalyticsActivityPayload {
+  type: AnalyticsActivityType;
+  userId: string;
+  userName: string;
+  timestamp: number;
+  detail?: string;
+  // Only set for type 'connection' — the other person involved.
+  otherUserId?: string;
+  otherUserName?: string;
 }
 
 export interface SummonRespondPayload {

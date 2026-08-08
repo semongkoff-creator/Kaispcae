@@ -3,6 +3,7 @@ import { DateTime } from 'luxon';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { HourglassSplit, CameraVideo, CheckCircle, PeopleFill, EmojiSmile, ClockHistory, Download } from 'react-bootstrap-icons';
 import { PeriodPicker, PeriodValue, defaultPeriodValue } from './PeriodPicker';
+import { TimelineChart, TimelineBlock } from './TimelineChart';
 
 const API = '/api';
 async function req<T>(path: string): Promise<T> {
@@ -20,7 +21,7 @@ interface IndividualResponse {
   meetingMinutes: number;
   taskSelesai: { due: number; completed: number };
   connections: { count: number };
-  vibe: { score: number };
+  vibe: { score: number; breakdown: { emoteEngagement: number | null; pokeResponse: number | null; voluntaryCallJoin: number | null; overtimeInverted: number | null } };
   distribution: { availableMinutes: number; focusMinutes: number; inMeetingMinutes: number; busyMinutes: number; awayMinutes: number; offlineMinutes: number };
   attendanceHistory: { date: string; clockIn: string | null; clockOut: string | null; status: string; workMinutes: number; overtimeMinutes: number; grace: { reason: string; previousDayClockOut: string | null; previousDayOvertimeMinutes: number } | null }[];
 }
@@ -36,6 +37,50 @@ const PIE_COLORS = ['#7c3aed', '#2563eb', '#d97706', '#6b7280', '#0891b2'];
 const card = 'bg-gray-50 dark:bg-gray-800 rounded-xl p-3';
 const cardLabel = 'text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mb-1';
 const cardValue = 'text-lg font-semibold text-gray-800 dark:text-gray-100';
+
+const VIBE_COMPONENT_LABELS: Record<string, string> = {
+  emoteEngagement: 'Keaktifan emote',
+  pokeResponse: 'Respon colekan',
+  voluntaryCallJoin: 'Ikut call sukarela',
+  overtimeInverted: 'Tanpa lembur berlebih',
+};
+
+// Bagian B.4 — "JANGAN pernah tampilkan angka vibe tanpa breakdown, supaya
+// tidak terasa seperti dinilai diam-diam." The 4 components are always
+// rendered alongside the score, never hidden behind a hover-only tooltip.
+// `null` means no data for that component this period (excluded from the
+// weighted average server-side, not silently scored 0) — shown as "—", not
+// a bar, so it reads as "no data" instead of "zero".
+function VibeBreakdownCard({ vibe }: { vibe: { score: number; breakdown: Record<string, number | null> } }) {
+  return (
+    <div className={`${card} mb-4`}>
+      <div className="flex items-center justify-between mb-2">
+        <p className={cardLabel + ' mb-0'}><EmojiSmile size={12} /> Vibe pribadi</p>
+        <p className={cardValue}>{vibe.score.toFixed(1)}/10</p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+        {Object.entries(VIBE_COMPONENT_LABELS).map(([key, label]) => {
+          const v = vibe.breakdown[key];
+          return (
+            <div key={key} className="flex items-center gap-2 text-[11px]">
+              <span className="text-gray-500 dark:text-gray-400 w-32 shrink-0">{label}</span>
+              {v === null ? (
+                <span className="text-gray-300 dark:text-gray-600">— (tidak ada data periode ini)</span>
+              ) : (
+                <>
+                  <div className="flex-1 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                    <div className="h-full bg-purple-500" style={{ width: `${Math.round(v * 100)}%` }} />
+                  </div>
+                  <span className="text-gray-400 w-8 text-right">{Math.round(v * 100)}%</span>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 // Bagian B.3.1 — Individual tier. `userId` is only ever set by AdminConsole
 // (Phase 3, a manager/admin browsing someone else's data via
@@ -58,6 +103,25 @@ export function AnalyticsPanel({ userId }: { userId?: string }) {
     finally { setLoading(false); }
   }, [period, userId]);
   useEffect(() => { void load(); }, [load]);
+
+  // v2 Bagian B.1 #2 — per-day Gantt, deliberately its OWN date picker
+  // (defaults to today) rather than reusing the period range above: the
+  // whole point is "look at ONE day's pattern", which a multi-day period
+  // selector doesn't map onto.
+  const [timelineDate, setTimelineDate] = useState(DateTime.now().setZone('Asia/Jakarta').toFormat('yyyy-LL-dd'));
+  const [timelineBlocks, setTimelineBlocks] = useState<TimelineBlock[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    setTimelineLoading(true);
+    const qs = new URLSearchParams({ date: timelineDate });
+    if (userId) qs.set('userId', userId);
+    req<{ date: string; blocks: TimelineBlock[] }>(`/analytics/individual/timeline?${qs}`)
+      .then((r) => { if (!cancelled) setTimelineBlocks(r.blocks); })
+      .catch(() => { if (!cancelled) setTimelineBlocks([]); })
+      .finally(() => { if (!cancelled) setTimelineLoading(false); });
+    return () => { cancelled = true; };
+  }, [timelineDate, userId]);
 
   // Bagian B.7 — same "server-built file, unconditional audit entry" shape
   // as AttendanceReport.tsx's own exportCsv, just xlsx instead of CSV.
@@ -119,17 +183,29 @@ export function AnalyticsPanel({ userId }: { userId?: string }) {
               <p className={cardValue}>{data.connections.count}</p>
               <p className="text-[10px] text-gray-400">Obrolan spontan</p>
             </div>
-            <div className={card}>
-              <p className={cardLabel}><EmojiSmile size={12} /> Vibe pribadi</p>
-              <p className={cardValue}>{data.vibe.score.toFixed(1)}/10</p>
-            </div>
           </div>
+
+          <VibeBreakdownCard vibe={data.vibe} />
 
           {data.overtime.totalMinutes > 0 && (
             <p className="mb-4 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5">
               Lembur periode ini: {fmtMinutes(data.overtime.totalMinutes)}
             </p>
           )}
+
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-gray-800 dark:text-gray-100">Timeline harian</p>
+            <input
+              type="date" value={timelineDate} onChange={(e) => setTimelineDate(e.target.value)}
+              aria-label="Tanggal timeline"
+              className="bg-gray-50 dark:bg-gray-700 rounded-lg px-2 py-1 text-xs text-gray-800 dark:text-gray-100 outline-none cursor-pointer"
+            />
+          </div>
+          <div className="mb-4">
+            {timelineLoading ? <p className="text-xs text-gray-400">Memuat…</p> : timelineBlocks.length === 0 ? (
+              <p className="text-xs text-gray-400">Tidak ada aktivitas tercatat pada tanggal ini.</p>
+            ) : <TimelineChart blocks={timelineBlocks} />}
+          </div>
 
           <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 mb-2">Distribusi waktu</p>
           <div className="flex flex-col sm:flex-row items-center gap-3 mb-4">

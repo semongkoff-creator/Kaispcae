@@ -7,6 +7,7 @@ import { getCachedPlayers } from '../store/roomStore';
 import { listTasksInRange } from '../lib/larkTasks';
 import { computeRanking } from '../routes/analytics';
 import { sendGroupText } from '../lib/larkIm';
+import { broadcastAnalyticsActivity } from './analyticsFeed';
 
 // Productivity Analytics — Bagian A.2's "connection" event (spontaneous
 // proximity chat between two people). No server-side proximity signal
@@ -36,12 +37,12 @@ export function startAnalyticsSweep(
   taskSyncIntervalMs = 15 * 60 * 1000,
   hallOfFameCheckIntervalMs = 5 * 60 * 1000,
 ): void {
-  setInterval(() => void sweepProximityOnce(), proximityIntervalMs);
+  setInterval(() => void sweepProximityOnce(io), proximityIntervalMs);
   setInterval(() => void syncTaskCompletionsOnce(), taskSyncIntervalMs);
   setInterval(() => void runWeeklyHallOfFameOnce(io), hallOfFameCheckIntervalMs);
 }
 
-async function sweepProximityOnce(): Promise<void> {
+async function sweepProximityOnce(io: Server): Promise<void> {
   try {
     const prisma = getPrisma();
     const now = Date.now();
@@ -69,6 +70,11 @@ async function sweepProximityOnce(): Promise<void> {
             lastLoggedAt.set(key, now);
             const [userAId, userBId] = uidA < uidB ? [uidA, uidB] : [uidB, uidA];
             await prisma.connectionEvent.create({ data: { roomSlug, userAId, userBId } });
+            // v2 Bagian B.2 #5 — Office Activity Feed. Broadcast from BOTH
+            // sides (proximity is mutual, unlike a poke's clear sender) so
+            // each side's own manager sees it regardless of who "started" it.
+            broadcastAnalyticsActivity(io, a.userId!, a.name, 'connection', undefined, { userId: b.userId!, userName: b.name });
+            broadcastAnalyticsActivity(io, b.userId!, b.name, 'connection', undefined, { userId: a.userId!, userName: a.name });
           } catch (e) {
             console.error(`[analytics] failed to record connection ${uidA}/${uidB} in ${roomSlug}:`, e);
           }
@@ -204,7 +210,7 @@ async function runWeeklyHallOfFameOnce(io: Server): Promise<void> {
 // runAttendanceSweepOnce. Hall of Fame is deliberately NOT included here —
 // it's time-gated to a specific weekly window, so a manual test drives it
 // directly rather than through this always-run hook.
-export async function runAnalyticsSweepOnce(): Promise<void> {
-  await sweepProximityOnce();
+export async function runAnalyticsSweepOnce(io: Server): Promise<void> {
+  await sweepProximityOnce(io);
   await syncTaskCompletionsOnce();
 }

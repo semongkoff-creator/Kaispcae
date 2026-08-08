@@ -14,6 +14,8 @@ import { refreshZoneRestrictionCache } from '../lib/zoneMembership';
 import { logActivity } from '../lib/larkBase';
 import { openStatusInterval, closeOpenStatusInterval, resolveEffectiveStatus } from '../lib/statusIntervals';
 import { incrementDailyVibeCounter } from '../lib/vibeCounters';
+import { recordResponseIfPending } from '../lib/pokeResponse';
+import { refreshManagerCache, broadcastAnalyticsActivity } from './analyticsFeed';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { redactInteractiveSecrets, redactDoorPasswords, redactDoorAreaPasswords } from '../lib/redactFurniture';
 import { unlockDoor, unlockDoorArea, clearUnlockedDoorsForRoom } from './doorLock';
@@ -922,6 +924,12 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     if (!isGuest) {
       void openStatusInterval(getPrisma(), uid, room, 'available').catch((e) =>
         console.error('[analytics] failed to open status interval on join:', e),
+      );
+      // v2 Bagian B.2 #5 — warms the Activity Feed's userId->managerId
+      // cache for this session (see analyticsFeed.ts's own doc comment on
+      // why this is read synchronously everywhere else).
+      void refreshManagerCache(uid).catch((e) =>
+        console.error('[analyticsFeed] failed to refresh manager cache on join:', e),
       );
     }
 
@@ -1921,9 +1929,17 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // as the JOIN_ROOM hook above. A guest's uid falls back to socket.id
     // (see the line above), which has no User row, so guard the same way.
     if (!(socket.data as { guestId?: string }).guestId) {
-      void openStatusInterval(getPrisma(), uid, room, resolveEffectiveStatus(mode)).catch((e) =>
+      const prisma = getPrisma();
+      void openStatusInterval(prisma, uid, room, resolveEffectiveStatus(mode), new Date(), data?.zoneId).catch((e) =>
         console.error('[analytics] failed to open status interval on work mode change:', e),
       );
+      // v2 Bagian B.4 — a deliberate status change is a qualifying "response"
+      // too (e.g. someone pokes you, you switch off DND/Away to reply).
+      void recordResponseIfPending(prisma, uid).catch((e) =>
+        console.error('[analytics] failed to record poke response:', e),
+      );
+      // v2 Bagian B.2 #5 — Office Activity Feed.
+      broadcastAnalyticsActivity(io, uid, playerNames.get(socket.id) || 'Someone', 'status_change', mode);
     }
   });
 

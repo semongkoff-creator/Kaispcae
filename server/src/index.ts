@@ -10,6 +10,7 @@ import { registerRtcHandlers } from './socket/rtcHandler';
 import { registerChatHandlers } from './socket/chatHandler';
 import { registerChannelChatHandlers } from './socket/channelChatHandler';
 import { registerEmoteHandlers } from './socket/emoteHandler';
+import { registerAnalyticsFeedHandlers } from './socket/analyticsFeed';
 import { registerZoneHandlers } from './socket/zoneHandler';
 import { registerZoneLockHandlers } from './socket/zoneLock';
 import { registerSeatClaimHandlers } from './socket/seatClaim';
@@ -249,6 +250,7 @@ async function start() {
     registerZoneHandlers(io, socket);
     registerEmoteHandlers(io, socket);
     if (!isGuest) {
+      registerAnalyticsFeedHandlers(io, socket);
       registerChannelChatHandlers(io, socket);
       registerZoneLockHandlers(io, socket);
       registerSeatClaimHandlers(io, socket);

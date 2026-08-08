@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { DateTime } from 'luxon';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, LineChart, Line, CartesianGrid } from 'recharts';
-import { PeopleFill, GraphUp, CheckCircle, HourglassSplit, ClockHistory, CurrencyExchange, Download } from 'react-bootstrap-icons';
+import { PeopleFill, GraphUp, CheckCircle, HourglassSplit, ClockHistory, CurrencyExchange, Download, Lightning } from 'react-bootstrap-icons';
 import { PeriodPicker, PeriodValue, defaultPeriodValue } from './PeriodPicker';
 import { RankingBoard } from './RankingBoard';
+import { NetworkGraph, NetworkNode, NetworkEdge } from './NetworkGraph';
 
 const API = '/api';
 async function req<T>(path: string): Promise<T> {
@@ -24,6 +25,9 @@ interface CompanyResponse {
   utilizationByDept: { departmentId: string; name: string; memberCount: number; utilizationPercent: number | null }[];
   heatmap: { weekday: number; hours: number[] }[];
   trend: { start: string; end: string; due: number; completed: number; rate: number | null }[];
+  dau: { date: string; count: number }[];
+  peakConcurrent: { count: number; at: string | null };
+  network: { nodes: NetworkNode[]; edges: NetworkEdge[]; isolationInsight: string | null };
 }
 
 const card = 'bg-gray-50 dark:bg-gray-800 rounded-xl p-3';
@@ -64,6 +68,7 @@ export function CompanyAnalyticsPanel() {
     rate: t.rate ?? 0,
   })) ?? [];
   const deptData = data?.utilizationByDept.map((d) => ({ name: d.name, utilization: d.utilizationPercent ?? 0 })) ?? [];
+  const dauData = data?.dau.map((d) => ({ label: DateTime.fromFormat(d.date, 'yyyy-LL-dd').setLocale('id').toFormat('d LLL'), count: d.count })) ?? [];
 
   const exportExcel = async () => {
     const token = localStorage.getItem('vm_token');
@@ -115,6 +120,13 @@ export function CompanyAnalyticsPanel() {
               <p className="text-[10px] text-gray-400">{data.schedulingSaved.connections} meeting spontan</p>
             </div>
             <div className={card}>
+              <p className={cardLabel}><Lightning size={12} /> Peak concurrent</p>
+              <p className={cardValue}>{data.peakConcurrent.count}</p>
+              <p className="text-[10px] text-gray-400">
+                {data.peakConcurrent.at ? DateTime.fromISO(data.peakConcurrent.at).setZone('Asia/Jakarta').setLocale('id').toFormat('d LLL, HH:mm') : 'Belum ada data'}
+              </p>
+            </div>
+            <div className={card}>
               <p className={cardLabel}><CurrencyExchange size={12} /> ROI estimasi</p>
               {data.roi ? (
                 <>
@@ -125,6 +137,19 @@ export function CompanyAnalyticsPanel() {
                 <p className="text-xs text-amber-600 dark:text-amber-400">Perlu diisi biaya platform & tarif/jam di Kebijakan</p>
               )}
             </div>
+          </div>
+
+          <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 mb-2">Daily Active Users</p>
+          <div className="h-32 mb-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={dauData}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
+                <Tooltip />
+                <Line type="monotone" dataKey="count" stroke="#7c3aed" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
 
           <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 mb-2">Heatmap kehadiran</p>
@@ -180,6 +205,46 @@ export function CompanyAnalyticsPanel() {
                   </LineChart>
                 </ResponsiveContainer>
               </div>
+            </div>
+          </div>
+
+          <p className="text-xs font-semibold text-gray-800 dark:text-gray-100 mb-2">Top Connectors — network koneksi</p>
+          <div className="flex flex-col sm:flex-row gap-4 mb-4">
+            <div className="w-full sm:w-80 shrink-0">
+              <NetworkGraph nodes={data.network.nodes} edges={data.network.edges} />
+              <div className="flex items-center gap-3 mt-1 text-[10px] text-gray-400">
+                <span className="inline-flex items-center gap-1"><span className="w-3 h-0.5 bg-violet-400 inline-block" /> Dalam-departemen</span>
+                <span className="inline-flex items-center gap-1"><span className="w-3 h-0.5 bg-amber-500 inline-block" /> Lintas-departemen</span>
+              </div>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-gray-400 border-b border-gray-100 dark:border-gray-700">
+                      <th className="py-2 pr-3 font-medium">Nama</th>
+                      <th className="py-2 pr-3 font-medium">Koneksi unik</th>
+                      <th className="py-2 font-medium">Lintas-dept</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.network.nodes.map((n) => {
+                      const myEdges = data.network.edges.filter((e) => e.a === n.userId || e.b === n.userId);
+                      const crossCount = myEdges.filter((e) => e.crossDept).length;
+                      return (
+                        <tr key={n.userId} className="border-b border-gray-50 dark:border-gray-800">
+                          <td className="py-1.5 pr-3 text-gray-700 dark:text-gray-200">{n.name}</td>
+                          <td className="py-1.5 pr-3 text-gray-500">{myEdges.length}</td>
+                          <td className="py-1.5 text-gray-500">{crossCount}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {data.network.isolationInsight && (
+                <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">{data.network.isolationInsight}</p>
+              )}
             </div>
           </div>
 
