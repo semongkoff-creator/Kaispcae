@@ -27,7 +27,7 @@ import { setSessionKickIo } from './lib/sessionKick';
 import authRoutes from './routes/auth';
 import roomRoutes, { setIo } from './routes/rooms';
 import roomMemberRoutes, { setMembersIo } from './routes/roomMembers';
-import guestInviteRoutes from './routes/guestInvite';
+import guestInviteRoutes, { setIo as setGuestInviteIo } from './routes/guestInvite';
 import teleportRoutes from './routes/teleport';
 import uploadRoutes from './routes/uploads';
 import recordingRoutes from './routes/recordings';
@@ -140,6 +140,10 @@ io.use(async (socket, next) => {
       socket.data.guestId = guestClaims.guestId;
       socket.data.guestName = guestClaims.name;
       socket.data.guestRoomSlug = guestClaims.roomSlug;
+      // QA (Akses tamu checklist item 7, "Revoke") — which invite link this
+      // session came from, so a revoke can find and disconnect it (see
+      // guestInvite.ts's DELETE handler).
+      socket.data.guestInviteId = guestClaims.inviteId;
       return next();
     }
     const claims = verifyTokenClaims(token);
@@ -163,6 +167,7 @@ setMembersIo(io);
 setChatIo(io);
 setAdminIo(io);
 setUsersIo(io);
+setGuestInviteIo(io);
 setCalendarIo(io);
 setMeetingIo(io);
 

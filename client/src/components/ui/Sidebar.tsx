@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill } from 'react-bootstrap-icons';
+import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -65,6 +65,10 @@ interface SidebarProps {
   // Room/Door Override above) — this just fires an action, it isn't a toggle.
   canManageGuests: boolean;
   onCreateGuestLink: () => void;
+  // QA (Akses tamu checklist item 7, "Revoke") — targets only the most
+  // recently created link (App.tsx's lastGuestInviteId ref); handler itself
+  // alerts if none exists yet this session.
+  onRevokeLastGuestLink: () => void;
 
   // QA #9/#10 — CEO/admin-only text broadcast ("Hanya CEO/admin bisa
   // broadcast"). Same "one-shot action, no current-state to reflect" shape
@@ -206,6 +210,7 @@ export function Sidebar({
   onToggleDoorOverride,
   canManageGuests,
   onCreateGuestLink,
+  onRevokeLastGuestLink,
   canBroadcast,
   onBroadcast,
   isGuest,
@@ -420,6 +425,12 @@ export function Sidebar({
                 indicator — this is a one-shot action, not a toggle. */}
             {canManageGuests && (
               <MenuRow icon={<Link45deg size={15} />} label="Buat Guest Link" onClick={closeAnd(onCreateGuestLink)} title="Buat link undangan untuk tamu (tanpa akun) masuk ke room ini" />
+            )}
+            {/* QA (Akses tamu checklist item 7, "Revoke") — cabut link
+                terakhir yang dibuat; server juga langsung mengeluarkan tamu
+                yang sedang masuk lewat link itu (lihat DELETE handler). */}
+            {canManageGuests && (
+              <MenuRow icon={<XCircleFill size={15} />} label="Cabut Guest Link Terakhir" onClick={closeAnd(onRevokeLastGuestLink)} title="Cabut guest link terakhir yang dibuat — tamu yang sedang masuk lewat link ini akan langsung dikeluarkan" />
             )}
             {/* QA #9/#10 — CEO/admin-only text broadcast, the text
                 counterpart to Spotlight (voice). One-shot action like Guest

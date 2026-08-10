@@ -178,10 +178,16 @@ export function verifyTokenClaims(token: string): { userId: string; exp: number;
 // just be undefined, and every consumer of req.userId does a real DB
 // lookup/FK-write keyed on it). Short-lived on purpose (12h, vs accounts'
 // 30d) — a guest session isn't meant to outlive the visit it was minted for.
-export function signGuestToken(payload: { guestId: string; name: string; roomSlug: string }): string {
+// QA (Akses tamu checklist item 7, "Revoke") — inviteId lets a revoke kick
+// every currently-connected socket that came from THIS specific link (see
+// guestInvite.ts's DELETE handler), not just block future joins. Added to
+// the claims, not looked up separately, so the running socket already has
+// it on hand (socket.data.guestInviteId) without an extra DB round trip per
+// connection.
+export function signGuestToken(payload: { guestId: string; name: string; roomSlug: string; inviteId: string }): string {
   const config = getConfig();
   return jwt.sign(
-    { guestId: payload.guestId, name: payload.name, roomSlug: payload.roomSlug },
+    { guestId: payload.guestId, name: payload.name, roomSlug: payload.roomSlug, inviteId: payload.inviteId },
     config.JWT_SECRET,
     { expiresIn: '12h' },
   );
@@ -191,15 +197,16 @@ export interface GuestTokenClaims {
   guestId: string;
   name: string;
   roomSlug: string;
+  inviteId: string;
   exp: number;
 }
 
 export function verifyGuestTokenClaims(token: string): GuestTokenClaims | null {
   try {
     const config = getConfig();
-    const decoded = jwt.verify(token, config.JWT_SECRET) as { guestId?: string; name?: string; roomSlug?: string; exp: number };
-    if (!decoded.guestId || !decoded.roomSlug) return null;
-    return { guestId: decoded.guestId, name: decoded.name || 'Guest', roomSlug: decoded.roomSlug, exp: decoded.exp };
+    const decoded = jwt.verify(token, config.JWT_SECRET) as { guestId?: string; name?: string; roomSlug?: string; inviteId?: string; exp: number };
+    if (!decoded.guestId || !decoded.roomSlug || !decoded.inviteId) return null;
+    return { guestId: decoded.guestId, name: decoded.name || 'Guest', roomSlug: decoded.roomSlug, inviteId: decoded.inviteId, exp: decoded.exp };
   } catch {
     return null;
   }

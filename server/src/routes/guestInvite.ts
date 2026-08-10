@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { Server } from 'socket.io';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { getPrisma } from '../lib/prisma';
@@ -7,6 +8,15 @@ import { authenticateToken, AuthRequest, signGuestToken } from '../middleware/au
 import { resolveRoomRole } from '../lib/roles';
 
 const guestInvite = Router();
+
+// QA (Akses tamu checklist item 7, "Revoke") — same "HTTP route needs the
+// live socket server" pattern as rooms.ts's own setIo (see index.ts's
+// `import { setIo as setChatIo }` for the established alias convention this
+// file's caller uses too).
+let ioRef: Server | null = null;
+export function setIo(io: Server): void {
+  ioRef = io;
+}
 
 // Human-typeable random password when the admin doesn't set their own —
 // excludes visually-ambiguous characters (0/O, 1/I/l) since this gets read
@@ -69,8 +79,11 @@ guestInvite.post('/rooms/:slug/guest-invites', authenticateToken, async (req: Au
       },
     });
     // plainPassword is returned ONCE here, never stored — this is the only
-    // moment it exists outside the admin's own clipboard/notes.
-    res.json({ token: invite.token, expiresAt: invite.expiresAt, maxUses: invite.maxUses, password: plainPassword });
+    // moment it exists outside the admin's own clipboard/notes. `id` (not
+    // just `token`) is included so the caller can revoke this exact link
+    // later without a separate lookup — DELETE .../guest-invites/:id below
+    // needs the DB id, not the invite token.
+    res.json({ id: invite.id, token: invite.token, expiresAt: invite.expiresAt, maxUses: invite.maxUses, password: plainPassword });
   } catch (e) {
     console.error('[guestInvite] create error:', e);
     res.status(500).json({ error: 'Gagal membuat guest link' });
@@ -87,7 +100,25 @@ guestInvite.delete('/rooms/:slug/guest-invites/:id', authenticateToken, async (r
     const { error, room } = await requireGuestManage(prisma, req.params.slug, req.userId!);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Admin role required' });
-    await prisma.roomInvite.updateMany({ where: { id: req.params.id, roomId: room!.id }, data: { revoked: true } });
+    const { count } = await prisma.roomInvite.updateMany({ where: { id: req.params.id, roomId: room!.id }, data: { revoked: true } });
+
+    // QA (Akses tamu checklist item 7, "Revoke") — a revoke that only
+    // blocks FUTURE joins would leave anyone already in via this link
+    // connected indefinitely. Walk the room's currently-connected sockets
+    // (not a DB query — there's no table of "who's connected", the socket
+    // server IS that state) and force-disconnect any whose guestInviteId
+    // matches. disconnect(true) also closes the underlying transport, which
+    // is what actually triggers roomHandler.ts's handleLeave cleanup
+    // (guestAllowlist removal, presence broadcast) — same path a guest
+    // closing their own tab takes.
+    if (count > 0 && ioRef) {
+      const sockets = await ioRef.in(req.params.slug).fetchSockets();
+      for (const s of sockets) {
+        if ((s.data as { guestInviteId?: string }).guestInviteId === req.params.id) {
+          s.disconnect(true);
+        }
+      }
+    }
     res.json({ ok: true });
   } catch (e) {
     console.error('[guestInvite] revoke error:', e);
@@ -139,7 +170,7 @@ guestInvite.post('/guest/join', async (req: Request, res: Response) => {
     await prisma.roomInvite.update({ where: { id: invite.id }, data: { useCount: { increment: 1 } } });
 
     const guestId = crypto.randomUUID();
-    const token = signGuestToken({ guestId, name: trimmedName, roomSlug: invite.room.slug });
+    const token = signGuestToken({ guestId, name: trimmedName, roomSlug: invite.room.slug, inviteId: invite.id });
     res.json({ token, roomSlug: invite.room.slug, roomName: invite.room.name, name: trimmedName });
   } catch (e) {
     console.error('[guestInvite] guest join error:', e);

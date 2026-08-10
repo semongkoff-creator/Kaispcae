@@ -431,7 +431,7 @@ export const api = {
   // optional — omitted means the server auto-generates one; either way the
   // response's `password` is the ONLY time the plain value is ever visible.
   createGuestInvite: (slug: string, opts: { expiresInHours?: number; maxUses?: number; password?: string }) =>
-    request<{ token: string; expiresAt: string | null; maxUses: number | null; password: string }>(`/rooms/${slug}/guest-invites`, {
+    request<{ id: string; token: string; expiresAt: string | null; maxUses: number | null; password: string }>(`/rooms/${slug}/guest-invites`, {
       method: 'POST',
       body: JSON.stringify(opts),
     }),

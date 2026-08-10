@@ -50,6 +50,9 @@ interface MTile {
   speaking?: boolean;
   reactionSourceId?: string; // player id for latestReaction lookup (cam tiles)
   volumeTargetId?: string;   // remote id whose volume this tile's slider adjusts
+  // QA (Akses tamu checklist item 6, "Label Guest") — never set on the
+  // local-cam/screen entries above, same as VideoGrid.tsx's own tiles.
+  isGuest?: boolean;
 }
 
 // Bug 16 — Google-Meet-style layout, with a second pass fixing the default
@@ -99,7 +102,7 @@ export function MeetingView({
     if (localScreenStream) out.push({ key: 'local-screen', name: 'Layarmu', stream: localScreenStream, isLocal: true, isScreen: true });
     for (const t of screenTiles) out.push({ key: `${t.id}-screen`, name: `Layar ${t.name}`, stream: t.screenStream, isLocal: false, isScreen: true });
     if (localStream) out.push({ key: 'local-cam', name: 'Kamu', avatarName: profiles.get(localUserId)?.name || localName, photoUrl: profiles.get(localUserId)?.photo ?? undefined, stream: localStream, isLocal: true, isScreen: false, micMuted, cameraOff, handRaised: localHandRaised, isBeingRecorded: isLocalBeingRecorded, speaking: localSpeaking && !micMuted, reactionSourceId: localPlayerId ?? undefined });
-    for (const t of videoTiles) { const uid = playerRecords[t.id]?.userId; out.push({ key: t.id, name: t.name, avatarName: (uid ? profiles.get(uid)?.name : '') || t.name, photoUrl: uid ? profiles.get(uid)?.photo ?? undefined : undefined, stream: t.stream, isLocal: false, isScreen: false, translucent: t.translucent, handRaised: t.handRaised, isBeingRecorded: t.isBeingRecorded, speaking: speakingPlayers.has(t.id), reactionSourceId: t.id, volumeTargetId: t.id }); }
+    for (const t of videoTiles) { const uid = playerRecords[t.id]?.userId; out.push({ key: t.id, name: t.name, avatarName: (uid ? profiles.get(uid)?.name : '') || t.name, photoUrl: uid ? profiles.get(uid)?.photo ?? undefined : undefined, stream: t.stream, isLocal: false, isScreen: false, translucent: t.translucent, handRaised: t.handRaised, isBeingRecorded: t.isBeingRecorded, speaking: speakingPlayers.has(t.id), reactionSourceId: t.id, volumeTargetId: t.id, isGuest: t.isGuest }); }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localStream, localScreenStream, micMuted, cameraOff, localHandRaised, isLocalBeingRecorded, localSpeaking, localPlayerId, localUserId, localName, profileSig,
@@ -164,6 +167,7 @@ export function MeetingView({
       reaction={t.reactionSourceId ? latestReaction(emoteEvents, t.reactionSourceId, now) : null}
       onVolumeChange={t.volumeTargetId ? (v) => onManualVolumeChange(t.volumeTargetId!, v) : undefined}
       connectionFailed={!t.isLocal && !t.isScreen && !!t.reactionSourceId && failedPeerIds?.has(t.reactionSourceId)}
+      isGuest={t.isGuest}
       large
     />
   );

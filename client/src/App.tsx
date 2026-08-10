@@ -745,9 +745,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
   // Guest Link & Ruang Tunggu — prompt-based, same lightweight "quick admin
   // config" convention as the Room Editor's door-password/capacity prompts,
-  // rather than a dedicated management panel. api.revokeGuestInvite exists
-  // server-side but has no UI yet — out of scope for this pass (an admin can
-  // still revoke via a direct API call if a link needs to be killed early).
+  // rather than a dedicated management panel. Remembers only the MOST
+  // RECENTLY created link's id (not a full history/list — there's still no
+  // management panel) so handleRevokeGuestLink below has something to act
+  // on without a separate "list my links" endpoint, which doesn't exist yet.
+  const lastGuestInviteId = useRef<string | null>(null);
   const handleCreateGuestLink = useCallback(async () => {
     const hoursRaw = window.prompt('Guest link berlaku berapa jam? (kosongkan = tanpa batas waktu)', '24');
     if (hoursRaw === null) return;
@@ -762,6 +764,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     const expiresInHours = trimmed ? Number(trimmed) : undefined;
     try {
       const result = await api.createGuestInvite(roomSlug, { expiresInHours, maxUses: oneTime ? 1 : undefined, password: passwordRaw.trim() || undefined });
+      lastGuestInviteId.current = result.id;
       const url = `${window.location.origin}/?guest=${encodeURIComponent(result.token)}`;
       await navigator.clipboard.writeText(url);
       // Alert (not just the clipboard toast) because the password can't also
@@ -773,6 +776,28 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     } catch (e) {
       console.error('[guest] create invite failed:', e);
       useGameStore.getState().addActivity('Gagal membuat guest link.');
+    }
+  }, [roomSlug]);
+
+  // QA (Akses tamu checklist item 7, "Revoke") — server now actually kicks
+  // any guest currently connected via this link (see guestInvite.ts's
+  // DELETE handler), not just blocks future joins. Only ever targets the
+  // most recently created link (see lastGuestInviteId above) — a proper
+  // "pick which link" management panel is a separate, bigger piece of work.
+  const handleRevokeGuestLink = useCallback(async () => {
+    const id = lastGuestInviteId.current;
+    if (!id) {
+      window.alert('Belum ada guest link yang dibuat di sesi ini untuk dicabut.');
+      return;
+    }
+    if (!window.confirm('Cabut guest link terakhir yang dibuat?\n\nLink tidak bisa dipakai lagi, dan tamu yang sedang masuk lewat link ini akan langsung dikeluarkan.')) return;
+    try {
+      await api.revokeGuestInvite(roomSlug, id);
+      lastGuestInviteId.current = null;
+      useGameStore.getState().addActivity('🚫 Guest link dicabut.');
+    } catch (e) {
+      console.error('[guest] revoke invite failed:', e);
+      useGameStore.getState().addActivity('Gagal mencabut guest link.');
     }
   }, [roomSlug]);
 
@@ -1758,6 +1783,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleDoorOverride={() => emitDoorOverride(!doorOverride)}
         canManageGuests={isAdmin}
         onCreateGuestLink={handleCreateGuestLink}
+        onRevokeLastGuestLink={handleRevokeGuestLink}
         canBroadcast={isAdmin}
         onBroadcast={handleBroadcast}
         // Bug fix — `isGuest` alone is only the CLIENT's own memory of which

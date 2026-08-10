@@ -72,7 +72,7 @@ interface VideoGridProps {
 // silently drift apart.
 export function getVideoTiles(
   nearby: ProximityPlayer[],
-  playerRecords: Record<string, { name: string; userId?: string; handRaised?: boolean }>,
+  playerRecords: Record<string, { name: string; userId?: string; handRaised?: boolean; isGuest?: boolean }>,
   remoteStreams: Map<string, MediaStream>,
   remoteScreenStreams: Map<string, MediaStream>,
   recordedTargetUserId?: string,
@@ -89,6 +89,10 @@ export function getVideoTiles(
       translucent: p.visibility === 'translucent',
       isBeingRecorded: !!recordedTargetUserId && playerRecords[p.id]?.userId === recordedTargetUserId,
       handRaised: !!playerRecords[p.id]?.handRaised,
+      // QA (Akses tamu checklist item 6, "Label Guest") — already shown in
+      // ParticipantPanel; video tiles never carried it, even though a tile is
+      // the more likely thing someone glances at mid-meeting.
+      isGuest: !!playerRecords[p.id]?.isGuest,
     }));
     // Deliberately NOT filtered by stream any more. A nearby player must show
     // the moment they're in range — as live video if it's flowing, or as an
@@ -586,6 +590,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
             reaction={latestReaction(emoteEvents, tile.id, now)}
             onEnlarge={() => setFeaturedKey(`${tile.id}-camera`)}
             connectionFailed={failedPeerIds?.has(tile.id)}
+            isGuest={tile.isGuest}
           />
         );
       })}
@@ -663,6 +668,7 @@ export function VideoTile({
   speaking,
   onEnlarge,
   connectionFailed,
+  isGuest,
 }: {
   name: string;
   // The camera-off avatar draws from the person's REAL identity, not the
@@ -698,6 +704,11 @@ export function VideoTile({
   // permanently-failed peer's tile just silently froze on its last frame
   // with no indication anything was wrong.
   connectionFailed?: boolean;
+  // QA (Akses tamu checklist item 6, "Label Guest") — already shown in
+  // ParticipantPanel's list rows; this is the same signal, just also
+  // surfaced on the tile itself (the more commonly glanced-at spot).
+  // Never set on the local/isScreen tile — see call sites.
+  isGuest?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [volume, setVolume] = useState(1);
@@ -874,6 +885,15 @@ export function VideoTile({
         className={`absolute left-1 bottom-1 max-w-[80%] flex items-center gap-1 bg-black/45 backdrop-blur-md text-white rounded-full ${large ? 'px-2.5 py-1 text-xs' : 'px-1.5 py-0.5 text-[9px]'}`}
       >
         <span className="truncate">{name}</span>
+        {/* QA (Akses tamu checklist item 6, "Label Guest") — same pairing
+            ParticipantPanel already uses (badge right next to the name),
+            just also shown here since a tile is glanced at far more during
+            an actual meeting. */}
+        {isGuest && (
+          <span className={`shrink-0 rounded-full bg-purple-500 font-semibold uppercase tracking-wide ${large ? 'px-1.5 py-0.5 text-[9px]' : 'px-1 text-[7px]'}`}>
+            Guest
+          </span>
+        )}
         {speaking && (
           <span className={`flex items-end gap-px shrink-0 ${large ? 'h-2.5' : 'h-1.5'}`}>
             <span className="w-0.5 h-full bg-purple-400 rounded-full animate-wave-bar" style={{ animationDelay: '0ms' }} />
