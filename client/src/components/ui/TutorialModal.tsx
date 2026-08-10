@@ -19,7 +19,10 @@ const SLIDES: Slide[] = [
   {
     emoji: '🕹️',
     title: 'Gerak-gerak',
-    body: 'Pakai tombol panah atau W A S D di keyboard untuk jalan. Karaktermu otomatis menghadap arah yang kamu tuju.',
+    // Extra keys (was a permanent text overlay on the map, moved here so
+    // the map itself stays clean — see App.tsx). Same bullet-list format
+    // Slide 7 below already uses.
+    body: 'Pakai tombol panah atau W A S D di keyboard untuk jalan. Karaktermu otomatis menghadap arah yang kamu tuju.\n\nKontrol lainnya:\n• Tahan R — lari\n• Space — lompat\n• Z — colek (nudge) orang terdekat\n• X — interaksi dengan objek',
   },
   {
     emoji: '🎥',

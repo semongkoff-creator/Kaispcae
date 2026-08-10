@@ -1523,14 +1523,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
       {!simplifiedView && (
         <>
-          <div className="absolute top-4 left-28 pointer-events-none">
-            <p className="text-gray-500 dark:text-gray-400 text-xs font-mono">WASD / Arrows to move · hold R to run · Space to jump · Z to nudge · X to interact</p>
-          </div>
-          <div className="absolute top-10 left-28 pointer-events-none">
-            <p className="text-gray-500 dark:text-gray-400 text-xs font-mono">
-              Playing as: <span className="text-gray-700 dark:text-gray-300">{playerName}</span>
-            </p>
-          </div>
+          {/* Controls text ("WASD / Arrows...") and "Playing as" removed from
+              here — the map stayed permanently covered by them. The control
+              list now lives in the existing Panduan (TutorialModal.tsx,
+              Slide 2), reachable any time via Sidebar ☰ → Room Features →
+              Panduan; "Playing as" was dropped entirely (the player's own
+              name is already visible elsewhere — video tile, participant
+              list, etc.). */}
           <div className="absolute top-14 left-16 flex items-start gap-2 pointer-events-none">
             {/* QA (Akses tamu checklist item 2, "Guest terbatas") — Soundboard
                 playback is now also server-rejected for guests
