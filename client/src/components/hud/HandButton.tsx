@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { HandIndexThumbFill } from 'react-bootstrap-icons';
+import { PersonRaisedHand } from 'react-bootstrap-icons';
 import { isTypingTarget } from '@/utils/hotkeys';
 
 interface HandButtonProps {
@@ -40,9 +40,11 @@ export function HandButton({ raised, onToggle }: HandButtonProps) {
       }`}
       title="Raise hand (H)"
     >
-      {/* Bootstrap Icons glyph (was a literal ✋ emoji) — same set as the
-          rest of the toolbar now. animate-bounce/opacity unchanged. */}
-      <HandIndexThumbFill className={raised ? 'text-white animate-bounce' : 'text-purple-700 dark:text-purple-300 opacity-70'} size={18} />
+      {/* PersonRaisedHand — was HandIndexThumbFill (a pointing-finger glyph,
+          read as "poke/point" rather than "raise hand"). This is Bootstrap
+          Icons' dedicated raised-hand glyph, same one Zoom/Meet-style UIs
+          use for this exact meaning. animate-bounce/opacity unchanged. */}
+      <PersonRaisedHand className={raised ? 'text-white animate-bounce' : 'text-purple-700 dark:text-purple-300 opacity-70'} size={18} />
       {showLabel && (
         <span className="absolute -top-8 whitespace-nowrap text-xs bg-white dark:bg-gray-800 text-purple-700 dark:text-purple-300 border border-purple-100 dark:border-gray-700 shadow-sm px-2 py-0.5 rounded">
           {raised ? 'Lower hand (H)' : 'Raise hand (H)'}
