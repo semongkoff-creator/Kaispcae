@@ -62,11 +62,12 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
   // Figma reference checkboxes — purely decorative (unchecked default,
-  // never read by handleSubmit below). Requiring them would change what
-  // register() actually gates on, which is auth LOGIC, out of scope for a
-  // styling-only pass. Only shown in register mode: the copy itself
-  // ("you are creating a KAISPACE account") only makes sense there — an
-  // existing user logging back in was never asked to accept anything.
+  // never read by handleSubmit below; requiring them would change what
+  // register() actually gates on, which is auth LOGIC, out of scope here).
+  // Shown regardless of mode: the Figma reference itself pairs them with
+  // the "Login" button, not a separate sign-up screen, so matching that
+  // literally wins over the (reasonable but not what was asked for) UX
+  // argument that "you are creating an account" reads oddly during login.
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
@@ -93,7 +94,7 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
       >
         {theme === 'dark' ? <SunFill size={14} /> : <MoonFill size={14} />}
       </button>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 w-full max-w-sm shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 w-full max-w-md shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700">
         <h1 className="text-[28px] leading-tight font-bold text-gray-900 dark:text-white mb-6">
           {mode === 'login' ? 'Welcome to KaiSpace' : 'Create your KaiSpace account'}
         </h1>
@@ -115,7 +116,7 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
             <span className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Email</span>
             <input
               type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com" required autoFocus
+              placeholder="commitcommunity@gmail.com" required autoFocus
               className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2.5 outline-none border border-purple-100 dark:border-gray-600 focus:border-purple-500 transition-colors text-sm"
             />
           </label>
@@ -138,33 +139,31 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
             </label>
           )}
 
-          {mode === 'register' && (
-            <div className="space-y-2 pt-1">
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox" checked={agreedToTerms}
-                  onChange={(e) => setAgreedToTerms(e.target.checked)}
-                  className="mt-0.5 w-3.5 h-3.5 accent-[#3B1E54] cursor-pointer shrink-0"
-                />
-                <span className="text-[11px] leading-snug text-gray-500 dark:text-gray-400">
-                  By signing up, you are creating a KAISPACE account, and you agree to KAISPACE&apos;s{' '}
-                  <span className="text-[#3B1E54] dark:text-purple-400 font-semibold" title="Segera hadir">Term of Use</span>
-                  {' '}and{' '}
-                  <span className="text-[#3B1E54] dark:text-purple-400 font-semibold" title="Segera hadir">Privacy Policy</span>.
-                </span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox" checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                  className="w-3.5 h-3.5 accent-[#3B1E54] cursor-pointer shrink-0"
-                />
-                <span className="text-[11px] leading-snug text-gray-500 dark:text-gray-400">
-                  Remember Me as <span className="font-semibold text-gray-700 dark:text-gray-300">Member</span> of <span className="font-semibold text-gray-700 dark:text-gray-300">KAISPACE</span>.
-                </span>
-              </label>
-            </div>
-          )}
+          <div className="space-y-2 pt-1">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox" checked={agreedToTerms}
+                onChange={(e) => setAgreedToTerms(e.target.checked)}
+                className="mt-0.5 w-3.5 h-3.5 accent-[#3B1E54] cursor-pointer shrink-0"
+              />
+              <span className="text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+                By signing up, you are creating a KAISPACE account, and you agree to KAISPACE&apos;s{' '}
+                <span className="text-[#3B1E54] dark:text-purple-400 font-semibold" title="Segera hadir">Term of Use</span>
+                {' '}and{' '}
+                <span className="text-[#3B1E54] dark:text-purple-400 font-semibold" title="Segera hadir">Privacy Policy</span>.
+              </span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox" checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="w-3.5 h-3.5 accent-[#3B1E54] cursor-pointer shrink-0"
+              />
+              <span className="text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+                Remember Me as <span className="font-semibold text-gray-700 dark:text-gray-300">Member</span> of <span className="font-semibold text-gray-700 dark:text-gray-300">KAISPACE</span>.
+              </span>
+            </label>
+          </div>
 
           {/* Tailwind's JIT scanner reads this className as literal source
               text at build time — it can't resolve a template-interpolated
@@ -194,15 +193,15 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
             type="button"
             disabled={!GOOGLE_LOGIN_ENABLED}
             title={GOOGLE_LOGIN_ENABLED ? undefined : 'Segera hadir'}
-            className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg py-2.5 transition-colors text-xs disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-purple-50 enabled:dark:hover:bg-gray-600 enabled:cursor-pointer"
+            className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-purple-50 enabled:dark:hover:bg-gray-600 enabled:cursor-pointer"
           >
-            <GoogleIcon /> Google
+            <GoogleIcon /> Login with Google
           </button>
           <a
             href="/api/auth/lark/login"
-            className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-600 font-medium rounded-lg py-2.5 transition-colors text-xs cursor-pointer"
+            className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-600 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] cursor-pointer"
           >
-            <LarkIcon /> Lark
+            <LarkIcon /> Login with Lark
           </a>
         </div>
 
