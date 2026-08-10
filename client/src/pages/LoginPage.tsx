@@ -2,6 +2,47 @@ import { useState } from 'react';
 import { SunFill, MoonFill } from 'react-bootstrap-icons';
 import { Theme } from '@/hooks/useTheme';
 
+// Figma "kaispace" reference — closest reading off the screenshot (no exact
+// hex was given). The button below hardcodes this same value in a Tailwind
+// arbitrary-value class instead of referencing this constant (Tailwind's
+// JIT scanner reads className as literal source text at build time, so a
+// template-interpolated class never resolves) — update both spots together
+// if Figma Dev Mode's Inspect tab gives an exact hex later.
+const FIGMA_PURPLE = '#3B1E54';
+
+// Google's real 4-color "G" mark — no react-bootstrap-icons equivalent
+// exists (checked), and this button has no backend behind it yet (see
+// GOOGLE_LOGIN_ENABLED below), so an accurate, recognizable mark matters
+// more than usual for signaling "this is a real, familiar option, just not
+// wired up yet" rather than a mystery placeholder icon.
+function GoogleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z" />
+      <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z" />
+      <path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.211 35.091 26.715 36 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z" />
+      <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z" />
+    </svg>
+  );
+}
+
+// No Lark brand asset exists anywhere in this repo (checked) — a plain
+// speech-bubble glyph in Lark's blue rather than guessing at their real
+// logo, which risks being visibly wrong.
+function LarkIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="#3370FF" aria-hidden="true">
+      <path d="M8 1C4.134 1 1 3.686 1 7c0 1.86.99 3.52 2.54 4.62L2.8 14.4a.4.4 0 0 0 .58.45l3.1-1.72c.5.1 1.01.15 1.52.15 3.866 0 7-2.686 7-6s-3.134-6-7-6z" />
+    </svg>
+  );
+}
+
+// Google OAuth has no server route/config anywhere in this codebase (see
+// server/.env.example — no GOOGLE_CLIENT_ID). Building that is a real
+// backend feature, out of scope for a "styling only, don't touch auth
+// logic" pass — so the button ships visible (Figma fidelity) but inert.
+const GOOGLE_LOGIN_ENABLED = false;
+
 interface LoginPageProps {
   onLogin: (email: string, password: string) => Promise<void>;
   onRegister: (email: string, password: string, displayName: string) => Promise<void>;
@@ -20,6 +61,14 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
+  // Figma reference checkboxes — purely decorative (unchecked default,
+  // never read by handleSubmit below). Requiring them would change what
+  // register() actually gates on, which is auth LOGIC, out of scope for a
+  // styling-only pass. Only shown in register mode: the copy itself
+  // ("you are creating a KAISPACE account") only makes sense there — an
+  // existing user logging back in was never asked to accept anything.
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,16 +94,9 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
         {theme === 'dark' ? <SunFill size={14} /> : <MoonFill size={14} />}
       </button>
       <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 w-full max-w-sm shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700">
-        <div className="flex items-center gap-3 mb-3">
-          <img
-            src="/assets/img/favico.png"
-            alt="KaiSpace"
-            className="block w-12 h-12 object-contain"
-            decoding="async"
-          />
-          <span className="text-2xl font-bold leading-none text-gray-900 dark:text-white">KaiSpace</span>
-        </div>
-        <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">{mode === 'login' ? 'Welcome back' : 'Create your account'}</p>
+        <h1 className="text-[28px] leading-tight font-bold text-gray-900 dark:text-white mb-6">
+          {mode === 'login' ? 'Welcome to KaiSpace' : 'Create your KaiSpace account'}
+        </h1>
 
         {sessionExpiredMessage && (
           <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 text-xs rounded-lg px-3 py-2 mb-4">
@@ -69,53 +111,109 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <input
-            type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-            placeholder="Email" required autoFocus
-            className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2.5 outline-none border border-purple-100 dark:border-gray-600 focus:border-purple-500 transition-colors text-sm"
-          />
-          <input
-            type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password" required minLength={6}
-            className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2.5 outline-none border border-purple-100 dark:border-gray-600 focus:border-purple-500 transition-colors text-sm"
-          />
-          {mode === 'register' && (
+          <label className="block">
+            <span className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Email</span>
             <input
-              type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Display name" required maxLength={30}
+              type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com" required autoFocus
               className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2.5 outline-none border border-purple-100 dark:border-gray-600 focus:border-purple-500 transition-colors text-sm"
             />
+          </label>
+          <label className="block">
+            <span className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Password</span>
+            <input
+              type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••••••" required minLength={6}
+              className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2.5 outline-none border border-purple-100 dark:border-gray-600 focus:border-purple-500 transition-colors text-sm"
+            />
+          </label>
+          {mode === 'register' && (
+            <label className="block">
+              <span className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Display name</span>
+              <input
+                type="text" value={displayName} onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="Nama tampilanmu" required maxLength={30}
+                className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2.5 outline-none border border-purple-100 dark:border-gray-600 focus:border-purple-500 transition-colors text-sm"
+              />
+            </label>
           )}
+
+          {mode === 'register' && (
+            <div className="space-y-2 pt-1">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox" checked={agreedToTerms}
+                  onChange={(e) => setAgreedToTerms(e.target.checked)}
+                  className="mt-0.5 w-3.5 h-3.5 accent-[#3B1E54] cursor-pointer shrink-0"
+                />
+                <span className="text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+                  By signing up, you are creating a KAISPACE account, and you agree to KAISPACE&apos;s{' '}
+                  <span className="text-[#3B1E54] dark:text-purple-400 font-semibold" title="Segera hadir">Term of Use</span>
+                  {' '}and{' '}
+                  <span className="text-[#3B1E54] dark:text-purple-400 font-semibold" title="Segera hadir">Privacy Policy</span>.
+                </span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox" checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-3.5 h-3.5 accent-[#3B1E54] cursor-pointer shrink-0"
+                />
+                <span className="text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+                  Remember Me as <span className="font-semibold text-gray-700 dark:text-gray-300">Member</span> of <span className="font-semibold text-gray-700 dark:text-gray-300">KAISPACE</span>.
+                </span>
+              </label>
+            </div>
+          )}
+
+          {/* Tailwind's JIT scanner reads this className as literal source
+              text at build time — it can't resolve a template-interpolated
+              class (`bg-[${FIGMA_PURPLE}]` would never match anything), so
+              the hex has to be hardcoded here rather than referencing the
+              FIGMA_PURPLE constant above. Update both places together if the
+              color changes. */}
           <button
             type="submit" disabled={loading}
-            className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-semibold rounded-lg py-2.5 transition-colors text-sm cursor-pointer"
+            className="w-full bg-[#3B1E54] hover:bg-[#4A1E6D] disabled:opacity-50 text-white font-semibold rounded-lg py-2.5 transition-colors text-sm cursor-pointer"
           >
-            {loading ? 'Please wait...' : mode === 'login' ? 'Sign In' : 'Create Account'}
+            {loading ? 'Please wait...' : mode === 'login' ? 'Login' : 'Create Account'}
           </button>
         </form>
 
         {/* Lark OAuth — an ADDITIONAL option beside the manual form above,
             which is untouched. A plain full-page navigation (not fetch): the
-            server issues a 302 to Lark's consent screen. */}
+            server issues a 302 to Lark's consent screen. Google sits beside
+            it purely for Figma fidelity — see GOOGLE_LOGIN_ENABLED above. */}
         <div className="flex items-center gap-2 my-4">
           <span className="flex-1 h-px bg-purple-100 dark:bg-gray-700" />
-          <span className="text-gray-400 dark:text-gray-500 text-[11px]">atau</span>
+          <span className="text-gray-400 dark:text-gray-500 text-[11px]">OR</span>
           <span className="flex-1 h-px bg-purple-100 dark:bg-gray-700" />
         </div>
-        <a
-          href="/api/auth/lark/login"
-          className="w-full flex items-center justify-center gap-2 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-600 font-medium rounded-lg py-2.5 transition-colors text-sm cursor-pointer"
-        >
-          Login dengan Lark
-        </a>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={!GOOGLE_LOGIN_ENABLED}
+            title={GOOGLE_LOGIN_ENABLED ? undefined : 'Segera hadir'}
+            className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg py-2.5 transition-colors text-xs disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-purple-50 enabled:dark:hover:bg-gray-600 enabled:cursor-pointer"
+          >
+            <GoogleIcon /> Google
+          </button>
+          <a
+            href="/api/auth/lark/login"
+            className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-600 font-medium rounded-lg py-2.5 transition-colors text-xs cursor-pointer"
+          >
+            <LarkIcon /> Lark
+          </a>
+        </div>
 
         <p className="text-gray-500 dark:text-gray-400 text-xs text-center mt-5">
-          {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
+          {mode === 'login' ? "Don't have account?" : 'Already have an account?'}{' '}
           <button
             onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-            className="text-purple-600 dark:text-purple-400 hover:text-purple-700 cursor-pointer"
+            style={{ color: FIGMA_PURPLE }}
+            className="font-semibold hover:brightness-110 cursor-pointer"
           >
-            {mode === 'login' ? 'Sign up' : 'Sign in'}
+            {mode === 'login' ? 'Sign Up here!' : 'Sign in'}
           </button>
         </p>
       </div>
