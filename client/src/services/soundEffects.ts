@@ -11,6 +11,7 @@ import { calcGain } from '@/hooks/useProximity';
 const NUDGE_SRC = '/assets/sfx/nudge.wav';
 const NUDGE_STRONG_SRC = '/assets/sfx/nudge-strong.wav';
 const SLAP_SRC = '/assets/sfx/slap.mp3';
+const HAND_RAISE_SRC = '/assets/sfx/hand-raise.mp3';
 
 // Preload one element per clip so the file is fetched/decoded up front; we
 // clone it per play so rapid repeats overlap instead of cutting each other
@@ -30,6 +31,7 @@ if (typeof window !== 'undefined') {
   preload(NUDGE_SRC);
   preload(NUDGE_STRONG_SRC);
   preload(SLAP_SRC);
+  preload(HAND_RAISE_SRC);
 }
 
 function playClip(src: string, volume: number): void {
@@ -64,12 +66,12 @@ export function playSlapSound(emphasized = false): void {
   playClip(SLAP_SRC, emphasized ? 0.9 : 0.5);
 }
 
-// Bug 14 — raise-hand chime for others in the same zone. Reuses the soft nudge
-// clip (no separate audio system) at a gentle volume so it reads as a polite
-// "someone wants to speak" cue, not an alarming knock. Same sound-setting gate
-// as everything else via playClip.
+// Bug 14 — raise-hand chime for others in the same zone. Used to reuse the
+// plain nudge clip; now its own dedicated sound (user-supplied "ting" clip)
+// so tuning/replacing it never affects the actual nudge/poke sound. Same
+// gentle volume and sound-setting gate as before via playClip.
 export function playHandRaiseSound(): void {
-  playClip(NUDGE_SRC, 0.35);
+  playClip(HAND_RAISE_SRC, 0.35);
 }
 
 // Soundboard — unlike the fixed clips above, the src here is dynamic (one of

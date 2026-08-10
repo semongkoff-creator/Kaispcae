@@ -864,10 +864,10 @@ export function VideoTile({
           the eye during a meeting (the whole point of "raise hand"). */}
       {handRaised && !isScreen && (
         <span
-          className={`absolute left-0.5 bg-amber-400 text-white rounded-full shadow flex items-center justify-center animate-bounce ${isBeingRecorded ? 'top-6' : 'top-0.5'} ${large ? 'w-6 h-6 text-sm' : 'w-4 h-4 text-[10px]'}`}
+          className={`absolute left-0.5 bg-amber-400 rounded-full shadow flex items-center justify-center animate-bounce ${isBeingRecorded ? 'top-6' : 'top-0.5'} ${large ? 'w-6 h-6' : 'w-4 h-4'}`}
           title={`${isLocal ? 'You have' : `${name} has`} raised a hand`}
         >
-          ✋
+          <img src="/assets/img/raise-hand-icon.png" alt="" className={large ? 'w-3.5 h-3' : 'w-2.5 h-2'} />
         </span>
       )}
       {isBeingRecorded && (

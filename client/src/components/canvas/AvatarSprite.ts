@@ -10,6 +10,15 @@ const AVATAR_RADIUS = TILE_SIZE * (14 / 32);
 
 const DEFAULT_COLOR = '#ff6b6b';
 
+// Raised-hand badge — same custom icon HandButton.tsx/VideoGrid.tsx/
+// ParticipantPanel.tsx use now (was a plain ✋ fillText emoji, inconsistent
+// once those switched). Loaded once at module scope, drawn via drawImage
+// instead of fillText — `.complete`/`naturalWidth` guard the brief window
+// before it's decoded so an early frame just skips drawing it rather than
+// throwing or painting a broken image.
+const handRaiseIcon = new Image();
+handRaiseIcon.src = '/assets/img/raise-hand-icon.png';
+
 interface DrawAvatarOptions {
   avatar: Avatar;
   x: number;
@@ -126,17 +135,16 @@ export function drawAvatar(
     nextBadgeY -= 15;
   }
 
-  // ─── Raised hand ✋ — the top-most cue, gently waving so it reads as an
+  // ─── Raised hand — the top-most cue, gently waving so it reads as an
   // active "I want to speak" signal rather than a static icon. ──────────
   if (avatar.handRaised) {
     const wave = Math.sin(timestamp * 0.008) * 0.25;
     ctx.save();
     ctx.translate(cx, nextBadgeY - 4);
     ctx.rotate(wave);
-    ctx.font = '16px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('✋', 0, 0);
+    if (handRaiseIcon.complete && handRaiseIcon.naturalWidth > 0) {
+      ctx.drawImage(handRaiseIcon, -9, -8, 18, 16);
+    }
     ctx.restore();
   }
 

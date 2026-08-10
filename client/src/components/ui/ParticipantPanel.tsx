@@ -456,7 +456,7 @@ function ParticipantRow({
         {/* Live presence cues, glanceable per row — same signals shown over
             the avatar (raise-hand ✋, presence badge) and video tile (speaking 🔊). */}
         {spotlightActive && <MegaphoneFill title="Spotlight aktif — terdengar/terlihat seluruh room" size={11} className="text-amber-500 shrink-0" />}
-        {handRaised && <span title="Hand raised" className="text-[11px] leading-none animate-bounce">✋</span>}
+        {handRaised && <img src="/assets/img/raise-hand-icon.png" alt="" title="Hand raised" className="w-3 h-2.5 animate-bounce shrink-0" />}
         {workMode === 'focus' && <Headphones title="Fokus (jangan diganggu)" size={12} className="text-purple-500 shrink-0" />}
         {workMode && workMode !== 'focus' && (
           <span title={PRESENCE_LABEL[workMode]} className="text-[11px] leading-none shrink-0">

@@ -7,9 +7,9 @@ interface HandButtonProps {
 }
 
 // "Raise hand" toggle (ZEP/Gather meeting cue). Sits in the same bottom HUD
-// row as Mic/Camera/Screen-share. When raised, the player shows a ✋ badge
-// over their avatar in-world and on their video tile in Meeting View (see
-// AvatarSprite.ts / VideoGrid.tsx). Keyboard shortcut: H.
+// row as Mic/Camera/Screen-share. When raised, the player shows the same
+// raise-hand icon over their avatar in-world and on their video tile in
+// Meeting View (see AvatarSprite.ts / VideoGrid.tsx). Keyboard shortcut: H.
 export function HandButton({ raised, onToggle }: HandButtonProps) {
   const [showLabel, setShowLabel] = useState(false);
 
@@ -39,15 +39,16 @@ export function HandButton({ raised, onToggle }: HandButtonProps) {
       }`}
       title="Raise hand (H)"
     >
-      {/* Literal emoji, not a Bootstrap Icons glyph — checked the full icon
-          set (HandIndex*, HandThumbs*, PersonRaisedHand) and none of them
-          read clearly as "raise hand" at 18px; PersonRaisedHand (tried
-          previously) is a person silhouette with an arm up, easy to mistake
-          for a generic person icon at a glance. ✋ is unambiguous and needs
-          no new icon library (Lucide isn't installed in this project).
-          text-* classes don't recolor emoji glyphs, so only the
-          animation/opacity carry over from the icon version. */}
-      <span className={`text-lg leading-none ${raised ? 'animate-bounce' : 'opacity-70'}`}>✋</span>
+      {/* User-supplied icon (checked react-bootstrap-icons' full hand set
+          previously — HandIndex*, HandThumbs*, PersonRaisedHand — none read
+          clearly at 18px; a plain ✋ emoji worked but looked inconsistent
+          once this custom icon replaced it everywhere else raised-hand
+          shows, see AvatarSprite.ts/VideoGrid.tsx/ParticipantPanel.tsx). */}
+      <img
+        src="/assets/img/raise-hand-icon.png"
+        alt=""
+        className={`w-[18px] h-4 object-contain ${raised ? 'animate-bounce' : 'opacity-70'}`}
+      />
       {showLabel && (
         <span className="absolute -top-8 whitespace-nowrap text-xs bg-white dark:bg-gray-800 text-purple-700 dark:text-purple-300 border border-purple-100 dark:border-gray-700 shadow-sm px-2 py-0.5 rounded">
           {raised ? 'Lower hand (H)' : 'Raise hand (H)'}
