@@ -7,6 +7,7 @@ import { UserProfile } from '@/services/api';
 import { CreditsModal } from '@/components/ui/CreditsModal';
 import { Theme } from '@/hooks/useTheme';
 import { SERVER_URL } from '@/services/serverUrl';
+import { useProfiles } from '@/hooks/useProfiles';
 
 interface LobbyProps {
   user: UserProfile;
@@ -33,6 +34,14 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
     return (parts[0][0] + parts[1][0]).toUpperCase();
   })();
+  // Real photo (from Lark, for accounts that logged in that way) — same
+  // batched lookup ChatPanel/VideoGrid already use for OTHER people's
+  // avatars, reused here for this account's own. Deliberately not added to
+  // /auth/me's UserProfile (see that endpoint's own doc comment: the photo
+  // column is heavy enough it's kept out of the hot path on purpose).
+  // Falls back to the existing initials circle when null (self-registered
+  // accounts with no Lark photo, or before the lookup resolves).
+  const myPhoto = useProfiles([user.id]).get(user.id)?.photo ?? null;
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -155,9 +164,13 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
               <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
               <div className="absolute right-0 top-full mt-2 w-52 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-purple-100 dark:border-gray-700 py-1.5 z-50">
                 <div className="flex items-center gap-2.5 px-3.5 py-2 border-b border-purple-50 dark:border-gray-700">
-                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-[11px] font-bold shrink-0 shadow-sm">
-                    {userInitials}
-                  </div>
+                  {myPhoto ? (
+                    <img src={myPhoto} alt="" className="w-7 h-7 rounded-full object-cover shrink-0 shadow-sm" />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-[11px] font-bold shrink-0 shadow-sm">
+                      {userInitials}
+                    </div>
+                  )}
                   <div className="min-w-0">
                     <p className="text-gray-800 dark:text-gray-100 text-sm font-medium truncate">{user.displayName}</p>
                     <p className={`text-[10px] font-semibold uppercase tracking-wide ${isAdmin ? 'text-purple-500 dark:text-purple-400' : 'text-gray-400 dark:text-gray-500'}`}>
