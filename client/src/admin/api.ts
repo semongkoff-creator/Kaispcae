@@ -99,12 +99,17 @@ export const adminApi = {
       queueEnabled: boolean;
       entries: {
         id: string; userId: string; name: string; topic: string | null; durationMin: number;
-        status: 'waiting' | 'called' | 'active'; requestedAt: number; calledAt: number | null; endsAt: number | null;
+        status: 'waiting' | 'called' | 'active'; mode: 'quick' | 'booking';
+        bookingStart: number | null; bookingEnd: number | null;
+        requestedAt: number; calledAt: number | null; endsAt: number | null;
       }[];
     }>(`/rooms/${slug}/queue${zoneId ? `?zoneId=${encodeURIComponent(zoneId)}` : ''}`),
 
   skipQueueEntry: (slug: string, entryId: string) =>
     req<{ ok: true }>(`/rooms/${slug}/queue/${entryId}/skip`, { method: 'POST' }),
+
+  approveQueueEntry: (slug: string, entryId: string) =>
+    req<{ ok: true }>(`/rooms/${slug}/queue/${entryId}/approve`, { method: 'POST' }),
 
   // "Ngobrol dengan CEO" queue, zone-level (see server/src/lib/zoneMembership.ts)
   // — "ruang CEO" turned out to be a zone inside the shared office, not a
@@ -113,10 +118,10 @@ export const adminApi = {
   getZoneRestrictions: (slug: string) =>
     req<{
       zones: { id: string; name: string }[];
-      restrictions: { zoneId: string; minRole: string; queueEnabled: boolean }[];
+      restrictions: { zoneId: string; minRole: string; queueEnabled: boolean; bookingMode: boolean }[];
     }>(`/rooms/${slug}/zone-restrictions`),
 
-  setZoneRestriction: (slug: string, zoneId: string, patch: { enabled: boolean; minRole?: string; queueEnabled?: boolean }) =>
+  setZoneRestriction: (slug: string, zoneId: string, patch: { enabled: boolean; minRole?: string; queueEnabled?: boolean; bookingMode?: boolean }) =>
     req<{ ok: true }>(`/rooms/${slug}/zones/${encodeURIComponent(zoneId)}/restriction`, {
       method: 'PATCH',
       body: JSON.stringify(patch),

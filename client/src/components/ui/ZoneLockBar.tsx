@@ -14,6 +14,12 @@ function formatCountdown(msRemaining: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+// v2 — HH:MM in the viewer's own timezone, for a booking ticket's window.
+function formatClock(epochMs: number): string {
+  const d = new Date(epochMs);
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+}
+
 // All the zone-lock UI, kept in one strip above the HUD so it never collides
 // with the room's own controls (the floating Chat button already taught us
 // what that looks like).
@@ -48,7 +54,11 @@ export function ZoneLockBar({
   onDecideApproval: (r: ZoneApprovalRequest, admit: boolean) => void;
   // "Ngobrol dengan CEO" queue, zone-level (see useZoneLock.ts). `endsAt`
   // (epoch ms) is only meaningful once `status === 'active'`.
-  zoneQueueTicket: { zoneId: string; status: 'waiting' | 'called' | 'active'; durationMin: number; position: number | null; endsAt: number | null } | null;
+  zoneQueueTicket: {
+    zoneId: string; status: 'waiting' | 'called' | 'active'; durationMin: number;
+    mode: 'quick' | 'booking'; bookingStart: number | null; bookingEnd: number | null;
+    position: number | null; endsAt: number | null;
+  } | null;
   zoneQueueBusy: boolean;
   zoneQueueError: string;
   onJoinZoneQueue: (zoneId: string, durationMin: number, topic?: string) => void;
@@ -57,7 +67,13 @@ export function ZoneLockBar({
   const [queueDuration, setQueueDuration] = useState(15);
   const [queueTopic, setQueueTopic] = useState('');
 
-  const queueingHere = zoneQueueTicket && zoneQueueTicket.zoneId === deniedZoneId;
+  // v2 — a bookingMode zone never sets deniedZoneId (ZONE_ENTER doesn't gate
+  // it, so there's nothing to be "bounced" from — see zoneHandler.ts), so
+  // the old "only show while standing at the zone you got denied from" tie
+  // would hide a booking/quick ticket's status forever. A 'booking' ticket
+  // always shows regardless of where the player currently is standing —
+  // it's a schedule, not a "you're at the door" state.
+  const queueingHere = zoneQueueTicket && (zoneQueueTicket.zoneId === deniedZoneId || zoneQueueTicket.mode === 'booking');
 
   // Live countdown while a session is active — a local 1s tick purely to
   // re-render (no server round trip, no polling); the actual remaining time
@@ -153,6 +169,21 @@ export function ZoneLockBar({
             {zoneQueueTicket.endsAt != null ? formatCountdown(zoneQueueTicket.endsAt - now) : `${zoneQueueTicket.durationMin}:00`}
           </p>
           <p className="text-[10px] text-gray-400">Waktu tersisa — keluar zona kapan saja untuk mengakhiri lebih awal.</p>
+        </div>
+      ) : queueingHere && zoneQueueTicket && zoneQueueTicket.mode === 'booking' ? (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-purple-200 dark:border-gray-700 p-3">
+          <p className="text-xs text-gray-800 dark:text-gray-100 inline-flex items-center gap-1.5">
+            <HourglassSplit size={11} className="text-purple-600" />
+            {zoneQueueTicket.status === 'called' ? 'Booking disetujui — menunggu jadwal' : 'Menunggu persetujuan CEO...'}
+          </p>
+          <p className="text-[10px] text-gray-400 mb-2">
+            {zoneQueueTicket.bookingStart && zoneQueueTicket.bookingEnd
+              ? `Jam ${formatClock(zoneQueueTicket.bookingStart)}–${formatClock(zoneQueueTicket.bookingEnd)}${zoneQueueTicket.status === 'called' ? ' — otomatis masuk saat jamnya tiba.' : ''}`
+              : null}
+          </p>
+          <button onClick={onCancelZoneQueue} disabled={zoneQueueBusy} className="w-full py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium cursor-pointer disabled:opacity-50">
+            Batalkan booking
+          </button>
         </div>
       ) : queueingHere && zoneQueueTicket ? (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-purple-200 dark:border-gray-700 p-3">

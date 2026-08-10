@@ -134,7 +134,7 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
     // every zone crossing for every player, all day, and the overwhelming
     // majority of zones have no restriction row at all.
     const restriction = getCachedZoneRestriction(room, zoneId);
-    if (restriction) {
+    if (restriction && !restriction.bookingMode) {
       if (!uid) {
         // Unauthenticated (guest) — the queue requires a real account, so
         // there is no self-service path regardless of queueEnabled.

@@ -1054,6 +1054,12 @@ export interface ZoneQueueRequestedPayload {
   roomName: string;
   zoneId: string;
   zoneName: string;
+  // v2 — always 'booking' in practice (a 'quick' entry is full-auto FCFS
+  // and never pages the CEO for a decision — see roomQueue.ts's
+  // advanceQueue), included so the toast can render the scheduled window.
+  mode?: 'quick' | 'booking';
+  bookingStart?: number;
+  bookingEnd?: number;
 }
 
 // See SocketEvents.ZONE_QUEUE_SESSION_ACTIVE — room-wide, so every client
@@ -1624,6 +1630,10 @@ export interface ZoneRestrictionState {
   zoneId: string;
   minRole: string;
   queueEnabled: boolean;
+  // "Ngobrol dengan CEO" v2 — true means this zone is always freely
+  // walkable; minRole/queueEnabled above are ignored. See ZONE_LOCKED_DENIED
+  // (never fired for this zone) and the booking/quick queue endpoints.
+  bookingMode: boolean;
 }
 
 // Live claim state of one claimable-seat marker (see mapLayers.ts's

@@ -63,24 +63,41 @@ export async function admitCalledEntry(prisma: PrismaClient, roomId: string, zon
 // would have double-booked the slot (caught below and treated as a no-op —
 // same "opportunistic, the next sweep tick will catch it" posture this
 // function already had, not a real failure worth surfacing to the caller).
-export async function advanceQueue(prisma: PrismaClient, roomId: string, zoneId: string | null): Promise<{ userId: string; name: string } | null> {
-  // "Ngobrol dengan CEO" queue, zone-level — now requires an explicit admin
-  // approval (see routes/roomMembers.ts's new /queue/:entryId/approve)
-  // instead of being auto-promoted, so this is a no-op for every zone-level
-  // queue. Room-level (zoneId === null) is untouched — it still auto-
-  // advances FCFS exactly as before.
-  if (zoneId !== null) return null;
+//
+// "Ngobrol dengan CEO" v2 — a zone-level queue now mixes two independent
+// sub-queues in one table: 'quick' (this function — full-auto FCFS, same
+// algorithm room-level always used) and 'booking' (a scheduled window,
+// NEVER auto-promoted here — see routes/roomMembers.ts's explicit /approve
+// endpoint and queueSweep.ts's clock-driven admitBookingIfDue). The WHERE
+// clause below always filters mode:'quick', so a pending/approved booking
+// can never be mistaken for "the slot" this function is managing, and a
+// booking is invisible to it in both directions.
+//
+// A booking whose time has already arrived (bookingStart <= now) is treated
+// as reserving the physical slot RIGHT NOW even though it isn't 'active' yet
+// — otherwise a quick-queue entry could sneak into the gap between "the
+// sweep noticed the booking is due" and "the sweep finished teleporting them
+// in" (both happen within the same 20s tick, but advanceQueue can also be
+// triggered independently by /queue/join, /skip, etc). This is the
+// "booking always wins a same-moment collision" rule from the v2 design doc.
+export async function advanceQueue(prisma: PrismaClient, roomId: string, zoneId: string | null): Promise<{ id: string; userId: string; name: string; durationMin: number } | null> {
   try {
     return await prisma.$transaction(async (tx) => {
       const occupied = await tx.roomQueueEntry.findFirst({ where: { roomId, zoneId, status: { in: ['called', 'active'] } } });
       if (occupied) return null;
+      if (zoneId !== null) {
+        const dueBooking = await tx.roomQueueEntry.findFirst({
+          where: { roomId, zoneId, mode: 'booking', status: 'called', bookingStart: { lte: new Date() } },
+        });
+        if (dueBooking) return null;
+      }
       const next = await tx.roomQueueEntry.findFirst({
-        where: { roomId, zoneId, status: 'waiting' },
+        where: { roomId, zoneId, mode: 'quick', status: 'waiting' },
         orderBy: { requestedAt: 'asc' },
       });
       if (!next) return null;
       await tx.roomQueueEntry.update({ where: { id: next.id }, data: { status: 'called', calledAt: new Date() } });
-      return { userId: next.userId, name: next.name };
+      return { id: next.id, userId: next.userId, name: next.name, durationMin: next.durationMin };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (e) {
     console.warn('[queue] advanceQueue lost a race (safe to ignore, sweep will retry):', e);

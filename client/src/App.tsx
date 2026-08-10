@@ -39,6 +39,7 @@ import { JoinGate, JoinRequestPanel } from './components/ui/JoinApproval';
 import { MessengerApp } from './components/Messenger/MessengerApp';
 import { NoticeBanner } from './components/ui/NoticeBanner';
 import { EmoteWheel } from './components/ui/EmoteWheel';
+import { BookingForm } from './components/ui/BookingForm';
 import { Minimap } from './components/hud/Minimap';
 import { AdminPanel } from './components/ui/AdminPanel';
 import { TeleportPanel } from './components/ui/TeleportPanel';
@@ -100,6 +101,14 @@ function describeConsentDecline(reason: 'declined' | 'timeout' | 'offline' | und
   if (reason === 'timeout') return "didn't respond to";
   if (reason === 'offline') return 'went offline before responding to';
   return 'declined';
+}
+
+// "Ngobrol dengan CEO" v2 — HH:MM in the viewer's own timezone, for booking
+// toasts/widgets. Deliberately no date shown — bookings are always same-day
+// (see BookingForm.tsx's own toTodayOrTomorrow reasoning).
+function formatClock(epochMs: number): string {
+  const d = new Date(epochMs);
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
 }
 
 // A mouse click (e.g. the "My Seat" sidebar button) never fires a keyup for
@@ -491,6 +500,29 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     emitZoneEnter(zoneId);
   }, [zones, emitZoneEnter]);
   const zoneLock = useZoneLock(socketRef, authUserId, roomSlug, enterZoneNow);
+  // "Ngobrol dengan CEO" v2 — the "Selesai meeting" widget. Assumes one
+  // bookingMode zone per room (this session's Q&A) — derived from the
+  // already-broadcast zoneRestrictions rather than a separate fetch.
+  const ceoZoneId = useMemo(() => zoneLock.zoneRestrictions.find((r) => r.bookingMode)?.zoneId ?? null, [zoneLock.zoneRestrictions]);
+  const activeZoneSessions = useGameStore((s) => s.activeZoneSessions);
+  const myActiveZoneSession = localIsCeo && ceoZoneId
+    ? [...activeZoneSessions.values()].find((s) => s.zoneId === ceoZoneId)
+    : undefined;
+  const [finishingSession, setFinishingSession] = useState(false);
+  const finishActiveZoneSession = useCallback(async () => {
+    if (!ceoZoneId) return;
+    setFinishingSession(true);
+    try {
+      const { entries } = await api.getZoneQueueEntries(roomSlug, ceoZoneId);
+      const active = entries.find((e) => e.status === 'active');
+      if (active) await api.skipQueueEntry(roomSlug, active.id);
+    } catch {
+      // Best-effort — the widget just stays up if this fails; the CEO can
+      // retry, or the session ends on its own at endsAt regardless.
+    } finally {
+      setFinishingSession(false);
+    }
+  }, [ceoZoneId, roomSlug]);
   // "Ngobrol dengan CEO" queue, zone-level — the map's own visual "tile
   // effect" (a lock badge on the zone's banner, see GameCanvas.tsx), so a
   // restricted area like "CEO Office" is visibly marked from a distance
@@ -576,8 +608,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       // ordinary room admin must queue like anyone else here; only the room
       // owner and whoever's been granted CEO access (see gameStore's
       // localIsCeo, roomHandler.ts's ceoUserIds) bypass.
+      // "Ngobrol dengan CEO" v2 — a bookingMode zone is always freely
+      // walkable (see zoneHandler.ts's own ZONE_ENTER, which skips this same
+      // gate server-side), so this client-side mirror must skip it too, or
+      // the avatar would get bounced back out locally even though the
+      // server would have let it through.
       const restriction = zoneLock.restrictionOf(zoneId);
-      if (restriction && localRole !== 'owner' && !localIsCeo) {
+      if (restriction && !restriction.bookingMode && localRole !== 'owner' && !localIsCeo) {
         const ticket = zoneLock.zoneQueueTicket;
         const admitted = ticket?.zoneId === zoneId && (ticket.status === 'called' || ticket.status === 'active');
         if (!admitted) {
@@ -627,7 +664,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket) return;
-    const onZoneSessionEnded = (msg: { zoneId: string; zoneName: string }) => {
+    const onZoneSessionEnded = (msg: { zoneId: string; zoneName: string; nudgeOut?: boolean }) => {
+      // "Ngobrol dengan CEO" v2 — a bookingMode zone stays freely walkable
+      // after the session ends (see roomHandler.ts's forceZoneExitForQueue),
+      // so there's nothing for THIS handler to do: no repositioning, no
+      // ZONE_EXIT, the avatar just keeps standing wherever it already was.
+      // useZoneLock's own onZoneSessionEnded still fires independently and
+      // handles the toast + dropping the finished ticket.
+      if (msg.nudgeOut === false) return;
       const z = zones.find((x) => x.id === msg.zoneId);
       if (z) {
         useGameStore.getState().setLocalPlayer({
@@ -1152,6 +1196,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const followInfo = useGameStore((s) => s.followInfo);
   const followerUserIds = useGameStore((s) => s.followerUserIds);
   const [showEmoteWheel, setShowEmoteWheel] = useState(false);
+  // "Ngobrol dengan CEO" v2 — the G-key booking form. Assumes one bookingMode
+  // zone per room (this session's own Q&A) — fetched fresh on each G press
+  // rather than cached, since it's a rare action and always wants the
+  // current admin config, not a stale snapshot from page load.
+  const [bookingZone, setBookingZone] = useState<{ zoneId: string; name: string } | null>(null);
+  const [showBookingForm, setShowBookingForm] = useState(false);
   const meetingViewActive = activePanel === 'meeting';
   const [miniModeWindow, setMiniModeWindow] = useState<Window | null>(null);
   const [miniModeError, setMiniModeError] = useState<string | null>(null);
@@ -1414,6 +1464,32 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [moduleOpen, isGuest]);
+
+  // "Ngobrol dengan CEO" v2 — G opens the booking form, from anywhere in the
+  // room (not gated by standing near the zone — see the spec's own "member
+  // di mana saja / dekat area CEO"). Guests never get a real account queue
+  // ticket (server-enforced, see roomQueue.ts's own reasoning), so this is
+  // inert for them same as the other member-only hotkeys.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (shouldIgnoreRoomHotkey(e.target, moduleOpen)) return;
+      if (isGuest) return;
+      if (e.key === 'g' || e.key === 'G') {
+        e.preventDefault();
+        api.getBookingZones(roomSlug).then((res) => {
+          const zone = res.zones[0];
+          if (!zone) {
+            zoneLock.flashToast?.('Tidak ada ruang booking di room ini.');
+            return;
+          }
+          setBookingZone({ zoneId: zone.zoneId, name: zone.name });
+          setShowBookingForm(true);
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [moduleOpen, isGuest, roomSlug, zoneLock]);
 
   const allPlayers = { [localPlayerId]: useGameStore.getState().localPlayer, ...playerRecords };
 
@@ -1678,7 +1754,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           <PendingRequestToast
             key={req.entryId}
             icon={<BriefcaseFill size={13} className="text-amber-600" />}
-            message={<><span className="font-medium">{req.name}</span> minta antre ngobrol di <span className="font-medium">{req.zoneName}</span>{req.topic ? <> — &quot;{req.topic}&quot;</> : null} ({req.durationMin}m)</>}
+            message={
+              req.mode === 'booking' && req.bookingStart && req.bookingEnd ? (
+                <><span className="font-medium">{req.name}</span> booking <span className="font-medium">{req.zoneName}</span> jam {formatClock(req.bookingStart)}–{formatClock(req.bookingEnd)}{req.topic ? <> — &quot;{req.topic}&quot;</> : null}</>
+              ) : (
+                <><span className="font-medium">{req.name}</span> minta antre ngobrol di <span className="font-medium">{req.zoneName}</span>{req.topic ? <> — &quot;{req.topic}&quot;</> : null} ({req.durationMin}m)</>
+              )
+            }
             onAccept={() => decideIncomingQueueRequest(req, 'approve')}
             onDecline={() => decideIncomingQueueRequest(req, 'reject')}
           />
@@ -2324,6 +2406,26 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         />
       )}
 
+      {/* "Ngobrol dengan CEO" v2 — CEO-only, visible regardless of where the
+          CEO is physically standing (the zone is freely walkable now, so
+          "in the zone" no longer means "hosting the session" the way it did
+          under the old gated model). */}
+      {!moduleOpen && myActiveZoneSession && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-64 bg-white/95 dark:bg-gray-800/95 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-xl p-3">
+          <p className="text-xs text-gray-800 dark:text-gray-100">
+            Sesi aktif: <span className="font-semibold">{myActiveZoneSession.playerName}</span>
+          </p>
+          <p className="text-[10px] text-gray-400 mb-2">Berakhir otomatis {formatClock(myActiveZoneSession.endsAt)}.</p>
+          <button
+            onClick={finishActiveZoneSession}
+            disabled={finishingSession}
+            className="w-full py-1.5 rounded-lg bg-purple-600 text-white text-xs font-medium cursor-pointer hover:bg-purple-700 disabled:opacity-50"
+          >
+            {finishingSession ? 'Mengakhiri…' : 'Selesai meeting'}
+          </button>
+        </div>
+      )}
+
       {/* The floating Chat button belongs to the room. While a suite module
           covers the screen it just sits on top of that module's UI (it landed
           over the Calendar's "Buat acara" button), so it stands down — same
@@ -2367,6 +2469,19 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onSelect={handleEmoteSelect}
         onClose={() => setShowEmoteWheel(false)}
       />
+
+      {showBookingForm && bookingZone && (
+        <BookingForm
+          zoneName={bookingZone.name}
+          busy={zoneLock.zoneQueueBusy}
+          error={zoneLock.zoneQueueError}
+          onClose={() => setShowBookingForm(false)}
+          onSubmit={async (bookingStart, bookingEnd, topic) => {
+            const ok = await zoneLock.bookZoneQueueSlot(bookingZone.zoneId, bookingStart, bookingEnd, topic);
+            if (ok) setShowBookingForm(false);
+          }}
+        />
+      )}
 
       <Minimap
         players={Object.values(allPlayers)}

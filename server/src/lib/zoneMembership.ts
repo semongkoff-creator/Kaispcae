@@ -11,9 +11,9 @@ export async function refreshZoneRestrictionCache(
   prisma: PrismaClient,
   roomSlug: string,
   roomId: string,
-): Promise<{ zoneId: string; minRole: string; queueEnabled: boolean }[]> {
+): Promise<{ zoneId: string; minRole: string; queueEnabled: boolean; bookingMode: boolean }[]> {
   const rows = await prisma.zoneRestriction.findMany({ where: { roomId } });
-  const mapped = rows.map((r) => ({ zoneId: r.zoneId, minRole: r.minRole, queueEnabled: r.queueEnabled }));
+  const mapped = rows.map((r) => ({ zoneId: r.zoneId, minRole: r.minRole, queueEnabled: r.queueEnabled, bookingMode: r.bookingMode }));
   setCachedZoneRestrictions(roomSlug, mapped);
   return mapped;
 }
@@ -28,12 +28,13 @@ export async function refreshZoneRestrictionCache(
 export interface ZoneEntryDecision {
   allowed: boolean;
   // 'open'        — this zone has no restriction row at all (the common case)
+  // 'booking'     — bookingMode zone: always freely walkable, nothing to gate
   // 'privileged'  — the room's own owner
   // 'member'      — explicitly granted CEO access (RoomMember.isCeo)
   // 'restricted'  — neither of the above, and queueEnabled is off: no self-service path
   // 'queue'       — neither of the above, but may join the queue (queueEnabled is on)
   // 'queue-active'— holds a 'called' or unexpired 'active' ticket for THIS zone
-  reason: 'open' | 'privileged' | 'member' | 'restricted' | 'queue' | 'queue-active';
+  reason: 'open' | 'booking' | 'privileged' | 'member' | 'restricted' | 'queue' | 'queue-active';
 }
 
 export async function resolveZoneEntry(
@@ -44,6 +45,11 @@ export async function resolveZoneEntry(
 ): Promise<ZoneEntryDecision> {
   const restriction = await prisma.zoneRestriction.findUnique({ where: { roomId_zoneId: { roomId: room.id, zoneId } } });
   if (!restriction) return { allowed: true, reason: 'open' };
+  // "Ngobrol dengan CEO" v2 — a bookingMode zone is never gated at all; the
+  // queue/booking system reserves the CEO's time, not the door. Checked
+  // before the owner/CEO shortcuts below since it applies to literally
+  // everyone, not just privileged users.
+  if (restriction.bookingMode) return { allowed: true, reason: 'booking' };
   if (userId === room.ownerId) return { allowed: true, reason: 'privileged' };
 
   // Deliberately NOT role-based (see roomHandler.ts's RoomAdminState.ceoUserIds

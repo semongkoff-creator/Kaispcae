@@ -945,17 +945,35 @@ model RoomQueueEntry {
   // that keep one person from booking the whole day.
   durationMin Int
   status      String    @default("waiting")
-  requestedAt DateTime  @default(now())
-  calledAt    DateTime?
-  startedAt   DateTime?
-  endsAt      DateTime?
-  completedAt DateTime?
+  // 'quick' = FCFS line, no fixed clock time (the original model). 'booking'
+  // = a specific bookingStart/bookingEnd window picked by the requester and
+  // approved by the CEO ahead of time — see ZoneRestriction.bookingMode and
+  // lib/roomQueue.ts's admitBookingIfDue. The two share this table (and the
+  // same status enum) but are advanced by completely different code paths:
+  // advanceQueue only ever auto-promotes 'quick' entries, never 'booking'
+  // ones (those move waiting->called only via the explicit approve endpoint,
+  // and called->active only via queueSweep's clock-driven pass).
+  mode           String    @default("quick")
+  bookingStart   DateTime?
+  bookingEnd     DateTime?
+  requestedAt    DateTime  @default(now())
+  calledAt       DateTime?
+  // Who approved a 'booking' entry (and when) — 'quick' entries under
+  // full-auto FCFS never populate this, there's no one decision to attribute.
+  approvedAt     DateTime?
+  approvedById   String?
+  approvedByName String?
+  startedAt      DateTime?
+  endsAt         DateTime?
+  completedAt    DateTime?
 
   // The waiting-room position query (oldest 'waiting' first, scoped by
   // zoneId too) and the sweep's expiry scans (by status) are the only
   // queries this table serves.
   @@index([roomId, zoneId, status, requestedAt])
   @@index([userId, status])
+  // queueSweep's "which approved bookings' start time has arrived?" scan.
+  @@index([zoneId, mode, status, bookingStart])
 }
 
 // "CEO Office" turned out to be a ZONE inside the shared "Kaitech" map, not
@@ -983,6 +1001,13 @@ model ZoneRestriction {
   // means "staff+ only, no self-service path", same relationship
   // restrictedAccess/queueEnabled have at the room level.
   queueEnabled Boolean  @default(true)
+  // "Ngobrol dengan CEO" v2 — true flips this zone from "gated, must queue to
+  // walk in" to "always freely walkable; the queue/booking system reserves
+  // the CEO's TIME, not the door". When true, ZONE_ENTER never blocks entry
+  // for this zone and minRole/queueEnabled above are ignored entirely (kept
+  // on the row rather than removed so any OTHER zone still using the old
+  // gated model — this flag defaults false — is completely unaffected).
+  bookingMode  Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

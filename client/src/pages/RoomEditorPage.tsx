@@ -1983,6 +1983,50 @@ export function RoomEditorPage({ slug }: { slug: string }) {
                   </button>
                 ))}
               </div>
+              {/* "Ngobrol dengan CEO" v2 — bookingMode toggle. No dedicated
+                  per-zone settings panel exists yet (ZoneRestriction rows are
+                  otherwise only ever written once, at area-creation time, see
+                  the restrictedArea branch below) — same prompt/confirm
+                  convention every other area setting on this page already
+                  uses (isolate/capacity/memberOnly above), not a new modal. */}
+              {selectedEffect === 'restrictedArea' && (
+                <button
+                  onClick={async () => {
+                    try {
+                      const { zones, restrictions } = await adminApi.getZoneRestrictions(slug);
+                      const restrictedZones = zones.filter((z) => restrictions.some((r) => r.zoneId === z.id));
+                      if (restrictedZones.length === 0) {
+                        window.alert('Belum ada Restricted Area di room ini — gambar dulu dengan tool ini, lalu coba lagi.');
+                        return;
+                      }
+                      let target = restrictedZones[0];
+                      if (restrictedZones.length > 1) {
+                        const names = restrictedZones.map((z) => z.name).join(', ');
+                        const picked = (window.prompt(`Ada ${restrictedZones.length} restricted area: ${names}\n\nKetik nama persis salah satu untuk diatur:`, restrictedZones[0].name) ?? '').trim();
+                        const found = restrictedZones.find((z) => z.name === picked);
+                        if (!found) return;
+                        target = found;
+                      }
+                      const current = restrictions.find((r) => r.zoneId === target.id);
+                      const nextBookingMode = !current?.bookingMode;
+                      const confirmMsg = nextBookingMode
+                        ? `Aktifkan Booking Mode untuk "${target.name}"?\n\nZona ini akan BEBAS keluar-masuk (tidak ada penolakan lagi) — booking (tombol G) & antrean cepat jadi reservasi waktu CEO, bukan syarat fisik masuk.`
+                        : `Matikan Booking Mode untuk "${target.name}"?\n\nZona akan kembali terkunci seperti semula (perlu antre untuk masuk).`;
+                      if (!window.confirm(confirmMsg)) return;
+                      await adminApi.setZoneRestriction(slug, target.id, {
+                        enabled: true, minRole: current?.minRole ?? 'admin', queueEnabled: current?.queueEnabled ?? true, bookingMode: nextBookingMode,
+                      });
+                      window.alert(`Booking Mode untuk "${target.name}" sekarang ${nextBookingMode ? 'AKTIF' : 'nonaktif'}.`);
+                    } catch (err) {
+                      console.error('[room-editor] failed to toggle booking mode:', err);
+                      window.alert('Gagal mengubah setelan Booking Mode.');
+                    }
+                  }}
+                  className="w-full mt-2 py-1.5 rounded bg-purple-600/20 hover:bg-purple-600/30 border border-purple-400/40 text-purple-300 text-xs font-medium cursor-pointer"
+                >
+                  ⚙️ Atur Booking Mode zona ini
+                </button>
+              )}
               <button
                 onClick={() => {
                   if (window.confirm('Hapus SEMUA tile effect di room ini (impassable, door, sittable, portal, starting point, dll)? Aksi ini bisa di-undo (Ctrl+Z).')) {

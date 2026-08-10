@@ -9,7 +9,7 @@ import { resolveEntry } from '../lib/roomMembership';
 import { resolveZoneEntry, refreshZoneRestrictionCache } from '../lib/zoneMembership';
 import { groupConversationId } from '../lib/conversations';
 import { requireWorkspace } from '../lib/workspace';
-import { getConnectedAdminSocketIds, getConnectedCeoSocketIds, forceLeaveForQueue, forceZoneExitForQueue, broadcastZoneQueueSessionCleared, markSpawnNearUser } from '../socket/roomHandler';
+import { getConnectedAdminSocketIds, getConnectedCeoSocketIds, forceLeaveForQueue, forceZoneExitForQueue, broadcastZoneQueueSessionCleared, markSpawnNearUser, advanceZoneQuickQueue } from '../socket/roomHandler';
 import { advanceQueue, QUEUE_MIN_MINUTES, QUEUE_MAX_MINUTES } from '../lib/roomQueue';
 
 // Reads a room's current zone list regardless of which map format it's
@@ -502,10 +502,14 @@ roomMembers.get('/rooms/:slug/queue/mine', authenticateToken, async (req: AuthRe
     });
     if (!entry) return res.json({ entry: null });
 
+    // Position is a 'quick' FCFS-line concept only — a 'booking' entry's
+    // place isn't determined by submit order, it's whenever the CEO
+    // approves + whatever bookingStart was picked, so there's no meaningful
+    // number to show while it's still 'waiting' on a decision.
     let position: number | null = null;
-    if (entry.status === 'waiting') {
+    if (entry.status === 'waiting' && entry.mode === 'quick') {
       position = 1 + (await prisma.roomQueueEntry.count({
-        where: { roomId: room.id, zoneId, status: 'waiting', requestedAt: { lt: entry.requestedAt } },
+        where: { roomId: room.id, zoneId, mode: 'quick', status: 'waiting', requestedAt: { lt: entry.requestedAt } },
       }));
     }
     return res.json({
@@ -513,6 +517,9 @@ roomMembers.get('/rooms/:slug/queue/mine', authenticateToken, async (req: AuthRe
         id: entry.id,
         status: entry.status,
         durationMin: entry.durationMin,
+        mode: entry.mode,
+        bookingStart: entry.bookingStart?.getTime() ?? null,
+        bookingEnd: entry.bookingEnd?.getTime() ?? null,
         position,
         calledAt: entry.calledAt?.getTime() ?? null,
         endsAt: entry.endsAt?.getTime() ?? null,
@@ -524,15 +531,15 @@ roomMembers.get('/rooms/:slug/queue/mine', authenticateToken, async (req: AuthRe
   }
 });
 
-// POST /api/rooms/:slug/queue/join — { topic?, durationMin, zoneId? } — the
-// form submit. Idempotent like join-request above: re-posting while already
-// queued just returns the existing ticket instead of stacking duplicates.
+// POST /api/rooms/:slug/queue/join — { topic?, durationMin, zoneId? } for the
+// original 'quick' FCFS form, or { mode: 'booking', bookingStart, bookingEnd,
+// topic?, zoneId } for a scheduled CEO booking (v2 — only valid for a
+// bookingMode zone). Idempotent like join-request above: re-posting while
+// already queued just returns the existing ticket instead of stacking
+// duplicates.
 roomMembers.post('/rooms/:slug/queue/join', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
-    const durationMin = Math.round(Number(req.body?.durationMin));
-    if (!Number.isFinite(durationMin) || durationMin < QUEUE_MIN_MINUTES || durationMin > QUEUE_MAX_MINUTES) {
-      return res.status(400).json({ error: `Durasi harus antara ${QUEUE_MIN_MINUTES}-${QUEUE_MAX_MINUTES} menit` });
-    }
+    const mode = req.body?.mode === 'booking' ? 'booking' : 'quick';
     const topic = typeof req.body?.topic === 'string' ? req.body.topic.trim().slice(0, 300) || null : null;
     const zoneId = normalizeZoneId(req.body?.zoneId);
 
@@ -541,19 +548,67 @@ roomMembers.post('/rooms/:slug/queue/join', authenticateToken, async (req: AuthR
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     let zoneName: string | null = null;
+    let zoneBookingMode = false;
     if (zoneId) {
       const restriction = await prisma.zoneRestriction.findUnique({ where: { roomId_zoneId: { roomId: room.id, zoneId } } });
-      if (!restriction?.queueEnabled) return res.status(400).json({ error: 'Zona ini tidak membuka antrean' });
+      zoneBookingMode = !!restriction?.bookingMode;
+      // bookingMode ignores minRole/queueEnabled entirely — the zone is
+      // always freely walkable, so there's nothing to gate the FORM behind
+      // either. A non-bookingMode zone keeps the original gated behavior.
+      if (!zoneBookingMode && !restriction?.queueEnabled) {
+        return res.status(400).json({ error: 'Zona ini tidak membuka antrean' });
+      }
       const zone = zonesOfRoom(room).find((z) => z.id === zoneId);
       zoneName = zone?.name ?? zoneId;
-      const decision = await resolveZoneEntry(prisma, room, zoneId, req.userId!);
-      if (decision.allowed) return res.status(400).json({ error: 'Kamu sudah punya akses ke zona ini' });
+      if (!zoneBookingMode) {
+        const decision = await resolveZoneEntry(prisma, room, zoneId, req.userId!);
+        if (decision.allowed) return res.status(400).json({ error: 'Kamu sudah punya akses ke zona ini' });
+      }
     } else {
+      if (mode === 'booking') return res.status(400).json({ error: 'Booking hanya berlaku untuk zona' });
       if (!room.restrictedAccess || !room.queueEnabled) {
         return res.status(400).json({ error: 'Room ini tidak membuka antrean' });
       }
       const entry = await resolveEntry(prisma, room, req.userId!);
       if (entry.allowed) return res.status(400).json({ error: 'Kamu sudah punya akses ke room ini' });
+    }
+    if (mode === 'booking' && !zoneBookingMode) {
+      return res.status(400).json({ error: 'Zona ini tidak mendukung booking' });
+    }
+
+    let durationMin: number;
+    let bookingStart: Date | null = null;
+    let bookingEnd: Date | null = null;
+    if (mode === 'booking') {
+      const startMs = Number(req.body?.bookingStart);
+      const endMs = Number(req.body?.bookingEnd);
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+        return res.status(400).json({ error: 'Jam mulai/selesai tidak valid' });
+      }
+      bookingStart = new Date(startMs);
+      bookingEnd = new Date(endMs);
+      if (bookingStart.getTime() <= Date.now()) {
+        return res.status(400).json({ error: 'Jam mulai harus di masa depan' });
+      }
+      durationMin = Math.round((bookingEnd.getTime() - bookingStart.getTime()) / 60000);
+      if (durationMin < QUEUE_MIN_MINUTES || durationMin > QUEUE_MAX_MINUTES) {
+        return res.status(400).json({ error: `Durasi harus antara ${QUEUE_MIN_MINUTES}-${QUEUE_MAX_MINUTES} menit` });
+      }
+      // Best-effort — the authoritative check is the SERIALIZABLE transaction
+      // inside the approve endpoint below; this just saves the requester a
+      // trip when the clash is obvious up front.
+      const clash = await prisma.roomQueueEntry.findFirst({
+        where: {
+          roomId: room.id, zoneId, mode: 'booking', status: { in: ['called', 'active'] },
+          bookingStart: { lt: bookingEnd }, bookingEnd: { gt: bookingStart },
+        },
+      });
+      if (clash) return res.status(409).json({ error: 'Jadwal ini bentrok dengan booking lain yang sudah disetujui' });
+    } else {
+      durationMin = Math.round(Number(req.body?.durationMin));
+      if (!Number.isFinite(durationMin) || durationMin < QUEUE_MIN_MINUTES || durationMin > QUEUE_MAX_MINUTES) {
+        return res.status(400).json({ error: `Durasi harus antara ${QUEUE_MIN_MINUTES}-${QUEUE_MAX_MINUTES} menit` });
+      }
     }
 
     const existing = await prisma.roomQueueEntry.findFirst({
@@ -571,24 +626,28 @@ roomMembers.post('/rooms/:slug/queue/join', authenticateToken, async (req: AuthR
         name: requester?.displayName || 'Seseorang',
         topic,
         durationMin,
+        mode,
+        bookingStart,
+        bookingEnd,
         status: 'waiting',
       },
     });
 
-    // Opportunistic — if the room/zone's slot happens to be free right now
-    // (e.g. this is the only person waiting), this is what actually calls
-    // them rather than making them wait for the next 20s sweep tick. A no-op
-    // for zone-level entries now (see advanceQueue's own doc comment) —
-    // those wait on the ZONE_QUEUE_REQUESTED push just below instead.
-    await advanceQueue(prisma, room.id, zoneId);
+    // Opportunistic — if the room's (or zone-level 'quick') slot happens to
+    // be free right now, this is what actually calls them rather than making
+    // them wait for the next 20s sweep tick. A 'booking' entry is invisible
+    // to this — it only ever moves waiting -> called via the explicit
+    // approve endpoint below, never auto-promoted. Zone-level goes through
+    // the teleport-aware wrapper (full-auto FCFS, v2); room-level is
+    // untouched — it still waits for JOIN_ROOM's own admitCalledEntry.
+    if (zoneId && ioRef) await advanceZoneQuickQueue(ioRef, room.id, room.slug, zoneId);
+    else await advanceQueue(prisma, room.id, zoneId);
 
-    // "Ngobrol dengan CEO" queue, zone-level — approval-gated (see
-    // advanceQueue above), so this is the ONLY signal anyone gets that
-    // someone's waiting. Goes to whoever's actually been granted CEO
-    // access for this room, NOT every room admin — it's their queue to
-    // decide, same "only currently-connected, actually-relevant people"
-    // posture JOIN_REQUESTED has for admins.
-    if (zoneId && ioRef) {
+    // "Ngobrol dengan CEO" queue, zone-level, 'booking' only — a 'quick'
+    // entry needs no decision (full-auto FCFS, see advanceQueue), so paging
+    // the CEO for one would just be noise. Goes to whoever's actually been
+    // granted CEO access for this room, NOT every room admin.
+    if (zoneId && mode === 'booking' && ioRef) {
       const ceoSocketIds = getConnectedCeoSocketIds(room.slug);
       for (const sid of ceoSocketIds) {
         ioRef.to(sid).emit(SocketEvents.ZONE_QUEUE_REQUESTED, {
@@ -597,6 +656,9 @@ roomMembers.post('/rooms/:slug/queue/join', authenticateToken, async (req: AuthR
           name: created.name,
           topic,
           durationMin,
+          mode,
+          bookingStart: bookingStart!.getTime(),
+          bookingEnd: bookingEnd!.getTime(),
           roomSlug: room.slug,
           roomName: room.name,
           zoneId,
@@ -630,7 +692,10 @@ roomMembers.post('/rooms/:slug/queue/cancel', authenticateToken, async (req: Aut
     if (!entry) return res.status(404).json({ error: 'Tidak ada antrean aktif' });
 
     await prisma.roomQueueEntry.update({ where: { id: entry.id }, data: { status: 'cancelled' } });
-    if (entry.status === 'called') await advanceQueue(prisma, room.id, zoneId);
+    if (entry.status === 'called') {
+      if (zoneId && ioRef) await advanceZoneQuickQueue(ioRef, room.id, room.slug, zoneId);
+      else await advanceQueue(prisma, room.id, zoneId);
+    }
 
     return res.json({ ok: true });
   } catch (err) {
@@ -639,13 +704,17 @@ roomMembers.post('/rooms/:slug/queue/cancel', authenticateToken, async (req: Aut
   }
 });
 
-// GET /api/rooms/:slug/queue?zoneId=... — the admin's live view of the
-// whole line, for the Admin Console's queue manager.
+// GET /api/rooms/:slug/queue?zoneId=... — the admin/CEO's live view of the
+// whole line (Admin Console's queue manager, and v2's in-game "Selesai
+// meeting" widget). requireRoomAdminOrCeo, not requireRoomAdmin — a CEO
+// grant is deliberately independent of room admin (see RoomAdminState's own
+// doc comment), so a non-admin CEO must still be able to see their own
+// zone's queue, same gate the approve/skip endpoints below already use.
 roomMembers.get('/rooms/:slug/queue', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const zoneId = normalizeZoneId(req.query.zoneId);
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdminOrCeo(prisma, req.params.slug, req.userId!);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa melihat antrean' });
 
@@ -662,6 +731,9 @@ roomMembers.get('/rooms/:slug/queue', authenticateToken, async (req: AuthRequest
         topic: r.topic,
         durationMin: r.durationMin,
         status: r.status,
+        mode: r.mode,
+        bookingStart: r.bookingStart?.getTime() ?? null,
+        bookingEnd: r.bookingEnd?.getTime() ?? null,
         requestedAt: r.requestedAt.getTime(),
         calledAt: r.calledAt?.getTime() ?? null,
         endsAt: r.endsAt?.getTime() ?? null,
@@ -696,15 +768,26 @@ roomMembers.post('/rooms/:slug/queue/:entryId/skip', authenticateToken, async (r
       where: { id: entry.id },
       data: wasActive ? { status: 'done', completedAt: new Date() } : { status: 'skipped' },
     });
+    // Same endpoint doubles as the CEO's "Selesai meeting" button (client
+    // just relabels it when the target entry is 'active') — reuse rather
+    // than a new one, per the v2 design doc.
+    let zoneBookingMode = false;
+    if (entry.zoneId) {
+      const restriction = await prisma.zoneRestriction.findUnique({ where: { roomId_zoneId: { roomId: room!.id, zoneId: entry.zoneId } } });
+      zoneBookingMode = !!restriction?.bookingMode;
+    }
     if (wasActive && ioRef) {
       if (entry.zoneId) {
-        forceZoneExitForQueue(ioRef, entry.userId, room!.slug, entry.zoneId, entry.zoneName ?? entry.zoneId);
+        // bookingMode: the zone stays freely walkable after the session ends
+        // — only the queue bookkeeping/countdown stops, nobody gets nudged out.
+        forceZoneExitForQueue(ioRef, entry.userId, room!.slug, entry.zoneId, entry.zoneName ?? entry.zoneId, !zoneBookingMode);
         broadcastZoneQueueSessionCleared(ioRef, room!.slug, entry.zoneId);
       } else {
         await forceLeaveForQueue(ioRef, entry.userId, room!.slug, room!.name);
       }
     }
-    await advanceQueue(prisma, room!.id, entry.zoneId);
+    if (entry.zoneId && ioRef) await advanceZoneQuickQueue(ioRef, room!.id, room!.slug, entry.zoneId);
+    else await advanceQueue(prisma, room!.id, entry.zoneId);
 
     return res.json({ ok: true });
   } catch (err) {
@@ -713,12 +796,14 @@ roomMembers.post('/rooms/:slug/queue/:entryId/skip', authenticateToken, async (r
   }
 });
 
-// POST /api/rooms/:slug/queue/:entryId/approve — admin explicitly admits a
-// 'waiting' zone-level entry (see roomQueue.ts's advanceQueue — zone-level
-// no longer auto-advances, this is the replacement). SERIALIZABLE
-// transaction for the same reason advanceQueue itself uses one: two admins
-// approving different people at the same instant must not both succeed
-// against a single-occupant slot.
+// POST /api/rooms/:slug/queue/:entryId/approve — admin/CEO explicitly admits
+// a 'waiting' entry. Under v2, 'quick' entries are full-auto FCFS
+// (advanceZoneQuickQueue) and never sit in 'waiting' long enough for a human
+// to reach this — this endpoint is now really the 'booking' decision point
+// (see roomQueue.ts's advanceQueue doc comment), kept mode-aware below only
+// as a defense-in-depth fallback. SERIALIZABLE transaction for the same
+// reason advanceQueue itself uses one: two admins approving overlapping
+// requests at the same instant must not both succeed.
 roomMembers.post('/rooms/:slug/queue/:entryId/approve', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
@@ -730,17 +815,41 @@ roomMembers.post('/rooms/:slug/queue/:entryId/approve', authenticateToken, async
     if (!entry || entry.roomId !== room!.id || entry.status !== 'waiting') {
       return res.status(404).json({ error: 'Antrean ini sudah tidak berlaku' });
     }
+    if (entry.mode === 'booking' && entry.bookingEnd && entry.bookingEnd.getTime() <= Date.now()) {
+      return res.status(400).json({ error: 'Waktu booking ini sudah lewat' });
+    }
+
+    const approver = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
 
     const approved = await prisma.$transaction(async (tx) => {
-      const occupied = await tx.roomQueueEntry.findFirst({
-        where: { roomId: room!.id, zoneId: entry.zoneId, status: { in: ['called', 'active'] } },
+      if (entry.mode === 'booking') {
+        // Reserves a future WINDOW, not the physical slot right now — so the
+        // only thing that can block it is another approved booking whose
+        // window overlaps, never a currently-active quick/booking session.
+        const clash = await tx.roomQueueEntry.findFirst({
+          where: {
+            roomId: room!.id, zoneId: entry.zoneId, mode: 'booking', status: { in: ['called', 'active'] },
+            id: { not: entry.id },
+            bookingStart: { lt: entry.bookingEnd! }, bookingEnd: { gt: entry.bookingStart! },
+          },
+        });
+        if (clash) return false;
+      } else {
+        const occupied = await tx.roomQueueEntry.findFirst({
+          where: { roomId: room!.id, zoneId: entry.zoneId, status: { in: ['called', 'active'] } },
+        });
+        if (occupied) return false;
+      }
+      await tx.roomQueueEntry.update({
+        where: { id: entry.id },
+        data: { status: 'called', calledAt: new Date(), approvedAt: new Date(), approvedById: req.userId!, approvedByName: approver?.displayName ?? null },
       });
-      if (occupied) return false;
-      await tx.roomQueueEntry.update({ where: { id: entry.id }, data: { status: 'called', calledAt: new Date() } });
       return true;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
-    if (!approved) return res.status(409).json({ error: 'Slot sedang terisi orang lain' });
+    if (!approved) {
+      return res.status(409).json({ error: entry.mode === 'booking' ? 'Jadwal ini bentrok dengan booking lain yang sudah disetujui' : 'Slot sedang terisi orang lain' });
+    }
     return res.json({ ok: true });
   } catch (err) {
     console.error('[roomMembers] queue approve error:', err);
@@ -760,7 +869,7 @@ roomMembers.get('/rooms/:slug/zone-restrictions', authenticateToken, async (req:
     const rows = await prisma.zoneRestriction.findMany({ where: { roomId: room!.id } });
     return res.json({
       zones: zonesOfRoom(room!).map((z) => ({ id: z.id, name: z.name })),
-      restrictions: rows.map((r) => ({ zoneId: r.zoneId, minRole: r.minRole, queueEnabled: r.queueEnabled })),
+      restrictions: rows.map((r) => ({ zoneId: r.zoneId, minRole: r.minRole, queueEnabled: r.queueEnabled, bookingMode: r.bookingMode })),
     });
   } catch (err) {
     console.error('[roomMembers] zone-restrictions list error:', err);
@@ -768,10 +877,31 @@ roomMembers.get('/rooms/:slug/zone-restrictions', authenticateToken, async (req:
   }
 });
 
+// GET /api/rooms/:slug/booking-zones — any authenticated member (not
+// admin-gated, unlike zone-restrictions above) — just the id+name of every
+// zone flagged bookingMode, so the client's G-key booking form knows which
+// zone to target without needing admin-only data.
+roomMembers.get('/rooms/:slug/booking-zones', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+
+    const rows = await prisma.zoneRestriction.findMany({ where: { roomId: room.id, bookingMode: true } });
+    const zoneNames = new Map(zonesOfRoom(room).map((z) => [z.id, z.name]));
+    return res.json({
+      zones: rows.map((r) => ({ zoneId: r.zoneId, name: zoneNames.get(r.zoneId) ?? r.zoneId })),
+    });
+  } catch (err) {
+    console.error('[roomMembers] booking-zones list error:', err);
+    return res.status(500).json({ error: 'Gagal memuat zona booking' });
+  }
+});
+
 // PATCH /api/rooms/:slug/zones/:zoneId/restriction — { enabled, minRole?,
-// queueEnabled? }. enabled:false deletes the row outright (an absent row
-// IS "not restricted" — there is no separate off-switch to flip back on
-// accidentally). Refreshes the in-memory cache ZONE_ENTER reads AND
+// queueEnabled?, bookingMode? }. enabled:false deletes the row outright (an
+// absent row IS "not restricted" — there is no separate off-switch to flip
+// back on accidentally). Refreshes the in-memory cache ZONE_ENTER reads AND
 // broadcasts to the room so anyone already standing there updates without
 // needing to rejoin.
 roomMembers.patch('/rooms/:slug/zones/:zoneId/restriction', authenticateToken, async (req: AuthRequest, res: Response) => {
@@ -786,6 +916,15 @@ roomMembers.patch('/rooms/:slug/zones/:zoneId/restriction', authenticateToken, a
     if (queueEnabled !== undefined && typeof queueEnabled !== 'boolean') {
       return res.status(400).json({ error: 'queueEnabled harus boolean' });
     }
+    // "Ngobrol dengan CEO" v2 — see ZoneRestriction.bookingMode's own doc
+    // comment. Only one zone is expected to ever use this (the Q&A this
+    // session settled on "assume 1 CEO zone per room" for the G-key form),
+    // but nothing here enforces that singleton — an admin could flip it on
+    // for more than one zone, the client just won't have a picker for it yet.
+    const bookingMode = req.body?.bookingMode;
+    if (bookingMode !== undefined && typeof bookingMode !== 'boolean') {
+      return res.status(400).json({ error: 'bookingMode harus boolean' });
+    }
 
     const prisma = getPrisma();
     const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
@@ -796,8 +935,8 @@ roomMembers.patch('/rooms/:slug/zones/:zoneId/restriction', authenticateToken, a
     if (enabled) {
       await prisma.zoneRestriction.upsert({
         where: { roomId_zoneId: { roomId: room!.id, zoneId } },
-        create: { roomId: room!.id, zoneId, minRole: minRole ?? 'staff', queueEnabled: queueEnabled ?? true },
-        update: { ...(minRole ? { minRole } : {}), ...(queueEnabled !== undefined ? { queueEnabled } : {}) },
+        create: { roomId: room!.id, zoneId, minRole: minRole ?? 'staff', queueEnabled: queueEnabled ?? true, bookingMode: bookingMode ?? false },
+        update: { ...(minRole ? { minRole } : {}), ...(queueEnabled !== undefined ? { queueEnabled } : {}), ...(bookingMode !== undefined ? { bookingMode } : {}) },
       });
     } else {
       await prisma.zoneRestriction.deleteMany({ where: { roomId: room!.id, zoneId } });

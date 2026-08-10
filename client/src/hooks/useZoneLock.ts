@@ -27,7 +27,9 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
   // roomQueue.ts) — null while still 'waiting'/'called'. ZoneLockBar uses it
   // to render a live countdown without polling the server every second.
   const [zoneQueueTicket, setZoneQueueTicket] = useState<{
-    zoneId: string; status: 'waiting' | 'called' | 'active'; durationMin: number; position: number | null; endsAt: number | null;
+    zoneId: string; status: 'waiting' | 'called' | 'active'; durationMin: number;
+    mode: 'quick' | 'booking'; bookingStart: number | null; bookingEnd: number | null;
+    position: number | null; endsAt: number | null;
   } | null>(null);
   const [zoneQueueBusy, setZoneQueueBusy] = useState(false);
   const [zoneQueueError, setZoneQueueError] = useState('');
@@ -112,8 +114,10 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     // roomHandler.ts's forceZoneExitForQueue). The actual avatar repositioning
     // + ZONE_EXIT emit is handled separately in App.tsx (it owns player
     // position, this hook doesn't) — this listener only owns this hook's own
-    // state: the toast, and dropping a now-finished ticket.
-    const onZoneSessionEnded = (msg: { zoneId: string; zoneName: string }) => {
+    // state: the toast, and dropping a now-finished ticket. `nudgeOut` (v2) —
+    // App.tsx's own listener decides whether to actually move the avatar;
+    // this hook's toast/state cleanup happens either way.
+    const onZoneSessionEnded = (msg: { zoneId: string; zoneName: string; nudgeOut?: boolean }) => {
       flash(`Waktu sesimu di ${msg.zoneName} sudah habis.`);
       setZoneQueueTicket((t) => (t && t.zoneId === msg.zoneId ? null : t));
     };
@@ -177,15 +181,27 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     };
   }, [socketRef, flash]);
 
+  const restrictionOf = useCallback((zoneId: string | null) =>
+    (zoneId ? zoneRestrictions.find((r) => r.zoneId === zoneId) : undefined), [zoneRestrictions]);
+
   // "Ngobrol dengan CEO" queue, zone-level — poll our own ticket while
   // there's a live one to watch, same 5s convention as JoinGate's room-level
-  // poll. The moment status flips to 'called', hand off to onAdmitted —
-  // App.tsx teleports the avatar straight in and emits ZONE_ENTER itself
-  // (see its own doc comment for why this used to be a raw emit here
-  // instead, and what that broke).
+  // poll.
+  //
+  // v2 — 'called' -> onAdmitted (App.tsx's client-side "teleport to zone
+  // center + emit ZONE_ENTER") only fires for a NON-bookingMode zone now. A
+  // bookingMode zone's 'called' -> 'active' transition is entirely
+  // server-driven (advanceZoneQuickQueue / queueSweep's admitBookingIfDue
+  // pass push a real PLAYER_TELEPORTED the moment it happens — see
+  // roomHandler.ts's autoSummonToZoneForQueue), so self-teleporting here
+  // too would at best double-move the avatar, and at worst — for a
+  // 'booking' entry specifically — move them the INSTANT the CEO approves,
+  // long before the scheduled bookingStart. This poll still exists to drive
+  // the ZoneLockBar countdown/status UI, just without the onAdmitted side effect.
   useEffect(() => {
     if (!zoneQueueTicket || zoneQueueTicket.status === 'active') return;
     const zoneId = zoneQueueTicket.zoneId;
+    const bookingMode = restrictionOf(zoneId)?.bookingMode ?? false;
     const iv = setInterval(async () => {
       try {
         const { entry } = await api.getMyQueueStatus(roomSlug, zoneId);
@@ -195,8 +211,12 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
           if (deniedZoneId === zoneId) setDeniedZoneId(null);
           return;
         }
-        setZoneQueueTicket({ zoneId, status: entry.status, durationMin: entry.durationMin, position: entry.position, endsAt: entry.endsAt });
-        if (entry.status === 'called') {
+        setZoneQueueTicket({
+          zoneId, status: entry.status, durationMin: entry.durationMin,
+          mode: entry.mode, bookingStart: entry.bookingStart, bookingEnd: entry.bookingEnd,
+          position: entry.position, endsAt: entry.endsAt,
+        });
+        if (entry.status === 'called' && !bookingMode) {
           onAdmitted?.(zoneId);
         }
       } catch {
@@ -210,18 +230,45 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
   const lockOf = useCallback((zoneId: string | null) =>
     (zoneId ? zoneLocks.find((z) => z.zoneId === zoneId && z.locked) : undefined), [zoneLocks]);
 
-  const restrictionOf = useCallback((zoneId: string | null) =>
-    (zoneId ? zoneRestrictions.find((r) => r.zoneId === zoneId) : undefined), [zoneRestrictions]);
-
   const joinZoneQueue = useCallback(async (zoneId: string, durationMin: number, topic?: string) => {
     setZoneQueueBusy(true);
     setZoneQueueError('');
     try {
       await api.joinQueue(roomSlug, durationMin, topic, zoneId);
       const { entry } = await api.getMyQueueStatus(roomSlug, zoneId);
-      if (entry) setZoneQueueTicket({ zoneId, status: entry.status, durationMin: entry.durationMin, position: entry.position, endsAt: entry.endsAt });
+      if (entry) {
+        setZoneQueueTicket({
+          zoneId, status: entry.status, durationMin: entry.durationMin,
+          mode: entry.mode, bookingStart: entry.bookingStart, bookingEnd: entry.bookingEnd,
+          position: entry.position, endsAt: entry.endsAt,
+        });
+      }
     } catch (e) {
       setZoneQueueError(e instanceof Error ? e.message : 'Gagal mendaftar antrean');
+    } finally {
+      setZoneQueueBusy(false);
+    }
+  }, [roomSlug]);
+
+  // v2 — the G-key booking form's submit, same shape as joinZoneQueue above
+  // but for a scheduled window instead of an open-ended FCFS ticket.
+  const bookZoneQueueSlot = useCallback(async (zoneId: string, bookingStart: number, bookingEnd: number, topic?: string) => {
+    setZoneQueueBusy(true);
+    setZoneQueueError('');
+    try {
+      await api.bookQueueSlot(roomSlug, zoneId, bookingStart, bookingEnd, topic);
+      const { entry } = await api.getMyQueueStatus(roomSlug, zoneId);
+      if (entry) {
+        setZoneQueueTicket({
+          zoneId, status: entry.status, durationMin: entry.durationMin,
+          mode: entry.mode, bookingStart: entry.bookingStart, bookingEnd: entry.bookingEnd,
+          position: entry.position, endsAt: entry.endsAt,
+        });
+      }
+      return true;
+    } catch (e) {
+      setZoneQueueError(e instanceof Error ? e.message : 'Gagal booking jadwal');
+      return false;
     } finally {
       setZoneQueueBusy(false);
     }
@@ -315,7 +362,7 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     zoneLocks, knocks, deniedZoneId, deniedReason, pendingKnock, pendingApproval, approvalRequests, toast,
     lockOf, setLock, knock, cancelKnock, decide, isKeyholder, isAdmitted, requestEntry, cancelApproval, decideApproval,
     // "Ngobrol dengan CEO" queue, zone-level.
-    zoneRestrictions, restrictionOf, zoneQueueTicket, zoneQueueBusy, zoneQueueError, joinZoneQueue, cancelZoneQueue,
+    zoneRestrictions, restrictionOf, zoneQueueTicket, zoneQueueBusy, zoneQueueError, joinZoneQueue, bookZoneQueueSlot, cancelZoneQueue,
     clearZoneQueueTicketOnExit,
     clearDenied: () => setDeniedZoneId(null),
     // App.tsx's client-side entry check calls this directly (no server round
@@ -328,5 +375,10 @@ export function useZoneLock(socketRef: React.RefObject<Socket | null>, myUserId:
     // reasons exactly) — member_only still has no local pre-check, it always
     // goes through the server round trip (onDenied above).
     denyEntry: (zoneId: string, reason: 'locked' | 'restricted' | 'queue' = 'locked') => { setDeniedZoneId(zoneId); setDeniedReason(reason); },
+    // v2 — the G-key handler's own "no booking zone in this room" case has
+    // no dedicated card to show (there's no zone to attach one to), so it
+    // reuses this hook's existing ephemeral toast instead of inventing a
+    // separate message channel for one edge case.
+    flashToast: flash,
   };
 }

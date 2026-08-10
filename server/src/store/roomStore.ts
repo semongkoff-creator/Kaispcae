@@ -403,13 +403,13 @@ export function setCachedFurnitureIds(roomId: string, ids: Set<string>): void {
 // whenever an admin edits a restriction) so the hot path is a synchronous
 // Map lookup; the DB is only actually hit for the rare zone that IS
 // restricted, where correctness matters more than raw speed anyway.
-const zoneRestrictionCache = new Map<string, Map<string, { minRole: string; queueEnabled: boolean }>>();
+const zoneRestrictionCache = new Map<string, Map<string, { minRole: string; queueEnabled: boolean; bookingMode: boolean }>>();
 
-export function setCachedZoneRestrictions(roomSlug: string, restrictions: { zoneId: string; minRole: string; queueEnabled: boolean }[]): void {
-  zoneRestrictionCache.set(roomSlug, new Map(restrictions.map((r) => [r.zoneId, { minRole: r.minRole, queueEnabled: r.queueEnabled }])));
+export function setCachedZoneRestrictions(roomSlug: string, restrictions: { zoneId: string; minRole: string; queueEnabled: boolean; bookingMode: boolean }[]): void {
+  zoneRestrictionCache.set(roomSlug, new Map(restrictions.map((r) => [r.zoneId, { minRole: r.minRole, queueEnabled: r.queueEnabled, bookingMode: r.bookingMode }])));
 }
 
-export function getCachedZoneRestriction(roomSlug: string, zoneId: string): { minRole: string; queueEnabled: boolean } | undefined {
+export function getCachedZoneRestriction(roomSlug: string, zoneId: string): { minRole: string; queueEnabled: boolean; bookingMode: boolean } | undefined {
   return zoneRestrictionCache.get(roomSlug)?.get(zoneId);
 }
 

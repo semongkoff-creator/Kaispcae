@@ -366,8 +366,20 @@ export const api = {
   joinQueue: (slug: string, durationMin: number, topic?: string, zoneId?: string) =>
     request<{ status: string; id: string }>(`/rooms/${slug}/queue/join`, {
       method: 'POST',
-      body: JSON.stringify({ durationMin, topic, zoneId }),
+      body: JSON.stringify({ mode: 'quick', durationMin, topic, zoneId }),
     }),
+
+  // v2 — a scheduled CEO booking, only valid for a bookingMode zone.
+  // bookingStart/bookingEnd are epoch ms.
+  bookQueueSlot: (slug: string, zoneId: string, bookingStart: number, bookingEnd: number, topic?: string) =>
+    request<{ status: string; id: string }>(`/rooms/${slug}/queue/join`, {
+      method: 'POST',
+      body: JSON.stringify({ mode: 'booking', zoneId, bookingStart, bookingEnd, topic }),
+    }),
+
+  // v2 — zones in this room open for booking (G-key form target), member-level.
+  getBookingZones: (slug: string) =>
+    request<{ zones: { zoneId: string; name: string }[] }>(`/rooms/${slug}/booking-zones`),
 
   getMyQueueStatus: (slug: string, zoneId?: string) =>
     request<{
@@ -375,6 +387,9 @@ export const api = {
         id: string;
         status: 'waiting' | 'called' | 'active';
         durationMin: number;
+        mode: 'quick' | 'booking';
+        bookingStart: number | null;
+        bookingEnd: number | null;
         position: number | null;
         calledAt: number | null;
         endsAt: number | null;
@@ -383,6 +398,16 @@ export const api = {
 
   cancelQueue: (slug: string, zoneId?: string) =>
     request<{ ok: true }>(`/rooms/${slug}/queue/cancel`, { method: 'POST', body: JSON.stringify({ zoneId }) }),
+
+  // v2 — the in-game "Selesai meeting" widget's own lookup (server-gated to
+  // admin/CEO, see roomMembers.ts's requireRoomAdminOrCeo) — finds the
+  // currently-active entry's id so the widget can skip() it without a
+  // separate admin-console round trip.
+  getZoneQueueEntries: (slug: string, zoneId: string) =>
+    request<{
+      queueEnabled: boolean;
+      entries: { id: string; userId: string; name: string; status: 'waiting' | 'called' | 'active'; mode: 'quick' | 'booking'; endsAt: number | null }[];
+    }>(`/rooms/${slug}/queue?zoneId=${encodeURIComponent(zoneId)}`),
 
   // Item 13, "Panic/report user" — see server/src/routes/users.ts's own
   // doc comment. Open to every real member; the server re-checks (not

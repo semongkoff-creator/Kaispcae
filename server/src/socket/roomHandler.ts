@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { isUserInLockedZone, zoneKeyholderOf, admitUserToZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
+import { getCachedZones } from '../store/roomStore';
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, findSpawnPixel, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, DoorAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveDoorAreaPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH, RosterEntry, RosterUpdate } from '@virtualmeet/shared';
 import {
@@ -565,12 +566,77 @@ export async function forceLeaveForQueue(io: Server, userId: string, roomSlug: s
 // nudging the avatar out and emitting ZONE_EXIT itself, same as a normal
 // voluntary walk-out — which is what actually clears zoneHandler.ts's
 // socketZone membership). A no-op if they've already disconnected.
-export function forceZoneExitForQueue(io: Server, userId: string, roomSlug: string, zoneId: string, zoneName: string): void {
+//
+// "Ngobrol dengan CEO" v2 — `nudgeOut` defaults true (the original gated
+// zones still need the physical push-out), but a bookingMode zone is always
+// freely walkable, so ending a session there must NOT walk anyone out — only
+// the queue bookkeeping/countdown ends. Callers pass false for those.
+export function forceZoneExitForQueue(io: Server, userId: string, roomSlug: string, zoneId: string, zoneName: string, nudgeOut = true): void {
   const targetSocketId = userSocketMap.get(userId);
   if (!targetSocketId) return;
   const targetSocket = io.sockets.sockets.get(targetSocketId);
   if (!targetSocket) return;
-  targetSocket.emit(SocketEvents.ZONE_SESSION_ENDED, { roomSlug, zoneId, zoneName });
+  targetSocket.emit(SocketEvents.ZONE_SESSION_ENDED, { roomSlug, zoneId, zoneName, nudgeOut });
+}
+
+// "Ngobrol dengan CEO" v2 — the booking/quick-auto counterpart to a Summon
+// accept: no consent step (the CEO already approved, or it's simply this
+// person's FCFS turn), teleport them straight into the zone the moment
+// their slot becomes due. Lands adjacent to the zone's own center tile
+// (findAdjacentFreeTile — same "beside, not on top" helper Summon/Force-Pull
+// use), not next to the CEO's live position specifically: a bookingMode zone
+// is freely walkable now, so several people (or zero) may already be
+// standing in it, and there can be more than one isCeo-granted user — the
+// zone's own footprint is a stable anchor none of that depends on.
+// Returns false (nothing to do) if the target isn't currently connected —
+// callers treat that as a no-show, not a retry.
+export function autoSummonToZoneForQueue(io: Server, userId: string, roomSlug: string, zoneId: string): boolean {
+  const targetSocketId = userSocketMap.get(userId);
+  if (!targetSocketId) return false;
+  const targetSocket = io.sockets.sockets.get(targetSocketId);
+  if (!targetSocket) return false;
+
+  const zone = getCachedZones(roomSlug).find((z) => z.id === zoneId);
+  const tiles = getCachedTiles(roomSlug);
+  const anchorX = zone ? Math.floor(zone.x + zone.width / 2) : 0;
+  const anchorY = zone ? Math.floor(zone.y + zone.height / 2) : 0;
+  const spot = tiles && tiles.length > 0 ? findAdjacentFreeTile(tiles, anchorX, anchorY) : { x: anchorX, y: anchorY };
+  const landX = spot.x * TILE_SIZE + TILE_SIZE / 2;
+  const landY = spot.y * TILE_SIZE + TILE_SIZE / 2;
+
+  updatePlayerPosition(roomSlug, targetSocketId, landX, landY, 'down');
+  io.to(roomSlug).emit(SocketEvents.PLAYER_TELEPORTED, { id: targetSocketId, x: landX, y: landY, direction: 'down' });
+  return true;
+}
+
+// "Ngobrol dengan CEO" v2 — full-auto FCFS for a zone-level 'quick' queue
+// (the Q&A this session settled on: no per-person CEO approval anymore,
+// mirrors the room-level queue's own always-auto behavior). Promotes the
+// earliest waiting entry (roomQueue.ts's advanceQueue, DB-only) and, since
+// there's no ZONE_ENTER gate left to hang a "the moment they walk in"
+// transition off of for a bookingMode zone, immediately teleports them in
+// and flips called -> active in the same step. If they turn out to be
+// offline right now, that ticket is a no-show (skipped) and the next
+// waiting entry is tried instead — bounded so an all-offline queue can't
+// spin forever. Call this anywhere the old code called advanceQueue for a
+// zoneId that might be bookingMode: after a fresh /queue/join, a /cancel
+// that frees the slot, a /skip, and the sweep's own expiry passes.
+export async function advanceZoneQuickQueue(io: Server, roomId: string, roomSlug: string, zoneId: string): Promise<void> {
+  const prisma = getPrisma();
+  for (let i = 0; i < 10; i++) {
+    const called = await advanceQueue(prisma, roomId, zoneId);
+    if (!called) return;
+    const delivered = autoSummonToZoneForQueue(io, called.userId, roomSlug, zoneId);
+    if (!delivered) {
+      await prisma.roomQueueEntry.update({ where: { id: called.id }, data: { status: 'skipped' } });
+      continue;
+    }
+    const now = new Date();
+    const endsAt = new Date(now.getTime() + called.durationMin * 60000);
+    await prisma.roomQueueEntry.update({ where: { id: called.id }, data: { status: 'active', startedAt: now, endsAt } });
+    io.to(roomSlug).emit(SocketEvents.ZONE_QUEUE_SESSION_ACTIVE, { zoneId, userId: called.userId, playerName: called.name, endsAt: endsAt.getTime() });
+    return;
+  }
 }
 
 export function registerRoomHandlers(io: Server, socket: Socket) {
