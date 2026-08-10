@@ -2073,16 +2073,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       )}
       {!moduleOpen && (
       <>
-        {/* Peserta's dropdown pops up from here — roughly centered above the
-            toolbar rather than glued to the exact Peserta button below (see
-            ParticipantPanel.tsx's own note); z-50 to match the toolbar so it
-            stays reachable over Meeting View's z-40 stage too. Ghost mode and
-            Notification Settings moved to Sidebar.tsx (no longer in this
-            bar) — Soundboard/ActivityFeed's own top-left panel spot is
-            untouched, see the top-14 left-16 block above. */}
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
-          <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} isGuest={isGuest} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} onReport={(userId, name) => setReportTarget({ userId, name })} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
-        </div>
+        {/* ParticipantPanel now positions itself as a full-height drawer
+            (left over the map HUD, right over Meeting View — see its own
+            file), no longer a toolbar-anchored popover, so it no longer
+            needs a positioning wrapper here. Ghost mode and Notification
+            Settings moved to Sidebar.tsx (no longer in this bar) —
+            Soundboard/ActivityFeed's own top-left panel spot is untouched,
+            see the top-14 left-16 block above. */}
+        <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} isGuest={isGuest} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} onReport={(userId, name) => setReportTarget({ userId, name })} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2">
           <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
           <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />

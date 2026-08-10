@@ -81,6 +81,24 @@ interface ParticipantPanelProps {
 const MAX_VIDEO_THUMBS = 3;
 
 export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, onReport, emitKick, emitForceMute, emitForcePull, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
+  // Drawer side follows the same flag App.tsx uses to switch between
+  // VideoGrid (map HUD) and MeetingView (App.tsx:1119) — read directly
+  // rather than threaded as a prop, same as the other store slices below.
+  const activePanel = useGameStore((s) => s.activePanel);
+  const meetingViewActive = activePanel === 'meeting';
+  // If the mode flips WHILE the drawer is open, close it rather than try to
+  // animate it across to the other edge — left and right are two different
+  // anchor points, not a continuous slide, so jumping sides while open would
+  // just look broken. Only fires on an actual transition (guarded by the
+  // ref), not on mount.
+  const prevMeetingViewActive = useRef(meetingViewActive);
+  useEffect(() => {
+    if (prevMeetingViewActive.current !== meetingViewActive) {
+      prevMeetingViewActive.current = meetingViewActive;
+      if (open) onClose();
+    }
+  }, [meetingViewActive, open, onClose]);
+
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
@@ -141,17 +159,19 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollo
   const videoOverflowCount = videoActive.length - videoThumbs.length;
 
   return (
-    // Own trigger button removed — opening/closing is now done from the
-    // meeting toolbar's Peserta button (App.tsx), which calls this exact
-    // same onToggle (openPanel('participants')). This div is now just the
-    // anchor the dropdown below positions itself against.
-    <div className="relative z-40 pointer-events-auto">
+    <>
       {open && (
         <div
-          // Opens upward now (was top-full, for the old top-left trigger) —
-          // the new trigger lives in the bottom toolbar, so the panel pops
-          // up above its anchor instead of dropping down off-screen.
-          className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-56 max-h-[60vh] bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-xl border border-purple-200/50 dark:border-white/10 shadow-2xl shadow-purple-500/10 flex flex-col pointer-events-auto"
+          // Full-height drawer: left edge (after the Sidebar rail, w-12)
+          // over the map HUD, right edge over Meeting View — the common
+          // "participants panel" placement for a meeting layout. `fixed`
+          // (not absolute) so it spans the real viewport height regardless
+          // of any ancestor's own height/scroll.
+          className={`fixed inset-y-0 z-50 w-80 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl shadow-2xl shadow-purple-500/10 flex flex-col pointer-events-auto animate-fade-in ${
+            meetingViewActive
+              ? 'right-0 border-l border-purple-200/50 dark:border-white/10'
+              : 'left-12 border-r border-purple-200/50 dark:border-white/10'
+          }`}
           onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
@@ -247,7 +267,7 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollo
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
