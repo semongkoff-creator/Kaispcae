@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, ChevronDown, ThreeDotsVertical, Search, BoxArrowInRight } from 'react-bootstrap-icons';
+import { useState, useEffect, useRef } from 'react';
+import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, ChevronDown, ThreeDotsVertical, Search, BoxArrowInRight, Image } from 'react-bootstrap-icons';
 import { io } from 'socket.io-client';
 import { RoomTheme, RoomTemplateId, ROOM_TEMPLATES } from '@virtualmeet/shared';
 import { api, RoomInfo } from '@/services/api';
@@ -80,6 +80,48 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
   // Per-card "..." menu — same idea as showUserMenu above, just keyed by
   // which card's menu is open (only ever one at a time).
   const [openMenuSlug, setOpenMenuSlug] = useState<string | null>(null);
+  // Cover-image upload — one shared hidden <input>, since only one card can
+  // ever be mid-upload at a time; pendingCoverSlugRef remembers which room
+  // the NEXT file-picker selection applies to (the input's onChange fires
+  // after this render's closure is long gone, so it can't just be a local
+  // variable). coverUploadSlug (state, not ref) drives the busy indicator.
+  const coverFileInputRef = useRef<HTMLInputElement>(null);
+  const pendingCoverSlugRef = useRef<string | null>(null);
+  const [coverUploadSlug, setCoverUploadSlug] = useState<string | null>(null);
+
+  const handleCoverButtonClick = (slug: string) => {
+    pendingCoverSlugRef.current = slug;
+    coverFileInputRef.current?.click();
+  };
+
+  const handleCoverFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const slug = pendingCoverSlugRef.current;
+    e.target.value = ''; // allow re-picking the same file later
+    if (!file || !slug) return;
+    // Same validation RoomEditorPage's reference-image upload already
+    // applies (uploadReferenceImage) — mirrored here rather than trusting
+    // the generic /uploads endpoint's own (broader) allowlist alone.
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      showToast('Cover harus PNG atau JPEG', 'error');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('Ukuran cover maksimal 5MB', 'error');
+      return;
+    }
+    setCoverUploadSlug(slug);
+    try {
+      const { url } = await api.uploadMedia(file, slug);
+      await api.setRoomCover(slug, url);
+      setRooms((prev) => prev.map((r) => (r.slug === slug ? { ...r, coverImage: url } : r)));
+      showToast('Cover diperbarui', 'success');
+    } catch {
+      showToast('Gagal mengganti cover', 'error');
+    } finally {
+      setCoverUploadSlug(null);
+    }
+  };
 
   useEffect(() => {
     api.getRooms()
@@ -398,11 +440,17 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
                     : 'bg-white dark:bg-gray-800 border-purple-100 dark:border-gray-700 hover:border-purple-300 hover:shadow-md cursor-pointer'
                 }`}
               >
-                {/* No cover-image data exists anywhere in the room model —
-                    matches the Figma reference's own literal "COVER IMG"
-                    placeholder rather than fabricating a fake image. */}
-                <div className="relative aspect-[16/9] bg-gradient-to-br from-[#3B1E54] to-[#4A1E6D] flex items-center justify-center">
-                  <span className="text-white/40 text-xs font-medium tracking-wide">COVER IMG</span>
+                {/* A room with no coverImage set yet still shows the Figma
+                    reference's own literal "COVER IMG" placeholder. */}
+                <div className="relative aspect-[16/9] bg-gradient-to-br from-[#3B1E54] to-[#4A1E6D] flex items-center justify-center overflow-hidden">
+                  {room.coverImage ? (
+                    <img src={room.coverImage} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-white/40 text-xs font-medium tracking-wide">COVER IMG</span>
+                  )}
+                  {coverUploadSlug === room.slug && (
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-xs">Mengunggah…</div>
+                  )}
                   <span className="absolute top-3 right-3 flex items-center gap-1 bg-black/30 backdrop-blur-sm rounded-full pl-1.5 pr-2 py-0.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                     <span className="text-white text-[10px] font-medium">{room.playerCount}</span>
@@ -420,10 +468,12 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
                   ) : (
                     <>
                       <h3 className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{room.name}</h3>
-                      {/* Delete (owner-only) is still the only action that
-                          exists — same authorization as before, just behind
-                          a "..." trigger instead of an always-visible link. */}
-                      {room.ownerId === user.id && (
+                      {/* "Ganti Cover" (any global admin — cover is a
+                          room-presentation thing, same accountRole:'admin'
+                          gate as "+ Create Space" above) and Delete
+                          (owner-only, unchanged) share one "..." menu now
+                          instead of Delete's own always-visible link. */}
+                      {(room.ownerId === user.id || isAdmin) && (
                         <div className="relative shrink-0">
                           <button
                             onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(isMenuOpen ? null : room.slug); }}
@@ -434,13 +484,23 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
                           {isMenuOpen && (
                             <>
                               <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); }} />
-                              <div className="absolute right-0 top-full mt-1 w-32 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 py-1 z-50">
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); setDeletingSlug(room.slug); setOpenMenuSlug(null); }}
-                                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 cursor-pointer"
-                                >
-                                  <TrashFill size={11} /> Delete
-                                </button>
+                              <div className="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 py-1 z-50">
+                                {isAdmin && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); handleCoverButtonClick(room.slug); }}
+                                    className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                                  >
+                                    <Image size={11} /> Ganti Cover
+                                  </button>
+                                )}
+                                {room.ownerId === user.id && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setDeletingSlug(room.slug); setOpenMenuSlug(null); }}
+                                    className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 cursor-pointer"
+                                  >
+                                    <TrashFill size={11} /> Delete
+                                  </button>
+                                )}
                               </div>
                             </>
                           )}
@@ -464,6 +524,13 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
         </button>
       </footer>
       {showCredits && <CreditsModal onClose={() => setShowCredits(false)} />}
+      <input
+        ref={coverFileInputRef}
+        type="file"
+        accept="image/png,image/jpeg"
+        className="hidden"
+        onChange={handleCoverFileChange}
+      />
     </div>
   );
 }

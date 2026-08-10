@@ -247,6 +247,9 @@ export interface RoomInfo {
   isPublic: boolean;
   createdAt: string;
   theme?: 'modern-interiors' | 'scifi-office';
+  // Lobby card cover — a /api/uploads/ or /api/files/ URL, or null for the
+  // placeholder block. See routes/rooms.ts's PATCH /rooms/:slug/cover.
+  coverImage?: string | null;
 }
 
 export const api = {
@@ -532,6 +535,17 @@ export const api = {
   deleteRoom: (slug: string) =>
     request<{ success: boolean }>(`/rooms/${slug}`, {
       method: 'DELETE',
+    }),
+
+  // Lobby card cover — upload the file via the existing generic uploadMedia
+  // below first, then pass its returned `url` here to actually save it on
+  // the room. Two calls, not one, so this reuses the exact same upload
+  // pipeline (and its type/size validation) Room Editor's reference-image
+  // feature already goes through, rather than a parallel one.
+  setRoomCover: (slug: string, coverImage: string | null) =>
+    request<{ ok: boolean; coverImage: string | null }>(`/rooms/${slug}/cover`, {
+      method: 'PATCH',
+      body: JSON.stringify({ coverImage }),
     }),
 
   // §4.1 — Teleport (Admin), shared team locations, staff+ only (server

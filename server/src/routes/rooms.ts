@@ -84,6 +84,7 @@ rooms.get('/rooms', async (_req, res: Response) => {
         playerCount: getLivePlayerCount(r.slug),
         maxPlayers: r.maxPlayers,
         theme: r.theme,
+        coverImage: r.coverImage,
         createdAt: r.createdAt,
       })),
     });
@@ -118,10 +119,40 @@ rooms.get('/rooms/:slug', async (req, res: Response) => {
       maxPlayers: room.maxPlayers,
       isPublic: room.isPublic,
       theme: room.theme,
+      coverImage: room.coverImage,
     });
   } catch (err) {
     console.error('[rooms] get error:', err);
     return res.status(500).json({ error: 'Failed to get room' });
+  }
+});
+
+// PATCH /api/rooms/:slug/cover — { coverImage } set the Lobby card cover.
+// The actual file goes through the existing generic POST /api/uploads first
+// (client: api.uploadMedia, same call Room Editor's reference-image feature
+// already uses) — this route only ever stores the URL it returns, same
+// same-origin allowlist as isUploadUrl (mediaHandler.ts) so a room can't
+// point its cover at an arbitrary external URL. null clears it back to the
+// Lobby's placeholder. Same room:update gate every other room-admin action
+// in this file uses.
+rooms.patch('/rooms/:slug/cover', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const coverImage = req.body?.coverImage;
+    if (coverImage !== null && (typeof coverImage !== 'string' || !/^\/api\/(uploads|files)\//.test(coverImage))) {
+      return res.status(400).json({ error: 'coverImage tidak valid' });
+    }
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    if (!hasFeatureAccess(role, 'room:update')) {
+      return res.status(403).json({ error: 'Admin role required to change the cover' });
+    }
+    await prisma.room.update({ where: { id: room.id }, data: { coverImage } });
+    return res.json({ ok: true, coverImage });
+  } catch (err) {
+    console.error('[rooms] set cover error:', err);
+    return res.status(500).json({ error: 'Gagal menyimpan cover' });
   }
 });
 

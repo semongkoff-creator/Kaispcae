@@ -713,6 +713,12 @@ model Room {
   // point of use). Lets RoomEditor's "Reset to Default" rebuild the room's
   // OWN template instead of always reverting to Main Office.
   template          String?
+  // Lobby card cover — a URL under /api/uploads/ or /api/files/ (same
+  // upload pipeline Room Editor's reference-image feature already uses,
+  // see routes/uploads.ts), not a data URL (unlike User.profilePhoto,
+  // which is small enough to store inline — a room cover is a full-size
+  // photo). Null shows the Lobby's "COVER IMG" placeholder block instead.
+  coverImage        String?
   ownerId           String
   owner             User                 @relation(fields: [ownerId], references: [id])
   isPublic          Boolean              @default(true)
