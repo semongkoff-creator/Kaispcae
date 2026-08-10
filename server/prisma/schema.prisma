@@ -838,7 +838,32 @@ model RoomInvite {
   // and rejects the join rather than silently letting it through unguarded.
   passwordHash  String?
 
+  auditEvents   GuestAuditEvent[]
+
   @@index([roomId])
+}
+
+// QA (Akses tamu checklist item 14, "Audit") — the guest-side half of a
+// guest visit's story (lobby_entered/left have no real User actor, so they
+// can't go through the general AuditLog table — see its actorId FK). The
+// admin's own admit/reject decision IS a real-user action but is kept HERE
+// too, not split into AuditLog, so one query against inviteId reconstructs
+// a whole visit (entered -> decided -> left) instead of joining two tables.
+model GuestAuditEvent {
+  id            String     @id @default(cuid())
+  inviteId      String
+  invite        RoomInvite @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  // The guest's synthetic JWT id — never a User.id (see RoomInvite's own
+  // doc comment on why guests never get a real account row).
+  guestId       String
+  guestName     String
+  event         String     // 'lobby_entered' | 'admitted' | 'rejected' | 'left'
+  // Set only for 'admitted'/'rejected' — the real admin who decided.
+  decidedById   String?
+  decidedByName String?
+  createdAt     DateTime   @default(now())
+
+  @@index([inviteId])
 }
 
 model RoomMember {

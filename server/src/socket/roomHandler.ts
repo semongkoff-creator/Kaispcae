@@ -103,6 +103,36 @@ function isGuestUid(uid: string): boolean { return uid.startsWith(GUEST_UID_PREF
 // (see index.ts's io.use handshake middleware).
 function isGuestSocket(socket: Socket): boolean { return !!(socket.data as { guestId?: string }).guestId; }
 
+// QA (Akses tamu checklist item 14, "Audit") — single writer for the guest
+// lifecycle log (see schema.prisma's GuestAuditEvent), same "never let a
+// logging failure break the actual action" posture as lib/audit.ts's
+// writeAudit. inviteId comes from the guest's own JWT (socket.data.guestInviteId,
+// set at handshake — see index.ts), never client-supplied at call time.
+async function logGuestAuditEvent(input: {
+  inviteId: string;
+  guestId: string;
+  guestName: string;
+  event: 'lobby_entered' | 'admitted' | 'rejected' | 'left';
+  decidedById?: string;
+  decidedByName?: string;
+}): Promise<void> {
+  try {
+    const prisma = getPrisma();
+    await prisma.guestAuditEvent.create({
+      data: {
+        inviteId: input.inviteId,
+        guestId: input.guestId,
+        guestName: input.guestName,
+        event: input.event,
+        decidedById: input.decidedById ?? null,
+        decidedByName: input.decidedByName ?? null,
+      },
+    });
+  } catch (e) {
+    console.error('[guestAudit] FAILED to write event:', input.event, e);
+  }
+}
+
 // Same "very few features" cut as isGuestSocket above, extended to
 // self-registered (non-Lark) accounts nobody has promoted — see
 // RoomAdminState.restrictedTierUserIds' own doc comment for why a manual
@@ -228,7 +258,11 @@ interface RoomAdminState {
   // notifiedAdminSocketIds mirrors PendingKnock's own field — remembered so
   // a later cancel (guest disconnects before a decision) tells exactly the
   // admin sockets that were actually notified, never a room-wide broadcast.
-  pendingGuests?: Map<string, { socketId: string; name: string; requestedAt: number; notifiedAdminSocketIds: string[] }>;
+  // inviteId (QA item 14, "Audit") lives on the pending entry itself, not
+  // read off the guest's live socket at decide-time — the guest may have
+  // already disconnected while waiting, and the audit trail still needs to
+  // know which link they came from.
+  pendingGuests?: Map<string, { socketId: string; name: string; requestedAt: number; notifiedAdminSocketIds: string[]; inviteId: string }>;
 }
 
 const roomAdminMap = new Map<string, RoomAdminState>();
@@ -558,13 +592,22 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // true, so it falls through instead.
         const guestName = (socket.data as { guestName?: string }).guestName || 'Guest';
         if (!rs.pendingGuests) rs.pendingGuests = new Map();
+        // QA (Akses tamu checklist item 14, "Audit") — only the FIRST time
+        // this guestId lands in the waiting room, not every retry/reconnect
+        // while still pending (pendingGuests.set below just refreshes the
+        // same entry in that case, so one lobby_entered row per real visit).
+        const isFirstRequest = !rs.pendingGuests.has(guestId!);
         const notifiedAdminSocketIds = getConnectedAdminSocketIds(room);
         for (const sid of notifiedAdminSocketIds) {
           io.to(sid).emit(SocketEvents.GUEST_JOIN_REQUESTED, { guestId: guestId!, name: guestName });
         }
-        rs.pendingGuests.set(guestId!, { socketId: socket.id, name: guestName, requestedAt: Date.now(), notifiedAdminSocketIds });
+        const guestInviteId = (socket.data as { guestInviteId?: string }).guestInviteId;
+        rs.pendingGuests.set(guestId!, { socketId: socket.id, name: guestName, requestedAt: Date.now(), notifiedAdminSocketIds, inviteId: guestInviteId! });
         socket.emit(SocketEvents.GUEST_JOIN_WAITING, { roomSlug: room });
         console.log(`[room] guest ${guestName} (${guestId}) waiting to enter ${room} — ${notifiedAdminSocketIds.length} admin(s) notified`);
+        if (isFirstRequest && guestInviteId) {
+          void logGuestAuditEvent({ inviteId: guestInviteId, guestId: guestId!, guestName, event: 'lobby_entered' });
+        }
         return;
       }
       // Admitted — fall through to the exact same join logic every member
@@ -1362,6 +1405,20 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       if (guestSocket) guestSocket.emit(SocketEvents.GUEST_JOIN_REJECTED, { roomSlug: room });
       console.log(`[room] guest ${data.guestId} rejected from ${room} by uid=${senderUid}`);
     }
+    // QA (Akses tamu checklist item 14, "Audit") — decidedById/Name identify
+    // the real admin who acted; senderUid is already server-verified above
+    // (canAccess), never client-supplied.
+    void (async () => {
+      const admin = senderUid ? await getPrisma().user.findUnique({ where: { id: senderUid }, select: { displayName: true } }).catch(() => null) : null;
+      await logGuestAuditEvent({
+        inviteId: pending.inviteId,
+        guestId: data.guestId,
+        guestName: pending.name,
+        event: data.admit ? 'admitted' : 'rejected',
+        decidedById: senderUid ?? undefined,
+        decidedByName: admin?.displayName ?? undefined,
+      });
+    })();
   });
 
   socket.on(SocketEvents.ADMIN_GRANT, (data: { targetUserId: string }) => {
@@ -2224,6 +2281,9 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         for (const sid of pending.notifiedAdminSocketIds) {
           io.to(sid).emit(SocketEvents.GUEST_JOIN_CANCELLED, { guestId: pendingGuestId });
         }
+        // QA (Akses tamu checklist item 14, "Audit") — left the lobby without
+        // ever getting a decision (closed the tab, gave up waiting).
+        void logGuestAuditEvent({ inviteId: pending.inviteId, guestId: pendingGuestId, guestName: pending.name, event: 'left' });
       }
     }
     const room = currentRoom;
@@ -2339,7 +2399,16 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
     // re-vetted through the waiting room every visit rather than silently
     // walking back in.
     const rs = getRoomAdmin(room);
-    if (isGuestUid(leavingUid)) rs.guestAllowlist?.delete(leavingUid.slice(GUEST_UID_PREFIX.length));
+    if (isGuestUid(leavingUid)) {
+      rs.guestAllowlist?.delete(leavingUid.slice(GUEST_UID_PREFIX.length));
+      // QA (Akses tamu checklist item 14, "Audit") — left after having
+      // already been admitted (was actually in the room, not just pending).
+      const guestInviteId = (socket.data as { guestInviteId?: string }).guestInviteId;
+      const guestName = (socket.data as { guestName?: string }).guestName;
+      if (guestInviteId) {
+        void logGuestAuditEvent({ inviteId: guestInviteId, guestId: leavingUid.slice(GUEST_UID_PREFIX.length), guestName: guestName || 'Guest', event: 'left' });
+      }
+    }
   }
   // Same "revoke the instant they leave" rule as the knock allowlist above —
   // a password door isn't a permanent pass, it's good for this visit only.
