@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { PeopleFill, CameraVideoFill, ChevronUp, ChevronDown, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill, MegaphoneFill, MicMuteFill, GeoAltFill, Search, VolumeMuteFill, VolumeUpFill, FlagFill } from 'react-bootstrap-icons';
+import { CameraVideoFill, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill, MegaphoneFill, MicMuteFill, GeoAltFill, Search, VolumeMuteFill, VolumeUpFill, FlagFill } from 'react-bootstrap-icons';
 import { roleAtLeast, Role, WorkMode } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
@@ -141,18 +141,17 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollo
   const videoOverflowCount = videoActive.length - videoThumbs.length;
 
   return (
+    // Own trigger button removed — opening/closing is now done from the
+    // meeting toolbar's Peserta button (App.tsx), which calls this exact
+    // same onToggle (openPanel('participants')). This div is now just the
+    // anchor the dropdown below positions itself against.
     <div className="relative z-40 pointer-events-auto">
-      <button
-        onClick={onToggle}
-        title="Participants"
-        className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer inline-flex items-center gap-1.5"
-      >
-        <PeopleFill size={13} /> {totalOnline} {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-      </button>
-
       {open && (
         <div
-          className="absolute top-full left-0 mt-2 w-56 max-h-[60vh] bg-white/95 dark:bg-gray-900/95 backdrop-blur-md rounded-xl border border-purple-100 dark:border-gray-700 shadow-2xl flex flex-col pointer-events-auto"
+          // Opens upward now (was top-full, for the old top-left trigger) —
+          // the new trigger lives in the bottom toolbar, so the panel pops
+          // up above its anchor instead of dropping down off-screen.
+          className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-56 max-h-[60vh] bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-xl border border-purple-200/50 dark:border-white/10 shadow-2xl shadow-purple-500/10 flex flex-col pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >

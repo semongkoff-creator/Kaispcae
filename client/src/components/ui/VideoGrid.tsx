@@ -713,7 +713,7 @@ export function VideoTile({
       // name/volume rows. That is what lets the cell decide the size instead
       // of the video deciding it and overflowing.
       className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border shadow-lg transition-all duration-300 animate-fade-in group relative ${large ? 'w-full h-full flex flex-col' : 'w-24'} ${
-        speaking ? 'border-purple-500 ring-2 ring-purple-400/60 shadow-purple-400/40' : 'border-purple-200'
+        speaking ? 'border-purple-500 ring-2 ring-purple-400/60 animate-speaking-glow' : 'border-purple-200'
       }`}
       style={{ opacity: translucent ? 0.5 : 1 }}
     >
@@ -793,7 +793,9 @@ export function VideoTile({
         <button
           onClick={onEnlarge}
           title={`Perbesar video ${isLocal ? 'Anda' : name}`}
-          className="absolute top-0.5 right-0.5 w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+          // Moved from top-right to bottom-right — top-right is now the
+          // mic-status glass badge (see below); the two shouldn't stack.
+          className="absolute bottom-0.5 right-0.5 w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
         >
           <ArrowsFullscreen size={9} />
         </button>
@@ -826,19 +828,34 @@ export function VideoTile({
           <RecordCircleFill size={9} /> {large && 'REC'}
         </span>
       )}
-      <div className={`flex items-center justify-between gap-1 ${large ? 'px-2 py-1 text-xs' : 'px-1 py-0.5 text-[10px]'}`}>
-        <span className="text-gray-700 truncate flex-1">{name}</span>
-        {/* Mic-muted now shown for remote tiles too (broadcast via
-            PLAYER_MIC — see Avatar.micMuted), not just the local preview;
-            camera-off stays local-only since a remote camera-off already
-            shows as the avatar placeholder instead of video. */}
-        {(micMuted || (isLocal && cameraOff)) && (
-          <span className="flex gap-1 shrink-0">
-            {micMuted && <MicMuteFill className="text-red-500" size={large ? 12 : 9} />}
-            {isLocal && cameraOff && <CameraVideoOffFill className="text-red-500" size={large ? 12 : 9} />}
+      {/* "Ethereal Collaboration" — name-tag as a floating glass chip over
+          the video (was a full-width bar sharing layout space below it);
+          mic/camera-off status moved to its own glass badge top-right (see
+          below, and the enlarge button's move to bottom-right above so the
+          two don't stack). Same `name`/`speaking` props as before — this is
+          a repositioning, not a new signal. */}
+      <span
+        className={`absolute left-1 bottom-1 max-w-[80%] flex items-center gap-1 bg-black/45 backdrop-blur-md text-white rounded-full ${large ? 'px-2.5 py-1 text-xs' : 'px-1.5 py-0.5 text-[9px]'}`}
+      >
+        <span className="truncate">{name}</span>
+        {speaking && (
+          <span className={`flex items-end gap-px shrink-0 ${large ? 'h-2.5' : 'h-1.5'}`}>
+            <span className="w-0.5 h-full bg-purple-400 rounded-full animate-wave-bar" style={{ animationDelay: '0ms' }} />
+            <span className="w-0.5 h-full bg-purple-400 rounded-full animate-wave-bar" style={{ animationDelay: '150ms' }} />
+            <span className="w-0.5 h-full bg-purple-400 rounded-full animate-wave-bar" style={{ animationDelay: '300ms' }} />
           </span>
         )}
-      </div>
+      </span>
+      {/* Mic-muted shown for remote tiles too (broadcast via PLAYER_MIC —
+          see Avatar.micMuted), not just the local preview; camera-off stays
+          local-only since a remote camera-off already shows as the avatar
+          placeholder instead of video. */}
+      {(micMuted || (isLocal && cameraOff)) && (
+        <span className={`absolute top-1 right-1 flex gap-1 bg-black/45 backdrop-blur-md rounded-full ${large ? 'p-1.5' : 'p-1'}`}>
+          {micMuted && <MicMuteFill className="text-red-400" size={large ? 12 : 9} />}
+          {isLocal && cameraOff && <CameraVideoOffFill className="text-red-400" size={large ? 12 : 9} />}
+        </span>
+      )}
       {/* §6 — manual per-listener volume, purely client-side (spec's own
           rule: no server sync needed, it's just my own listening preference).
           Not shown for screen-share tiles or my own tiles — screen share

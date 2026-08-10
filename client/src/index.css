@@ -65,7 +65,33 @@ canvas {
   animation: reaction-float 2.4s ease-out both;
 }
 
+/* "Ethereal Collaboration" — the speaking indicator's pulsing glow (spec:
+   "ring 2px #A855F7 + spread-shadow 8px, efek berdenyut"). The ring itself is
+   still a plain Tailwind `ring-2 ring-purple-400/60` on the tile (see
+   VideoGrid.tsx) — this only pulses the outer glow so the ring edge stays
+   crisp instead of blurring in and out with it. */
+@keyframes speaking-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.45), 0 0 8px 2px rgba(168, 85, 247, 0.35); }
+  50%      { box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.65), 0 0 16px 6px rgba(168, 85, 247, 0.5); }
+}
+.animate-speaking-glow {
+  animation: speaking-glow-pulse 1.6s ease-in-out infinite;
+}
+
+/* Small 3-bar "speaking" wave shown next to a tile's name-tag (spec: "3-bar
+   wave animasi di sebelah nama"). Each bar is the same element staggered via
+   an inline animationDelay in VideoGrid.tsx, not 3 separate keyframes. */
+@keyframes wave-bar {
+  0%, 100% { transform: scaleY(0.35); }
+  50%      { transform: scaleY(1); }
+}
+.animate-wave-bar {
+  animation: wave-bar 0.9s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in { animation: none; }
   .animate-reaction-float { animation: reaction-float 2.4s linear both; }
+  .animate-speaking-glow { animation: none; box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.55); }
+  .animate-wave-bar { animation: none; transform: scaleY(0.75); }
 }

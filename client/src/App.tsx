@@ -69,12 +69,14 @@ import { PendingRequestToast } from './components/ui/PendingRequestToast';
 import { Sidebar } from './components/ui/Sidebar';
 import { MicButton } from './components/hud/MicButton';
 import { HandButton } from './components/hud/HandButton';
-import { HiddenButton } from './components/hud/HiddenButton';
 import { playHandRaiseSound, updateSoundboardVolumes } from './services/soundEffects';
 import { CameraButton } from './components/hud/CameraButton';
 import { DeviceMenu } from './components/hud/DeviceMenu';
 import { ScreenShareButton } from './components/hud/ScreenShareButton';
-import { NotificationSettings } from './components/ui/NotificationSettings';
+import { EmojiButton } from './components/hud/EmojiButton';
+import { ChatToggleButton } from './components/hud/ChatToggleButton';
+import { ParticipantsToggleButton } from './components/hud/ParticipantsToggleButton';
+import { LeaveButton } from './components/hud/LeaveButton';
 import { Lobby } from './pages/Lobby';
 import { LoginPage } from './pages/LoginPage';
 import { GuestEntry, GuestSession } from './pages/GuestEntry';
@@ -884,6 +886,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const activePanel = useGameStore((s) => s.activePanel);
   const openPanel = useGameStore((s) => s.openPanel);
   const closePanel = useGameStore((s) => s.closePanel);
+  // Meeting toolbar's Chat button badge — same store slice and sum ChatPanel
+  // itself used to compute for its own (now-removed) trigger button.
+  const unreadByTarget = useGameStore((s) => s.unreadByTarget);
+  const totalUnread = Object.values(unreadByTarget).reduce((a, b) => a + b, 0);
   const showAdminPanel = activePanel === 'adminPanel';
   const showTeleportPanel = activePanel === 'teleport';
   const showAddMediaPanel = activePanel === 'addMedia';
@@ -1531,7 +1537,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             </p>
           </div>
           <div className="absolute top-14 left-16 flex items-start gap-2 pointer-events-none">
-            <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} isGuest={isGuest} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} onReport={(userId, name) => setReportTarget({ userId, name })} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
             {/* QA (Akses tamu checklist item 2, "Guest terbatas") — Soundboard
                 playback is now also server-rejected for guests
                 (roomHandler.ts's SOUNDBOARD_PLAY), so hiding the panel too
@@ -1810,6 +1815,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onStopRecording={stopMyRecording}
         onLeaveRoom={onLeave}
         onLogout={() => setShowLogoutConfirm(true)}
+        hiddenActive={!!localPlayer.hidden}
+        canToggleHidden={roleAtLeast(localRole, 'admin')}
+        onToggleHidden={handleHiddenToggle}
         theme={theme}
         onToggleTheme={onToggleTheme}
       />
@@ -2070,24 +2078,36 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </div>
       )}
       {!moduleOpen && (
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-50">
-        <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
-        <DeviceMenu kind="audio" />
-        <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
-        <DeviceMenu kind="video" />
-        {/* QA (Akses tamu checklist item 2, "Guest terbatas") — both
-            server-rejected for guests now too (roomHandler.ts's
-            PLAYER_HAND/PLAYER_HIDDEN). Mic/Camera/Screen Share stay —
-            those are the kept-open meeting-participation set. */}
-        {!isGuest && <HandButton raised={!!localPlayer.handRaised} onToggle={handleHandToggle} />}
-        {/* Ghost mode follow-up — admin+ only now (see shared/permissions.ts's
-            'player:hide'), not just "any non-guest member" — the server
-            already re-checks this itself, this just keeps the button from
-            showing to someone who'd be rejected for clicking it. */}
-        {roleAtLeast(localRole, 'admin') && <HiddenButton hidden={!!localPlayer.hidden} onToggle={handleHiddenToggle} />}
-        <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
-        <NotificationSettings />
-      </div>
+      <>
+        {/* Peserta's dropdown pops up from here — roughly centered above the
+            toolbar rather than glued to the exact Peserta button below (see
+            ParticipantPanel.tsx's own note); z-50 to match the toolbar so it
+            stays reachable over Meeting View's z-40 stage too. Ghost mode and
+            Notification Settings moved to Sidebar.tsx (no longer in this
+            bar) — Soundboard/ActivityFeed's own top-left panel spot is
+            untouched, see the top-14 left-16 block above. */}
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+          <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} isGuest={isGuest} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} onReport={(userId, name) => setReportTarget({ userId, name })} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
+        </div>
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2">
+          <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
+          <DeviceMenu kind="audio" />
+          <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
+          <DeviceMenu kind="video" />
+          <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
+          {/* QA (Akses tamu checklist item 2, "Guest terbatas") — both
+              server-rejected for guests now too (roomHandler.ts's
+              PLAYER_HAND/PLAYER_HIDDEN, emoteHandler.ts). Mic/Camera/Share/
+              Chat/Peserta stay — those are the kept-open
+              meeting-participation set. */}
+          {!isGuest && <HandButton raised={!!localPlayer.handRaised} onToggle={handleHandToggle} />}
+          {!isGuest && <EmojiButton open={showEmoteWheel} onToggle={() => setShowEmoteWheel((v) => !v)} />}
+          <ChatToggleButton open={channelChat.chatPanelOpen} onToggle={() => channelChat.setChatPanelOpen(!channelChat.chatPanelOpen)} unreadCount={totalUnread} />
+          <ParticipantsToggleButton open={activePanel === 'participants'} onToggle={() => openPanel('participants')} />
+          <div className="w-px h-7 bg-purple-200/50 dark:bg-white/10 mx-0.5" />
+          <LeaveButton onLeave={onLeave} />
+        </div>
+      </>
       )}
 
       {/* Only shown once getUserMedia has actually failed (denied / no

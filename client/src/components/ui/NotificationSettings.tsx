@@ -46,7 +46,9 @@ export function NotificationSettings() {
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center justify-center w-9 h-9 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-lg transition-all hover:scale-105 cursor-pointer"
+        // w-8 h-8 rounded-lg (was rounded-full) — now lives in Sidebar.tsx's
+        // rail among square SidebarIcon rows, matches their shape.
+        className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 transition-all hover:scale-105 cursor-pointer"
         title="Notification settings"
       >
         {settings.browserNotifOn ? <BellFill className="text-purple-700 dark:text-purple-300" size={14} /> : <BellSlashFill className="text-gray-400 dark:text-gray-500" size={14} />}

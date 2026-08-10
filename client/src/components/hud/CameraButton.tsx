@@ -25,10 +25,16 @@ export function CameraButton({ enabled, onToggle }: CameraButtonProps) {
   return (
     <button
       onClick={onToggle}
-      className="flex items-center justify-center w-9 h-9 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-lg transition-all hover:scale-105 cursor-pointer"
+      // Same active-state convention as MicButton: camera on = solid purple
+      // (the capability is actively broadcasting), off = glass + red icon.
+      className={`flex items-center justify-center w-11 h-11 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
+        enabled
+          ? 'bg-purple-600 border-purple-500 shadow-purple-500/30'
+          : 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
+      }`}
       title="Toggle Camera (V)"
     >
-      {enabled ? <CameraVideoFill className="text-purple-700 dark:text-purple-300" size={15} /> : <CameraVideoOffFill className="text-red-500" size={15} />}
+      {enabled ? <CameraVideoFill className="text-white" size={18} /> : <CameraVideoOffFill className="text-red-500" size={18} />}
     </button>
   );
 }

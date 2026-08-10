@@ -156,14 +156,21 @@ export function MeetingView({
   );
 
   return (
-    <div className="absolute inset-0 z-40 bg-gray-900/97 backdrop-blur-sm flex flex-col pointer-events-auto">
+    // font-ethereal scopes Inter to this dedicated screen only (Tahap 1's
+    // token) — the rest of the app (ambient HUD, login, admin) keeps the
+    // default system-sans look untouched.
+    <div className="absolute inset-0 z-40 bg-gray-900/97 backdrop-blur-sm flex flex-col pointer-events-auto font-ethereal">
       {/* pl-20 clears the fixed Sidebar rail (z-50) pinned to the left edge. */}
       <div className="flex items-center justify-between pl-20 pr-6 py-3 shrink-0">
         <p className="text-white/70 text-sm font-medium">Meeting View — {tiles.length} {tiles.length === 1 ? 'peserta' : 'peserta'}</p>
+        {/* Closest real equivalent to a "leave" action in this app — MeetKai
+            has no discrete hang-up/disconnect (you leave by proximity or by
+            closing this view), so the spec's "leave merah" is applied here:
+            neutral at rest, red on hover/focus to signal what it does. */}
         <button
           onClick={onClose}
           title="Keluar Meeting View"
-          className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer transition-colors"
+          className="w-9 h-9 rounded-full bg-white/10 hover:bg-red-500/80 text-white flex items-center justify-center cursor-pointer transition-colors"
         >
           <XLg size={16} />
         </button>

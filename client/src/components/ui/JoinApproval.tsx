@@ -336,7 +336,7 @@ export function JoinRequestPanel({ roomSlug, onClose }: { roomSlug: string; onCl
   };
 
   return (
-    <div className="absolute top-16 right-4 z-50 w-80 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md rounded-xl border border-purple-100 dark:border-gray-700 shadow-2xl pointer-events-auto">
+    <div className="absolute top-16 right-4 z-50 w-80 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-xl border border-purple-200/50 dark:border-white/10 shadow-2xl shadow-purple-500/10 pointer-events-auto">
       <div className="px-3 py-2.5 border-b border-purple-100 dark:border-gray-700 flex items-center justify-between">
         <span className="text-sm font-medium">Permintaan bergabung</span>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">

@@ -1,8 +1,9 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill } from 'react-bootstrap-icons';
+import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
+import { NotificationSettings } from './NotificationSettings';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { Theme } from '@/hooks/useTheme';
 import { ManualStatus } from '@/data/presence';
@@ -164,6 +165,14 @@ interface SidebarProps {
   onLeaveRoom: () => void;
   onLogout: () => void;
 
+  // Ghost mode — moved here from the meeting toolbar's bottom-center HUD
+  // bar (was HiddenButton, App.tsx); same handleHiddenToggle/localPlayer.hidden
+  // wiring, only the render location changed. canToggleHidden mirrors the
+  // exact roleAtLeast(localRole, 'admin') check that gated it before.
+  hiddenActive: boolean;
+  canToggleHidden: boolean;
+  onToggleHidden: () => void;
+
   theme: Theme;
   onToggleTheme: () => void;
 }
@@ -249,6 +258,9 @@ export function Sidebar({
   onStopRecording,
   onLeaveRoom,
   onLogout,
+  hiddenActive,
+  canToggleHidden,
+  onToggleHidden,
   theme,
   onToggleTheme,
 }: SidebarProps) {
@@ -491,6 +503,22 @@ export function Sidebar({
           offering the editor at all was misleading, not just extraneous. */}
       {!isGuest && <AvatarEditorButton onClick={onEditAvatar} variant="sidebar" />}
       <PresenceButton manualStatus={manualStatus} onPick={onPickPresence} variant="sidebar" />
+
+      {/* Ghost mode + Notification Settings — moved here from the meeting
+          toolbar (previously HiddenButton/NotificationSettings in App.tsx's
+          bottom-center HUD bar) so that bar stays to the 8 core meeting
+          controls. Same handlers/state as before, only the render location
+          changed. */}
+      {canToggleHidden && (
+        <SidebarIcon
+          title={hiddenActive ? 'Tampilkan diri' : 'Sembunyikan diri'}
+          active={hiddenActive}
+          onClick={onToggleHidden}
+        >
+          {hiddenActive ? <EyeSlashFill size={14} /> : <EyeFill size={14} />}
+        </SidebarIcon>
+      )}
+      <NotificationSettings />
 
       <SidebarIcon
         title="Back to room list"

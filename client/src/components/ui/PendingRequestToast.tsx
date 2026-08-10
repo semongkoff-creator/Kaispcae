@@ -21,7 +21,10 @@ interface PendingRequestToastProps {
 // the same size whoever is asking.
 export function PendingRequestToast({ icon, message, onAccept, onDecline }: PendingRequestToastProps) {
   return (
-    <div className="w-72 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-lg rounded-xl px-3.5 py-3 pointer-events-auto animate-fade-in">
+    // Already rendered top-center by its App.tsx wrapper
+    // (`top-16 left-1/2 -translate-x-1/2`) — the "toast dari atas-tengah"
+    // spec was already true positionally; this is just the glass upgrade.
+    <div className="w-72 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-xl px-3.5 py-3 pointer-events-auto animate-fade-in">
       <div className="flex items-start gap-2.5">
         <span className="shrink-0 mt-0.5">{icon}</span>
         <p className="text-xs leading-relaxed text-gray-700 dark:text-gray-300">{message}</p>

@@ -81,17 +81,24 @@ export function DeviceMenu({ kind }: DeviceMenuProps) {
   };
 
   return (
-    <div className="relative" ref={ref}>
+    // self-center: this sits next to the 44px main buttons as a deliberately
+    // smaller "mini circle" utility control (device picker, not a primary
+    // action) — self-center keeps it vertically centered in the toolbar row
+    // regardless of the row's own stretch behavior.
+    <div className="relative self-center" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center justify-center w-5 h-9 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-lg transition-all hover:scale-105 cursor-pointer text-purple-700 dark:text-purple-300"
+        className="flex items-center justify-center w-5 h-5 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 transition-all hover:scale-105 cursor-pointer text-purple-700 dark:text-purple-300"
         title={kind === 'audio' ? 'Pilih mikrofon / speaker' : 'Pilih kamera'}
       >
-        <ChevronUp size={11} />
+        <ChevronUp size={10} />
       </button>
 
       {open && (
-        <div className="absolute bottom-11 left-1/2 -translate-x-1/2 w-64 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-purple-100 dark:border-gray-700 rounded-lg shadow-xl py-1 z-[60]">
+        // bottom-full instead of a fixed bottom-11 — that pixel value
+        // assumed the old h-9 trigger's height; bottom-full anchors off
+        // this button's OWN box regardless of its (now smaller) size.
+        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-64 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-purple-100 dark:border-gray-700 rounded-lg shadow-xl py-1 z-[60]">
           {groups.map((g) => (
             <div key={g.label}>
               <div className="flex items-center gap-1.5 px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
