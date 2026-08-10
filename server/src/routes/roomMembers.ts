@@ -9,7 +9,7 @@ import { resolveEntry } from '../lib/roomMembership';
 import { resolveZoneEntry, refreshZoneRestrictionCache } from '../lib/zoneMembership';
 import { groupConversationId } from '../lib/conversations';
 import { requireWorkspace } from '../lib/workspace';
-import { getConnectedAdminSocketIds, getConnectedCeoSocketIds, forceLeaveForQueue, forceZoneExitForQueue, broadcastZoneQueueSessionCleared } from '../socket/roomHandler';
+import { getConnectedAdminSocketIds, getConnectedCeoSocketIds, forceLeaveForQueue, forceZoneExitForQueue, broadcastZoneQueueSessionCleared, markSpawnNearUser } from '../socket/roomHandler';
 import { advanceQueue, QUEUE_MIN_MINUTES, QUEUE_MAX_MINUTES } from '../lib/roomQueue';
 
 // Reads a room's current zone list regardless of which map format it's
@@ -195,6 +195,13 @@ roomMembers.post('/rooms/:slug/join-requests/:userId', authenticateToken, async 
         decidedAt: new Date(),
       },
     });
+
+    // Spawn near the admin who approved — see roomHandler.ts's
+    // markSpawnNearUser doc comment. Approve-only: a reject has no join to
+    // place, and this is scoped to the explicit pending->decided transition
+    // (not the "room is open, walk in freely" path, which has no specific
+    // inviter to land beside).
+    if (decision === 'approve') markSpawnNearUser(room!.slug, req.params.userId, req.userId!);
 
     if (ioRef) {
       // Targeted at the requester's own sockets: a decision about one person

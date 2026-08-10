@@ -133,6 +133,19 @@ async function logGuestAuditEvent(input: {
   }
 }
 
+// "Spawn near whoever let you in" — a guest just admitted, or a member just
+// approved, should land beside the admin who did it instead of the room's
+// fixed Starting Point. In-memory, one-time-consumed: set ONLY at the exact
+// moment of an admit/approve decision (see call sites), read+deleted exactly
+// once at the JOIN_ROOM spawn computation below. An ordinary reconnect never
+// calls the setter at all, so it structurally can never be pulled toward the
+// admin — no separate "is this a reconnect" check needed.
+const pendingNearPlacement = new Map<string, string>(); // `${roomSlug}:${targetUid}` -> nearUid
+
+export function markSpawnNearUser(roomSlug: string, targetUid: string, nearUid: string): void {
+  pendingNearPlacement.set(`${roomSlug}:${targetUid}`, nearUid);
+}
+
 // Same "very few features" cut as isGuestSocket above, extended to
 // self-registered (non-Lark) accounts nobody has promoted — see
 // RoomAdminState.restrictedTierUserIds' own doc comment for why a manual
@@ -926,6 +939,34 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const remembered = getLastKnownPosition(uid, room);
     let spawn = remembered ?? findSpawnPixel(tiles);
 
+    // "Spawn near whoever let you in" — consumed at most once per admit/
+    // approve decision (see markSpawnNearUser's own doc comment), so an
+    // ordinary reconnect (which never calls the setter) always finds nothing
+    // here and falls straight through to the remembered/Starting-Point spawn
+    // above, untouched. Wins over `remembered` when both are set — "you were
+    // just let in" is a far more recent, specific signal than a possibly
+    // stale saved position (e.g. from a much earlier visit).
+    const nearPlacementKey = `${room}:${uid}`;
+    const nearUid = pendingNearPlacement.get(nearPlacementKey);
+    if (nearUid) {
+      pendingNearPlacement.delete(nearPlacementKey);
+      const roomPlayers = await getPlayers(room);
+      const nearPlayer = roomPlayers.find((p) => p.userId === nearUid);
+      if (nearPlayer) {
+        const nearTileX = Math.floor(nearPlayer.x / TILE_SIZE);
+        const nearTileY = Math.floor(nearPlayer.y / TILE_SIZE);
+        // Same helper Summon/My Seat already use — deliberately not
+        // reimplemented here. Its own fallback (no free neighbor -> stand on
+        // the anchor's own tile) is left as-is, matching how Summon already
+        // behaves in that edge case.
+        const spot = findAdjacentFreeTile(tiles, nearTileX, nearTileY);
+        spawn = { x: spot.x * TILE_SIZE + TILE_SIZE / 2, y: spot.y * TILE_SIZE + TILE_SIZE / 2 };
+      }
+      // nearPlayer not found (admin disconnected between deciding and this
+      // join actually landing) — `spawn` simply keeps its remembered/
+      // Starting-Point value from above, no special-casing needed.
+    }
+
     // Bug 8 — the remembered position can be INSIDE a blocked tile: sitting
     // puts the avatar on the chair's own tile (chair is in BLOCKED_TILES),
     // and a disconnect/refresh/laptop-sleep mid-sit stores exactly that as
@@ -1399,6 +1440,9 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     if (data.admit) {
       if (!rs.guestAllowlist) rs.guestAllowlist = new Set();
       rs.guestAllowlist.add(data.guestId);
+      // Spawn near the admin who admitted them — see markSpawnNearUser's own
+      // doc comment. senderUid is already server-verified above (canAccess).
+      if (senderUid) markSpawnNearUser(room, guestUid(data.guestId), senderUid);
       if (guestSocket) guestSocket.emit(SocketEvents.GUEST_JOIN_ADMITTED, { roomSlug: room });
       console.log(`[room] guest ${data.guestId} admitted to ${room} by uid=${senderUid}`);
     } else {
