@@ -830,6 +830,13 @@ model RoomInvite {
   maxUses       Int?
   useCount      Int       @default(0)
   revoked       Boolean   @default(false)
+  // Guest link password (bcrypt, same as User.password in auth.ts) — every
+  // link created going forward always has one (POST /guest-invites always
+  // sets it, admin-supplied or auto-generated). Nullable only so existing
+  // rows from before this column existed don't break the migration; POST
+  // /guest/join treats a null hash as "this link predates password support"
+  // and rejects the join rather than silently letting it through unguarded.
+  passwordHash  String?
 
   @@index([roomId])
 }

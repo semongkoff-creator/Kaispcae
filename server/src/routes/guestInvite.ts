@@ -1,11 +1,24 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { getPrisma } from '../lib/prisma';
 import { hasFeatureAccess } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest, signGuestToken } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
 
 const guestInvite = Router();
+
+// Human-typeable random password when the admin doesn't set their own —
+// excludes visually-ambiguous characters (0/O, 1/I/l) since this gets read
+// off a screen and typed by hand on the guest's side, unlike the link token
+// itself (which is only ever copy-pasted, so base64url is fine there).
+const PASSWORD_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+function generatePassword(length = 8): string {
+  const bytes = crypto.randomBytes(length);
+  let out = '';
+  for (let i = 0; i < length; i++) out += PASSWORD_CHARS[bytes[i] % PASSWORD_CHARS.length];
+  return out;
+}
 
 // Guest Link & Ruang Tunggu — creating/revoking a link is admin+
 // ('guest:manage', shared/permissions.ts), same "resolve the caller's real
@@ -30,9 +43,16 @@ guestInvite.post('/rooms/:slug/guest-invites', authenticateToken, async (req: Au
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Admin role required' });
 
-    const body = (req.body ?? {}) as { expiresInHours?: unknown; maxUses?: unknown };
+    const body = (req.body ?? {}) as { expiresInHours?: unknown; maxUses?: unknown; password?: unknown };
     const expiresInHours = Number(body.expiresInHours);
     const maxUses = Number(body.maxUses);
+
+    // Every link gets a password — admin-supplied (must be non-empty after
+    // trim) or auto-generated. Never optional/blank: an empty string is
+    // treated the same as "not provided", not as "no password".
+    const customPassword = typeof body.password === 'string' ? body.password.trim() : '';
+    const plainPassword = customPassword || generatePassword();
+    const passwordHash = await bcrypt.hash(plainPassword, 12);
 
     const actor = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
     const invite = await prisma.roomInvite.create({
@@ -45,9 +65,12 @@ guestInvite.post('/rooms/:slug/guest-invites', authenticateToken, async (req: Au
         createdByName: actor?.displayName ?? 'Admin',
         expiresAt: Number.isFinite(expiresInHours) && expiresInHours > 0 ? new Date(Date.now() + expiresInHours * 3600_000) : null,
         maxUses: Number.isInteger(maxUses) && maxUses > 0 ? maxUses : null,
+        passwordHash,
       },
     });
-    res.json({ token: invite.token, expiresAt: invite.expiresAt, maxUses: invite.maxUses });
+    // plainPassword is returned ONCE here, never stored — this is the only
+    // moment it exists outside the admin's own clipboard/notes.
+    res.json({ token: invite.token, expiresAt: invite.expiresAt, maxUses: invite.maxUses, password: plainPassword });
   } catch (e) {
     console.error('[guestInvite] create error:', e);
     res.status(500).json({ error: 'Gagal membuat guest link' });
@@ -80,8 +103,8 @@ guestInvite.delete('/rooms/:slug/guest-invites/:id', authenticateToken, async (r
 // or any endpoint that assumes req.userId is a real User row.
 guestInvite.post('/guest/join', async (req: Request, res: Response) => {
   try {
-    const body = (req.body ?? {}) as { token?: unknown; name?: unknown };
-    if (typeof body.token !== 'string' || typeof body.name !== 'string') {
+    const body = (req.body ?? {}) as { token?: unknown; name?: unknown; password?: unknown };
+    if (typeof body.token !== 'string' || typeof body.name !== 'string' || typeof body.password !== 'string') {
       return res.status(400).json({ error: 'Data tidak valid' });
     }
     const trimmedName = body.name.trim().slice(0, 40);
@@ -99,6 +122,16 @@ guestInvite.post('/guest/join', async (req: Request, res: Response) => {
     if (invite.maxUses != null && invite.useCount >= invite.maxUses) {
       return res.status(410).json({ error: 'Link undangan ini sudah tidak berlaku' });
     }
+    // Links created before password support existed have no hash — reject
+    // rather than silently letting them through unguarded (see schema.prisma's
+    // doc comment on passwordHash).
+    if (!invite.passwordHash) {
+      return res.status(410).json({ error: 'Link undangan ini sudah tidak berlaku — minta admin membuat link baru' });
+    }
+    // Checked BEFORE the useCount bump below — a wrong password must not
+    // burn a one-time link's only use.
+    const passwordOk = await bcrypt.compare(body.password, invite.passwordHash);
+    if (!passwordOk) return res.status(401).json({ error: 'Password salah' });
 
     // Fire-and-forget count bump — a lost increment under a race just means
     // a one-time link could be used one extra time in the worst case, not a

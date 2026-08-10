@@ -752,13 +752,24 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     const hoursRaw = window.prompt('Guest link berlaku berapa jam? (kosongkan = tanpa batas waktu)', '24');
     if (hoursRaw === null) return;
     const oneTime = window.confirm('Link ini HANYA BISA DIPAKAI SEKALI?\n\nOK = ya, sekali pakai — otomatis tidak berlaku lagi setelah satu tamu masuk.\nBatal = tidak, bisa dipakai berkali-kali sampai kedaluwarsa.');
+    // Password is mandatory on every link (server enforces this too — this
+    // prompt is just the input, not the source of truth). Empty input means
+    // "auto-generate", not "no password" — the server never creates a link
+    // without one.
+    const passwordRaw = window.prompt('Password link (kosongkan = dibuatkan otomatis):', '');
+    if (passwordRaw === null) return;
     const trimmed = hoursRaw.trim();
     const expiresInHours = trimmed ? Number(trimmed) : undefined;
     try {
-      const result = await api.createGuestInvite(roomSlug, { expiresInHours, maxUses: oneTime ? 1 : undefined });
+      const result = await api.createGuestInvite(roomSlug, { expiresInHours, maxUses: oneTime ? 1 : undefined, password: passwordRaw.trim() || undefined });
       const url = `${window.location.origin}/?guest=${encodeURIComponent(result.token)}`;
       await navigator.clipboard.writeText(url);
-      useGameStore.getState().addActivity('🔗 Guest link disalin ke clipboard.');
+      // Alert (not just the clipboard toast) because the password can't also
+      // fit in the clipboard alongside the link — this is the ONLY moment
+      // the plain password is ever shown, so it has to be read here, not
+      // copy-pasted from a second place.
+      window.alert(`Guest link dibuat.\n\nLink (sudah disalin ke clipboard):\n${url}\n\nPassword: ${result.password}\n\nBagikan link DAN password ini ke tamu — keduanya dibutuhkan untuk masuk.`);
+      useGameStore.getState().addActivity('🔗 Guest link dibuat.');
     } catch (e) {
       console.error('[guest] create invite failed:', e);
       useGameStore.getState().addActivity('Gagal membuat guest link.');

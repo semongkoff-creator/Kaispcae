@@ -426,24 +426,27 @@ export const api = {
   getRoom: (slug: string) => request<RoomInfo>(`/rooms/${slug}`),
 
   // ── Guest Link & Ruang Tunggu ────────────────────────────────────
-  // Admin-only: mint a room-scoped invite link. Both params optional —
-  // omitted means "no expiry" / "unlimited uses" respectively.
-  createGuestInvite: (slug: string, opts: { expiresInHours?: number; maxUses?: number }) =>
-    request<{ token: string; expiresAt: string | null; maxUses: number | null }>(`/rooms/${slug}/guest-invites`, {
+  // Admin-only: mint a room-scoped invite link. expiresInHours/maxUses
+  // optional — omitted means "no expiry" / "unlimited uses". password
+  // optional — omitted means the server auto-generates one; either way the
+  // response's `password` is the ONLY time the plain value is ever visible.
+  createGuestInvite: (slug: string, opts: { expiresInHours?: number; maxUses?: number; password?: string }) =>
+    request<{ token: string; expiresAt: string | null; maxUses: number | null; password: string }>(`/rooms/${slug}/guest-invites`, {
       method: 'POST',
       body: JSON.stringify(opts),
     }),
   revokeGuestInvite: (slug: string, id: string) =>
     request<{ ok: boolean }>(`/rooms/${slug}/guest-invites/${id}`, { method: 'DELETE' }),
 
-  // PUBLIC — no account required. Exchanges an invite token + a display name
-  // for a short-lived guest session token (see GuestEntry.tsx). request()
-  // still runs fine unauthenticated: it only ever ATTACHES a Bearer header
-  // when one happens to be cached, and this route never checks it either way.
-  guestJoin: (token: string, name: string) =>
+  // PUBLIC — no account required. Exchanges an invite token + display name +
+  // the link's password for a short-lived guest session token (see
+  // GuestEntry.tsx). request() still runs fine unauthenticated: it only ever
+  // ATTACHES a Bearer header when one happens to be cached, and this route
+  // never checks it either way.
+  guestJoin: (token: string, name: string, password: string) =>
     request<{ token: string; roomSlug: string; roomName: string; name: string }>('/guest/join', {
       method: 'POST',
-      body: JSON.stringify({ token, name }),
+      body: JSON.stringify({ token, name, password }),
     }),
 
   // ZEP Room Editor (opened in its own tab) — admin-gated on the server. Returns
