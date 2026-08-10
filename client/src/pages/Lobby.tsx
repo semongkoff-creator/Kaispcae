@@ -183,7 +183,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
           )}
         </div>
       </header>
-      <main className="max-w-4xl mx-auto px-6 py-8">
+      <main className="max-w-6xl mx-auto px-6 py-8">
         {toast && (
           // Outer layer does the positioning (flex), so the inner card's
           // fade-in animation transform never fights a positioning transform.
@@ -370,7 +370,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {visibleRooms.map((room) => {
               const isConfirmingDelete = deletingSlug === room.slug;
               const isMenuOpen = openMenuSlug === room.slug;
@@ -388,14 +388,14 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
                 {/* No cover-image data exists anywhere in the room model —
                     matches the Figma reference's own literal "COVER IMG"
                     placeholder rather than fabricating a fake image. */}
-                <div className="relative h-28 bg-gradient-to-br from-[#3B1E54] to-[#4A1E6D] flex items-center justify-center">
+                <div className="relative aspect-[16/9] bg-gradient-to-br from-[#3B1E54] to-[#4A1E6D] flex items-center justify-center">
                   <span className="text-white/40 text-xs font-medium tracking-wide">COVER IMG</span>
-                  <span className="absolute top-2.5 right-2.5 flex items-center gap-1 bg-black/30 backdrop-blur-sm rounded-full pl-1.5 pr-2 py-0.5">
+                  <span className="absolute top-3 right-3 flex items-center gap-1 bg-black/30 backdrop-blur-sm rounded-full pl-1.5 pr-2 py-0.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                     <span className="text-white text-[10px] font-medium">{room.playerCount}</span>
                   </span>
                 </div>
-                <div className="px-4 py-3 flex items-center justify-between">
+                <div className="px-4 py-3.5 flex items-center justify-between">
                   {isConfirmingDelete ? (
                     <div className="flex items-center justify-between w-full text-xs">
                       <span className="text-red-600 dark:text-red-400 font-medium">Delete this room?</span>
@@ -442,7 +442,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
           </div>
         )}
       </main>
-      <footer className="max-w-4xl mx-auto px-6 py-6 flex justify-center">
+      <footer className="max-w-6xl mx-auto px-6 py-6 flex justify-center">
         <button
           onClick={() => setShowCredits(true)}
           className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-xs cursor-pointer inline-flex items-center gap-1.5"
