@@ -74,7 +74,6 @@ import { CameraButton } from './components/hud/CameraButton';
 import { DeviceMenu } from './components/hud/DeviceMenu';
 import { ScreenShareButton } from './components/hud/ScreenShareButton';
 import { EmojiButton } from './components/hud/EmojiButton';
-import { ChatToggleButton } from './components/hud/ChatToggleButton';
 import { ParticipantsToggleButton } from './components/hud/ParticipantsToggleButton';
 import { LeaveButton } from './components/hud/LeaveButton';
 import { Lobby } from './pages/Lobby';
@@ -886,10 +885,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const activePanel = useGameStore((s) => s.activePanel);
   const openPanel = useGameStore((s) => s.openPanel);
   const closePanel = useGameStore((s) => s.closePanel);
-  // Meeting toolbar's Chat button badge — same store slice and sum ChatPanel
-  // itself used to compute for its own (now-removed) trigger button.
-  const unreadByTarget = useGameStore((s) => s.unreadByTarget);
-  const totalUnread = Object.values(unreadByTarget).reduce((a, b) => a + b, 0);
   const showAdminPanel = activePanel === 'adminPanel';
   const showTeleportPanel = activePanel === 'teleport';
   const showAddMediaPanel = activePanel === 'addMedia';
@@ -2091,19 +2086,21 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </div>
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2">
           <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
-          <DeviceMenu kind="audio" />
           <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
-          <DeviceMenu kind="video" />
           <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
           {/* QA (Akses tamu checklist item 2, "Guest terbatas") — both
               server-rejected for guests now too (roomHandler.ts's
               PLAYER_HAND/PLAYER_HIDDEN, emoteHandler.ts). Mic/Camera/Share/
-              Chat/Peserta stay — those are the kept-open
-              meeting-participation set. */}
+              Peserta stay — those are the kept-open meeting-participation
+              set. Chat is its own standalone bottom-right button again (see
+              ChatPanel.tsx), not part of this bar. */}
           {!isGuest && <HandButton raised={!!localPlayer.handRaised} onToggle={handleHandToggle} />}
           {!isGuest && <EmojiButton open={showEmoteWheel} onToggle={() => setShowEmoteWheel((v) => !v)} />}
-          <ChatToggleButton open={channelChat.chatPanelOpen} onToggle={() => channelChat.setChatPanelOpen(!channelChat.chatPanelOpen)} unreadCount={totalUnread} />
           <ParticipantsToggleButton open={activePanel === 'participants'} onToggle={() => openPanel('participants')} />
+          {/* Mic/speaker/camera device picker — was two small carets glued
+              to Mic and Camera, merged into one ⋮ menu (see DeviceMenu.tsx)
+              placed just left of Keluar. */}
+          <DeviceMenu />
           <div className="w-px h-7 bg-purple-200/50 dark:bg-white/10 mx-0.5" />
           <LeaveButton onLeave={onLeave} />
         </div>

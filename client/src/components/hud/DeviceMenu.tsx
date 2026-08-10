@@ -1,17 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ChevronUp, Check, MicFill, VolumeUpFill, CameraVideoFill } from 'react-bootstrap-icons';
+import { ThreeDotsVertical, Check, MicFill, VolumeUpFill, CameraVideoFill } from 'react-bootstrap-icons';
 import { webrtcService } from '@/services/webrtcService';
 
-// The little caret that sits next to the Mic / Camera buttons and opens a
-// device picker — the same affordance Zoom/Meet/Zep use. 'audio' lists both
-// microphones and speakers (input + output live together, as in the reference
-// design); 'video' lists cameras. Selection is applied immediately via
-// webrtcService and remembered there (localStorage), so this component holds
-// no source of truth of its own beyond what it last read.
-interface DeviceMenuProps {
-  kind: 'audio' | 'video';
-}
-
+// Device picker (mic/speaker/camera) — the same affordance Zoom/Meet/Zep
+// use, now behind a single ⋮ trigger instead of two separate carets next to
+// Mic and Camera (was one instance per `kind`, merged per request so the
+// toolbar has one less pair of small controls). Selection is applied
+// immediately via webrtcService and remembered there, so this component
+// holds no source of truth of its own beyond what it last read.
 interface Group {
   label: string;
   icon: React.ReactNode;
@@ -21,7 +17,7 @@ interface Group {
   fallbackName: string;
 }
 
-export function DeviceMenu({ kind }: DeviceMenuProps) {
+export function DeviceMenu() {
   const [open, setOpen] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
   const ref = useRef<HTMLDivElement>(null);
@@ -29,29 +25,24 @@ export function DeviceMenu({ kind }: DeviceMenuProps) {
   const load = useCallback(async () => {
     const { mics, cameras, speakers } = await webrtcService.listDevices();
     const sel = webrtcService.getSelectedDevices();
-    if (kind === 'audio') {
-      setGroups([
-        {
-          label: 'Mikrofon', icon: <MicFill size={11} />, devices: mics,
-          selectedId: sel.micId, fallbackName: 'Mikrofon',
-          onPick: (id) => webrtcService.switchMic(id),
-        },
-        {
-          label: 'Speaker', icon: <VolumeUpFill size={11} />, devices: speakers,
-          selectedId: sel.speakerId, fallbackName: 'Speaker',
-          onPick: (id) => webrtcService.switchSpeaker(id),
-        },
-      ]);
-    } else {
-      setGroups([
-        {
-          label: 'Kamera', icon: <CameraVideoFill size={11} />, devices: cameras,
-          selectedId: sel.cameraId, fallbackName: 'Kamera',
-          onPick: (id) => webrtcService.switchCamera(id),
-        },
-      ]);
-    }
-  }, [kind]);
+    setGroups([
+      {
+        label: 'Mikrofon', icon: <MicFill size={11} />, devices: mics,
+        selectedId: sel.micId, fallbackName: 'Mikrofon',
+        onPick: (id) => webrtcService.switchMic(id),
+      },
+      {
+        label: 'Speaker', icon: <VolumeUpFill size={11} />, devices: speakers,
+        selectedId: sel.speakerId, fallbackName: 'Speaker',
+        onPick: (id) => webrtcService.switchSpeaker(id),
+      },
+      {
+        label: 'Kamera', icon: <CameraVideoFill size={11} />, devices: cameras,
+        selectedId: sel.cameraId, fallbackName: 'Kamera',
+        onPick: (id) => webrtcService.switchCamera(id),
+      },
+    ]);
+  }, []);
 
   // Enumerate only when the menu opens — the list is short-lived and device
   // labels can change (plugging in a headset), so a fresh read each time beats
@@ -81,23 +72,20 @@ export function DeviceMenu({ kind }: DeviceMenuProps) {
   };
 
   return (
-    // self-center: this sits next to the 44px main buttons as a deliberately
-    // smaller "mini circle" utility control (device picker, not a primary
-    // action) — self-center keeps it vertically centered in the toolbar row
-    // regardless of the row's own stretch behavior.
-    <div className="relative self-center" ref={ref}>
+    // Now a standalone toolbar control (was a small sub-caret glued to
+    // Mic/Camera) — sized to match the other 44px main buttons.
+    <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center justify-center w-5 h-5 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 transition-all hover:scale-105 cursor-pointer text-purple-700 dark:text-purple-300"
-        title={kind === 'audio' ? 'Pilih mikrofon / speaker' : 'Pilih kamera'}
+        className="flex items-center justify-center w-11 h-11 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 transition-all hover:scale-105 cursor-pointer text-purple-700 dark:text-purple-300"
+        title="Pilih mikrofon / speaker / kamera"
       >
-        <ChevronUp size={10} />
+        <ThreeDotsVertical size={18} />
       </button>
 
       {open && (
-        // bottom-full instead of a fixed bottom-11 — that pixel value
-        // assumed the old h-9 trigger's height; bottom-full anchors off
-        // this button's OWN box regardless of its (now smaller) size.
+        // bottom-full (not a fixed pixel offset) anchors off this button's
+        // own box, so it stays correct regardless of the trigger's size.
         <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-64 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-purple-100 dark:border-gray-700 rounded-lg shadow-xl py-1 z-[60]">
           {groups.map((g) => (
             <div key={g.label}>

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, MegaphoneFill, ChevronLeft, ChevronRight, XLg } from 'react-bootstrap-icons';
+import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, MegaphoneFill, ChevronLeft, ChevronRight, XLg } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@virtualmeet/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -119,6 +119,8 @@ export function ChatPanel({
     setEditText('');
   };
   const unreadByTarget = useGameStore((s) => s.unreadByTarget);
+  // Total unread across every target (for the collapsed Chat button badge).
+  const totalUnread = Object.values(unreadByTarget).reduce((a, b) => a + b, 0);
 
   const typingByTarget = useGameStore((s) => s.typingByTarget);
   const playerRecords = useGameStore((s) => s.playerRecords);
@@ -441,10 +443,23 @@ export function ChatPanel({
 
   return (
     <>
-      {/* Own bottom-right trigger button removed — opening/closing is now
-          done from the meeting toolbar's Chat button (App.tsx), which calls
-          this exact same onToggleOpen(!open). `open`/`onToggleOpen` props
-          and the panel below are otherwise untouched. */}
+      {/* Restored to its own standalone bottom-right trigger (was briefly
+          folded into the meeting toolbar — reverted per request). Still
+          uses the "Ethereal Collaboration" glass upgrade (backdrop-blur-xl,
+          translucent border/glow) from the separately-approved restyle pass
+          — only the toolbar placement was undone, not that styling. */}
+      <button
+        onClick={() => onToggleOpen(!open)}
+        className="absolute bottom-4 right-4 z-50 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl px-3 py-2 rounded-lg text-sm text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
+      >
+        <ChatDotsFill size={14} /> {open ? 'Hide' : 'Chat'}
+        {!open && totalUnread > 0 && (
+          <span className="ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold inline-flex items-center justify-center">
+            {totalUnread > 99 ? '99+' : totalUnread}
+          </span>
+        )}
+      </button>
+
       {open && (
         <div
           className="absolute bottom-16 right-4 z-50 w-80 h-[28rem] bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-xl border border-purple-200/50 dark:border-white/10 shadow-2xl shadow-purple-500/10 flex flex-col pointer-events-auto"
