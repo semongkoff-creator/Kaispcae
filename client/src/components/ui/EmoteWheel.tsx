@@ -52,37 +52,33 @@ export function EmoteWheel({ open, onSelect, onClose }: EmoteWheelProps) {
 
   if (!open) return null;
 
-  const cx = 50;
-  const cy = 50;
-  const r = 36;
-
   return (
-    // z-[60] — same reasoning as AvatarSetup's dialog: above the persistent
-    // HUD's z-50, since this is a transient overlay the HUD shouldn't
-    // render in front of while it's open (unlike MeetingView, which is
+    // Straight horizontal row anchored above the bottom-center HUD toolbar
+    // (bottom-24 clears the toolbar's own ~64px pill + gap) — was a ring of
+    // buttons centered on the whole screen (cx/cy/r trig), which visually
+    // surrounded the avatar rather than reading as a toolbar menu. Same
+    // full-screen click-outside-to-close backdrop as before; z-[60] — above
+    // the persistent HUD's z-50, since this is a transient overlay the HUD
+    // shouldn't render in front of while it's open (unlike MeetingView,
     // deliberately z-40 so the HUD stays usable during that mode).
-    <div className="absolute inset-0 z-[60] flex items-center justify-center" onClick={onClose}>
-      <div className="relative w-[220px] h-[220px]" onClick={(e) => e.stopPropagation()}>
-        {EMOTE_LIST.map((emote, i) => {
-          const angle = (i / EMOTE_LIST.length) * Math.PI * 2 - Math.PI / 2;
-          const bx = cx + r * Math.cos(angle) - 18;
-          const by = cy + r * Math.sin(angle) - 18;
+    <div className="absolute inset-0 z-[60]" onClick={onClose}>
+      <div
+        className="absolute bottom-24 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2 pointer-events-auto animate-fade-in"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {EMOTE_LIST.map((emote) => {
           const EmoteIcon = EMOTE_ICONS[emote];
           return (
             <button
               key={emote}
               onClick={() => onSelect(emote)}
-              className="absolute w-9 h-9 rounded-full bg-white/90 dark:bg-gray-800/90 border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-purple-600 hover:bg-purple-50 dark:hover:bg-gray-700 hover:scale-110 transition-all cursor-pointer"
-              style={{ left: bx, top: by }}
+              className="w-9 h-9 rounded-full flex items-center justify-center text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-700 hover:scale-110 transition-all cursor-pointer"
               title={EMOTE_LABELS[emote]}
             >
               <EmoteIcon size={18} />
             </button>
           );
         })}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white/80 text-purple-700 text-xs px-2 py-1 rounded-full shadow-sm">
-          Press B
-        </div>
       </div>
     </div>
   );

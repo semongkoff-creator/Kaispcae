@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { PersonRaisedHand } from 'react-bootstrap-icons';
 import { isTypingTarget } from '@/utils/hotkeys';
 
 interface HandButtonProps {
@@ -40,11 +39,15 @@ export function HandButton({ raised, onToggle }: HandButtonProps) {
       }`}
       title="Raise hand (H)"
     >
-      {/* PersonRaisedHand — was HandIndexThumbFill (a pointing-finger glyph,
-          read as "poke/point" rather than "raise hand"). This is Bootstrap
-          Icons' dedicated raised-hand glyph, same one Zoom/Meet-style UIs
-          use for this exact meaning. animate-bounce/opacity unchanged. */}
-      <PersonRaisedHand className={raised ? 'text-white animate-bounce' : 'text-purple-700 dark:text-purple-300 opacity-70'} size={18} />
+      {/* Literal emoji, not a Bootstrap Icons glyph — checked the full icon
+          set (HandIndex*, HandThumbs*, PersonRaisedHand) and none of them
+          read clearly as "raise hand" at 18px; PersonRaisedHand (tried
+          previously) is a person silhouette with an arm up, easy to mistake
+          for a generic person icon at a glance. ✋ is unambiguous and needs
+          no new icon library (Lucide isn't installed in this project).
+          text-* classes don't recolor emoji glyphs, so only the
+          animation/opacity carry over from the icon version. */}
+      <span className={`text-lg leading-none ${raised ? 'animate-bounce' : 'opacity-70'}`}>✋</span>
       {showLabel && (
         <span className="absolute -top-8 whitespace-nowrap text-xs bg-white dark:bg-gray-800 text-purple-700 dark:text-purple-300 border border-purple-100 dark:border-gray-700 shadow-sm px-2 py-0.5 rounded">
           {raised ? 'Lower hand (H)' : 'Raise hand (H)'}
