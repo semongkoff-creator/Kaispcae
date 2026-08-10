@@ -49,7 +49,7 @@ interface MTile {
   cameraOff?: boolean;
   speaking?: boolean;
   reactionSourceId?: string; // player id for latestReaction lookup (cam tiles)
-  volumeTargetId?: string;   // remote id whose volume the main tile can adjust
+  volumeTargetId?: string;   // remote id whose volume this tile's slider adjusts
 }
 
 // Bug 16 — Google-Meet-style layout, with a second pass fixing the default
@@ -140,7 +140,14 @@ export function MeetingView({
   const thumbnails = featured ? tiles.filter((t) => t.key !== featuredKey) : [];
   const isPinned = !!pinnedKey && pinnedKey === featuredKey;
 
-  const renderTile = (t: MTile, main: boolean) => (
+  // Bug fix (regression report) — onVolumeChange used to be gated on `main`
+  // (the single featured/spotlighted tile only), so grid and thumbnail-strip
+  // tiles never got a volume slider at all. volumeTargetId is already set on
+  // every tile (see MTile below), so this was just an unnecessary
+  // restriction, not a technical requirement — every remote tile gets the
+  // slider now, matching VideoGrid.tsx's ambient-HUD tiles (which never had
+  // this restriction).
+  const renderTile = (t: MTile) => (
     <VideoTile
       name={t.name}
       avatarName={t.avatarName}
@@ -155,7 +162,7 @@ export function MeetingView({
       isBeingRecorded={t.isBeingRecorded}
       speaking={t.speaking}
       reaction={t.reactionSourceId ? latestReaction(emoteEvents, t.reactionSourceId, now) : null}
-      onVolumeChange={main && t.volumeTargetId ? (v) => onManualVolumeChange(t.volumeTargetId!, v) : undefined}
+      onVolumeChange={t.volumeTargetId ? (v) => onManualVolumeChange(t.volumeTargetId!, v) : undefined}
       connectionFailed={!t.isLocal && !t.isScreen && !!t.reactionSourceId && failedPeerIds?.has(t.reactionSourceId)}
       large
     />
@@ -190,7 +197,7 @@ export function MeetingView({
           // the video stretching to fill the whole panel. max-w-full guards the
           // rare taller-than-16:9 container.
           <div className="relative h-full aspect-video max-w-full mx-auto">
-            {renderTile(featured, true)}
+            {renderTile(featured)}
             {isPinned && (
               <button
                 onClick={() => setPinnedKey(null)}
@@ -219,7 +226,7 @@ export function MeetingView({
                 title={`Sorot ${t.name}`}
                 className="relative rounded-lg overflow-hidden cursor-pointer ring-1 ring-white/10 hover:ring-purple-400/70 transition-all"
               >
-                {renderTile(t, false)}
+                {renderTile(t)}
               </button>
             ))}
           </div>
@@ -241,7 +248,7 @@ export function MeetingView({
                 title={`Sorot ${t.name}`}
                 className="shrink-0 w-40 h-24 rounded-lg overflow-hidden cursor-pointer ring-1 ring-white/10 hover:ring-purple-400/70 transition-all"
               >
-                {renderTile(t, false)}
+                {renderTile(t)}
               </button>
             ))}
           </div>

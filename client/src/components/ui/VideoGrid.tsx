@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
-import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff } from 'react-bootstrap-icons';
+import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff, Grid3x3GapFill } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@virtualmeet/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
@@ -58,6 +58,12 @@ interface VideoGridProps {
   // tile (same as any other nearby player) but VideoTile shows a
   // "connection lost" badge over it instead of a silently frozen picture.
   failedPeerIds?: Set<string>;
+  // Meeting View entry point — moved here from Sidebar's Room Features
+  // dropdown to sit next to the hide/show camera-tiles toggle instead.
+  // VideoGrid only ever renders while Meeting View is NOT active, so this
+  // is always the "enter" direction; exiting uses MeetingView's own close
+  // button.
+  onToggleMeetingView: () => void;
 }
 
 // Shared with MeetingView.tsx (the "Dedicated Meeting View" full-screen
@@ -429,7 +435,7 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
   );
 }
 
-export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds }: VideoGridProps) {
+export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds, onToggleMeetingView }: VideoGridProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localHandRaised = localPlayer.handRaised;
@@ -509,13 +515,24 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
 
   if (hidden) {
     return (
-      <button
-        onClick={() => setHidden(false)}
-        title="Show camera tiles"
-        className="absolute top-16 right-4 z-20 pointer-events-auto bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm rounded-full px-2.5 py-1.5 flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 cursor-pointer hover:bg-white"
-      >
-        <CameraVideoFill size={12} /> {totalTiles}
-      </button>
+      <div className="absolute top-16 right-4 z-20 flex items-center gap-1.5 pointer-events-auto">
+        {/* Kept reachable even with tiles hidden — otherwise hiding the
+            camera strip would also hide the only way into Meeting View. */}
+        <button
+          onClick={onToggleMeetingView}
+          title="Meeting View"
+          className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+        >
+          <Grid3x3GapFill size={11} />
+        </button>
+        <button
+          onClick={() => setHidden(false)}
+          title="Show camera tiles"
+          className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm rounded-full px-2.5 py-1.5 flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 cursor-pointer hover:bg-white"
+        >
+          <CameraVideoFill size={12} /> {totalTiles}
+        </button>
+      </div>
     );
   }
 
@@ -526,6 +543,20 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
       className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
     >
       <EyeSlashFill size={11} />
+    </button>
+  );
+
+  // Meeting View entry — moved here from Sidebar's Room Features dropdown,
+  // grouped with the hide/show toggle above (same icon Sidebar used to show,
+  // same size/style as hideButton for a matched pair). Function unchanged —
+  // still just calls onToggleMeetingView (openPanel('meeting') in App.tsx).
+  const meetingViewButton = (
+    <button
+      onClick={onToggleMeetingView}
+      title="Meeting View"
+      className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+    >
+      <Grid3x3GapFill size={11} />
     </button>
   );
 
@@ -583,7 +614,12 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           space of its own beyond its children (flex-col sizes to content),
           so this doesn't reintroduce a dead click-through zone over the map. */}
       <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 max-h-[calc(100vh-6rem)] overflow-y-auto pointer-events-auto">
-        {hideButton}
+        {/* Meeting View + hide/show, grouped side by side (was hideButton
+            alone) rather than stacked in this otherwise-vertical column. */}
+        <div className="flex items-center gap-1.5">
+          {meetingViewButton}
+          {hideButton}
+        </div>
         {/* Every share that isn't currently the focus lives here as a
             thumbnail. An explicit button rather than a click-anywhere tile:
             the whole tile being clickable was invisible, so there was no way

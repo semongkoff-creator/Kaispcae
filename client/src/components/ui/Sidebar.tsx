@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, Grid3x3GapFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill } from 'react-bootstrap-icons';
+import { List, XLg, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -52,9 +52,6 @@ interface SidebarProps {
   // the one action worth reaching without an extra click to open anything.
   hasMySeat: boolean;
   onMySeat: () => void;
-
-  meetingViewActive: boolean;
-  onToggleMeetingView: () => void;
 
   // Akses & Password Pintu audit item #9 — emergency door override
   // (canDoorOverride gates it to admins/owner; doorOverride reflects the
@@ -204,8 +201,6 @@ export function Sidebar({
   onToggleTeleport,
   hasMySeat,
   onMySeat,
-  meetingViewActive,
-  onToggleMeetingView,
   doorOverride,
   canDoorOverride,
   onToggleDoorOverride,
@@ -319,11 +314,8 @@ export function Sidebar({
               <MenuRow icon={<PeopleFill size={15} />} label="Member" onClick={closeAnd(onOpenMemberList)} />
             )}
             <MenuDivider />
-            {/* Always available, even with camera/mic off — MeetingView
-                itself shows a friendly "nobody's on camera" placeholder
-                rather than an empty/broken grid, so there's no need to hide
-                the entry point until someone's actually streaming. */}
-            <MenuRow icon={<Grid3x3GapFill size={15} />} label={meetingViewActive ? 'Exit Meeting View' : 'Meeting View'} active={meetingViewActive} onClick={closeAnd(onToggleMeetingView)} />
+            {/* Meeting View entry moved to VideoGrid.tsx (next to the
+                hide/show camera-tiles toggle) — no longer listed here. */}
             {!miniModeActive && (
               <MenuRow
                 icon={<PipFill size={15} />}

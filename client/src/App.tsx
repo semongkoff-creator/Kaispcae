@@ -1742,8 +1742,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleTeleport={() => openPanel('teleport')}
         hasMySeat={hasMySeat}
         onMySeat={handleMySeat}
-        meetingViewActive={meetingViewActive}
-        onToggleMeetingView={() => openPanel('meeting')}
         doorOverride={doorOverride}
         canDoorOverride={isAdmin}
         onToggleDoorOverride={() => emitDoorOverride(!doorOverride)}
@@ -2045,6 +2043,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             recordedTargetUserId={activeRecording?.targetUserId}
             isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
             failedPeerIds={failedPeers}
+            onToggleMeetingView={() => openPanel('meeting')}
           />
         </>
       )}
