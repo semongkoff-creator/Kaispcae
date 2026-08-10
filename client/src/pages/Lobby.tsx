@@ -134,50 +134,53 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
     <div className="w-screen h-screen overflow-y-auto bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-950 text-gray-900 dark:text-gray-100">
       <header className="px-6 py-3.5 flex items-center justify-between border-b border-purple-100 dark:border-gray-800 backdrop-blur-sm">
         <h1 className="text-xl font-bold tracking-tight text-gray-900 dark:text-gray-100">KaiSpace</h1>
-        <div className="flex items-center gap-2">
+
+        {/* User dropdown — Figma shows only plain "Name ▾", no avatar and no
+            separate theme-toggle icon sitting beside it (both existed as
+            visible header elements before this pass). Neither capability is
+            gone: the avatar moved inside the open menu, and the theme
+            toggle is now a row in that same menu instead of its own button
+            — same onToggleTheme/onLogout calls, just relocated. */}
+        <div className="relative">
           <button
-            onClick={onToggleTheme}
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            className="w-9 h-9 rounded-full border border-purple-100 dark:border-gray-700 bg-white/70 dark:bg-gray-800/70 flex items-center justify-center text-purple-600 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-700 hover:border-purple-300 dark:hover:border-gray-600 transition-colors cursor-pointer"
+            onClick={() => setShowUserMenu((v) => !v)}
+            className="flex items-center gap-1.5 cursor-pointer"
           >
-            {theme === 'dark' ? <SunFill size={14} /> : <MoonFill size={14} />}
+            <span className="text-gray-900 dark:text-gray-100 text-sm font-medium max-w-[12rem] truncate">{user.displayName}</span>
+            <ChevronDown size={12} className="text-gray-400 dark:text-gray-500 shrink-0" />
           </button>
 
-          {/* User dropdown — was a static chip + a separate standalone
-              logout icon button; same info + same onLogout call, just
-              behind one clickable trigger like Figma's "Name ▾". */}
-          <div className="relative">
-            <button
-              onClick={() => setShowUserMenu((v) => !v)}
-              className="flex items-center gap-2.5 pl-1 pr-2.5 py-1 rounded-full border border-purple-100 dark:border-gray-700 bg-white/70 dark:bg-gray-800/70 hover:border-purple-300 dark:hover:border-gray-600 transition-colors cursor-pointer"
-            >
-              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-[11px] font-bold shrink-0 shadow-sm">
-                {userInitials}
-              </div>
-              <span className="text-gray-800 dark:text-gray-100 text-sm font-medium max-w-[9rem] truncate">{user.displayName}</span>
-              <ChevronDown size={11} className="text-gray-400 dark:text-gray-500 shrink-0" />
-            </button>
-
-            {showUserMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
-                <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-purple-100 dark:border-gray-700 py-1.5 z-50">
-                  <div className="px-3.5 py-2 border-b border-purple-50 dark:border-gray-700">
+          {showUserMenu && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
+              <div className="absolute right-0 top-full mt-2 w-52 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-purple-100 dark:border-gray-700 py-1.5 z-50">
+                <div className="flex items-center gap-2.5 px-3.5 py-2 border-b border-purple-50 dark:border-gray-700">
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-[11px] font-bold shrink-0 shadow-sm">
+                    {userInitials}
+                  </div>
+                  <div className="min-w-0">
                     <p className="text-gray-800 dark:text-gray-100 text-sm font-medium truncate">{user.displayName}</p>
-                    <p className={`text-[10px] font-semibold uppercase tracking-wide mt-0.5 ${isAdmin ? 'text-purple-500 dark:text-purple-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                    <p className={`text-[10px] font-semibold uppercase tracking-wide ${isAdmin ? 'text-purple-500 dark:text-purple-400' : 'text-gray-400 dark:text-gray-500'}`}>
                       {isAdmin ? 'Admin' : 'Member'}
                     </p>
                   </div>
-                  <button
-                    onClick={() => { setShowUserMenu(false); onLogout(); }}
-                    className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 cursor-pointer"
-                  >
-                    <BoxArrowRight size={14} /> Logout
-                  </button>
                 </div>
-              </>
-            )}
-          </div>
+                <button
+                  onClick={onToggleTheme}
+                  className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                >
+                  {theme === 'dark' ? <SunFill size={13} /> : <MoonFill size={13} />}
+                  {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                </button>
+                <button
+                  onClick={() => { setShowUserMenu(false); onLogout(); }}
+                  className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 cursor-pointer"
+                >
+                  <BoxArrowRight size={14} /> Logout
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </header>
       <main className="max-w-4xl mx-auto px-6 py-8">
