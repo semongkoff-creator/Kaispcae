@@ -26,15 +26,14 @@ function GoogleIcon() {
   );
 }
 
-// No Lark brand asset exists anywhere in this repo (checked) — a plain
-// speech-bubble glyph in Lark's blue rather than guessing at their real
-// logo, which risks being visibly wrong.
+// The real Feishu/Lark bird mark — user-supplied source JPG (solid white
+// background, no alpha) converted to a transparent PNG via a near-white
+// chroma-key threshold (see the conversion this file's history references;
+// small icon size means the soft anti-aliased edge left behind isn't
+// visible in practice) and dropped into public/assets/img next to
+// favico.png, the only other logo asset in this app.
 function LarkIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="#3370FF" aria-hidden="true">
-      <path d="M8 1C4.134 1 1 3.686 1 7c0 1.86.99 3.52 2.54 4.62L2.8 14.4a.4.4 0 0 0 .58.45l3.1-1.72c.5.1 1.01.15 1.52.15 3.866 0 7-2.686 7-6s-3.134-6-7-6z" />
-    </svg>
-  );
+  return <img src="/assets/img/lark-logo.png" alt="" width={16} height={16} className="object-contain" />;
 }
 
 // Google OAuth has no server route/config anywhere in this codebase (see
