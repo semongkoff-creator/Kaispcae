@@ -26,3 +26,16 @@ export async function recordResponseIfPending(prisma: PrismaClient, userId: stri
   if (latencyMs > PENDING_TIMEOUT_MS) return;
   await prisma.pokeResponseSample.create({ data: { userId, latencyMs } });
 }
+
+// A poke that's NEVER followed by any qualifying action (the person goes
+// idle, disconnects, or just never responds) would otherwise sit in
+// `pendingPokes` forever — recordResponseIfPending only ever cleans up the
+// entry it's called FOR, not stale ones nobody comes back to close. Piggy-
+// backs on analyticsSweep.ts's existing 20s proximity tick rather than a
+// new interval of its own.
+export function prunePendingPokes(): void {
+  const now = Date.now();
+  for (const [userId, receivedAt] of pendingPokes) {
+    if (now - receivedAt > PENDING_TIMEOUT_MS) pendingPokes.delete(userId);
+  }
+}

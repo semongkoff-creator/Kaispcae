@@ -8,6 +8,7 @@ import { listTasksInRange } from '../lib/larkTasks';
 import { computeRanking } from '../routes/analytics';
 import { sendGroupText } from '../lib/larkIm';
 import { broadcastAnalyticsActivity } from './analyticsFeed';
+import { prunePendingPokes } from '../lib/pokeResponse';
 
 // Productivity Analytics — Bagian A.2's "connection" event (spontaneous
 // proximity chat between two people). No server-side proximity signal
@@ -46,6 +47,18 @@ async function sweepProximityOnce(io: Server): Promise<void> {
   try {
     const prisma = getPrisma();
     const now = Date.now();
+
+    // Prune entries whose cooldown has already lapsed — they're dead
+    // weight either way (a pair past cooldown is re-logged fresh next
+    // tick, same as if the entry never existed), so this is a correctness
+    // no-op that also stops the map from growing without bound over a
+    // long-running process (every distinct pair that's EVER been close
+    // would otherwise sit here forever).
+    for (const [key, loggedAt] of lastLoggedAt) {
+      if (now - loggedAt >= CONNECTION_COOLDOWN_MS) lastLoggedAt.delete(key);
+    }
+    // Same unbounded-growth guard for pokeResponse.ts's own in-memory map.
+    prunePendingPokes();
 
     for (const roomSlug of getActiveRoomSlugs()) {
       // Guests have no User row (FK would fail) — same exclusion as every

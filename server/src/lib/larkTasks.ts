@@ -120,11 +120,19 @@ export async function listTodayTasks(ownerOpenId: string): Promise<DailyTask[]> 
 // happens locally instead. Paginated (listTodayTasks never needed to be —
 // "Today" is always a small slice; a full-range query over a busy Base can
 // exceed one page).
+// Hard ceiling on pagination — 50 pages * 200/page = 10,000 records is far
+// beyond any real Daily Task board at this company's scale. A genuine
+// runaway (a buggy/looping page_token from Lark's side, however unlikely)
+// stops here instead of growing `all` and this function's caller
+// (analyticsSweep.ts's every-15-minute sync) unbounded.
+const MAX_PAGES = 50;
+
 export async function listTasksInRange(startMs: number, endMs: number): Promise<DailyTask[]> {
   const t = await token();
   const { app, table } = ids();
   const all: any[] = [];
   let pageToken: string | undefined;
+  let pages = 0;
   do {
     const res = await fetch(
       `${LARK_OPENAPI_BASE}/bitable/v1/apps/${app}/tables/${table}/records/search?page_size=200`,
@@ -137,7 +145,12 @@ export async function listTasksInRange(startMs: number, endMs: number): Promise<
     const j: any = await res.json();
     if (j.code !== 0) throw new Error(`lark-search-failed:${j.code}:${j.msg}`);
     all.push(...(j.data?.items ?? []));
+    pages += 1;
     pageToken = j.data?.has_more ? j.data?.page_token : undefined;
+    if (pageToken && pages >= MAX_PAGES) {
+      console.warn(`[larkTasks] listTasksInRange hit the ${MAX_PAGES}-page cap — truncating, results may be incomplete`);
+      break;
+    }
   } while (pageToken);
 
   return all
