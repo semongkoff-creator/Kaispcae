@@ -18,6 +18,12 @@ interface MeetingViewProps {
   isLocalBeingRecorded?: boolean;
   onClose: () => void;
   onEmote: (emote: EmoteType) => void;
+  // Bug fix — the quick-reactions strip below used to render unconditionally
+  // whenever Meeting View was open (no visibility check at all), so it sat
+  // permanently over the toolbar. Now it follows the same toolbar Emoji
+  // button/showEmoteWheel toggle App.tsx already has (see its own note on
+  // why the EmoteWheel radial is suppressed while this is shown instead).
+  showReactions: boolean;
   // QA (Fallback checklist item 9) — same set VideoGrid.tsx takes; Meeting
   // View is the other place VideoTile is used (via renderTile below), so it
   // needs the same "connection lost" signal, not a second copy of the logic.
@@ -58,7 +64,7 @@ interface MTile {
 // leaving it drops you right back onto the map where you already are.
 export function MeetingView({
   nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams,
-  micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, onClose, onEmote, failedPeerIds,
+  micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, onClose, onEmote, failedPeerIds, showReactions,
 }: MeetingViewProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localHandRaised = useGameStore((s) => s.localPlayer.handRaised);
@@ -244,21 +250,28 @@ export function MeetingView({
 
       {/* Quick-reactions strip (reuses the in-world emote pipeline). pb-20 lifts
           it clear of the persistent bottom-center HUD control row (Mic/Camera/
-          Hand at bottom-6, z-50) which otherwise overlaps it. */}
-      <div className="shrink-0 flex justify-center pb-20 pt-2">
-        <div className="flex items-center gap-1 bg-white/10 border border-white/15 rounded-full px-2 py-1.5 backdrop-blur-sm pointer-events-auto">
-          {EMOTE_LIST.map((emote) => (
-            <button
-              key={emote}
-              onClick={() => onEmote(emote)}
-              title={EMOTE_LABELS[emote]}
-              className="w-9 h-9 rounded-full flex items-center justify-center text-xl hover:bg-white/20 hover:scale-110 active:scale-95 transition-all cursor-pointer"
-            >
-              {EMOTE_EMOJI[emote]}
-            </button>
-          ))}
+          Hand at bottom-6, z-50) which otherwise overlaps it. Only shown while
+          toggled on via the toolbar's Emoji button (showReactions) — it used
+          to render unconditionally, permanently covering that spot. Selecting
+          an emote does NOT auto-close the strip, matching the EmoteWheel
+          radial picker's existing behavior (repeat reactions without
+          reopening). */}
+      {showReactions && (
+        <div className="shrink-0 flex justify-center pb-20 pt-2 animate-fade-in">
+          <div className="flex items-center gap-1 bg-white/10 border border-white/15 rounded-full px-2 py-1.5 backdrop-blur-sm pointer-events-auto">
+            {EMOTE_LIST.map((emote) => (
+              <button
+                key={emote}
+                onClick={() => onEmote(emote)}
+                title={EMOTE_LABELS[emote]}
+                className="w-9 h-9 rounded-full flex items-center justify-center text-xl hover:bg-white/20 hover:scale-110 active:scale-95 transition-all cursor-pointer"
+              >
+                {EMOTE_EMOJI[emote]}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

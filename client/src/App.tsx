@@ -2028,6 +2028,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
           onClose={closePanel}
           onEmote={handleEmoteSelect}
+          showReactions={showEmoteWheel}
           failedPeerIds={failedPeers}
         />
       ) : (
@@ -2322,8 +2323,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       />
       )}
 
+      {/* Suppressed during Meeting View — MeetingView's own quick-reactions
+          strip (showReactions above) now handles the same toolbar Emoji
+          toggle there instead, so the two pickers don't stack. */}
       <EmoteWheel
-        open={showEmoteWheel}
+        open={showEmoteWheel && !meetingViewActive}
         onSelect={handleEmoteSelect}
         onClose={() => setShowEmoteWheel(false)}
       />
