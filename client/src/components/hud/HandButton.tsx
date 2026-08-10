@@ -43,11 +43,27 @@ export function HandButton({ raised, onToggle }: HandButtonProps) {
           previously — HandIndex*, HandThumbs*, PersonRaisedHand — none read
           clearly at 18px; a plain ✋ emoji worked but looked inconsistent
           once this custom icon replaced it everywhere else raised-hand
-          shows, see AvatarSprite.ts/VideoGrid.tsx/ParticipantPanel.tsx). */}
-      <img
-        src="/assets/img/raise-hand-icon.png"
-        alt=""
-        className={`w-[18px] h-4 object-contain ${raised ? 'animate-bounce' : 'opacity-70'}`}
+          shows, see AvatarSprite.ts/VideoGrid.tsx/ParticipantPanel.tsx).
+          A flat-colored PNG can't be recolored via text-* classes the way
+          every sibling button's react-bootstrap-icons SVG can (ScreenShare/
+          People/DeviceMenu all use `size={18}` + a `text-purple-700
+          dark:text-purple-300` className) — used it as a CSS mask instead
+          of an <img> so bg-* classes tint it the same way, same sizing and
+          color language as those siblings rather than a fixed-tint image. */}
+      <span
+        role="img"
+        aria-label=""
+        className={`w-5 h-5 ${raised ? 'bg-white animate-bounce' : 'bg-purple-700 dark:bg-purple-300'}`}
+        style={{
+          maskImage: 'url(/assets/img/raise-hand-icon.png)',
+          maskSize: 'contain',
+          maskPosition: 'center',
+          maskRepeat: 'no-repeat',
+          WebkitMaskImage: 'url(/assets/img/raise-hand-icon.png)',
+          WebkitMaskSize: 'contain',
+          WebkitMaskPosition: 'center',
+          WebkitMaskRepeat: 'no-repeat',
+        }}
       />
       {showLabel && (
         <span className="absolute -top-8 whitespace-nowrap text-xs bg-white dark:bg-gray-800 text-purple-700 dark:text-purple-300 border border-purple-100 dark:border-gray-700 shadow-sm px-2 py-0.5 rounded">
