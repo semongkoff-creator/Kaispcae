@@ -101,7 +101,7 @@ export function MeetingView({
     const out: MTile[] = [];
     if (localScreenStream) out.push({ key: 'local-screen', name: 'Layarmu', stream: localScreenStream, isLocal: true, isScreen: true });
     for (const t of screenTiles) out.push({ key: `${t.id}-screen`, name: `Layar ${t.name}`, stream: t.screenStream, isLocal: false, isScreen: true });
-    if (localStream) out.push({ key: 'local-cam', name: 'Kamu', avatarName: profiles.get(localUserId)?.name || localName, photoUrl: profiles.get(localUserId)?.photo ?? undefined, stream: localStream, isLocal: true, isScreen: false, micMuted, cameraOff, handRaised: localHandRaised, isBeingRecorded: isLocalBeingRecorded, speaking: localSpeaking && !micMuted, reactionSourceId: localPlayerId ?? undefined });
+    if (localStream) out.push({ key: 'local-cam', name: 'You', avatarName: profiles.get(localUserId)?.name || localName, photoUrl: profiles.get(localUserId)?.photo ?? undefined, stream: localStream, isLocal: true, isScreen: false, micMuted, cameraOff, handRaised: localHandRaised, isBeingRecorded: isLocalBeingRecorded, speaking: localSpeaking && !micMuted, reactionSourceId: localPlayerId ?? undefined });
     for (const t of videoTiles) { const uid = playerRecords[t.id]?.userId; out.push({ key: t.id, name: t.name, avatarName: (uid ? profiles.get(uid)?.name : '') || t.name, photoUrl: uid ? profiles.get(uid)?.photo ?? undefined : undefined, stream: t.stream, isLocal: false, isScreen: false, translucent: t.translucent, handRaised: t.handRaised, isBeingRecorded: t.isBeingRecorded, speaking: speakingPlayers.has(t.id), reactionSourceId: t.id, volumeTargetId: t.id, isGuest: t.isGuest }); }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
