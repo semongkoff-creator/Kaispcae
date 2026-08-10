@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2 } from 'react-bootstrap-icons';
+import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, ChevronDown, ThreeDotsVertical, Search, BoxArrowInRight } from 'react-bootstrap-icons';
 import { io } from 'socket.io-client';
 import { RoomTheme, RoomTemplateId, ROOM_TEMPLATES } from '@virtualmeet/shared';
 import { api, RoomInfo } from '@/services/api';
@@ -50,6 +50,27 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
   };
   const [showCredits, setShowCredits] = useState(false);
   const [nameError, setNameError] = useState(false);
+  // Figma "kaispace" reference — all four of these are purely presentational
+  // additions over data that's already fetched (or an existing input just
+  // moved behind a toggle, same pattern showCreate below already uses), not
+  // new server logic:
+  // - showUserMenu: the header chip becomes a real dropdown instead of a
+  //   static chip + separate logout icon.
+  // - activeTab: 'recent' (today's full list, unchanged default) vs
+  //   'mine' (client-side filter to rooms this account owns — the only
+  //   "my space" concept the existing RoomInfo data actually supports).
+  // - search: client-side name filter over the already-fetched `rooms`
+  //   array — no server search endpoint exists to call instead.
+  // - showJoinInput: the join-code input now hides behind a button (Figma
+  //   shows a compact "Join with Code" pill, not an always-open field),
+  //   toggled exactly like showCreate already toggles the create panel.
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [activeTab, setActiveTab] = useState<'recent' | 'mine'>('recent');
+  const [search, setSearch] = useState('');
+  const [showJoinInput, setShowJoinInput] = useState(false);
+  // Per-card "..." menu — same idea as showUserMenu above, just keyed by
+  // which card's menu is open (only ever one at a time).
+  const [openMenuSlug, setOpenMenuSlug] = useState<string | null>(null);
 
   useEffect(() => {
     api.getRooms()
@@ -63,10 +84,13 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
   const lastRoomSlug = localStorage.getItem('vm_last_room_slug');
   const lastRoom = rooms.find((r) => r.slug === lastRoomSlug);
 
-  // Newest first — matches the API's own createdAt-desc order.
+  // Newest first — matches the API's own createdAt-desc order. Tab/search
+  // are both plain client-side filters on top of that, never a new fetch.
   const visibleRooms = rooms
     .slice()
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .filter((r) => activeTab === 'recent' || r.ownerId === user.id)
+    .filter((r) => r.name.toLowerCase().includes(search.trim().toLowerCase()));
 
   useEffect(() => {
     const socket = io(SERVER_URL, { transports: ['websocket', 'polling'] });
@@ -109,9 +133,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
   return (
     <div className="w-screen h-screen overflow-y-auto bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-950 text-gray-900 dark:text-gray-100">
       <header className="px-6 py-3.5 flex items-center justify-between border-b border-purple-100 dark:border-gray-800 backdrop-blur-sm">
-        <h1 className="text-xl font-bold tracking-tight text-gray-900 dark:text-gray-100">
-          Virtual<span className="text-purple-600 dark:text-purple-400">Meet</span>
-        </h1>
+        <h1 className="text-xl font-bold tracking-tight text-gray-900 dark:text-gray-100">KaiSpace</h1>
         <div className="flex items-center gap-2">
           <button
             onClick={onToggleTheme}
@@ -121,26 +143,41 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
             {theme === 'dark' ? <SunFill size={14} /> : <MoonFill size={14} />}
           </button>
 
-          {/* User chip: initials avatar + name + role badge */}
-          <div className="flex items-center gap-2.5 pl-1 pr-2.5 py-1 rounded-full border border-purple-100 dark:border-gray-700 bg-white/70 dark:bg-gray-800/70">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-[11px] font-bold shrink-0 shadow-sm">
-              {userInitials}
-            </div>
-            <div className="flex flex-col leading-none">
+          {/* User dropdown — was a static chip + a separate standalone
+              logout icon button; same info + same onLogout call, just
+              behind one clickable trigger like Figma's "Name ▾". */}
+          <div className="relative">
+            <button
+              onClick={() => setShowUserMenu((v) => !v)}
+              className="flex items-center gap-2.5 pl-1 pr-2.5 py-1 rounded-full border border-purple-100 dark:border-gray-700 bg-white/70 dark:bg-gray-800/70 hover:border-purple-300 dark:hover:border-gray-600 transition-colors cursor-pointer"
+            >
+              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-[11px] font-bold shrink-0 shadow-sm">
+                {userInitials}
+              </div>
               <span className="text-gray-800 dark:text-gray-100 text-sm font-medium max-w-[9rem] truncate">{user.displayName}</span>
-              <span className={`text-[10px] font-semibold uppercase tracking-wide mt-0.5 ${isAdmin ? 'text-purple-500 dark:text-purple-400' : 'text-gray-400 dark:text-gray-500'}`}>
-                {isAdmin ? 'Admin' : 'Member'}
-              </span>
-            </div>
-          </div>
+              <ChevronDown size={11} className="text-gray-400 dark:text-gray-500 shrink-0" />
+            </button>
 
-          <button
-            onClick={onLogout}
-            title="Logout"
-            className="w-9 h-9 rounded-full border border-transparent text-gray-400 dark:text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 hover:border-red-200 dark:hover:border-red-800 flex items-center justify-center transition-colors cursor-pointer"
-          >
-            <BoxArrowRight size={16} />
-          </button>
+            {showUserMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
+                <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-purple-100 dark:border-gray-700 py-1.5 z-50">
+                  <div className="px-3.5 py-2 border-b border-purple-50 dark:border-gray-700">
+                    <p className="text-gray-800 dark:text-gray-100 text-sm font-medium truncate">{user.displayName}</p>
+                    <p className={`text-[10px] font-semibold uppercase tracking-wide mt-0.5 ${isAdmin ? 'text-purple-500 dark:text-purple-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                      {isAdmin ? 'Admin' : 'Member'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => { setShowUserMenu(false); onLogout(); }}
+                    className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 cursor-pointer"
+                  >
+                    <BoxArrowRight size={14} /> Logout
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
       <main className="max-w-4xl mx-auto px-6 py-8">
@@ -171,23 +208,77 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
             </p>
             <button
               onClick={() => onJoinRoom(lastRoom.slug)}
-              className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg cursor-pointer"
+              className="bg-[#3B1E54] hover:bg-[#4A1E6D] text-white text-xs font-medium px-3 py-1.5 rounded-lg cursor-pointer"
             >
               Rejoin
             </button>
           </div>
         )}
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Public Rooms</h2>
-          <div className="flex gap-3">
-            <input
-              value={joinCode} onChange={(e) => setJoinCode(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleJoinByCode()}
-              placeholder="Join with code..." maxLength={30}
-              className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg px-3 py-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 w-48 shadow-sm"
-            />
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          {/* Recent / My Space — Recent is today's unchanged default list;
+              My Space filters client-side to rooms owned by this account
+              (see visibleRooms above), the only "mine" concept the current
+              data supports. */}
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setActiveTab('recent')}
+              className={`text-sm cursor-pointer ${activeTab === 'recent' ? 'font-bold text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+            >
+              Recent
+            </button>
+            <span className="text-gray-200 dark:text-gray-700">|</span>
+            <button
+              onClick={() => setActiveTab('mine')}
+              className={`text-sm cursor-pointer ${activeTab === 'mine' ? 'font-bold text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+            >
+              My Space
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            <div className="relative">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 pointer-events-none" />
+              <input
+                value={search} onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search Spaces" maxLength={50}
+                className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg pl-8 pr-3 py-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 w-48 shadow-sm"
+              />
+            </div>
+
+            <div className="relative">
+              <button
+                onClick={() => setShowJoinInput((v) => !v)}
+                className="flex items-center gap-1.5 bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/40 dark:hover:bg-purple-900/60 text-[#3B1E54] dark:text-purple-300 text-sm font-medium px-3.5 py-2 rounded-lg cursor-pointer whitespace-nowrap"
+              >
+                <BoxArrowInRight size={13} /> Join with Code
+              </button>
+              {showJoinInput && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowJoinInput(false)} />
+                  <div className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-purple-100 dark:border-gray-700 p-3 z-50">
+                    <label className="text-gray-500 dark:text-gray-400 text-xs block mb-1.5">Room code</label>
+                    <div className="flex gap-2">
+                      <input
+                        autoFocus
+                        value={joinCode} onChange={(e) => setJoinCode(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleJoinByCode()}
+                        placeholder="Enter code..." maxLength={30}
+                        className="flex-1 bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg px-3 py-2 outline-none border border-purple-100 dark:border-gray-600 focus:border-purple-500"
+                      />
+                      <button
+                        onClick={handleJoinByCode}
+                        className="bg-[#3B1E54] hover:bg-[#4A1E6D] text-white text-sm font-medium px-3 py-2 rounded-lg cursor-pointer"
+                      >
+                        Go
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
             {isAdmin && (
-              <button onClick={() => setShowCreate(!showCreate)} className="bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium px-4 py-2 rounded-lg cursor-pointer">+ Create Room</button>
+              <button onClick={() => setShowCreate(!showCreate)} className="bg-[#3B1E54] hover:bg-[#4A1E6D] text-white text-sm font-medium px-4 py-2 rounded-lg cursor-pointer whitespace-nowrap">+ Create Space</button>
             )}
           </div>
         </div>
@@ -264,47 +355,84 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
           </div>
         ) : visibleRooms.length === 0 ? (
           <div className="text-center py-16">
-            <p className="text-gray-400 dark:text-gray-500 text-lg mb-2">Belum ada room</p>
-            <p className="text-gray-400 dark:text-gray-500 text-sm">{isAdmin ? 'Buat room pertama lewat tombol "Create Room" di atas.' : 'Tunggu admin membuat room, atau masuk lewat kode.'}</p>
+            {search || activeTab === 'mine' ? (
+              <p className="text-gray-400 dark:text-gray-500 text-lg">
+                {search ? `Tidak ada space bernama "${search}"` : 'Kamu belum punya space sendiri'}
+              </p>
+            ) : (
+              <>
+                <p className="text-gray-400 dark:text-gray-500 text-lg mb-2">Belum ada room</p>
+                <p className="text-gray-400 dark:text-gray-500 text-sm">{isAdmin ? 'Buat room pertama lewat tombol "+ Create Space" di atas.' : 'Tunggu admin membuat room, atau masuk lewat kode.'}</p>
+              </>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {visibleRooms.map((room) => {
               const isConfirmingDelete = deletingSlug === room.slug;
+              const isMenuOpen = openMenuSlug === room.slug;
               const handleJoinClick = () => { if (!isConfirmingDelete) onJoinRoom(room.slug); };
               return (
               <div
                 key={room.id}
                 onClick={handleJoinClick}
-                className={`rounded-xl p-5 border shadow-sm transition-all ${
+                className={`rounded-xl overflow-hidden border shadow-sm transition-all ${
                   isConfirmingDelete
                     ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 ring-2 ring-red-200 dark:ring-red-800'
                     : 'bg-white dark:bg-gray-800 border-purple-100 dark:border-gray-700 hover:border-purple-300 hover:shadow-md cursor-pointer'
                 }`}
               >
-                <div className="flex items-start justify-between mb-1">
-                  <h3 className="font-semibold text-sm text-gray-900 dark:text-gray-100 inline-flex items-center gap-1.5">
-                    {room.name}
-                  </h3>
-                  <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono">{room.slug.slice(0, 8)}</span>
+                {/* No cover-image data exists anywhere in the room model —
+                    matches the Figma reference's own literal "COVER IMG"
+                    placeholder rather than fabricating a fake image. */}
+                <div className="relative h-28 bg-gradient-to-br from-[#3B1E54] to-[#4A1E6D] flex items-center justify-center">
+                  <span className="text-white/40 text-xs font-medium tracking-wide">COVER IMG</span>
+                  <span className="absolute top-2.5 right-2.5 flex items-center gap-1 bg-black/30 backdrop-blur-sm rounded-full pl-1.5 pr-2 py-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    <span className="text-white text-[10px] font-medium">{room.playerCount}</span>
+                  </span>
                 </div>
-                <p className="text-gray-400 dark:text-gray-500 text-[10px] mb-3">Created by {room.ownerDisplayName}</p>
-                {isConfirmingDelete ? (
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-red-600 dark:text-red-400 font-medium">Delete this room permanently?</span>
-                    <div className="flex gap-2">
-                      <button onClick={(e) => { e.stopPropagation(); handleDelete(room.slug); setDeletingSlug(null); }} className="text-[10px] font-semibold text-white bg-red-500 hover:bg-red-600 px-2 py-1 rounded cursor-pointer">Confirm</button>
-                      <button onClick={(e) => { e.stopPropagation(); setDeletingSlug(null); }} className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 px-2 py-1 rounded cursor-pointer">Cancel</button>
+                <div className="px-4 py-3 flex items-center justify-between">
+                  {isConfirmingDelete ? (
+                    <div className="flex items-center justify-between w-full text-xs">
+                      <span className="text-red-600 dark:text-red-400 font-medium">Delete this room?</span>
+                      <div className="flex gap-2">
+                        <button onClick={(e) => { e.stopPropagation(); handleDelete(room.slug); setDeletingSlug(null); }} className="text-[10px] font-semibold text-white bg-red-500 hover:bg-red-600 px-2 py-1 rounded cursor-pointer">Confirm</button>
+                        <button onClick={(e) => { e.stopPropagation(); setDeletingSlug(null); }} className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 px-2 py-1 rounded cursor-pointer">Cancel</button>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                    <span>{room.playerCount} / {room.maxPlayers} online</span>
-                    {room.ownerId === user.id && (
-                      <button onClick={(e) => { e.stopPropagation(); setDeletingSlug(room.slug); }} className="text-red-500/70 hover:text-red-500 text-xs cursor-pointer inline-flex items-center gap-1"><TrashFill size={11} /> Delete</button>
-                    )}
-                  </div>
-                )}
+                  ) : (
+                    <>
+                      <h3 className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{room.name}</h3>
+                      {/* Delete (owner-only) is still the only action that
+                          exists — same authorization as before, just behind
+                          a "..." trigger instead of an always-visible link. */}
+                      {room.ownerId === user.id && (
+                        <div className="relative shrink-0">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(isMenuOpen ? null : room.slug); }}
+                            className="w-6 h-6 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                          >
+                            <ThreeDotsVertical size={14} />
+                          </button>
+                          {isMenuOpen && (
+                            <>
+                              <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); }} />
+                              <div className="absolute right-0 top-full mt-1 w-32 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 py-1 z-50">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setDeletingSlug(room.slug); setOpenMenuSlug(null); }}
+                                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 cursor-pointer"
+                                >
+                                  <TrashFill size={11} /> Delete
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
               );
             })}
