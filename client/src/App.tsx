@@ -40,6 +40,7 @@ import { MessengerApp } from './components/Messenger/MessengerApp';
 import { NoticeBanner } from './components/ui/NoticeBanner';
 import { EmoteWheel } from './components/ui/EmoteWheel';
 import { BookingForm } from './components/ui/BookingForm';
+import { SettingsPanel } from './components/ui/SettingsPanel';
 import { Minimap } from './components/hud/Minimap';
 import { AdminPanel } from './components/ui/AdminPanel';
 import { TeleportPanel } from './components/ui/TeleportPanel';
@@ -985,6 +986,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const [reportTarget, setReportTarget] = useState<{ userId: string; name: string } | null>(null);
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
   const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
@@ -1847,6 +1849,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           "Show UI" exit icon internally when simplified, since that's the
           one thing that must always stay reachable. */}
       <Sidebar
+        onOpenSettings={() => setShowSettings(true)}
         onEditAvatar={() => setShowEditor(true)}
         onOpenTutorial={() => setShowTutorial(true)}
         onOpenMemberList={() => setShowMemberList(true)}
@@ -2482,6 +2485,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           }}
         />
       )}
+
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
 
       <Minimap
         players={Object.values(allPlayers)}

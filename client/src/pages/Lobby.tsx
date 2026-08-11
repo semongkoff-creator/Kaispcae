@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, ChevronDown, ThreeDotsVertical, Search, BoxArrowInRight, Image } from 'react-bootstrap-icons';
+import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, ChevronDown, ThreeDotsVertical, Search, BoxArrowInRight, Image, GearFill } from 'react-bootstrap-icons';
+import { SettingsPanel } from '@/components/ui/SettingsPanel';
 import { io } from 'socket.io-client';
 import { RoomTheme, RoomTemplateId, ROOM_TEMPLATES } from '@virtualmeet/shared';
 import { api, RoomInfo } from '@/services/api';
@@ -74,6 +75,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
   //   shows a compact "Join with Code" pill, not an always-open field),
   //   toggled exactly like showCreate already toggles the create panel.
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState<'recent' | 'mine'>('recent');
   const [search, setSearch] = useState('');
   const [showJoinInput, setShowJoinInput] = useState(false);
@@ -226,6 +228,12 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
                 >
                   {theme === 'dark' ? <SunFill size={13} /> : <MoonFill size={13} />}
                   {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                </button>
+                <button
+                  onClick={() => { setShowUserMenu(false); setShowSettings(true); }}
+                  className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                >
+                  <GearFill size={13} /> Settings
                 </button>
                 <button
                   onClick={() => { setShowUserMenu(false); onLogout(); }}
@@ -524,6 +532,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
         </button>
       </footer>
       {showCredits && <CreditsModal onClose={() => setShowCredits(false)} />}
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
       <input
         ref={coverFileInputRef}
         type="file"

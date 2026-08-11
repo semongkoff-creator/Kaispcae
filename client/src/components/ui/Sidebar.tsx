@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill } from 'react-bootstrap-icons';
+import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill, GearFill } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -165,6 +165,7 @@ interface SidebarProps {
   // onLogout below, which clears the session entirely.
   onLeaveRoom: () => void;
   onLogout: () => void;
+  onOpenSettings: () => void;
 
   // Ghost mode — moved here from the meeting toolbar's bottom-center HUD
   // bar (was HiddenButton, App.tsx); same handleHiddenToggle/localPlayer.hidden
@@ -258,6 +259,7 @@ export function Sidebar({
   onStopRecording,
   onLeaveRoom,
   onLogout,
+  onOpenSettings,
   hiddenActive,
   canToggleHidden,
   onToggleHidden,
@@ -522,6 +524,14 @@ export function Sidebar({
         </SidebarIcon>
       )}
       <NotificationSettings />
+      {/* New Settings panel — coexists with the bell above for now (Tahap
+          2/3 of this build). NotificationSettings' two toggles move into
+          Settings' own "Notifikasi" section and this bell gets removed once
+          that lands (Tahap 4) — removing it before the replacement exists
+          would leave a gap with no way to reach those toggles at all. */}
+      <SidebarIcon title="Settings" onClick={onOpenSettings}>
+        <GearFill size={14} />
+      </SidebarIcon>
 
       <SidebarIcon
         title="Back to room list"
