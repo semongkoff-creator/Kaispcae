@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill, GearFill } from 'react-bootstrap-icons';
+import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill, GearFill, HourglassSplit } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -166,6 +166,14 @@ interface SidebarProps {
   onLogout: () => void;
   onOpenSettings: () => void;
 
+  // QA (Booking popup close button) — shown whenever this user has an
+  // active "Ngobrol dengan CEO" booking (see App.tsx's zoneLock.zoneQueueTicket),
+  // regardless of whether its ZoneLockBar notice card is currently
+  // dismissed. Doubles as the reopen affordance: clicking it always shows
+  // the card again (harmless if it's already showing).
+  hasActiveBooking: boolean;
+  onReopenBookingNotice: () => void;
+
   // Ghost mode — moved here from the meeting toolbar's bottom-center HUD
   // bar (was HiddenButton, App.tsx); same handleHiddenToggle/localPlayer.hidden
   // wiring, only the render location changed. canToggleHidden mirrors the
@@ -259,6 +267,8 @@ export function Sidebar({
   onLeaveRoom,
   onLogout,
   onOpenSettings,
+  hasActiveBooking,
+  onReopenBookingNotice,
   hiddenActive,
   canToggleHidden,
   onToggleHidden,
@@ -520,6 +530,16 @@ export function Sidebar({
           onClick={onToggleHidden}
         >
           {hiddenActive ? <EyeSlashFill size={14} /> : <EyeFill size={14} />}
+        </SidebarIcon>
+      )}
+      {/* QA (Booking popup close button) — persistent "you have a CEO
+          booking" indicator + reopen affordance for its ZoneLockBar notice
+          card, which has no other way back once closed (X only hides it,
+          see ZoneLockBar.tsx). Same icon (HourglassSplit) the card itself
+          uses, so it reads as "that same booking" rather than a new signal. */}
+      {hasActiveBooking && (
+        <SidebarIcon title="Booking CEO aktif — klik untuk lihat" onClick={onReopenBookingNotice}>
+          <HourglassSplit size={14} />
         </SidebarIcon>
       )}
       {/* The notification bell (browser-notif + sound toggles) was removed

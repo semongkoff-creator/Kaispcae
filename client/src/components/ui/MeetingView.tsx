@@ -176,7 +176,18 @@ export function MeetingView({
     // font-ethereal scopes Inter to this dedicated screen only (Tahap 1's
     // token) — the rest of the app (ambient HUD, login, admin) keeps the
     // default system-sans look untouched.
-    <div className="absolute inset-0 z-40 bg-gray-900/97 backdrop-blur-sm flex flex-col pointer-events-auto font-ethereal">
+    // pb-24 (96px) reserves room for the persistent bottom-center HUD control
+    // row (App.tsx: `absolute bottom-6 ... z-50`, MicButton etc. are w-11/44px
+    // inside a py-2 + border container — bottom-6(24) + 44 + py-2(16) +
+    // border(2) = 86px from the viewport's bottom edge, so 96px leaves a
+    // real margin rather than just barely clearing it). Previously only the
+    // quick-reactions strip below had its own ad-hoc pb-20 (80px — a few px
+    // short of that same 86px) for this reason; the tile grid and thumbnail
+    // strip had none at all, so a bottom row of tiles (or the whole
+    // thumbnail strip) could end up hidden under the toolbar. Reserving it
+    // once here, on the outer container, covers every branch uniformly
+    // instead of requiring each one to remember it.
+    <div className="absolute inset-0 z-40 bg-gray-900/97 backdrop-blur-sm flex flex-col pointer-events-auto font-ethereal pb-24">
       {/* pl-20 clears the fixed Sidebar rail (z-50) pinned to the left edge. */}
       <div className="flex items-center justify-between pl-20 pr-6 py-3 shrink-0">
         <p className="text-white/70 text-sm font-medium">Meeting View — {tiles.length} {tiles.length === 1 ? 'peserta' : 'peserta'}</p>
@@ -259,16 +270,16 @@ export function MeetingView({
         </div>
       )}
 
-      {/* Quick-reactions strip (reuses the in-world emote pipeline). pb-20 lifts
-          it clear of the persistent bottom-center HUD control row (Mic/Camera/
-          Hand at bottom-6, z-50) which otherwise overlaps it. Only shown while
+      {/* Quick-reactions strip (reuses the in-world emote pipeline). Bottom
+          clearance for the floating toolbar now comes from the outer
+          container's own pb-20 above, not a local one here. Only shown while
           toggled on via the toolbar's Emoji button (showReactions) — it used
           to render unconditionally, permanently covering that spot. Selecting
           an emote does NOT auto-close the strip, matching the EmoteWheel
           radial picker's existing behavior (repeat reactions without
           reopening). */}
       {showReactions && (
-        <div className="shrink-0 flex justify-center pb-20 pt-2 animate-fade-in">
+        <div className="shrink-0 flex justify-center pt-2 animate-fade-in">
           <div className="flex items-center gap-1 bg-white/10 border border-white/15 rounded-full px-2 py-1.5 backdrop-blur-sm pointer-events-auto">
             {EMOTE_LIST.map((emote) => (
               <button

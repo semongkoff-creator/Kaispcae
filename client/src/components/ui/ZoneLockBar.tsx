@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { LockFill, HandIndexThumbFill, PersonBadgeFill, HourglassSplit, PeopleFill } from 'react-bootstrap-icons';
+import { LockFill, HandIndexThumbFill, PersonBadgeFill, HourglassSplit, PeopleFill, XLg } from 'react-bootstrap-icons';
 import { ZoneKnockRequest, ZoneLockState, ZoneApprovalRequest } from '@virtualmeet/shared';
 
 const ZONE_QUEUE_DURATION_OPTIONS = [15, 30, 45, 60];
@@ -27,6 +27,7 @@ export function ZoneLockBar({
   currentZone, lock, isKeyholder, knocks, deniedZoneId, deniedZoneName, deniedReason, pendingKnock, pendingApproval, approvalRequests, toast,
   onKnock, onCancelKnock, onDecide, onCancelApproval, onDecideApproval,
   zoneQueueTicket, zoneQueueBusy, zoneQueueError, onJoinZoneQueue, onCancelZoneQueue,
+  bookingNoticeDismissed, onDismissBookingNotice,
 }: {
   currentZone: { id: string; name: string } | null;
   lock: ZoneLockState | undefined;
@@ -63,6 +64,13 @@ export function ZoneLockBar({
   zoneQueueError: string;
   onJoinZoneQueue: (zoneId: string, durationMin: number, topic?: string) => void;
   onCancelZoneQueue: () => void;
+  // QA (Booking popup close button) — the booking card below (mode ===
+  // 'booking') is the only one in this file with a dismiss-without-
+  // cancelling affordance. Owned by App.tsx (Game), not local state here,
+  // so a Sidebar icon can also flip it back — see App.tsx's
+  // bookingNoticeDismissed / Sidebar's hasActiveBooking prop.
+  bookingNoticeDismissed: boolean;
+  onDismissBookingNotice: () => void;
 }) {
   const [queueDuration, setQueueDuration] = useState(15);
   const [queueTopic, setQueueTopic] = useState('');
@@ -171,20 +179,37 @@ export function ZoneLockBar({
           <p className="text-[10px] text-gray-400">Waktu tersisa — keluar zona kapan saja untuk mengakhiri lebih awal.</p>
         </div>
       ) : queueingHere && zoneQueueTicket && zoneQueueTicket.mode === 'booking' ? (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-purple-200 dark:border-gray-700 p-3">
-          <p className="text-xs text-gray-800 dark:text-gray-100 inline-flex items-center gap-1.5">
-            <HourglassSplit size={11} className="text-purple-600" />
-            {zoneQueueTicket.status === 'called' ? 'Booking disetujui — menunggu jadwal' : 'Menunggu persetujuan CEO...'}
-          </p>
-          <p className="text-[10px] text-gray-400 mb-2">
-            {zoneQueueTicket.bookingStart && zoneQueueTicket.bookingEnd
-              ? `Jam ${formatClock(zoneQueueTicket.bookingStart)}–${formatClock(zoneQueueTicket.bookingEnd)}${zoneQueueTicket.status === 'called' ? ' — otomatis masuk saat jamnya tiba.' : ''}`
-              : null}
-          </p>
-          <button onClick={onCancelZoneQueue} disabled={zoneQueueBusy} className="w-full py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium cursor-pointer disabled:opacity-50">
-            Batalkan booking
-          </button>
-        </div>
+        // Closing this (X) only hides the card — the booking itself (and its
+        // auto-summon when the time comes, see queueSweep.ts) is completely
+        // unaffected. Only "Batalkan booking" below actually cancels it.
+        // App.tsx resets bookingNoticeDismissed back to false whenever a
+        // genuinely new booking starts or this one gets approved, so closing
+        // an old notice can't accidentally suppress a future, unrelated one.
+        bookingNoticeDismissed ? null : (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-purple-200 dark:border-gray-700 p-3">
+            <div className="flex items-start justify-between gap-2 mb-0.5">
+              <p className="text-xs text-gray-800 dark:text-gray-100 inline-flex items-center gap-1.5">
+                <HourglassSplit size={11} className="text-purple-600 shrink-0" />
+                {zoneQueueTicket.status === 'called' ? 'Booking disetujui — menunggu jadwal' : 'Menunggu persetujuan CEO...'}
+              </p>
+              <button
+                onClick={onDismissBookingNotice}
+                title="Tutup (booking tetap aktif — buka lagi lewat ikon jam pasir di sidebar)"
+                className="shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+              >
+                <XLg size={10} />
+              </button>
+            </div>
+            <p className="text-[10px] text-gray-400 mb-2">
+              {zoneQueueTicket.bookingStart && zoneQueueTicket.bookingEnd
+                ? `Jam ${formatClock(zoneQueueTicket.bookingStart)}–${formatClock(zoneQueueTicket.bookingEnd)}${zoneQueueTicket.status === 'called' ? ' — otomatis masuk saat jamnya tiba.' : ''}`
+                : null}
+            </p>
+            <button onClick={onCancelZoneQueue} disabled={zoneQueueBusy} className="w-full py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium cursor-pointer disabled:opacity-50">
+              Batalkan booking
+            </button>
+          </div>
+        )
       ) : queueingHere && zoneQueueTicket ? (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-purple-200 dark:border-gray-700 p-3">
           <p className="text-xs text-gray-800 dark:text-gray-100 inline-flex items-center gap-1.5">

@@ -756,9 +756,10 @@ export function VideoTile({
       // colour rather than an extra element so it can't shift the tile's size
       // and nudge its neighbours every time someone starts talking.
       // h-full flex flex-col on the large path: the tile fills the grid cell
-      // it was given, and the video area takes whatever is left after the
-      // name/volume rows. That is what lets the cell decide the size instead
-      // of the video deciding it and overflowing.
+      // it was given, and the video area (flex-1 min-h-0, the only flow
+      // child) takes 100% of it — the name tag and volume slider are both
+      // absolute overlays now (see below), not flow siblings competing for
+      // the same space, so nothing shrinks the video to make room for them.
       className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border shadow-lg transition-all duration-300 animate-fade-in group relative ${large ? 'w-full h-full flex flex-col' : 'w-24'} ${
         speaking ? 'border-purple-500 ring-2 ring-purple-400/60 animate-speaking-glow' : 'border-purple-200'
       }`}
@@ -905,11 +906,13 @@ export function VideoTile({
       {/* Mic-muted shown for remote tiles too (broadcast via PLAYER_MIC —
           see Avatar.micMuted), not just the local preview; camera-off stays
           local-only since a remote camera-off already shows as the avatar
-          placeholder instead of video. */}
+          placeholder instead of video. Bumped up on the large path (Meeting
+          View's own tiles, much bigger than the ambient strip's w-24 ones) —
+          the icon was easy to miss at the same 12px used everywhere else. */}
       {(micMuted || (isLocal && cameraOff)) && (
-        <span className={`absolute top-1 right-1 flex gap-1 bg-black/45 backdrop-blur-md rounded-full ${large ? 'p-1.5' : 'p-1'}`}>
-          {micMuted && <MicMuteFill className="text-red-400" size={large ? 12 : 9} />}
-          {isLocal && cameraOff && <CameraVideoOffFill className="text-red-400" size={large ? 12 : 9} />}
+        <span className={`absolute top-1 right-1 flex gap-1 bg-black/45 backdrop-blur-md rounded-full ${large ? 'p-2' : 'p-1'}`}>
+          {micMuted && <MicMuteFill className="text-red-400" size={large ? 18 : 9} />}
+          {isLocal && cameraOff && <CameraVideoOffFill className="text-red-400" size={large ? 18 : 9} />}
         </span>
       )}
       {/* §6 — manual per-listener volume, purely client-side (spec's own
@@ -922,18 +925,23 @@ export function VideoTile({
           hidden looks identical to a normal one, so you'd have no way to tell
           why they've gone quiet — and no reason to suspect you did it.
           //
-          Faded rather than unmounted/collapsed. These tiles stack in a
-          vertical column, so removing the row would shorten the tile and jerk
-          every tile below it upward on hover — chasing a target that moves
-          because you pointed at it. Reserving the space costs a thin strip
-          and keeps the column still. */}
+          Bug fix — this used to be a normal-flow row stacked below the video
+          area, back when the name tag was ALSO a flow row sharing that same
+          space. The name tag was later moved to an absolute floating chip
+          (see below) but this row never followed, so it kept claiming real
+          flow space at the tile's bottom edge — exactly where the name tag's
+          `bottom-1` now also points, so the two visually collided/overlapped
+          whenever the slider was visible. Now absolute too, stacked directly
+          above the name tag with its own reserved offset, so neither can
+          ever cover the other and the video area no longer shrinks to make
+          room for this row. */}
       {!isLocal && !isScreen && onVolumeChange && (
         <div
-          className={`flex items-center gap-1 transition-opacity duration-200 ${large ? 'px-2 pb-1.5 gap-1.5' : 'px-1 pb-1'} ${
-            volume < 1 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }`}
+          className={`absolute left-1 right-1 flex items-center gap-1 bg-black/45 backdrop-blur-md rounded-full transition-opacity duration-200 ${
+            large ? 'bottom-9 px-2 py-1 gap-1.5' : 'bottom-6 px-1.5 py-0.5'
+          } ${volume < 1 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
         >
-          {volume === 0 ? <VolumeMuteFill size={large ? 10 : 8} className="text-gray-400 shrink-0" /> : <VolumeUpFill size={large ? 10 : 8} className="text-gray-400 shrink-0" />}
+          {volume === 0 ? <VolumeMuteFill size={large ? 10 : 8} className="text-white/80 shrink-0" /> : <VolumeUpFill size={large ? 10 : 8} className="text-white/80 shrink-0" />}
           <input
             type="range"
             min={0}

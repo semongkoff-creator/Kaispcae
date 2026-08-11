@@ -501,6 +501,22 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     emitZoneEnter(zoneId);
   }, [zones, emitZoneEnter]);
   const zoneLock = useZoneLock(socketRef, authUserId, roomSlug, enterZoneNow);
+  // QA (Booking popup close button) — X on the booking-approved card
+  // (ZoneLockBar.tsx) only hides it, never touches the booking itself.
+  // Reopen affordance lives in Sidebar (hasActiveBooking icon). Reset back
+  // to false whenever a genuinely new booking ticket starts or this one
+  // transitions to 'called' (the approval moment) — an old dismissal must
+  // never silently swallow a DIFFERENT, later booking's notice.
+  const [bookingNoticeDismissed, setBookingNoticeDismissed] = useState(false);
+  const prevBookingTicketRef = useRef<{ zoneId: string; status: string } | null>(null);
+  useEffect(() => {
+    const ticket = zoneLock.zoneQueueTicket;
+    if (!ticket || ticket.mode !== 'booking') { prevBookingTicketRef.current = null; return; }
+    const prev = prevBookingTicketRef.current;
+    const isNewOrJustApproved = !prev || prev.zoneId !== ticket.zoneId || (prev.status !== 'called' && ticket.status === 'called');
+    if (isNewOrJustApproved) setBookingNoticeDismissed(false);
+    prevBookingTicketRef.current = { zoneId: ticket.zoneId, status: ticket.status };
+  }, [zoneLock.zoneQueueTicket?.zoneId, zoneLock.zoneQueueTicket?.status, zoneLock.zoneQueueTicket?.mode]);
   // "Ngobrol dengan CEO" v2 — the "Selesai meeting" widget. Assumes one
   // bookingMode zone per room (this session's Q&A) — derived from the
   // already-broadcast zoneRestrictions rather than a separate fetch.
@@ -1850,6 +1866,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           one thing that must always stay reachable. */}
       <Sidebar
         onOpenSettings={() => setShowSettings(true)}
+        hasActiveBooking={zoneLock.zoneQueueTicket?.mode === 'booking'}
+        onReopenBookingNotice={() => setBookingNoticeDismissed(false)}
         onEditAvatar={() => setShowEditor(true)}
         onOpenTutorial={() => setShowTutorial(true)}
         onOpenMemberList={() => setShowMemberList(true)}
@@ -2406,6 +2424,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           zoneQueueError={zoneLock.zoneQueueError}
           onJoinZoneQueue={zoneLock.joinZoneQueue}
           onCancelZoneQueue={zoneLock.cancelZoneQueue}
+          bookingNoticeDismissed={bookingNoticeDismissed}
+          onDismissBookingNotice={() => setBookingNoticeDismissed(true)}
         />
       )}
 
