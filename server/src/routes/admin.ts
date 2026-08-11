@@ -7,6 +7,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { requireWorkspace } from '../lib/workspace';
 import { writeAudit, clientIp } from '../lib/audit';
 import { rateLimit } from '../middleware/rateLimit';
+import { findUserInOrg } from '../lib/orgScope';
 
 const admin = Router();
 
@@ -32,10 +33,14 @@ async function notify(prisma: PrismaClient, userId: string, body: string): Promi
 
 // ─── Members ────────────────────────────────────────────────────────
 
-admin.get('/admin/members', authenticateToken, requireWorkspace('workspace:manageMembers'), async (_req: AuthRequest, res: Response) => {
+admin.get('/admin/members', authenticateToken, requireWorkspace('workspace:manageMembers'), async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const users = await prisma.user.findMany({
+      // Multi-tenant Fase 2 — used to have no where at all, returning every
+      // account in the deployment to any workspace admin regardless of org.
+      where: { organizationId: req.organizationId },
       select: {
         id: true, email: true, displayName: true, workspaceRole: true, timezone: true,
         active: true, createdAt: true,
@@ -53,11 +58,15 @@ admin.get('/admin/members', authenticateToken, requireWorkspace('workspace:manag
 
 // Change workspace role / department / manager / active.
 admin.patch('/admin/members/:userId', authenticateToken, requireWorkspace('workspace:manageMembers'), adminMutationLimit, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
-    const target = await prisma.user.findUnique({
-      where: { id: req.params.userId },
-      select: { id: true, workspaceRole: true, active: true, departmentId: true, managerId: true, displayName: true },
+    // Multi-tenant Fase 2 — this used to resolve ANY userId with no org
+    // check, so a workspace admin of one org could promote/demote/deactivate
+    // or reassign the manager of an account in a DIFFERENT org. findUserInOrg
+    // returns null (→ 404) for a cross-org id, same as "doesn't exist".
+    const target = await findUserInOrg(prisma, req.params.userId, req.organizationId, {
+      id: true, workspaceRole: true, active: true, departmentId: true, managerId: true, displayName: true,
     });
     if (!target) return res.status(404).json({ error: 'Pengguna tidak ditemukan' });
 
@@ -70,9 +79,12 @@ admin.patch('/admin/members/:userId', authenticateToken, requireWorkspace('works
       if (role !== 'admin' && role !== 'member') return res.status(400).json({ error: 'Peran tidak valid' });
       // Guard against locking the workspace out of itself: the last active
       // admin may not demote themselves (mirrors the Base module's
-      // last-owner rule).
+      // last-owner rule). Scoped to the TARGET's own org — an unscoped
+      // count across every org would almost never trip once a second org
+      // exists, silently defeating this guard for org A the moment org B
+      // has its own admin.
       if (target.workspaceRole === 'admin' && role === 'member') {
-        const admins = await prisma.user.count({ where: { workspaceRole: 'admin', active: true } });
+        const admins = await prisma.user.count({ where: { workspaceRole: 'admin', active: true, organizationId: req.organizationId } });
         if (admins <= 1) return res.status(400).json({ error: 'Admin terakhir tidak bisa diturunkan' });
       }
       before.workspaceRole = target.workspaceRole; after.workspaceRole = role;
@@ -81,13 +93,18 @@ admin.patch('/admin/members/:userId', authenticateToken, requireWorkspace('works
     if (req.body?.active !== undefined) {
       const active = Boolean(req.body.active);
       if (target.active && !active) {
-        const admins = await prisma.user.count({ where: { workspaceRole: 'admin', active: true } });
+        const admins = await prisma.user.count({ where: { workspaceRole: 'admin', active: true, organizationId: req.organizationId } });
         if (target.workspaceRole === 'admin' && admins <= 1) return res.status(400).json({ error: 'Admin terakhir tidak bisa dinonaktifkan' });
       }
       before.active = target.active; after.active = active;
       data.active = active;
     }
     if (req.body?.departmentId !== undefined) {
+      // Multi-tenant Fase 2 — NOT org-verified. Department has no
+      // organizationId column yet (redesign — global-unique name, singleton-
+      // adjacent — is its own migration-bearing slice, deliberately deferred).
+      // Unchanged from before; Kaitech is still the only org today so this
+      // is not a behavior change, just a known gap to close in that slice.
       const depId = req.body.departmentId ? String(req.body.departmentId) : null;
       before.departmentId = target.departmentId; after.departmentId = depId;
       data.department = depId ? { connect: { id: depId } } : { disconnect: true };
@@ -95,6 +112,12 @@ admin.patch('/admin/members/:userId', authenticateToken, requireWorkspace('works
     if (req.body?.managerId !== undefined) {
       const mgrId = req.body.managerId ? String(req.body.managerId) : null;
       if (mgrId === target.id) return res.status(400).json({ error: 'Tidak bisa menjadi manajer diri sendiri' });
+      // The new manager must be in the same org as the target — otherwise a
+      // workspace admin could wire up a reporting line across companies.
+      if (mgrId) {
+        const mgr = await findUserInOrg(prisma, mgrId, req.organizationId, { id: true });
+        if (!mgr) return res.status(404).json({ error: 'Manajer tidak ditemukan' });
+      }
       before.managerId = target.managerId; after.managerId = mgrId;
       data.manager = mgrId ? { connect: { id: mgrId } } : { disconnect: true };
     }
@@ -118,11 +141,15 @@ admin.patch('/admin/members/:userId', authenticateToken, requireWorkspace('works
 // Deliberately NOT admin-gated and deliberately minimal: you cannot invite a
 // colleague you can't name, but nobody needs their email, role, department or
 // manager to do it — so those are not in the response.
-admin.get('/workspace/people', authenticateToken, async (_req: AuthRequest, res: Response) => {
+admin.get('/workspace/people', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
+    // Multi-tenant Fase 2 — used to return every active account in the
+    // deployment; a picker for inviting a colleague must not list people
+    // from a different company.
     const people = await prisma.user.findMany({
-      where: { active: true },
+      where: { active: true, organizationId: req.organizationId },
       select: { id: true, displayName: true },
       orderBy: { displayName: 'asc' },
       take: 500,
@@ -255,10 +282,19 @@ admin.patch('/admin/policy', authenticateToken, requireWorkspace('base:managePol
 // Doc takeover — the ONLY way an admin ever reaches a private document's
 // contents (D6).
 admin.post('/admin/docs/:docId/takeover', authenticateToken, requireWorkspace('docs:takeover'), adminMutationLimit, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
-    const doc = await prisma.doc.findUnique({ where: { id: req.params.docId }, select: { id: true, title: true, ownerId: true } });
-    if (!doc) return res.status(404).json({ error: 'Dokumen tidak ditemukan' });
+    // Multi-tenant Fase 2 — Doc has no organizationId column of its own, but
+    // ownerId is a real relation to User (which does), so the org check
+    // rides on the owner join rather than needing a new column. Wrong-org
+    // (or missing) both read as the same 404 — a workspace admin must never
+    // learn that a document exists in someone else's company.
+    const doc = await prisma.doc.findUnique({
+      where: { id: req.params.docId },
+      select: { id: true, title: true, ownerId: true, owner: { select: { organizationId: true } } },
+    });
+    if (!doc || doc.owner.organizationId !== req.organizationId) return res.status(404).json({ error: 'Dokumen tidak ditemukan' });
     if (doc.ownerId === req.userId) return res.status(400).json({ error: 'Kamu sudah pemilik dokumen ini' });
     const reason = String(req.body?.reason ?? '').trim();
     if (!reason) return res.status(400).json({ error: 'Alasan wajib diisi untuk pengambilalihan' });
@@ -294,9 +330,15 @@ admin.post('/admin/docs/:docId/takeover', authenticateToken, requireWorkspace('d
 // ─── Audit log ──────────────────────────────────────────────────────
 
 admin.get('/admin/audit', authenticateToken, requireWorkspace('workspace:viewAuditLog'), async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
-    const where: Prisma.AuditLogWhereInput = {};
+    // Multi-tenant Fase 2 — AuditLog has no organizationId column, but
+    // actorId is a required relation to User (which does), so the filter
+    // rides on that join. Optional actorId/targetUserId query filters below
+    // still apply ON TOP of this — a cross-org id just yields zero rows,
+    // never a peek into another company's log.
+    const where: Prisma.AuditLogWhereInput = { actor: { organizationId: req.organizationId } };
     if (req.query.actorId) where.actorId = String(req.query.actorId);
     if (req.query.targetUserId) where.targetUserId = String(req.query.targetUserId);
     if (req.query.action) where.action = String(req.query.action);
@@ -334,16 +376,27 @@ admin.get('/admin/audit', authenticateToken, requireWorkspace('workspace:viewAud
 // notice is in-memory only by design (a live banner, not a historical
 // record), so there is nothing durable to back up there.
 admin.get('/admin/backup/export', authenticateToken, requireWorkspace('workspace:exportBackup'), async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
+    // Multi-tenant Fase 2 — all three of these used to have no where at all,
+    // dumping every room's notes/MoM and every user's attendance company-
+    // wide into one export. deskNote/attendanceRecord have real relations
+    // (room/user) so a nested filter works directly; MomRecord.roomId is a
+    // plain string (stores the room SLUG — see routes/meeting.ts's
+    // POST /meeting/start, not a Prisma relation), so it needs the same
+    // two-step "resolve org's room slugs, then filter by them" the checklist
+    // flagged for this exact model.
+    const orgRoomSlugs = (await prisma.room.findMany({ where: { organizationId: req.organizationId }, select: { slug: true } })).map((r) => r.slug);
     const [notes, moms, attendance] = await Promise.all([
-      prisma.deskNote.findMany({ orderBy: { createdAt: 'asc' } }),
-      prisma.momRecord.findMany({ orderBy: { createdAt: 'asc' } }),
+      prisma.deskNote.findMany({ where: { room: { organizationId: req.organizationId } }, orderBy: { createdAt: 'asc' } }),
+      prisma.momRecord.findMany({ where: { roomId: { in: orgRoomSlugs } }, orderBy: { createdAt: 'asc' } }),
       // Deliberately excludes clockIn/clockOut lat/lng/accuracy — that data
       // already has its own dedicated auto-purge retention sweep
       // (lib/larkAttendance's LOCATION_RETENTION_DAYS); a manual export
       // would otherwise create an unmanaged copy that outlives it.
       prisma.attendanceRecord.findMany({
+        where: { user: { organizationId: req.organizationId } },
         orderBy: { date: 'asc' },
         select: {
           id: true, userId: true, date: true, clockIn: true, clockOut: true, shiftId: true,
