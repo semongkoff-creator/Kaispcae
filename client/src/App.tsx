@@ -82,6 +82,7 @@ import { LeaveButton } from './components/hud/LeaveButton';
 import { Lobby } from './pages/Lobby';
 import { LoginPage } from './pages/LoginPage';
 import { GuestEntry, GuestSession } from './pages/GuestEntry';
+import { JoinOrgInvite } from './pages/JoinOrgInvite';
 import { useAuth } from './hooks/useAuth';
 import { useTheme, Theme } from './hooks/useTheme';
 import { api, UserPreferences } from './services/api';
@@ -2626,7 +2627,7 @@ function todayKey(): string {
 const STATUS_PICKED_PREFIX = 'vm_status_picked:';
 
 function MainApp() {
-  const { user, loading, error, sessionExpiredMessage, login, register, logout, markTutorialSeen, updatePreferences } = useAuth();
+  const { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, logout, markTutorialSeen, updatePreferences } = useAuth();
   const { theme, toggleTheme } = useTheme();
   // Settings feature — sync the store's live tooltipsEnabled/notifKinds
   // mirrors from the account's saved preferences as soon as they're known,
@@ -2690,6 +2691,18 @@ function MainApp() {
     if (!guestInviteToken) return;
     const url = new URL(window.location.href);
     url.searchParams.delete('guest');
+    window.history.replaceState({}, '', url.toString());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Fase 5 (org-resolution) — ?orgInvite=<token>, same "read once, scrub
+  // from the visible URL" treatment as ?guest= above.
+  const [orgInviteToken, setOrgInviteToken] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('orgInvite'),
+  );
+  useEffect(() => {
+    if (!orgInviteToken) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('orgInvite');
     window.history.replaceState({}, '', url.toString());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2882,6 +2895,23 @@ function MainApp() {
     // Guests have no account to persist preferences to — onUpdatePreferences
     // is left undefined, so the Settings toggle only affects this tab's live
     // store state (see Tooltip.tsx), never attempts a PATCH.
+  }
+
+  // Fase 5 (org-resolution) — an org-invite link replaces LoginPage the
+  // same way a guest-link token replaces it above, but this creates a REAL
+  // account (via useAuth's acceptOrgInvite) landing in the inviting org,
+  // not a guest session. Only while logged out — an already-authenticated
+  // tab that happens to open an invite link just ignores it.
+  if (orgInviteToken && !user) {
+    return (
+      <JoinOrgInvite
+        inviteToken={orgInviteToken}
+        onAccept={async (password, displayName) => {
+          await acceptOrgInvite(orgInviteToken, password, displayName);
+          setOrgInviteToken(null);
+        }}
+      />
+    );
   }
 
   // Auth gate

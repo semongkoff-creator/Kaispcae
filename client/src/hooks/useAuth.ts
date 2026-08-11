@@ -107,6 +107,23 @@ export function useAuth() {
     }
   }, []);
 
+  // Fase 5 (org-resolution) — same shape as register above, landing the new
+  // account in whichever org the invite belongs to instead of the single
+  // default org register() always uses.
+  const acceptOrgInvite = useCallback(async (inviteToken: string, password: string, displayName: string) => {
+    setError(null);
+    setSessionExpiredMessage(null);
+    try {
+      const res = await api.acceptOrgInvite(inviteToken, password, displayName);
+      localStorage.setItem('vm_token', res.token);
+      setUser(res.user);
+      return res.user;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal bergabung');
+      throw err;
+    }
+  }, []);
+
   // QA #1/#6 — called once the first-run tutorial's last slide is dismissed.
   // Updates local state immediately (so the gate in App.tsx doesn't need a
   // round trip before letting the user into the room) and persists it
@@ -141,5 +158,5 @@ export function useAuth() {
     api.logout(token).catch(() => {});
   }, []);
 
-  return { user, loading, error, sessionExpiredMessage, login, register, logout, setError, markTutorialSeen, updatePreferences };
+  return { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, logout, setError, markTutorialSeen, updatePreferences };
 }

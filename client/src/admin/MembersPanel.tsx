@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
+import { PersonPlusFill } from 'react-bootstrap-icons';
 import { WORKSPACE_ROLE_LABELS, WorkspaceRole } from '@virtualmeet/shared';
 import { CurrentUser } from '@/hooks/useCurrentUser';
 import { adminApi, AdminMember, AdminDepartment } from './api';
+import { InviteMemberModal } from './InviteMemberModal';
 
 const dateFmt = new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 
@@ -11,6 +13,7 @@ export function MembersPanel({ currentUser }: { currentUser: CurrentUser }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [inviting, setInviting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -48,8 +51,17 @@ export function MembersPanel({ currentUser }: { currentUser: CurrentUser }) {
     <div>
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Anggota workspace</h2>
-        <span className="text-xs text-gray-400">{members.length} orang</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-400">{members.length} orang</span>
+          <button
+            onClick={() => setInviting(true)}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium cursor-pointer"
+          >
+            <PersonPlusFill size={12} /> Undang anggota
+          </button>
+        </div>
       </div>
+      {inviting && <InviteMemberModal onClose={() => setInviting(false)} />}
       {error && <p className="mb-2 text-xs text-red-600 bg-red-50 dark:bg-red-900/20 rounded-lg px-2 py-1.5">{error}</p>}
 
       <div className="overflow-x-auto">

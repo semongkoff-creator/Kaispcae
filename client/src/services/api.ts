@@ -502,6 +502,20 @@ export const api = {
       body: JSON.stringify({ token, name, password }),
     }),
 
+  // Fase 5 (org-resolution) — PUBLIC preview of an org invite (org name +
+  // the email/role it's for), shown before the visitor commits to setting
+  // a password. Same unauthenticated posture as guestJoin above.
+  getOrgInvite: (token: string) =>
+    request<{ organizationName: string; email: string; role: string }>(`/org-invites/${token}`),
+
+  // PUBLIC — creates a real account (not a guest session) in the invite's
+  // org and logs it in, same response shape as register/login.
+  acceptOrgInvite: (token: string, password: string, displayName: string) =>
+    request<{ user: UserProfile; token: string }>(`/org-invites/${token}/accept`, {
+      method: 'POST',
+      body: JSON.stringify({ password, displayName }),
+    }),
+
   // ZEP Room Editor (opened in its own tab) — admin-gated on the server. Returns
   // the room's stored map as-is (read-only). tilemapData is the raw 2D tile grid
   // (rows of tile objects); the editor normalizes it to RoomTile[][] on the

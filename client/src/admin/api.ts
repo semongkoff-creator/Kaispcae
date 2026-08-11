@@ -33,6 +33,17 @@ export interface AdminMember {
 
 export interface AdminDepartment { id: string; name: string; memberCount: number }
 
+export interface AdminOrgInvite {
+  id: string;
+  email: string;
+  role: string;
+  status?: 'pending' | 'accepted' | 'revoked';
+  token?: string; // only present on the create response
+  expiresAt: string;
+  acceptedAt?: string | null;
+  createdAt?: string;
+}
+
 export interface WorkspacePolicy {
   basePublicLinksAllowed: boolean;
   baseExportAllowed: boolean;
@@ -149,6 +160,16 @@ export const adminApi = {
     ).then((r) => r.requests),
   updateMember: (userId: string, patch: Partial<{ workspaceRole: WorkspaceRole; active: boolean; departmentId: string | null; managerId: string | null }>) =>
     req<Record<string, unknown>>(`/admin/members/${userId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+
+  // Fase 5 (org-resolution) — invite a new member by email; they land in
+  // THIS org (not the single default every signup used to hardcode) once
+  // they open the link and set a password. No email-sending infra exists
+  // in this codebase, so `token` is returned bare and the caller builds a
+  // copyable link client-side, same convention as createGuestInvite.
+  createOrgInvite: (email: string, role: 'admin' | 'member') =>
+    req<AdminOrgInvite>('/admin/org-invites', { method: 'POST', body: JSON.stringify({ email, role }) }),
+  getOrgInvites: () => req<{ invites: AdminOrgInvite[] }>('/admin/org-invites').then((r) => r.invites),
+  revokeOrgInvite: (id: string) => req<{ ok: boolean }>(`/admin/org-invites/${id}`, { method: 'DELETE' }),
 
   getDepartments: () => req<{ departments: AdminDepartment[] }>('/admin/departments'),
   createDepartment: (name: string) => req<AdminDepartment>('/admin/departments', { method: 'POST', body: JSON.stringify({ name }) }),

@@ -7,6 +7,7 @@ import { syntheticLarkEmail } from '../lib/larkEmail';
 import { buildStoredTokenFields } from '../lib/larkUserToken';
 import { disconnectUserSockets } from '../lib/sessionKick';
 import { DEFAULT_ORG_ID } from '../lib/defaultOrg';
+import { resolvePendingInvite, markInviteAccepted, accountFieldsForInviteRole } from '../lib/orgInvite';
 
 const lark = Router();
 
@@ -19,7 +20,11 @@ const LARK_BASE = 'https://open.larksuite.com/open-apis';
 //   pendingStates: OAuth `state` values we issued, to reject forged callbacks.
 //   oneTimeCodes:  single-use codes swapped for a JWT, so the raw token never
 //                  travels in a URL (which proxies/servers log).
-const pendingStates = new Map<string, number>();
+// Fase 5 — orgInviteToken rides alongside the expiry so a login started
+// from an invite link (?orgInvite=<token> on /auth/lark/login) can resolve
+// the right org in the callback below, instead of every Lark login
+// hardcoding DEFAULT_ORG_ID.
+const pendingStates = new Map<string, { exp: number; orgInviteToken?: string }>();
 const oneTimeCodes = new Map<string, { token: string; exp: number }>();
 const STATE_TTL_MS = 10 * 60 * 1000;
 const CODE_TTL_MS = 60 * 1000;
@@ -36,12 +41,13 @@ function larkConfig(): { appId: string; secret: string; redirect: string } | nul
 }
 
 // Kick off the OAuth dance: redirect the browser to Lark's consent screen.
-lark.get('/auth/lark/login', (_req: Request, res: Response) => {
+lark.get('/auth/lark/login', (req: Request, res: Response) => {
   const cfg = larkConfig();
   if (!cfg) return res.status(503).send('Login Lark belum dikonfigurasi di server.');
-  sweep(pendingStates, (exp) => exp);
+  sweep(pendingStates, (v) => v.exp);
   const state = crypto.randomBytes(16).toString('hex');
-  pendingStates.set(state, Date.now() + STATE_TTL_MS);
+  const orgInviteToken = typeof req.query.orgInvite === 'string' ? req.query.orgInvite : undefined;
+  pendingStates.set(state, { exp: Date.now() + STATE_TTL_MS, orgInviteToken });
   const url =
     `${LARK_BASE}/authen/v1/authorize` +
     `?app_id=${encodeURIComponent(cfg.appId)}` +
@@ -63,8 +69,9 @@ lark.get('/auth/lark/callback', async (req: Request, res: Response) => {
   // on a CLIENT_URL that may point at a stale tunnel.
   const fail = (reason: string) => res.redirect(`/?larkError=${reason}`);
 
-  if (typeof state !== 'string' || (pendingStates.get(state) ?? 0) < Date.now()) return fail('state');
-  pendingStates.delete(state);
+  const pending = typeof state === 'string' ? pendingStates.get(state) : undefined;
+  if (!pending || pending.exp < Date.now()) return fail('state');
+  pendingStates.delete(state as string);
   if (typeof code !== 'string' || !code) return fail('nocode');
 
   try {
@@ -128,6 +135,17 @@ lark.get('/auth/lark/callback', async (req: Request, res: Response) => {
     const prisma = getPrisma();
     let user = await prisma.user.findUnique({ where: { larkOpenId: openId } });
     if (!user) {
+      // Fase 5 — a login started from an invite link (?orgInvite=<token>)
+      // resolves the invited org/role instead of the DEFAULT_ORG_ID
+      // placeholder every account used to land in regardless of which
+      // company actually invited them. Falls back to the old placeholder
+      // when there's no invite (still true for a bare Lark login button
+      // with no invite context) or the invite turned out to be invalid/
+      // expired/already used by the time the OAuth round-trip finished.
+      const invite = pending.orgInviteToken ? await resolvePendingInvite(prisma, pending.orgInviteToken) : null;
+      const orgFields = invite
+        ? { organizationId: invite.organizationId, ...accountFieldsForInviteRole(invite.role) }
+        : { organizationId: DEFAULT_ORG_ID };
       user = await prisma.user.create({
         data: {
           larkOpenId: openId,
@@ -144,12 +162,11 @@ lark.get('/auth/lark/callback', async (req: Request, res: Response) => {
           // upload feature stores). ChatAvatar renders any <img src>, so it
           // still shows — just note it's not the base64-in-DB path.
           profilePhoto: avatar || null,
-          // Fase 1 — same placeholder as manual registration (routes/auth.ts):
-          // no org-selection flow exists yet for Lark login either.
-          organizationId: DEFAULT_ORG_ID,
+          ...orgFields,
           ...larkTokenFields,
         },
       });
+      if (invite) await markInviteAccepted(prisma, invite.id);
     } else {
       // Existing account — always refresh the stored tokens on each Lark login
       // (they rotate), backfill user_id for accounts created before A2, and
