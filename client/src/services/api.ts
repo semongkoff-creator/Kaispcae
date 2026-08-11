@@ -284,6 +284,15 @@ export const api = {
       body: JSON.stringify({ email, password, displayName }),
     }),
 
+  // Self-serve org creation (Fase 5 follow-up) — same response shape as
+  // register above, but creates a brand-new Organization too; the
+  // founding user lands as that org's admin.
+  createOrganization: (orgName: string, email: string, password: string, displayName: string) =>
+    request<{ user: UserProfile; token: string }>('/auth/create-organization', {
+      method: 'POST',
+      body: JSON.stringify({ orgName, email, password, displayName }),
+    }),
+
   login: (email: string, password: string) =>
     request<{ user: UserProfile; token: string }>('/auth/login', {
       method: 'POST',

@@ -135,6 +135,23 @@ export function useAuth() {
     }
   }, []);
 
+  // Self-serve org creation — same shape as register above, landing the
+  // new account as the founding admin of a brand-new org instead of the
+  // single default org register() always uses.
+  const createOrganization = useCallback(async (orgName: string, email: string, password: string, displayName: string) => {
+    setError(null);
+    setSessionExpiredMessage(null);
+    try {
+      const res = await api.createOrganization(orgName, email, password, displayName);
+      localStorage.setItem('vm_token', res.token);
+      setUser(res.user);
+      return res.user;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal membuat organisasi');
+      throw err;
+    }
+  }, []);
+
   // Fase 5 (org-resolution) — same shape as register above, landing the new
   // account in whichever org the invite belongs to instead of the single
   // default org register() always uses.
@@ -186,5 +203,5 @@ export function useAuth() {
     api.logout(token).catch(() => {});
   }, []);
 
-  return { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, logout, setError, markTutorialSeen, updatePreferences };
+  return { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, createOrganization, logout, setError, markTutorialSeen, updatePreferences };
 }
