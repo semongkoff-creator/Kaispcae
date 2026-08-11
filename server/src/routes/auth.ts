@@ -5,12 +5,16 @@ import { randomUUID } from 'crypto';
 import { getPrisma } from '../lib/prisma';
 import { getConfig } from '../config';
 import { authenticateToken, setUploadSessionCookie, clearUploadSessionCookie, verifyTokenClaims, AuthRequest } from '../middleware/auth';
-import { validate, registerSchema, loginSchema } from '../middleware/validate';
+import { validate, registerSchema, loginSchema, createOrganizationSchema } from '../middleware/validate';
 import { rateLimit } from '../middleware/rateLimit';
 import { ensureCheckedInToday } from '../lib/larkAttendance';
 import { disconnectUserSockets, disconnectUserSocketsSilently } from '../lib/sessionKick';
 import { DEFAULT_ORG_ID } from '../lib/defaultOrg';
 import { googleConfig } from '../lib/googleConfig';
+import { Prisma, User } from '@prisma/client';
+import { accountFieldsForInviteRole } from '../lib/orgInvite';
+import { writeAudit, clientIp } from '../lib/audit';
+import { slugifyOrgName } from '../lib/orgSlug';
 
 const auth = Router();
 
@@ -122,6 +126,82 @@ auth.post('/register', authRateLimit, validate(registerSchema), async (req, res:
   } catch (err) {
     console.error('[auth] register error:', err);
     return res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+// POST /auth/create-organization — self-serve: creates a brand-new
+// Organization AND its founding admin User atomically. This is the only
+// self-serve way to get a new org today; OrgInvite (lib/orgInvite.ts)
+// only grows membership within an org that already exists. Deliberately
+// reuses authRateLimit (not a separate limiter) — this mints a new
+// tenant AND a new account in one request, at least as abuse-sensitive
+// as plain registration.
+auth.post('/create-organization', authRateLimit, validate(createOrganizationSchema), async (req, res: Response) => {
+  try {
+    const { orgName, email, password, displayName } = req.body;
+    const prisma = getPrisma();
+
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      return res.status(409).json({ error: 'Email already registered' });
+    }
+
+    const hashed = await bcrypt.hash(password, 12);
+    const { accountRole, workspaceRole } = accountFieldsForInviteRole('admin');
+    const baseSlug = slugifyOrgName(orgName);
+
+    const MAX_SLUG_ATTEMPTS = 20;
+    let created: User | null = null;
+    let lastCollisionErr: unknown = null;
+
+    for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt++) {
+      const candidateSlug = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`;
+      try {
+        created = await prisma.$transaction(async (tx) => {
+          const org = await tx.organization.create({ data: { name: orgName, slug: candidateSlug } });
+          return tx.user.create({
+            data: {
+              email, password: hashed, displayName,
+              accountRole, workspaceRole,
+              organizationId: org.id,
+            },
+          });
+        });
+        lastCollisionErr = null;
+        break;
+      } catch (e) {
+        // P2002 = unique constraint violation. Only retry on a slug
+        // collision specifically — any other failure must surface
+        // immediately, not get silently swallowed into more retries.
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002' && (e.meta?.target as string[] | undefined)?.includes('slug')) {
+          lastCollisionErr = e;
+          continue;
+        }
+        throw e;
+      }
+    }
+
+    if (!created) {
+      console.error('[auth] create-organization: exhausted slug attempts for', orgName, lastCollisionErr);
+      return res.status(500).json({ error: 'Gagal membuat organisasi, coba nama lain' });
+    }
+
+    const sessionId = await startNewSession(created.id);
+    const token = signToken(created, sessionId);
+    setUploadSessionCookie(req, res, token);
+
+    void writeAudit(prisma, {
+      actorId: created.id, action: 'org:create', targetType: 'organization', targetId: created.id,
+      meta: { orgName, slug: baseSlug }, ip: clientIp(req),
+    });
+
+    return res.status(201).json({
+      user: { id: created.id, email: created.email, displayName: created.displayName, accountRole: created.accountRole, workspaceRole: created.workspaceRole, timezone: created.timezone, tutorialCompletedAt: created.tutorialCompletedAt, preferences: created.preferences },
+      token,
+    });
+  } catch (err) {
+    console.error('[auth] create-organization error:', err);
+    return res.status(500).json({ error: 'Gagal membuat organisasi' });
   }
 });
 

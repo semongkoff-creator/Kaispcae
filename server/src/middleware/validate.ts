@@ -21,6 +21,13 @@ export const registerSchema = z.object({
   displayName: z.string().min(1).max(30),
 });
 
+export const createOrganizationSchema = z.object({
+  orgName: z.string().min(1).max(80),
+  email: z.string().email(),
+  password: z.string().min(6).max(100),
+  displayName: z.string().min(1).max(30),
+});
+
 export const loginSchema = z.object({
   email: z.string().email(),
   password: z.string(),
