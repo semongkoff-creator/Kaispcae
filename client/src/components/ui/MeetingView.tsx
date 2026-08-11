@@ -143,6 +143,18 @@ export function MeetingView({
   const thumbnails = featured ? tiles.filter((t) => t.key !== featuredKey) : [];
   const isPinned = !!pinnedKey && pinnedKey === featuredKey;
 
+  // Explicit columns/rows from participant count — NOT CSS auto-fit, which
+  // picked column count purely from container WIDTH. On a normal-width
+  // window that let 4 tiles all fit in one row, and since the old
+  // gridAutoRows only ever produced that ONE row, it then stretched to fill
+  // the container's full height — every tile came out tall and narrow
+  // instead of an even 2x2. Column count now follows headcount directly
+  // (1→1, 2→2, 3-4→2, 5-9→3, beyond that ceil(sqrt(n))), and row count is a
+  // fixed track count too, so height always splits across the actual number
+  // of rows rather than however many CSS happened to wrap to.
+  const gridColumns = tiles.length <= 1 ? 1 : tiles.length <= 4 ? 2 : tiles.length <= 9 ? 3 : Math.ceil(Math.sqrt(tiles.length));
+  const gridRows = Math.max(1, Math.ceil(tiles.length / gridColumns));
+
   // Bug fix (regression report) — onVolumeChange used to be gated on `main`
   // (the single featured/spotlighted tile only), so grid and thumbnail-strip
   // tiles never got a volume slider at all. volumeTargetId is already set on
@@ -226,13 +238,12 @@ export function MeetingView({
         ) : tiles.length > 0 ? (
           // Nobody pinned and nobody's sharing — an even grid, everyone the
           // same size (Meet's default "Tiled" view), rather than forcing one
-          // person into a spotlight nobody asked for. auto-fit + minmax keeps
-          // cells a sane size and evenly filled regardless of headcount: 3
-          // people land in one neat row on a normal window instead of the
-          // lopsided "1 big + strip" layout. Click any tile to pin it.
+          // person into a spotlight nobody asked for. Columns/rows are the
+          // explicit gridColumns/gridRows above, not CSS auto-fit — see that
+          // comment for why. Click any tile to pin it.
           <div
             className="w-full h-full grid gap-3 place-content-center overflow-y-auto py-1"
-            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gridAutoRows: 'minmax(146px, 1fr)' }}
+            style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${gridRows}, minmax(120px, 1fr))` }}
           >
             {tiles.map((t) => (
               <button
