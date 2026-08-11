@@ -747,6 +747,10 @@ export function VideoTile({
   // Screen shares are exempt: a paused screen share is still the screen, and
   // showing someone's walking avatar in place of it would be misleading.
   const showAvatar = !isScreen && (isLocal ? !!cameraOff : (!stream || remoteVideoOff));
+  // Whether this tile has a volume slider at all (never for local/screen
+  // tiles — see the slider block below). Name tag and slider share the same
+  // bottom-1 spot and swap on hover rather than stacking (see both below).
+  const hasVolumeSlider = !isLocal && !isScreen && !!onVolumeChange;
 
 
   return (
@@ -881,9 +885,17 @@ export function VideoTile({
           mic/camera-off status moved to its own glass badge top-right (see
           below, and the enlarge button's move to bottom-right above so the
           two don't stack). Same `name`/`speaking` props as before — this is
-          a repositioning, not a new signal. */}
+          a repositioning, not a new signal.
+          Bug fix — this used to stay visible while the volume slider below
+          ALSO appeared on hover, so the two collided in the same corner.
+          They now share the exact same spot and swap instead: hovering a
+          tile that has a slider fades this out (group-hover:opacity-0) as
+          the slider fades in, so only one is ever showing. Tiles with no
+          slider (local/screen) are unaffected — hasVolumeSlider gates it. */}
       <span
-        className={`absolute left-1 bottom-1 max-w-[80%] flex items-center gap-1 bg-black/45 backdrop-blur-md text-white rounded-full ${large ? 'px-2.5 py-1 text-xs' : 'px-1.5 py-0.5 text-[9px]'}`}
+        className={`absolute left-1 bottom-1 max-w-[80%] flex items-center gap-1 bg-black/45 backdrop-blur-md text-white rounded-full transition-opacity duration-150 ${
+          large ? 'px-2.5 py-1 text-xs' : 'px-1.5 py-0.5 text-[9px]'
+        } ${hasVolumeSlider ? 'group-hover:opacity-0' : ''}`}
       >
         <span className="truncate">{name}</span>
         {/* QA (Akses tamu checklist item 6, "Label Guest") — same pairing
@@ -920,26 +932,19 @@ export function VideoTile({
           Not shown for screen-share tiles or my own tiles — screen share
           carries no audio track here, and muting yourself already has the
           mic button. */}
-      {/* Revealed on hover once it's at full volume, but kept visible the
-          moment it isn't: a turned-down or silenced person whose slider is
-          hidden looks identical to a normal one, so you'd have no way to tell
-          why they've gone quiet — and no reason to suspect you did it.
-          //
-          Bug fix — this used to be a normal-flow row stacked below the video
-          area, back when the name tag was ALSO a flow row sharing that same
-          space. The name tag was later moved to an absolute floating chip
-          (see below) but this row never followed, so it kept claiming real
-          flow space at the tile's bottom edge — exactly where the name tag's
-          `bottom-1` now also points, so the two visually collided/overlapped
-          whenever the slider was visible. Now absolute too, stacked directly
-          above the name tag with its own reserved offset, so neither can
-          ever cover the other and the video area no longer shrinks to make
-          room for this row. */}
-      {!isLocal && !isScreen && onVolumeChange && (
+      {/* Bug fix — this used to stack above the name tag (or, before that,
+          sit in normal document flow below the video) — both approaches
+          still ended up visually colliding with the name tag in practice.
+          Now it shares the EXACT same bottom-1 spot as the name tag and the
+          two swap on hover (see the name tag's own comment above): only
+          hovering reveals the slider, and only while hovering — no longer
+          kept visible just because volume was turned down, so it's always
+          exactly one or the other, never both, never neither. */}
+      {hasVolumeSlider && (
         <div
-          className={`absolute left-1 right-1 flex items-center gap-1 bg-black/45 backdrop-blur-md rounded-full transition-opacity duration-200 ${
-            large ? 'bottom-9 px-2 py-1 gap-1.5' : 'bottom-6 px-1.5 py-0.5'
-          } ${volume < 1 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+          className={`absolute left-1 right-1 bottom-1 flex items-center gap-1 bg-black/45 backdrop-blur-md rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-150 ${
+            large ? 'px-2 py-1 gap-1.5' : 'px-1.5 py-0.5'
+          }`}
         >
           {volume === 0 ? <VolumeMuteFill size={large ? 10 : 8} className="text-white/80 shrink-0" /> : <VolumeUpFill size={large ? 10 : 8} className="text-white/80 shrink-0" />}
           <input
