@@ -280,6 +280,17 @@ async function start() {
     // an external, unauthenticated visitor has no business touching.
     const isGuest = !!(socket.data as { guestId?: string }).guestId;
 
+    // Multi-tenant Fase 4 — every non-guest socket with a resolved org
+    // joins its own org-scoped Socket.IO room, so workspace-wide broadcasts
+    // (roster presence, lobby room-count) can target `org:<id>` instead of
+    // io.emit()'ing to literally every connected socket across every
+    // company. A socket with no resolved organizationId (guest, or a failed
+    // auth lookup) simply never joins one — it's excluded from these
+    // broadcasts entirely rather than falling back to "everyone", matching
+    // this migration's fail-closed posture everywhere else.
+    const connOrgId = (socket.data as { organizationId?: string }).organizationId;
+    if (!isGuest && connOrgId) socket.join(`org:${connOrgId}`);
+
     registerRoomHandlers(io, socket);
     registerCsHandlers(io, socket);
     registerMovementHandlers(io, socket);

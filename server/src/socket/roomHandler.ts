@@ -177,10 +177,15 @@ const userSocketMap = new Map<string, string>();
 // maintained alongside userSocketMap above (same set/delete call sites:
 // JOIN_ROOM success and handleLeave). Guests are never entered here — they
 // have no User row, so they don't belong in a workspace member roster.
-const userRoomMap = new Map<string, { roomSlug: string; roomName: string; zoneName?: string }>();
+// Multi-tenant Fase 4 — organizationId travels with every entry so a
+// presence delta/snapshot can be scoped to the right company's
+// `org:<id>` Socket.IO room (see index.ts's connection-time join) instead
+// of reaching every connected socket workspace-wide, which previously
+// leaked which room/zone every user in EVERY org was in to every other org.
+const userRoomMap = new Map<string, { roomSlug: string; roomName: string; zoneName?: string; organizationId: string }>();
 
-function broadcastRosterUpdate(io: Server, update: RosterUpdate) {
-  io.emit(SocketEvents.ROSTER_UPDATED, update);
+function broadcastRosterUpdate(io: Server, update: RosterUpdate, organizationId: string) {
+  io.to(`org:${organizationId}`).emit(SocketEvents.ROSTER_UPDATED, update);
 }
 
 // Bug follow-up — the roster used to only ever record the top-level ROOM,
@@ -196,7 +201,7 @@ export function updateRosterZone(io: Server, socketId: string, zoneName: string 
   const existing = userRoomMap.get(uid);
   if (!existing) return;
   existing.zoneName = zoneName ?? undefined;
-  broadcastRosterUpdate(io, { userId: uid, online: true, roomSlug: existing.roomSlug, roomName: existing.roomName, zoneName: existing.zoneName });
+  broadcastRosterUpdate(io, { userId: uid, online: true, roomSlug: existing.roomSlug, roomName: existing.roomName, zoneName: existing.zoneName }, existing.organizationId);
 }
 
 // Reconnect grace period — a bare network drop (wifi blip, tab backgrounded,
@@ -461,9 +466,24 @@ export function broadcastZoneQueueSessionCleared(io: Server, room: string, zoneI
   io.to(room).emit(SocketEvents.ZONE_QUEUE_SESSION_CLEARED, { zoneId });
 }
 
-function broadcastRoomCount(io: Server, room: string) {
+// Multi-tenant Fase 4 — `organizationId` lets a caller that already has the
+// room's org in hand (JOIN_ROOM's dbRoom) skip a redundant query; a caller
+// that doesn't (handleLeave, which works entirely off the in-memory slug)
+// falls back to a cheap lookup. Either way, an org that can't be resolved
+// means the update is dropped rather than broadcast to everyone — same
+// fail-closed posture as the rest of this migration.
+async function broadcastRoomCount(io: Server, room: string, organizationId?: string): Promise<void> {
   const count = io.sockets.adapter.rooms.get(room)?.size ?? 0;
-  io.emit('lobby:room_updated', { roomId: room, playerCount: count });
+  let orgId = organizationId;
+  if (!orgId) {
+    try {
+      orgId = (await getPrisma().room.findUnique({ where: { slug: room }, select: { organizationId: true } }))?.organizationId;
+    } catch (e) {
+      console.error('[room] broadcastRoomCount org lookup failed:', e);
+    }
+  }
+  if (!orgId) return;
+  io.to(`org:${orgId}`).emit('lobby:room_updated', { roomId: room, playerCount: count });
 }
 
 export function getPlayerName(id: string): string {
@@ -926,7 +946,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
     // Fetch the saved room once — reused for spawn point lookup below and
     // for the tiles/furniture/zones sent in room:state once player data is ready.
-    let dbRoom: { id: string; name?: string; maxPlayers?: number; tilemapData: unknown; furniture: unknown; zones: unknown; theme?: string | null; template?: string | null; layerData?: unknown } | null = null;
+    let dbRoom: { id: string; name?: string; maxPlayers?: number; tilemapData: unknown; furniture: unknown; zones: unknown; theme?: string | null; template?: string | null; layerData?: unknown; organizationId?: string } | null = null;
     try {
       dbRoom = await getPrisma().room.findUnique({ where: { slug: room } });
     } catch (e) { console.warn('[room] failed to load room from db:', e); }
@@ -963,10 +983,17 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // registration above already ran regardless — matches its own posture
     // (that map isn't gated on room admission either, it's single-session
     // bookkeeping for the account as a whole).
-    if (!isGuest) {
+    // Multi-tenant Fase 4 — dbRoom's organizationId is required to scope the
+    // roster entry/broadcast. The only way it's missing here is the same
+    // rare "slug has no DB row" case the comment above already accepts as
+    // walk-in (legacy/ad-hoc rooms) — such a join simply doesn't get
+    // tracked in the workspace-wide roster at all rather than being
+    // broadcast unscoped to every org.
+    if (!isGuest && dbRoom?.organizationId) {
       const roomName = dbRoom?.name || room;
-      userRoomMap.set(uid, { roomSlug: room, roomName });
-      broadcastRosterUpdate(io, { userId: uid, online: true, roomSlug: room, roomName });
+      const organizationId = dbRoom.organizationId;
+      userRoomMap.set(uid, { roomSlug: room, roomName, organizationId });
+      broadcastRosterUpdate(io, { userId: uid, online: true, roomSlug: room, roomName }, organizationId);
     }
 
     // Resolve the room's actual tile grid NOW (it used to happen later, only
@@ -1149,7 +1176,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     }
 
     socket.to(room).emit(SocketEvents.PLAYER_JOINED, newPlayer);
-    broadcastRoomCount(io, room);
+    void broadcastRoomCount(io, room, dbRoom?.organizationId);
 
     addPlayer(room, newPlayer).then(async () => {
       const state = await getRoomState(room, DEFAULT_ROOM_NAME);
@@ -2342,8 +2369,9 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       // Remove from memory
       roomAdminMap.delete(room);
       roomNoticeMap.delete(room);
-      // Notify lobby
-      io.emit('lobby:room_removed', { roomId: room });
+      // Notify lobby — Multi-tenant Fase 4: scoped to the deleted room's own
+      // org, dbRoom is already the full row so its organizationId is free.
+      io.to(`org:${dbRoom.organizationId}`).emit('lobby:room_removed', { roomId: room });
       console.log(`[room] room deleted: ${room}`);
     } catch (e) {
       console.error('[room] delete error:', e);
@@ -2483,7 +2511,17 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // this (Sidebar hides the "Member" row for isGuest), this is the
     // server-side backstop in case a guest client fakes the request anyway.
     if ((socket.data as { guestId?: string }).guestId) return;
-    const snapshot: RosterEntry[] = Array.from(userRoomMap, ([userId, v]) => ({ userId, roomSlug: v.roomSlug, roomName: v.roomName, zoneName: v.zoneName }));
+    // Multi-tenant Fase 4 — this snapshot previously returned every online
+    // account across every organization on the deployment (userId, current
+    // room, current zone), keyed by nothing but "connected and not a
+    // guest" — any authenticated user of ANY company could request it. The
+    // requester's own org (never a client-supplied value) is the only
+    // thing allowed to filter it.
+    const requesterOrgId = (socket.data as { organizationId?: string }).organizationId;
+    if (!requesterOrgId) return;
+    const snapshot: RosterEntry[] = Array.from(userRoomMap, ([userId, v]) => ({ userId, roomSlug: v.roomSlug, roomName: v.roomName, zoneName: v.zoneName, organizationId: v.organizationId }))
+      .filter((entry) => entry.organizationId === requesterOrgId)
+      .map(({ userId, roomSlug, roomName, zoneName }) => ({ userId, roomSlug, roomName, zoneName }));
     socket.emit(SocketEvents.ROSTER_SNAPSHOT, snapshot);
   });
 }
@@ -2567,7 +2605,7 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
   removePlayer(room, socket.id);
   io.to(room).emit(SocketEvents.PLAYER_LEFT, socket.id);
   socket.leave(room);
-  broadcastRoomCount(io, room);
+  await broadcastRoomCount(io, room);
   playerNames.delete(socket.id);
   playerColors.delete(socket.id);
   for (const [uid, sid] of userSocketMap) {
@@ -2580,8 +2618,12 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
       // superseded tab's OLD socket calling handleLeave after the NEW tab
       // already re-registered this uid must NOT wipe the new tab's roster
       // entry / broadcast a false "offline" for a user who's still online.
-      if (userRoomMap.delete(uid)) {
-        broadcastRosterUpdate(io, { userId: uid, online: false });
+      // Multi-tenant Fase 4 — organizationId has to be read out BEFORE the
+      // delete() below discards the entry; Map.delete()'s return value is
+      // only a boolean, not the removed entry.
+      const leavingRosterEntry = userRoomMap.get(uid);
+      if (userRoomMap.delete(uid) && leavingRosterEntry) {
+        broadcastRosterUpdate(io, { userId: uid, online: false }, leavingRosterEntry.organizationId);
         // Productivity Analytics — same authoritative-socket guard as the
         // roster broadcast just above (a superseded tab's stale disconnect
         // must not close the NEW tab's still-open interval).

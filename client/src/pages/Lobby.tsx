@@ -147,7 +147,13 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
     .filter((r) => r.name.toLowerCase().includes(search.trim().toLowerCase()));
 
   useEffect(() => {
-    const socket = io(SERVER_URL, { transports: ['websocket', 'polling'] });
+    // Multi-tenant Fase 4 — must send the auth token, same as useSocket.ts's
+    // main game connection: the server now scopes these lobby broadcasts to
+    // the caller's own org (io.to(`org:<id>`) instead of io.emit()), which
+    // requires socket.data.organizationId to have been resolved at
+    // handshake — an anonymous connection (as this previously was) would
+    // silently stop receiving these events entirely.
+    const socket = io(SERVER_URL, { transports: ['websocket', 'polling'], auth: { token: localStorage.getItem('vm_token') || undefined } });
     socket.on('lobby:room_updated', (data: { roomId: string; playerCount: number }) => {
       setRooms((prev) => prev.map((r) =>
         (r.id === data.roomId || r.slug === data.roomId) ? { ...r, playerCount: data.playerCount } : r
