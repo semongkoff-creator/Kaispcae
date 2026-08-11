@@ -5,6 +5,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { SocketEvents } from '@virtualmeet/shared';
 import { registerRoomHandlers, getPlayerName, getPlayerColor } from './socket/roomHandler';
+import { registerCsHandlers } from './socket/csHandler';
 import { registerMovementHandlers } from './socket/movementHandler';
 import { registerRtcHandlers } from './socket/rtcHandler';
 import { registerChatHandlers } from './socket/chatHandler';
@@ -45,6 +46,7 @@ import larkChatMapRoutes from './routes/larkChatMap';
 import taskRoutes from './routes/tasks';
 import leaveRoutes from './routes/leave';
 import analyticsRoutes from './routes/analytics';
+import csRoutes, { setIo as setCsIo } from './routes/cs';
 import { startLarkEventStream } from './lib/larkWs';
 import { subscribeLeaveApproval } from './lib/larkApproval';
 import { startReminderSweep } from './socket/reminderSweep';
@@ -177,6 +179,7 @@ setUsersIo(io);
 setGuestInviteIo(io);
 setCalendarIo(io);
 setMeetingIo(io);
+setCsIo(io);
 
 // ── REST routes ──────────────────────────────────────────────────
 app.get('/api/health', async (_req, res) => {
@@ -233,6 +236,7 @@ app.use('/api', attendanceAdminRoutes);
 app.use('/api', calendarRoutes);
 app.use('/api', meetingRoomRoutes);
 app.use('/api', analyticsRoutes);
+app.use('/api', csRoutes);
 
 // ── Socket.IO ────────────────────────────────────────────────────
 async function start() {
@@ -256,6 +260,7 @@ async function start() {
     const isGuest = !!(socket.data as { guestId?: string }).guestId;
 
     registerRoomHandlers(io, socket);
+    registerCsHandlers(io, socket);
     registerMovementHandlers(io, socket);
     registerRtcHandlers(io, socket);
     registerChatHandlers(io, socket, () => getPlayerName(socket.id), () => getPlayerColor(socket.id));

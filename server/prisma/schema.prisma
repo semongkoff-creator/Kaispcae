@@ -147,6 +147,8 @@ model User {
   dailyVibeCounters       DailyVibeCounter[]         @relation("DailyVibeCounterUser")
   taskCompletionSnapshots TaskCompletionSnapshot[]   @relation("TaskCompletionSnapshotUser")
   pokeResponseSamples     PokeResponseSample[]       @relation("PokeResponseSampleUser")
+  // Customer Service chat (bot FAQ + n8n/WhatsApp handoff) — see CsSession below.
+  csSessions              CsSession[]                @relation("CsSessionUser")
 }
 
 // ─── Workspace foundation (shared by Base / Calendar / Attendance / Docs) ───
@@ -1489,4 +1491,41 @@ model PokeResponseSample {
   occurredAt DateTime @default(now())
 
   @@index([userId, occurredAt])
+}
+
+// ── Customer Service chat ──────────────────────────────────────────────
+// Account-wide, not tied to a Room — reachable from the Lobby or any room
+// (see client/src/components/ui/CsChatWidget.tsx, mounted in both places).
+// One session per CS conversation. Starts in 'bot' mode (server-side
+// keyword-matched FAQ, see server/src/data/csFaq.ts); flips to 'human' the
+// moment the user asks for an admin, at which point server-side handoff
+// logic relays messages to n8n's webhook and accepts admin replies back via
+// POST /api/cs/reply (token-verified against CS_N8N_TOKEN — see
+// server/src/config/index.ts). A recent existing session is reused rather
+// than minting a new row every time the panel is reopened, so a
+// conversation survives closing/reopening the widget.
+model CsSession {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("CsSessionUser", fields: [userId], references: [id], onDelete: Cascade)
+  mode      String   @default("bot") // 'bot' | 'human'
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages CsMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+model CsMessage {
+  id        String    @id @default(cuid())
+  sessionId String
+  session   CsSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  // Who actually authored this line, not who it's addressed to — 'user' |
+  // 'bot' | 'admin'. 'admin' rows only ever arrive via POST /api/cs/reply.
+  from      String
+  text      String
+  createdAt DateTime  @default(now())
+
+  @@index([sessionId, createdAt])
 }

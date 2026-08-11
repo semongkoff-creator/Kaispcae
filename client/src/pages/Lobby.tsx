@@ -541,6 +541,10 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
       </footer>
       {showCredits && <CreditsModal onClose={() => setShowCredits(false)} />}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} onUpdatePreferences={onUpdatePreferences} onLogout={onLogout} />}
+      {/* Chat CS moved into ChatPanel.tsx (a new "CS" tab, in-room only) —
+          see CsChatConversation.tsx. Lobby has no ChatPanel of its own, so
+          Chat CS is no longer reachable from here at all (a deliberate
+          product tradeoff, not an oversight). */}
       <input
         ref={coverFileInputRef}
         type="file"

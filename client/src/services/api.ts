@@ -214,6 +214,15 @@ async function downloadRecordingBlob(id: string, filename: string): Promise<void
   URL.revokeObjectURL(url);
 }
 
+// Customer Service chat — one line in a CsSession's history. `from`
+// distinguishes who actually wrote it (never who it's addressed to).
+export interface CsMessage {
+  id: string;
+  from: 'user' | 'bot' | 'admin';
+  text: string;
+  createdAt: string;
+}
+
 // Lightweight, cross-device UI preferences — server-synced (Settings
 // feature), NOT localStorage, so they follow the user between devices.
 // Partial on purpose: an account that's never touched Settings has none of
@@ -554,6 +563,26 @@ export const api = {
     request<{ ok: boolean; preferences: UserPreferences }>('/users/me/preferences', {
       method: 'PATCH',
       body: JSON.stringify(patch),
+    }),
+
+  // Customer Service chat.
+  csOpenSession: () =>
+    request<{ sessionId: string; mode: 'bot' | 'human'; messages: CsMessage[] }>('/cs/session', {
+      method: 'POST',
+    }),
+
+  csSendMessage: (sessionId: string, text: string) =>
+    request<{ userMessage: CsMessage; botMessage: CsMessage | null; offerAdmin: boolean; mode: 'bot' | 'human'; relayed: boolean | null }>(`/cs/session/${sessionId}/message`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
+
+  // Tahap 3 — the "Hubungi admin" button's own trigger (distinct from
+  // typing "admin" as a message, which csSendMessage above already handles
+  // server-side).
+  csHandoff: (sessionId: string) =>
+    request<{ mode: 'bot' | 'human'; botMessage: CsMessage | null }>(`/cs/session/${sessionId}/handoff`, {
+      method: 'POST',
     }),
 
   deleteRoom: (slug: string) =>

@@ -59,6 +59,7 @@ import { MediaViewerModal } from './components/ui/MediaViewerModal';
 import { InteractiveObjectModal } from './components/ui/InteractiveObjectModal';
 import { NoteModal } from './components/ui/NoteModal';
 import { TutorialModal } from './components/ui/TutorialModal';
+import { UserGuidePanel } from './components/ui/UserGuidePanel';
 import { StatusPickModal } from './components/ui/StatusPickModal';
 import { MemberListPanel } from './components/ui/MemberListPanel';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
@@ -153,15 +154,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
   const [showEditor, setShowEditor] = useState(false);
-  // QA #1/#6/#7 — reopen the first-run walkthrough on demand (Sidebar's
-  // "Panduan" row), for anyone who skipped it, forgot it, or just wants the
-  // Gather/ZEP differences refresher. Independent of the MainApp gate that
-  // shows it before <Game> ever mounts — this is a plain overlay on top of
-  // the already-running room, same pattern as showEditor/AvatarSetup above.
-  const [showTutorial, setShowTutorial] = useState(false);
+  // ZEP-style User Guide — Sidebar's "Panduan" row (Room Features menu).
+  // Used to reopen the first-run TutorialModal walkthrough in dismissible
+  // mode; now opens the richer section+screenshot UserGuidePanel instead.
+  // Independent of MainApp's own first-run TutorialModal gate (shown before
+  // <Game> ever mounts, for new accounts/guests) — that one is untouched,
+  // different purpose (a forced onboarding step, not a reference doc).
+  const [showUserGuide, setShowUserGuide] = useState(false);
   // QA (Presence checklist item #8, "Member list akurat") — workspace-wide
   // member list, opened from Sidebar's "Member" row. Same plain-overlay-state
-  // pattern as showEditor/showTutorial above.
+  // pattern as showEditor/showUserGuide above.
   const [showMemberList, setShowMemberList] = useState(false);
 
   // Media state from store
@@ -1869,7 +1871,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         hasActiveBooking={zoneLock.zoneQueueTicket?.mode === 'booking'}
         onReopenBookingNotice={() => setBookingNoticeDismissed(false)}
         onEditAvatar={() => setShowEditor(true)}
-        onOpenTutorial={() => setShowTutorial(true)}
+        onOpenTutorial={() => setShowUserGuide(true)}
         onOpenMemberList={() => setShowMemberList(true)}
         localRole={localRole}
         manualStatus={manualStatus}
@@ -2141,7 +2143,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         />
       )}
 
-      {showTutorial && <TutorialModal onFinish={() => setShowTutorial(false)} dismissible />}
+      {showUserGuide && <UserGuidePanel onClose={() => setShowUserGuide(false)} />}
 
       {showMemberList && (
         <MemberListPanel

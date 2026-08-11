@@ -316,11 +316,13 @@ export function Sidebar({
               </button>
             </div>
 
-            {/* QA #1/#6/#7 — reopens the first-run walkthrough (auto-shown
-                once before entering, see App.tsx's TutorialModal gate).
-                Always first in the list and always visible (no isGuest/
-                isAdmin gate) — this is the one thing anyone stuck should be
-                able to find without already knowing where anything else is. */}
+            {/* Opens the ZEP-style User Guide (App.tsx's UserGuidePanel) —
+                distinct from the mandatory first-run TutorialModal (shown
+                once automatically before entering, never reachable from
+                here). Always first in the list and always visible (no
+                isGuest/isAdmin gate) — this is the one thing anyone stuck
+                should be able to find without already knowing where
+                anything else is. */}
             <MenuRow icon={<QuestionCircleFill size={15} />} label="Panduan" onClick={closeAnd(onOpenTutorial)} />
             {/* QA (Presence checklist item #8, "Member list akurat") — a
                 guest has no User row (see server/src/routes/guestInvite.ts),

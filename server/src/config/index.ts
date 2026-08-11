@@ -68,6 +68,12 @@ const envSchema = z
     // instead of crashing (see lib/youtubeService.ts). See
     // server/.env.example for how to obtain a key.
     YOUTUBE_API_KEY: z.string().optional(),
+    // Customer Service chat handoff (Tahap 3/4 — see routes/cs.ts). Both
+    // optional so bot-only mode (Tahap 2) works with nothing configured;
+    // the handoff endpoints guard on these being set and no-op/error
+    // clearly otherwise rather than crashing. Never sent to the client.
+    N8N_CS_WEBHOOK_URL: z.string().optional(),
+    CS_N8N_TOKEN: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     // The default JWT secret is a well-known literal — anyone can forge valid
