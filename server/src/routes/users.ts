@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { getPrisma } from '../lib/prisma';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { rateLimit } from '../middleware/rateLimit';
+import { findUserInOrg } from '../lib/orgScope';
 
 const users = Router();
 
@@ -119,14 +120,21 @@ users.patch('/users/me/preferences', authenticateToken, async (req: AuthRequest,
 // for users who haven't set one (chat falls back to initials); a row is still
 // returned for them so the name resolves.
 users.get('/users/profile-photos', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   const raw = String(req.query.ids ?? '').trim();
   if (!raw) return res.json({ profiles: [] });
   // Cap the batch so a crafted id list can't pull a pile of TEXT columns.
   const ids = Array.from(new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))).slice(0, 100);
   if (ids.length === 0) return res.json({ profiles: [] });
   try {
+    // Multi-tenant Fase 2 — this used to accept ANY id the client sent with
+    // no org check at all, so any authenticated user could batch-enumerate
+    // name+photo for arbitrary user ids across the whole deployment. Ids
+    // from a different org are simply left out of the response, same as
+    // "id doesn't exist" — chat's caller already tolerates fewer rows than
+    // ids requested (falls back to initials for anyone missing).
     const rows = await getPrisma().user.findMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, organizationId: req.organizationId },
       select: { id: true, displayName: true, profilePhoto: true },
     });
     return res.json({ profiles: rows.map((r) => ({ id: r.id, name: r.displayName, photo: r.profilePhoto })) });
@@ -150,6 +158,7 @@ const MAX_REPORT_REASON_CHARS = 1000;
 // product decision), an admin acts on it manually via tools that already
 // exist (DM, Kick, Force Mute).
 users.post('/users/:userId/report', authenticateToken, reportRateLimit, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const reportedId = req.params.userId;
     if (reportedId === req.userId) return res.status(400).json({ error: 'Tidak bisa melaporkan diri sendiri' });
@@ -161,9 +170,12 @@ users.post('/users/:userId/report', authenticateToken, reportRateLimit, async (r
     const roomSlug = typeof req.body?.roomSlug === 'string' ? req.body.roomSlug : null;
 
     const prisma = getPrisma();
+    // Multi-tenant Fase 2 — reportedId came from the URL, un-scoped; treating
+    // a wrong-org id as "not found" (via findUserInOrg) matches the existing
+    // 404 rather than confirming a stranger-org account exists.
     const [reporter, reported] = await Promise.all([
       prisma.user.findUnique({ where: { id: req.userId }, select: { displayName: true } }),
-      prisma.user.findUnique({ where: { id: reportedId }, select: { id: true, displayName: true } }),
+      findUserInOrg(prisma, reportedId, req.organizationId, { id: true, displayName: true }),
     ]);
     if (!reported) return res.status(404).json({ error: 'User tidak ditemukan' });
 
@@ -174,8 +186,10 @@ users.post('/users/:userId/report', authenticateToken, reportRateLimit, async (r
     // Fan out to every workspace admin — same Notification + socket-push
     // shape as admin.ts's own notify() (a takeover notice), duplicated
     // rather than shared since that helper is a single-recipient send and
-    // this one is deliberately a broadcast to a role, not one user.
-    const admins = await prisma.user.findMany({ where: { workspaceRole: 'admin' }, select: { id: true } });
+    // this one is deliberately a broadcast to a role, not one user. Scoped
+    // to the reporter's own org — a report filed in one company must never
+    // page another company's admins.
+    const admins = await prisma.user.findMany({ where: { workspaceRole: 'admin', organizationId: req.organizationId }, select: { id: true } });
     const body = `${reporter?.displayName ?? 'Seseorang'} melaporkan ${reported.displayName}${roomSlug ? ` (di room ${roomSlug})` : ''}: ${reason}`;
     await prisma.notification.createMany({
       data: admins.map((a) => ({ recipientId: a.id, kind: 'report', body })),
