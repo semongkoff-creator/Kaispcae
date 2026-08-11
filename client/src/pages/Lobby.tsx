@@ -453,7 +453,14 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                     reference's own literal "COVER IMG" placeholder. */}
                 <div className="relative aspect-[16/9] bg-gradient-to-br from-[#3B1E54] to-[#4A1E6D] flex items-center justify-center overflow-hidden">
                   {room.coverImage ? (
-                    <img src={room.coverImage} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                    // object-contain, not cover — a cover can be any aspect
+                    // ratio (a wide logo wordmark, a photo, etc.); cropping
+                    // it to fill this 16:9 box zoomed into an arbitrary
+                    // center slice (e.g. Kaitech's wordmark lost its first
+                    // and last letters). Showing the whole image letterboxed
+                    // against the same gradient background is more
+                    // predictable than guessing a crop that happens to work.
+                    <img src={room.coverImage} alt="" className="absolute inset-0 w-full h-full object-contain" />
                   ) : (
                     <span className="text-white/40 text-xs font-medium tracking-wide">COVER IMG</span>
                   )}
