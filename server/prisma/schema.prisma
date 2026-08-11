@@ -16,6 +16,13 @@ datasource db {
 
 model User {
   id                      String                    @id @default(cuid())
+  // Multi-tenant foundation (Fase 1) — every user belongs to exactly one
+  // Organization. Existing accounts are backfilled to a single default org
+  // by the migration, so this lands as required with no nullable window.
+  // Query filtering / permission scoping by this field is NOT part of this
+  // migration — that's a later, separate phase (see the phased plan).
+  organizationId          String
+  organization            Organization              @relation(fields: [organizationId], references: [id])
   email                   String                    @unique
   password                String
   displayName             String
@@ -149,6 +156,58 @@ model User {
   pokeResponseSamples     PokeResponseSample[]       @relation("PokeResponseSampleUser")
   // Customer Service chat (bot FAQ + n8n/WhatsApp handoff) — see CsSession below.
   csSessions              CsSession[]                @relation("CsSessionUser")
+  orgInvitesSent          OrgInvite[]                @relation("OrgInviteInviter")
+}
+
+// ─── Multi-tenant foundation (Fase 1) ───
+//
+// One Organization per company. User/Room carry the required organizationId
+// FK added alongside this model (see their own fields) — every other
+// company-wide model (Department, WorkspacePolicy, AttendanceRecord's Shift/
+// LeaveType, etc.) still needs its own organizationId in a LATER phase; this
+// migration deliberately only lands the two FKs the approved plan scoped to
+// "Fase 1: fondasi", plus this table and OrgInvite for the chosen invite-based
+// join flow. No query in server/src filters by organizationId yet — that's
+// Fase 2, done one file at a time with two-different-org verification.
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users   User[]
+  rooms   Room[]
+  invites OrgInvite[]
+}
+
+// Invite-based org join (the flow chosen over domain-matching / join-code).
+// An org admin creates one of these per invitee email; the invitee's
+// registration reads the token and is created directly into that org. Not
+// wired to any route yet in this migration — schema foundation only, so the
+// register/accept-invite endpoints can be built in a follow-up step without
+// another migration.
+model OrgInvite {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  token          String       @unique
+  // Org-level role the invitee lands with once accepted — deliberately NOT
+  // reusing accountRole/workspaceRole's string values here; kept separate so
+  // "org admin" (manages this one org) can't be confused with the existing
+  // global accountRole/workspaceRole concepts, which Fase 3 still needs to
+  // reconcile with per-org scoping.
+  role           String       @default("member")
+  status         String       @default("pending")
+  invitedById    String
+  invitedBy      User         @relation("OrgInviteInviter", fields: [invitedById], references: [id])
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([email])
 }
 
 // ─── Workspace foundation (shared by Base / Calendar / Attendance / Docs) ───
@@ -705,6 +764,11 @@ model Notification {
 
 model Room {
   id                String               @id @default(cuid())
+  // Multi-tenant foundation (Fase 1) — see User.organizationId's comment;
+  // same required-with-backfill treatment, same "not filtered by anywhere
+  // yet" caveat.
+  organizationId    String
+  organization      Organization         @relation(fields: [organizationId], references: [id])
   name              String
   slug              String               @unique
   tilemapData       Json

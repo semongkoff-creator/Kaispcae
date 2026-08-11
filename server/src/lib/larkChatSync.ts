@@ -5,6 +5,7 @@ import { SocketEvents, ChannelMessage } from '@virtualmeet/shared';
 import { ensureGroupConversation } from './conversations';
 import { sendGroupText, sendAsUser } from './larkIm';
 import { getValidUserToken } from './larkUserToken';
+import { DEFAULT_ORG_ID } from './defaultOrg';
 
 // Bagian 4 — the two directions of the Lark ↔ MeetKai channel sync live here so
 // the socket handler (outbound) and the webhook route (inbound) share one
@@ -30,6 +31,7 @@ export async function getLarkRelayUserId(prisma: PrismaClient): Promise<string> 
       email: RELAY_EMAIL,
       password: `lark-relay-unusable-${randomUUID()}`,
       displayName: 'Lark',
+      organizationId: DEFAULT_ORG_ID,
     },
     select: { id: true },
   });

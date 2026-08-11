@@ -6,6 +6,7 @@ import { signToken } from './auth';
 import { syntheticLarkEmail } from '../lib/larkEmail';
 import { buildStoredTokenFields } from '../lib/larkUserToken';
 import { disconnectUserSockets } from '../lib/sessionKick';
+import { DEFAULT_ORG_ID } from '../lib/defaultOrg';
 
 const lark = Router();
 
@@ -143,6 +144,9 @@ lark.get('/auth/lark/callback', async (req: Request, res: Response) => {
           // upload feature stores). ChatAvatar renders any <img src>, so it
           // still shows — just note it's not the base64-in-DB path.
           profilePhoto: avatar || null,
+          // Fase 1 — same placeholder as manual registration (routes/auth.ts):
+          // no org-selection flow exists yet for Lark login either.
+          organizationId: DEFAULT_ORG_ID,
           ...larkTokenFields,
         },
       });

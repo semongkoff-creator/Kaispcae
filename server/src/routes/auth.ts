@@ -9,6 +9,7 @@ import { validate, registerSchema, loginSchema } from '../middleware/validate';
 import { rateLimit } from '../middleware/rateLimit';
 import { ensureCheckedInToday } from '../lib/larkAttendance';
 import { disconnectUserSockets, disconnectUserSocketsSilently } from '../lib/sessionKick';
+import { DEFAULT_ORG_ID } from '../lib/defaultOrg';
 
 const auth = Router();
 
@@ -88,6 +89,10 @@ auth.post('/register', authRateLimit, validate(registerSchema), async (req, res:
         email, password: hashed, displayName,
         accountRole: isFirstEverUser ? 'admin' : 'user',
         workspaceRole: isFirstEverUser ? 'admin' : 'member',
+        // Fase 1 — no invite/org-selection flow exists yet (that's a later
+        // phase), so every registration still lands in the one default org,
+        // same behavior as today having a single implicit workspace.
+        organizationId: DEFAULT_ORG_ID,
       },
     });
 

@@ -613,7 +613,7 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
     // can only join rooms that already exist. A fresh DB lookup here (not
     // a JWT-embedded claim) so a just-demoted admin can't keep creating
     // rooms until their token happens to expire.
-    const requester = await prisma.user.findUnique({ where: { id: req.userId! }, select: { accountRole: true } });
+    const requester = await prisma.user.findUnique({ where: { id: req.userId! }, select: { accountRole: true, organizationId: true } });
     if (requester?.accountRole !== 'admin') {
       return res.status(403).json({ error: 'Only admin accounts can create rooms' });
     }
@@ -638,6 +638,10 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
         theme,
         template: template ?? null,
         ownerId: req.userId!,
+        // Fase 1 — a new room belongs to its creator's org. No cross-org
+        // filtering exists yet anywhere downstream (that's Fase 2), so this
+        // is purely a required-field fill for now, not an isolation change.
+        organizationId: requester.organizationId,
         tilemapData: layout.tiles as any,
         furniture: layout.furniture as any,
         zones: layout.zones as any,
