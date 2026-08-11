@@ -29,6 +29,7 @@ async function notify(prisma: PrismaClient, userId: string, body: string): Promi
 // ─── Calendars ──────────────────────────────────────────────────────
 
 calendar.get('/calendars', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const uid = req.userId!;
@@ -38,7 +39,9 @@ calendar.get('/calendars', authenticateToken, async (req: AuthRequest, res: Resp
         where: { userId: uid },
         select: { role: true, calendar: { select: { id: true, name: true, color: true, type: true } } },
       }),
-      prisma.calendar.findMany({ where: { type: 'team' }, select: { id: true, name: true, color: true, type: true } }),
+      // Multi-tenant Fase 2 — used to list every team calendar workspace-
+      // wide with no org filter at all.
+      prisma.calendar.findMany({ where: { type: 'team', owner: { organizationId: req.organizationId } }, select: { id: true, name: true, color: true, type: true } }),
     ]);
     const map = new Map<string, { id: string; name: string; color: string; type: string; role: CalendarRole }>();
     for (const t of teams) map.set(t.id, { ...t, role: 'viewer' });
@@ -70,11 +73,20 @@ calendar.post('/calendars', authenticateToken, mutationLimit, async (req: AuthRe
 });
 
 calendar.delete('/calendars/:calendarId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
-    const cal = await prisma.calendar.findUnique({ where: { id: req.params.calendarId }, select: { type: true } });
-    if (!cal) return res.status(404).json({ error: 'Kalender tidak ditemukan' });
-    const role = await resolveCalendarRole(prisma, req.params.calendarId, req.userId!);
+    const cal = await prisma.calendar.findUnique({
+      where: { id: req.params.calendarId },
+      select: { type: true, owner: { select: { organizationId: true } } },
+    });
+    // Multi-tenant Fase 2 — checked directly here (not just via
+    // resolveCalendarRole below) because the 'team' branch doesn't consult
+    // `role` at all — it only checks the caller's WORKSPACE role, which
+    // isn't org-scoped yet (Fase 3). Without this, any workspace admin could
+    // delete another org's team calendar.
+    if (!cal || cal.owner.organizationId !== req.organizationId) return res.status(404).json({ error: 'Kalender tidak ditemukan' });
+    const role = await resolveCalendarRole(prisma, req.params.calendarId, req.userId!, req.organizationId);
     if (cal.type === 'team') {
       const wsRole = await resolveWorkspaceRole(prisma, req.userId!);
       if (!canWorkspace('calendar:manageTeamCalendars', { workspaceRole: wsRole ?? undefined })) {
@@ -154,7 +166,7 @@ calendar.get('/calendars/events', authenticateToken, async (req: AuthRequest, re
     // Re-check every calendar from the DB; ids come from the client.
     const roles = new Map<string, CalendarRole>();
     for (const id of ids) {
-      const r = await resolveCalendarRole(prisma, id, uid);
+      const r = await resolveCalendarRole(prisma, id, uid, req.organizationId);
       if (r) roles.set(id, r);
     }
     if (!roles.size) return res.json({ events: [] });
@@ -201,7 +213,7 @@ calendar.get('/calendars/events', authenticateToken, async (req: AuthRequest, re
 calendar.post('/calendars/:calendarId/events', authenticateToken, mutationLimit, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const role = await resolveCalendarRole(prisma, req.params.calendarId, req.userId!);
+    const role = await resolveCalendarRole(prisma, req.params.calendarId, req.userId!, req.organizationId);
     if (!canCalendar('event:create', { role: role ?? undefined })) return res.status(403).json({ error: 'Tidak boleh membuat acara di kalender ini' });
 
     const title = String(req.body?.title ?? '').trim().slice(0, 200) || 'Tanpa judul';
@@ -281,7 +293,7 @@ calendar.patch('/calendars/events/:eventId', authenticateToken, mutationLimit, a
       include: { attendees: true, reminders: true },
     });
     if (!row) return res.status(404).json({ error: 'Acara tidak ditemukan' });
-    const role = await resolveCalendarRole(prisma, row.calendarId, req.userId!);
+    const role = await resolveCalendarRole(prisma, row.calendarId, req.userId!, req.organizationId);
     if (!canCalendar('event:update', { role: role ?? undefined })) return res.status(403).json({ error: 'Tidak boleh mengubah acara ini' });
 
     const scope = (String(req.body?.scope ?? 'all') as EditScope);
@@ -370,7 +382,7 @@ calendar.delete('/calendars/events/:eventId', authenticateToken, async (req: Aut
     const prisma = getPrisma();
     const row = await prisma.calendarEvent.findUnique({ where: { id: req.params.eventId } });
     if (!row) return res.status(404).json({ error: 'Acara tidak ditemukan' });
-    const role = await resolveCalendarRole(prisma, row.calendarId, req.userId!);
+    const role = await resolveCalendarRole(prisma, row.calendarId, req.userId!, req.organizationId);
     if (!canCalendar('event:delete', { role: role ?? undefined })) return res.status(403).json({ error: 'Tidak boleh menghapus acara ini' });
 
     const scope = String(req.query.scope ?? 'all') as EditScope;
@@ -428,14 +440,22 @@ calendar.post('/calendars/events/:eventId/rsvp', authenticateToken, mutationLimi
 // is deliberately nothing here to leak, regardless of who asks.
 
 calendar.get('/calendars/freebusy', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const from = new Date(String(req.query.from ?? ''));
     const to = new Date(String(req.query.to ?? ''));
     if (isNaN(from.getTime()) || isNaN(to.getTime()) || to <= from) return res.status(400).json({ error: 'Rentang tidak valid' });
     if (to.getTime() - from.getTime() > 31 * 86400000) return res.status(400).json({ error: 'Rentang terlalu panjang' });
-    const userIds = String(req.query.userIds ?? '').split(',').filter(Boolean).slice(0, 50);
-    if (!userIds.length) return res.json({ freebusy: {} });
+    const requestedIds = String(req.query.userIds ?? '').split(',').filter(Boolean).slice(0, 50);
+    if (!requestedIds.length) return res.json({ freebusy: {} });
+
+    // Multi-tenant Fase 2 — userIds are fully client-supplied; a cross-org id
+    // used to still return that stranger's busy/free times. Silently drop
+    // anything outside the caller's org, same as a batch-lookup omission
+    // elsewhere (not an error — the caller just gets no data for that id).
+    const inOrg = await prisma.user.findMany({ where: { id: { in: requestedIds }, organizationId: req.organizationId }, select: { id: true } });
+    const userIds = inOrg.map((u) => u.id);
 
     const out: Record<string, { start: string; end: string }[]> = {};
     for (const userId of userIds) {

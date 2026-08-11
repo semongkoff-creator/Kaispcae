@@ -7,9 +7,19 @@ import { CalendarRole } from '@virtualmeet/shared';
 // who isn't the owner and holds no CalendarMember row gets null. Admin power
 // over calendars is org configuration (create/delete TEAM calendars, manage
 // rooms) — it is not a key to everyone's personal schedule.
-export async function resolveCalendarRole(prisma: PrismaClient, calendarId: string, userId: string): Promise<CalendarRole | null> {
-  const cal = await prisma.calendar.findUnique({ where: { id: calendarId }, select: { ownerId: true, type: true } });
+export async function resolveCalendarRole(prisma: PrismaClient, calendarId: string, userId: string, organizationId: string | undefined): Promise<CalendarRole | null> {
+  const cal = await prisma.calendar.findUnique({
+    where: { id: calendarId },
+    select: { ownerId: true, type: true, owner: { select: { organizationId: true } } },
+  });
   if (!cal) return null;
+  // Multi-tenant Fase 2 — every branch below (owner, explicit member, or the
+  // "any authenticated user" team-calendar default) previously assumed one
+  // shared workspace. A calendar whose owner is in a different org must be
+  // invisible regardless of which of those three paths would otherwise grant
+  // access — most notably the team-calendar branch, which the comment below
+  // already documents as "readable by the whole workspace by default".
+  if (!organizationId || cal.owner.organizationId !== organizationId) return null;
   if (cal.ownerId === userId) return 'owner';
   const m = await prisma.calendarMember.findUnique({
     where: { calendarId_userId: { calendarId, userId } },
