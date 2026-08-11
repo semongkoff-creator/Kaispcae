@@ -228,7 +228,7 @@ calendar.post('/calendars/:calendarId/events', authenticateToken, mutationLimit,
     }
     const roomId = req.body?.roomId ? String(req.body.roomId) : null;
     if (roomId) {
-      const why = await roomBookable(prisma, roomId, req.userId!);
+      const why = await roomBookable(prisma, roomId, req.userId!, req.organizationId);
       if (why) return res.status(409).json({ error: why });
     }
 
@@ -490,10 +490,15 @@ calendar.get('/calendars/freebusy', authenticateToken, async (req: AuthRequest, 
 export class RoomBusyError extends Error {}
 
 // Policy/existence check. Safe to run before the transaction: it doesn't
-// depend on the slot.
-export async function roomBookable(prisma: PrismaClient, roomId: string, userId: string): Promise<string | null> {
-  const room = await prisma.meetingRoom.findUnique({ where: { id: roomId }, select: { active: true, bookableBy: true, name: true } });
-  if (!room || !room.active) return 'Ruang tidak tersedia';
+// depend on the slot. Migration slice — this used to check ONLY active +
+// bookableBy, with zero org awareness: the CALENDAR a booking lands on was
+// verified org-safe (resolveCalendarRole above), but the ROOM being booked
+// never was, so a member of one org could book (and really clash-block)
+// another org's meeting room on their own org's calendar.
+export async function roomBookable(prisma: PrismaClient, roomId: string, userId: string, organizationId: string | undefined): Promise<string | null> {
+  if (!organizationId) return 'Ruang tidak tersedia';
+  const room = await prisma.meetingRoom.findUnique({ where: { id: roomId }, select: { active: true, bookableBy: true, name: true, organizationId: true } });
+  if (!room || !room.active || room.organizationId !== organizationId) return 'Ruang tidak tersedia';
   if (room.bookableBy === 'admin') {
     const wsRole = await resolveWorkspaceRole(prisma, userId);
     if (wsRole !== 'admin') return `Ruang "${room.name}" hanya bisa dibooking admin`;

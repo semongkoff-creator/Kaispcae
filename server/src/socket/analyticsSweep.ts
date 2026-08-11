@@ -120,21 +120,32 @@ async function syncTaskCompletionsOnce(): Promise<void> {
     if (dateKey === lastTaskSyncDateKey) return;
 
     const prisma = getPrisma();
-    const policy = await prisma.workspacePolicy.findUnique({ where: { id: 'singleton' } });
-    const doneValues = new Set(
-      (policy?.analyticsTaskDoneStatusValues ?? ['Done', 'Selesai', 'Completed']).map((s) => s.toLowerCase()),
-    );
-
     const startMs = yesterday.startOf('day').toMillis();
     const endMs = yesterday.endOf('day').toMillis();
     const tasks = await listTasksInRange(startMs, endMs);
 
+    // Migration slice — analyticsTaskDoneStatusValues is a per-org
+    // WorkspacePolicy field now (was the single shared id='singleton' row,
+    // read once and applied to every task regardless of which org its
+    // owner belonged to). Resolved lazily per owner's org, cached for the
+    // rest of this run.
+    const doneValuesByOrg = new Map<string, Set<string>>();
+    async function doneValuesForOrg(organizationId: string): Promise<Set<string>> {
+      const cached = doneValuesByOrg.get(organizationId);
+      if (cached) return cached;
+      const policy = await prisma.workspacePolicy.findUnique({ where: { organizationId } });
+      const values = new Set((policy?.analyticsTaskDoneStatusValues ?? ['Done', 'Selesai', 'Completed']).map((s) => s.toLowerCase()));
+      doneValuesByOrg.set(organizationId, values);
+      return values;
+    }
+
     const perUser = new Map<string, { due: number; completed: number }>();
     for (const task of tasks) {
-      const isDone = !!task.status && doneValues.has(task.status.toLowerCase());
       for (const openId of task.ownerOpenIds) {
-        const owner = await prisma.user.findFirst({ where: { larkOpenId: openId }, select: { id: true } });
+        const owner = await prisma.user.findFirst({ where: { larkOpenId: openId }, select: { id: true, organizationId: true } });
         if (!owner) continue;
+        const doneValues = await doneValuesForOrg(owner.organizationId);
+        const isDone = !!task.status && doneValues.has(task.status.toLowerCase());
         const agg = perUser.get(owner.id) ?? { due: 0, completed: 0 };
         agg.due += 1;
         if (isDone) agg.completed += 1;
@@ -180,37 +191,63 @@ async function runWeeklyHallOfFameOnce(io: Server): Promise<void> {
     if (weekKey === lastHallOfFameWeekKey) return;
 
     const prisma = getPrisma();
-    const users = await prisma.user.findMany({ where: { active: true }, select: { id: true, displayName: true } });
+    // Migration slice — this used to rank every active user across every
+    // org in ONE global leaderboard, then broadcast the winners' real
+    // names and scores into every active room on the deployment
+    // (getActiveRoomSlugs() with no org filter) — a company's employee
+    // ranking and identities leaking straight into another company's
+    // rooms. Grouped by org below so each company gets its own
+    // leaderboard, notified/pinned/pushed only within its own boundary.
+    const users = await prisma.user.findMany({ where: { active: true }, select: { id: true, displayName: true, organizationId: true } });
     if (!users.length) { lastHallOfFameWeekKey = weekKey; return; }
 
-    const names = new Map(users.map((u) => [u.id, u.displayName]));
-    const categories = await computeRanking(users.map((u) => u.id), names, priorWeekStart.toJSDate(), priorWeekEnd.toJSDate());
-    const winners = categories.filter((c) => c.top.length > 0).map((c) => ({ kategori: c.kategori, winner: c.top[0] }));
-    if (!winners.length) { lastHallOfFameWeekKey = weekKey; return; }
+    const usersByOrg = new Map<string, { id: string; displayName: string }[]>();
+    for (const u of users) {
+      if (!usersByOrg.has(u.organizationId)) usersByOrg.set(u.organizationId, []);
+      usersByOrg.get(u.organizationId)!.push({ id: u.id, displayName: u.displayName });
+    }
 
-    for (const w of winners) {
+    const activeRoomSlugs = getActiveRoomSlugs();
+
+    for (const [organizationId, orgUsers] of usersByOrg) {
       try {
-        await prisma.notification.create({
-          data: { recipientId: w.winner.userId, kind: 'workspace', body: `🔥 ${w.kategori} — Minggu ${priorWeekStart.toFormat('W')} (${w.winner.nilai})` },
-        });
-        io.to(`user:${w.winner.userId}`).emit('base:notif', {});
+        const names = new Map(orgUsers.map((u) => [u.id, u.displayName]));
+        const categories = await computeRanking(orgUsers.map((u) => u.id), names, priorWeekStart.toJSDate(), priorWeekEnd.toJSDate(), organizationId);
+        const winners = categories.filter((c) => c.top.length > 0).map((c) => ({ kategori: c.kategori, winner: c.top[0] }));
+        if (!winners.length) continue;
+
+        for (const w of winners) {
+          try {
+            await prisma.notification.create({
+              data: { recipientId: w.winner.userId, kind: 'workspace', body: `🔥 ${w.kategori} — Minggu ${priorWeekStart.toFormat('W')} (${w.winner.nilai})` },
+            });
+            io.to(`user:${w.winner.userId}`).emit('base:notif', {});
+          } catch (e) {
+            console.error('[analytics] failed to notify hall-of-fame winner:', w.winner.userId, e);
+          }
+        }
+
+        const noticeText = `🏆 Hall of Fame — Minggu ${priorWeekStart.toFormat('d LLL')} s/d ${priorWeekEnd.toFormat('d LLL')}\n${
+          winners.map((w) => `${w.kategori}: ${w.winner.user} (${w.winner.nilai})`).join('\n')
+        }`;
+        // Intersect the in-memory active-room list (workspace-wide, no org
+        // concept of its own) against THIS org's own rooms.
+        if (activeRoomSlugs.length) {
+          const orgActiveRooms = await prisma.room.findMany({
+            where: { organizationId, slug: { in: activeRoomSlugs } }, select: { slug: true },
+          });
+          for (const { slug } of orgActiveRooms) pinSystemNotice(io, slug, noticeText, 'Hall of Fame');
+        }
+
+        const policy = await prisma.workspacePolicy.findUnique({ where: { organizationId } });
+        if (policy?.analyticsHallOfFameLarkChatId) {
+          void sendGroupText(policy.analyticsHallOfFameLarkChatId, noticeText).catch((e) =>
+            console.error('[analytics] Lark Hall of Fame push failed:', e),
+          );
+        }
       } catch (e) {
-        console.error('[analytics] failed to notify hall-of-fame winner:', w.winner.userId, e);
+        console.error('[analytics] hall of fame sweep error for org:', organizationId, e);
       }
-    }
-
-    const noticeText = `🏆 Hall of Fame — Minggu ${priorWeekStart.toFormat('d LLL')} s/d ${priorWeekEnd.toFormat('d LLL')}\n${
-      winners.map((w) => `${w.kategori}: ${w.winner.user} (${w.winner.nilai})`).join('\n')
-    }`;
-    for (const roomSlug of getActiveRoomSlugs()) {
-      pinSystemNotice(io, roomSlug, noticeText, 'Hall of Fame');
-    }
-
-    const policy = await prisma.workspacePolicy.findUnique({ where: { id: 'singleton' } });
-    if (policy?.analyticsHallOfFameLarkChatId) {
-      void sendGroupText(policy.analyticsHallOfFameLarkChatId, noticeText).catch((e) =>
-        console.error('[analytics] Lark Hall of Fame push failed:', e),
-      );
     }
 
     lastHallOfFameWeekKey = weekKey;

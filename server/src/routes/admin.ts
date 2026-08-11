@@ -7,7 +7,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { requireWorkspace } from '../lib/workspace';
 import { writeAudit, clientIp } from '../lib/audit';
 import { rateLimit } from '../middleware/rateLimit';
-import { findUserInOrg } from '../lib/orgScope';
+import { findUserInOrg, findDepartmentInOrg } from '../lib/orgScope';
 
 const admin = Router();
 
@@ -100,12 +100,14 @@ admin.patch('/admin/members/:userId', authenticateToken, requireWorkspace('works
       data.active = active;
     }
     if (req.body?.departmentId !== undefined) {
-      // Multi-tenant Fase 2 — NOT org-verified. Department has no
-      // organizationId column yet (redesign — global-unique name, singleton-
-      // adjacent — is its own migration-bearing slice, deliberately deferred).
-      // Unchanged from before; Kaitech is still the only org today so this
-      // is not a behavior change, just a known gap to close in that slice.
       const depId = req.body.departmentId ? String(req.body.departmentId) : null;
+      // Migration slice — Department now carries organizationId; without
+      // this check a workspace admin could attach an employee to another
+      // org's department by id.
+      if (depId) {
+        const dep = await findDepartmentInOrg(prisma, depId, req.organizationId);
+        if (!dep) return res.status(404).json({ error: 'Departemen tidak ditemukan' });
+      }
       before.departmentId = target.departmentId; after.departmentId = depId;
       data.department = depId ? { connect: { id: depId } } : { disconnect: true };
     }
@@ -163,10 +165,13 @@ admin.get('/workspace/people', authenticateToken, async (req: AuthRequest, res: 
 
 // ─── Departments ────────────────────────────────────────────────────
 
-admin.get('/admin/departments', authenticateToken, requireWorkspace('workspace:manageMembers'), async (_req: AuthRequest, res: Response) => {
+admin.get('/admin/departments', authenticateToken, requireWorkspace('workspace:manageMembers'), async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
+    // Migration slice — used to return every org's departments (requireWorkspace
+    // checks role only, not org membership of the resource).
     const departments = await prisma.department.findMany({
+      where: { organizationId: req.organizationId },
       select: { id: true, name: true, _count: { select: { members: true } } },
       orderBy: { name: 'asc' },
     });
@@ -182,9 +187,12 @@ admin.post('/admin/departments', authenticateToken, requireWorkspace('workspace:
     const prisma = getPrisma();
     const name = String(req.body?.name ?? '').trim().slice(0, 60);
     if (!name) return res.status(400).json({ error: 'Nama departemen tidak boleh kosong' });
-    const existing = await prisma.department.findUnique({ where: { name } });
+    // Migration slice — uniqueness is now per-org (@@unique([organizationId,
+    // name])); this pre-check is scoped the same way so a name already used
+    // by a DIFFERENT org no longer blocks this one from using it.
+    const existing = await prisma.department.findUnique({ where: { organizationId_name: { organizationId: req.organizationId!, name } } });
     if (existing) return res.status(409).json({ error: 'Departemen dengan nama itu sudah ada' });
-    const dep = await prisma.department.create({ data: { name } });
+    const dep = await prisma.department.create({ data: { name, organizationId: req.organizationId! } });
     await writeAudit(prisma, { actorId: req.userId!, action: 'workspace:manageMembers', targetType: 'department', targetId: dep.id, meta: { created: name }, ip: clientIp(req) });
     return res.status(201).json({ id: dep.id, name: dep.name, memberCount: 0 });
   } catch (err) {
@@ -196,7 +204,10 @@ admin.post('/admin/departments', authenticateToken, requireWorkspace('workspace:
 admin.delete('/admin/departments/:id', authenticateToken, requireWorkspace('workspace:manageMembers'), async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const dep = await prisma.department.findUnique({ where: { id: req.params.id }, select: { id: true, name: true } });
+    // Migration slice — org-scoped lookup; without it an admin could delete
+    // another org's department by id (members' departmentId → null via
+    // Prisma's SetNull, which would have applied cross-org too).
+    const dep = await findDepartmentInOrg(prisma, req.params.id, req.organizationId);
     if (!dep) return res.status(404).json({ error: 'Departemen tidak ditemukan' });
     await prisma.department.delete({ where: { id: dep.id } }); // members' departmentId → null (SetNull)
     await writeAudit(prisma, { actorId: req.userId!, action: 'workspace:manageMembers', targetType: 'department', targetId: dep.id, meta: { deleted: dep.name }, ip: clientIp(req) });
@@ -210,7 +221,6 @@ admin.delete('/admin/departments/:id', authenticateToken, requireWorkspace('work
 // ─── Policy ─────────────────────────────────────────────────────────
 
 const POLICY_DEFAULTS = {
-  id: 'singleton',
   basePublicLinksAllowed: true,
   baseExportAllowed: true,
   docsPublicLinksAllowed: true,
@@ -220,11 +230,16 @@ const POLICY_DEFAULTS = {
 
 // Read-your-own-policy is intentionally NOT admin-gated: every client needs
 // to know whether share links are allowed in order to hide the affordance.
-// It exposes no one's data — only the workspace's own rules.
-admin.get('/workspace/policy', authenticateToken, async (_req: AuthRequest, res: Response) => {
+// It exposes no one's data — only the workspace's own rules. Migration
+// slice — this used to read the one literal id='singleton' row, meaning
+// EVERY org read (and, via the PATCH below, silently overwrote) the exact
+// same policy in real time. organizationId is now WorkspacePolicy's own
+// primary key, one row per org.
+admin.get('/workspace/policy', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
-    const policy = await prisma.workspacePolicy.findUnique({ where: { id: 'singleton' } });
+    const policy = await prisma.workspacePolicy.findUnique({ where: { organizationId: req.organizationId } });
     return res.json({ policy: policy ?? POLICY_DEFAULTS });
   } catch (err) {
     console.error('[admin] get policy error:', err);
@@ -235,7 +250,7 @@ admin.get('/workspace/policy', authenticateToken, async (_req: AuthRequest, res:
 admin.patch('/admin/policy', authenticateToken, requireWorkspace('base:managePolicy'), adminMutationLimit, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const before = (await prisma.workspacePolicy.findUnique({ where: { id: 'singleton' } })) ?? POLICY_DEFAULTS;
+    const before = (await prisma.workspacePolicy.findUnique({ where: { organizationId: req.organizationId! } })) ?? POLICY_DEFAULTS;
 
     const patch: Record<string, unknown> = {};
     for (const key of ['basePublicLinksAllowed', 'baseExportAllowed', 'docsPublicLinksAllowed', 'docsLinkPasswordRequired'] as const) {
@@ -253,9 +268,9 @@ admin.patch('/admin/policy', authenticateToken, requireWorkspace('base:managePol
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Tidak ada perubahan' });
 
     const policy = await prisma.workspacePolicy.upsert({
-      where: { id: 'singleton' },
+      where: { organizationId: req.organizationId! },
       update: { ...patch, updatedById: req.userId! },
-      create: { ...POLICY_DEFAULTS, ...patch, updatedById: req.userId! },
+      create: { ...POLICY_DEFAULTS, ...patch, organizationId: req.organizationId!, updatedById: req.userId! },
     });
     // Log ONLY the keys this request actually changed. Recording the whole
     // `before` row against a partial `after` renders untouched fields as
@@ -264,7 +279,7 @@ admin.patch('/admin/policy', authenticateToken, requireWorkspace('base:managePol
     const beforeChanged: Record<string, unknown> = {};
     for (const k of Object.keys(patch)) beforeChanged[k] = (before as Record<string, unknown>)[k];
     await writeAudit(prisma, {
-      actorId: req.userId!, action: 'base:managePolicy', targetType: 'policy', targetId: 'singleton',
+      actorId: req.userId!, action: 'base:managePolicy', targetType: 'policy', targetId: req.organizationId!,
       meta: { before: beforeChanged, after: patch }, ip: clientIp(req),
     });
     return res.json({ policy });

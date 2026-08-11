@@ -179,6 +179,15 @@ model Organization {
   users   User[]
   rooms   Room[]
   invites OrgInvite[]
+
+  // Migration slice (post-Fase 4) — the last 6 models that had no
+  // organizationId at all, closing the gap Fase 1 explicitly deferred.
+  departments     Department[]
+  shifts          Shift[]
+  leaveTypes      LeaveType[]
+  holidays        Holiday[]
+  meetingRooms    MeetingRoom[]
+  workspacePolicy WorkspacePolicy?
 }
 
 // Invite-based org join (the flow chosen over domain-matching / join-code).
@@ -213,11 +222,20 @@ model OrgInvite {
 // ─── Workspace foundation (shared by Base / Calendar / Attendance / Docs) ───
 
 model Department {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  members   User[]
+  id             String       @id @default(cuid())
+  // Migration slice — was a global-unique `name` with no org boundary at
+  // all; any org's admin could read/rename/delete any other org's
+  // departments, and PATCH /admin/members could attach an employee to a
+  // foreign org's department with zero validation.
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  name           String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  members        User[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
 }
 
 // ONE audit table for every module. Anything a workspace admin does that
@@ -279,11 +297,17 @@ model UserReport {
   @@index([reportedId, createdAt])
 }
 
-// Workspace-wide policy, a single row (id = "singleton"). Admin-editable;
-// enforced server-side. Base/Docs share-link limits live here so both the
-// Base module and the future Docs module read one source of truth.
+// Per-org policy, one row per organization — organizationId IS the primary
+// key (was a single global row keyed by id="singleton" before this
+// migration slice, meaning any org's admin editing it silently changed
+// EVERY org's policy in real time: share-link limits, Vibe formula
+// weights, overtime grace threshold, all of it, live, cross-tenant).
+// Admin-editable; enforced server-side. Base/Docs share-link limits live
+// here so both the Base module and the future Docs module read one source
+// of truth.
 model WorkspacePolicy {
-  id                       String   @id @default("singleton")
+  organizationId           String       @id
+  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Base
   basePublicLinksAllowed   Boolean  @default(true)
   baseExportAllowed        Boolean  @default(true)
@@ -342,7 +366,14 @@ model WorkspacePolicy {
 // movement history in this schema by design.
 
 model Shift {
-  id              String   @id @default(cuid())
+  id              String       @id @default(cuid())
+  // Migration slice — was global with no org boundary; GET /attendance/shifts
+  // has no admin gate ("you need to know your own shift's hours"), so this
+  // used to hand geofenceLat/Lng/RadiusM (an office's real GPS location) and
+  // allowedIps (an internal network allowlist) to any authenticated user of
+  // ANY org on the deployment.
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
   name            String
   // Wall-clock "HH:mm" in the shift's zone — NOT instants: a shift is
   // "09:00 every workday", which a UTC timestamp cannot express.
@@ -366,6 +397,8 @@ model Shift {
 
   assignments ShiftAssignment[]
   records     AttendanceRecord[]
+
+  @@index([organizationId])
 }
 
 model ShiftAssignment {
@@ -418,14 +451,25 @@ model AttendanceRecord {
 }
 
 model LeaveType {
-  id               String   @id @default(cuid())
-  name             String   @unique
-  quotaPerYear     Int      @default(12)
-  paid             Boolean  @default(true)
-  requiresApproval Boolean  @default(true)
-  createdAt        DateTime @default(now())
+  id               String       @id @default(cuid())
+  // Migration slice — was global-unique `name` with no org boundary;
+  // GET /attendance/leave-types and GET /attendance/leaves?mine=true both
+  // had no admin gate and returned every org's leave catalog, and
+  // POST /attendance/leaves accepted a raw client-supplied typeId with no
+  // org check, letting one org's employee create a Leave governed by
+  // another org's quota/approval rules.
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  name             String
+  quotaPerYear     Int          @default(12)
+  paid             Boolean      @default(true)
+  requiresApproval Boolean      @default(true)
+  createdAt        DateTime     @default(now())
 
   leaves Leave[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
 }
 
 model Leave {
@@ -470,9 +514,18 @@ model Correction {
 }
 
 model Holiday {
-  id   String   @id @default(cuid())
-  date DateTime @unique
-  name String
+  id             String       @id @default(cuid())
+  // Migration slice — was global-unique `date` with no org boundary; the
+  // only write route upserts by date, so a second org setting a holiday on
+  // a date another org had already labeled silently overwrote that org's
+  // name with no conflict surfaced and no audit trail.
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  date           DateTime
+  name           String
+
+  @@unique([organizationId, date])
+  @@index([organizationId])
 }
 
 // ─── Calendar ───────────────────────────────────────────────────────
@@ -514,17 +567,26 @@ model CalendarMember {
 }
 
 model MeetingRoom {
-  id         String   @id @default(cuid())
-  name       String
-  capacity   Int      @default(4)
-  location   String?
-  equipment  String[] @default([])
+  id             String       @id @default(cuid())
+  // Migration slice — was global with no org boundary at all. GET
+  // /meeting-rooms has no admin gate and listed every org's rooms; worse,
+  // POST /calendars/:calendarId/events checked the CALENDAR's org but never
+  // the room's, so one org's member could book (and really clash-block)
+  // another org's meeting room on their own calendar.
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  name           String
+  capacity       Int          @default(4)
+  location       String?
+  equipment      String[]     @default([])
   // Minimum workspace role allowed to book: 'member' (anyone) or 'admin'.
-  bookableBy String   @default("member")
-  active     Boolean  @default(true)
-  createdAt  DateTime @default(now())
+  bookableBy     String       @default("member")
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
 
   events CalendarEvent[]
+
+  @@index([organizationId])
 }
 
 // A5 — a recorded "official meeting" started from inside a meeting-type Zone,

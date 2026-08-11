@@ -5,24 +5,28 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { requireWorkspace, resolveWorkspaceRole } from '../lib/workspace';
 import { writeAudit, clientIp } from '../lib/audit';
 import { rateLimit } from '../middleware/rateLimit';
-import { findUserInOrg } from '../lib/orgScope';
+import { findUserInOrg, findShiftInOrg, findLeaveTypeInOrg } from '../lib/orgScope';
 
 const aa = Router();
 const mutationLimit = rateLimit(60 * 1000, 30);
 
 // ─── Shifts ─────────────────────────────────────────────────────────
 
-aa.get('/attendance/shifts', authenticateToken, async (_req: AuthRequest, res: Response) => {
+aa.get('/attendance/shifts', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     // Readable by everyone: you need to know your own shift's hours. Editing
-    // is admin-only below.
-    const shifts = await prisma.shift.findMany({ orderBy: { name: 'asc' } });
+    // is admin-only below. Migration slice — used to have no org filter at
+    // all, handing every org's geofence GPS coordinates and IP allowlist to
+    // any authenticated user of any org.
+    const shifts = await prisma.shift.findMany({ where: { organizationId: req.organizationId }, orderBy: { name: 'asc' } });
     return res.json({ shifts });
   } catch (err) { console.error('[attendance] shifts error:', err); return res.status(500).json({ error: 'Gagal memuat shift' }); }
 });
 
 aa.post('/admin/attendance/shifts', authenticateToken, requireWorkspace('attendance:manageShifts'), mutationLimit, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const name = String(req.body?.name ?? '').trim().slice(0, 80);
@@ -33,6 +37,7 @@ aa.post('/admin/attendance/shifts', authenticateToken, requireWorkspace('attenda
     if (!hhmm.test(startTime) || !hhmm.test(endTime)) return res.status(400).json({ error: 'Jam harus format HH:mm' });
     const shift = await prisma.shift.create({
       data: {
+        organizationId: req.organizationId!,
         name, startTime, endTime,
         timezone: String(req.body?.timezone ?? 'Asia/Jakarta'),
         breakMinutes: Math.max(0, Math.floor(Number(req.body?.breakMinutes) || 0)),
@@ -53,7 +58,10 @@ aa.post('/admin/attendance/shifts', authenticateToken, requireWorkspace('attenda
 aa.patch('/admin/attendance/shifts/:id', authenticateToken, requireWorkspace('attendance:manageShifts'), mutationLimit, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const before = await prisma.shift.findUnique({ where: { id: req.params.id } });
+    // Migration slice — org-scoped lookup; without it any org's admin could
+    // reconfigure (rename, re-geofence, change IP allowlist) another org's
+    // shift by id.
+    const before = await findShiftInOrg(prisma, req.params.id, req.organizationId);
     if (!before) return res.status(404).json({ error: 'Shift tidak ditemukan' });
     const data: Record<string, unknown> = {};
     for (const k of ['name', 'startTime', 'endTime', 'timezone', 'overtimeRule'] as const) if (req.body?.[k] !== undefined) data[k] = String(req.body[k]);
@@ -150,20 +158,30 @@ aa.patch('/admin/attendance/records/:id', authenticateToken, requireWorkspace('a
 
 // ─── Leave types & holidays ─────────────────────────────────────────
 
-aa.get('/attendance/leave-types', authenticateToken, async (_req: AuthRequest, res: Response) => {
+aa.get('/attendance/leave-types', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
-    return res.json({ types: await prisma.leaveType.findMany({ orderBy: { name: 'asc' } }) });
+    // Migration slice — used to have no org filter, returning every org's
+    // leave catalog to any authenticated user of any org.
+    return res.json({ types: await prisma.leaveType.findMany({ where: { organizationId: req.organizationId }, orderBy: { name: 'asc' } }) });
   } catch (err) { console.error('[attendance] leave types error:', err); return res.status(500).json({ error: 'Gagal' }); }
 });
 
 aa.post('/admin/attendance/leave-types', authenticateToken, requireWorkspace('attendance:manageLeaveTypes'), mutationLimit, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const name = String(req.body?.name ?? '').trim().slice(0, 60);
     if (!name) return res.status(400).json({ error: 'Nama wajib diisi' });
+    // Migration slice — uniqueness is now per-org; pre-check (previously
+    // absent entirely — a name collision surfaced as an unexplained 500)
+    // scoped the same way, mirroring Department's own pre-check.
+    const existing = await prisma.leaveType.findUnique({ where: { organizationId_name: { organizationId: req.organizationId, name } } });
+    if (existing) return res.status(409).json({ error: 'Jenis cuti dengan nama itu sudah ada' });
     const t = await prisma.leaveType.create({
       data: {
+        organizationId: req.organizationId,
         name,
         quotaPerYear: Math.max(0, Math.floor(Number(req.body?.quotaPerYear) || 0)),
         paid: req.body?.paid !== false,
@@ -176,13 +194,18 @@ aa.post('/admin/attendance/leave-types', authenticateToken, requireWorkspace('at
 });
 
 aa.post('/admin/attendance/holidays', authenticateToken, requireWorkspace('attendance:manageLeaveTypes'), mutationLimit, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const date = new Date(String(req.body?.date));
     if (isNaN(date.getTime())) return res.status(400).json({ error: 'Tanggal tidak valid' });
+    // Migration slice — upsert key is now (organizationId, date); it used to
+    // be `date` alone, so a second org labeling the same date silently
+    // overwrote whichever org had set it first, with no conflict surfaced.
     const h = await prisma.holiday.upsert({
-      where: { date }, update: { name: String(req.body?.name ?? 'Libur') },
-      create: { date, name: String(req.body?.name ?? 'Libur') },
+      where: { organizationId_date: { organizationId: req.organizationId, date } },
+      update: { name: String(req.body?.name ?? 'Libur') },
+      create: { organizationId: req.organizationId, date, name: String(req.body?.name ?? 'Libur') },
     });
     return res.status(201).json({ holiday: h });
   } catch (err) { console.error('[attendance] holiday error:', err); return res.status(500).json({ error: 'Gagal' }); }
@@ -195,7 +218,11 @@ aa.post('/attendance/leaves', authenticateToken, mutationLimit, async (req: Auth
   try {
     const prisma = getPrisma();
     const typeId = String(req.body?.typeId ?? '');
-    const type = await prisma.leaveType.findUnique({ where: { id: typeId } });
+    // Migration slice — org-scoped lookup; typeId is raw client input, and
+    // without this check an employee could reference another org's
+    // LeaveType id to create a Leave governed by that org's quota/approval
+    // rules.
+    const type = await findLeaveTypeInOrg(prisma, typeId, req.organizationId);
     if (!type) return res.status(400).json({ error: 'Jenis cuti tidak valid' });
     const startDate = new Date(String(req.body?.startDate));
     const endDate = new Date(String(req.body?.endDate));
@@ -243,11 +270,14 @@ aa.get('/attendance/leaves', authenticateToken, async (req: AuthRequest, res: Re
     const prisma = getPrisma();
     const mine = req.query.mine !== 'false';
     if (mine) {
+      if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
       const leaves = await prisma.leave.findMany({
         where: { userId: req.userId! }, orderBy: { startDate: 'desc' }, include: { type: true },
       });
-      // Remaining quota per type, so the UI never has to guess.
-      const types = await prisma.leaveType.findMany();
+      // Remaining quota per type, so the UI never has to guess. Migration
+      // slice — used to have no org filter, mixing every org's leave
+      // catalog into this response.
+      const types = await prisma.leaveType.findMany({ where: { organizationId: req.organizationId } });
       const year = new Date().getUTCFullYear();
       const quota = types.map((t) => {
         const used = leaves

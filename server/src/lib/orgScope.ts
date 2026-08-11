@@ -42,3 +42,37 @@ export async function findUserInOrg<T extends Prisma.UserSelect>(
   if (!user || user.organizationId !== organizationId) return null;
   return user;
 }
+
+// Migration slice (post-Fase 4) — same fail-closed shape as findRoomInOrg,
+// for the 4 remaining models (of the 6 that gained organizationId) that
+// have a lookup-by-id route: Department, Shift, LeaveType, MeetingRoom.
+// Holiday has no by-id read route (only an org-scoped upsert-by-date) and
+// WorkspacePolicy is looked up directly by organizationId (its new PK), so
+// neither needs one of these.
+export async function findDepartmentInOrg(prisma: PrismaClient, id: string, organizationId: string | undefined) {
+  if (!organizationId) return null;
+  const dept = await prisma.department.findUnique({ where: { id } });
+  if (!dept || dept.organizationId !== organizationId) return null;
+  return dept;
+}
+
+export async function findShiftInOrg(prisma: PrismaClient, id: string, organizationId: string | undefined) {
+  if (!organizationId) return null;
+  const shift = await prisma.shift.findUnique({ where: { id } });
+  if (!shift || shift.organizationId !== organizationId) return null;
+  return shift;
+}
+
+export async function findLeaveTypeInOrg(prisma: PrismaClient, id: string, organizationId: string | undefined) {
+  if (!organizationId) return null;
+  const type = await prisma.leaveType.findUnique({ where: { id } });
+  if (!type || type.organizationId !== organizationId) return null;
+  return type;
+}
+
+export async function findMeetingRoomInOrg(prisma: PrismaClient, id: string, organizationId: string | undefined) {
+  if (!organizationId) return null;
+  const room = await prisma.meetingRoom.findUnique({ where: { id } });
+  if (!room || room.organizationId !== organizationId) return null;
+  return room;
+}

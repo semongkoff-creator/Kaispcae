@@ -120,7 +120,7 @@ async function resolveZoneType(roomSlug: string, zoneId: string): Promise<ZoneTy
 // data-sufficiency exclusion, applied per-component instead of per-person.
 // Weights are admin-editable WorkspacePolicy fields (brief flags them as
 // unconfirmed) — never hardcoded "what matters most" assumptions.
-async function computeVibe(userId: string, start: Date, end: Date) {
+async function computeVibe(userId: string, start: Date, end: Date, organizationId: string) {
   const prisma = getPrisma();
   const days = Math.max(1, DateTime.fromJSDate(end).diff(DateTime.fromJSDate(start), 'days').days);
   const [counters, connectionCount, policy, pokeAgg, meetingIntervals, records] = await Promise.all([
@@ -131,7 +131,10 @@ async function computeVibe(userId: string, start: Date, end: Date) {
     prisma.connectionEvent.count({
       where: { occurredAt: { gte: start, lt: end }, OR: [{ userAId: userId }, { userBId: userId }] },
     }),
-    prisma.workspacePolicy.findUnique({ where: { id: 'singleton' } }),
+    // Migration slice — WorkspacePolicy is now keyed by organizationId, not
+    // a single shared id='singleton' row every org used to read (and, via
+    // the PATCH route, silently overwrite for every other org's users too).
+    prisma.workspacePolicy.findUnique({ where: { organizationId } }),
     prisma.pokeResponseSample.aggregate({
       where: { userId, occurredAt: { gte: start, lt: end } },
       _avg: { latencyMs: true }, _count: true,
@@ -228,11 +231,11 @@ async function computeTaskCompletion(userId: string, start: Date, end: Date) {
 // Widens the query by one extra day BEFORE `start` — applyOvertimeGrace
 // needs the immediately preceding record to check yesterday's overtime for
 // the FIRST day in range (see its own doc comment in shared/analyticsRules.ts).
-async function computeAttendance(userId: string, start: Date, end: Date) {
+async function computeAttendance(userId: string, start: Date, end: Date, organizationId: string) {
   const prisma = getPrisma();
   const { gte: bucketedStart, lte: bucketedEnd } = bucketedRange(start, end);
   const [policy, records] = await Promise.all([
-    prisma.workspacePolicy.findUnique({ where: { id: 'singleton' } }),
+    prisma.workspacePolicy.findUnique({ where: { organizationId } }),
     prisma.attendanceRecord.findMany({
       where: { userId, date: { gte: DateTime.fromJSDate(bucketedStart).minus({ days: 3 }).toJSDate(), lte: bucketedEnd } },
       include: { shift: true },
@@ -275,12 +278,12 @@ async function computeAttendance(userId: string, start: Date, end: Date) {
 // Reused as-is by Individual too would be redundant with its own inline
 // Promise.all (kept separate there so the response shape stays exactly
 // B.3.1's, not wrapped in this helper's grouping).
-async function computeMemberSummary(userId: string, start: Date, end: Date) {
+async function computeMemberSummary(userId: string, start: Date, end: Date, organizationId: string) {
   const [distribution, vibe, tasks, attendance] = await Promise.all([
     computeStatusDistribution(userId, start, end),
-    computeVibe(userId, start, end),
+    computeVibe(userId, start, end, organizationId),
     computeTaskCompletion(userId, start, end),
-    computeAttendance(userId, start, end),
+    computeAttendance(userId, start, end, organizationId),
   ]);
   return { distribution, vibe, tasks, attendance };
 }
@@ -502,6 +505,7 @@ async function computeConnectionNetwork(
 // any cross-user field — Bagian C.1's "never show comparisons at Individual
 // tier" is enforced by this endpoint's shape, not just hidden in the UI.
 router.get('/analytics/individual', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const targetUserId = typeof req.query.userId === 'string' && req.query.userId ? req.query.userId : req.userId!;
@@ -523,9 +527,9 @@ router.get('/analytics/individual', authenticateToken, async (req: AuthRequest, 
     const { type, start, end } = parsePeriod(req.query);
     const [distribution, vibe, tasks, attendance] = await Promise.all([
       computeStatusDistribution(targetUserId, start, end),
-      computeVibe(targetUserId, start, end),
+      computeVibe(targetUserId, start, end, req.organizationId),
       computeTaskCompletion(targetUserId, start, end),
-      computeAttendance(targetUserId, start, end),
+      computeAttendance(targetUserId, start, end, req.organizationId),
     ]);
 
     return res.json({
@@ -605,6 +609,7 @@ router.get('/analytics/individual/timeline', authenticateToken, async (req: Auth
 // doc comment on 'analytics:viewAllCompany' for why 'analytics:viewTeam'
 // deliberately doesn't exist).
 router.get('/analytics/team', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const reports = await prisma.user.findMany({ where: { managerId: req.userId! }, select: { id: true, displayName: true } });
@@ -617,7 +622,7 @@ router.get('/analytics/team', authenticateToken, async (req: AuthRequest, res: R
     const names = new Map(reports.map((r) => [r.id, r.displayName]));
     const liveMeetings = await computeLiveMeetings(reports.map((r) => r.id), names);
     const members = await Promise.all(reports.map(async (m) => {
-      const s = await computeMemberSummary(m.id, start, end);
+      const s = await computeMemberSummary(m.id, start, end, req.organizationId!);
       return {
         userId: m.id,
         name: m.displayName,
@@ -672,21 +677,17 @@ router.get('/analytics/company', authenticateToken, requireWorkspace('analytics:
     const { type, start, end } = parsePeriod(req.query);
     // Multi-tenant Fase 2 — `users` used to have no org filter at all
     // ("select every active employee"), the root pool for this entire
-    // endpoint. `departments` stays unfiltered — Department has no
-    // organizationId column yet (blocked, same class of gap as
-    // WorkspacePolicy/Shift/LeaveType/Holiday) — but every number actually
-    // shown per department below is aggregated from `perUser`, which IS
-    // now org-scoped, so a cross-org department name can appear in the list
-    // with zero real data attached (memberCount 0), never someone else's
-    // numbers.
+    // endpoint. Migration slice — `departments` and `policy` now also
+    // org-scoped (previously Department had no organizationId at all, and
+    // WorkspacePolicy was the single shared id='singleton' row).
     const [users, departments, policy] = await Promise.all([
       prisma.user.findMany({ where: { active: true, organizationId: req.organizationId }, select: { id: true, displayName: true, departmentId: true } }),
-      prisma.department.findMany({ select: { id: true, name: true } }),
-      prisma.workspacePolicy.findUnique({ where: { id: 'singleton' } }),
+      prisma.department.findMany({ where: { organizationId: req.organizationId }, select: { id: true, name: true } }),
+      prisma.workspacePolicy.findUnique({ where: { organizationId: req.organizationId } }),
     ]);
 
     const perUser = await Promise.all(users.map(async (u) => {
-      const s = await computeMemberSummary(u.id, start, end);
+      const s = await computeMemberSummary(u.id, start, end, req.organizationId!);
       return {
         userId: u.id, departmentId: u.departmentId,
         jamHadirMinutes: s.attendance.totalWorkMinutes, focusMinutes: s.distribution.focusMinutes,
@@ -814,11 +815,11 @@ async function computeConnectionStatsMap(userIds: string[], start: Date, end: Da
   return result;
 }
 
-async function buildRankablePool(userIds: string[], names: Map<string, string>, start: Date, end: Date): Promise<RankablePerson[]> {
+async function buildRankablePool(userIds: string[], names: Map<string, string>, start: Date, end: Date, organizationId: string): Promise<RankablePerson[]> {
   const [presentDaysMap, connMap, summaries] = await Promise.all([
     computePresentDaysMap(userIds, start, end),
     computeConnectionStatsMap(userIds, start, end),
-    Promise.all(userIds.map((id) => computeMemberSummary(id, start, end))),
+    Promise.all(userIds.map((id) => computeMemberSummary(id, start, end, organizationId))),
   ]);
   return userIds.map((id, i) => {
     const s = summaries[i];
@@ -906,8 +907,8 @@ function rankCategory(
 // Bagian C.3's 7 categories. Exported so analyticsSweep.ts's weekly Hall of
 // Fame sweep can reuse the exact same math (company-wide) rather than
 // duplicating it.
-export async function computeRanking(userIds: string[], names: Map<string, string>, start: Date, end: Date): Promise<RankingCategoryResult[]> {
-  const pool = await buildRankablePool(userIds, names, start, end);
+export async function computeRanking(userIds: string[], names: Map<string, string>, start: Date, end: Date, organizationId: string): Promise<RankingCategoryResult[]> {
+  const pool = await buildRankablePool(userIds, names, start, end, organizationId);
   const perDay = (total: number, p: RankablePerson) => (p.presentDays > 0 ? total / p.presentDays : 0);
 
   return [
@@ -959,7 +960,7 @@ router.get('/analytics/ranking', authenticateToken, async (req: AuthRequest, res
     }
 
     const names = new Map(pool.map((p) => [p.id, p.displayName]));
-    const categories = await computeRanking(pool.map((p) => p.id), names, start, end);
+    const categories = await computeRanking(pool.map((p) => p.id), names, start, end, req.organizationId);
 
     await writeAudit(prisma, {
       actorId: req.userId!, action: scope === 'company' ? 'analytics:viewAllCompany' : 'attendance:viewAll',
@@ -1032,7 +1033,7 @@ router.get('/analytics/export', authenticateToken, async (req: AuthRequest, res:
 
     if (tier === 'individual') {
       const [s, target] = await Promise.all([
-        computeMemberSummary(targetUserId!, start, end),
+        computeMemberSummary(targetUserId!, start, end, req.organizationId),
         prisma.user.findUnique({ where: { id: targetUserId! }, select: { displayName: true } }),
       ]);
 
@@ -1068,7 +1069,7 @@ router.get('/analytics/export', authenticateToken, async (req: AuthRequest, res:
       rankingSheet.addRow(['Ranking tidak tersedia di tingkat Individu — lihat Bagian C.1 (tidak pernah dibandingkan dengan rekan di sini).']);
     } else {
       const names = new Map(poolUsers.map((u) => [u.id, u.displayName]));
-      const summaries = await Promise.all(poolUsers.map(async (u) => ({ user: u, s: await computeMemberSummary(u.id, start, end) })));
+      const summaries = await Promise.all(poolUsers.map(async (u) => ({ user: u, s: await computeMemberSummary(u.id, start, end, req.organizationId!) })));
 
       const ringkasan = workbook.addWorksheet('Ringkasan');
       addHeader(ringkasan);
@@ -1099,7 +1100,7 @@ router.get('/analytics/export', authenticateToken, async (req: AuthRequest, res:
 
       const rankingSheet = workbook.addWorksheet('Ranking');
       addHeader(rankingSheet);
-      const categories = await computeRanking(poolUsers.map((u) => u.id), names, start, end);
+      const categories = await computeRanking(poolUsers.map((u) => u.id), names, start, end, req.organizationId!);
       for (const cat of categories) {
         rankingSheet.addRow([cat.kategori]);
         rankingSheet.addRow(['Top', ...cat.top.map((t) => `${t.rank}. ${t.user} (${t.nilai})`)]);

@@ -5,17 +5,23 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { requireWorkspace, resolveWorkspaceRole } from '../lib/workspace';
 import { writeAudit, clientIp } from '../lib/audit';
 import { rateLimit } from '../middleware/rateLimit';
+import { findMeetingRoomInOrg } from '../lib/orgScope';
 
 const meetingRooms = Router();
 const mutationLimit = rateLimit(60 * 1000, 30);
 
 // Anyone may LIST rooms — you can't book what you can't see. Creating and
 // configuring them is admin-only (workspace layer), enforced below.
-meetingRooms.get('/meeting-rooms', authenticateToken, async (_req: AuthRequest, res: Response) => {
+meetingRooms.get('/meeting-rooms', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
+    // Migration slice — used to have no org filter, listing every org's
+    // meeting rooms (including location/equipment) to any authenticated
+    // user of any org, and handing out ids that fed straight into the
+    // busy/can-book/booking endpoints below.
     const rooms = await prisma.meetingRoom.findMany({
-      where: { active: true },
+      where: { active: true, organizationId: req.organizationId },
       select: { id: true, name: true, capacity: true, location: true, equipment: true, bookableBy: true },
       orderBy: { name: 'asc' },
     });
@@ -24,6 +30,7 @@ meetingRooms.get('/meeting-rooms', authenticateToken, async (_req: AuthRequest, 
 });
 
 meetingRooms.post('/admin/meeting-rooms', authenticateToken, requireWorkspace('calendar:manageRooms'), mutationLimit, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const name = String(req.body?.name ?? '').trim().slice(0, 80);
@@ -31,6 +38,7 @@ meetingRooms.post('/admin/meeting-rooms', authenticateToken, requireWorkspace('c
     const capacity = Number(req.body?.capacity);
     const room = await prisma.meetingRoom.create({
       data: {
+        organizationId: req.organizationId,
         name,
         capacity: Number.isFinite(capacity) && capacity > 0 ? Math.floor(capacity) : 4,
         location: req.body?.location ? String(req.body.location).slice(0, 120) : null,
@@ -46,7 +54,10 @@ meetingRooms.post('/admin/meeting-rooms', authenticateToken, requireWorkspace('c
 meetingRooms.patch('/admin/meeting-rooms/:roomId', authenticateToken, requireWorkspace('calendar:manageRooms'), mutationLimit, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const before = await prisma.meetingRoom.findUnique({ where: { id: req.params.roomId } });
+    // Migration slice — org-scoped lookup; without it any org's admin
+    // could reconfigure (or, via `active`, silently disable) another
+    // org's meeting room by id.
+    const before = await findMeetingRoomInOrg(prisma, req.params.roomId, req.organizationId);
     if (!before) return res.status(404).json({ error: 'Ruang tidak ditemukan' });
     const data: Record<string, unknown> = {};
     if (req.body?.name !== undefined) data.name = String(req.body.name).trim().slice(0, 80);
@@ -68,7 +79,9 @@ meetingRooms.patch('/admin/meeting-rooms/:roomId', authenticateToken, requireWor
 meetingRooms.delete('/admin/meeting-rooms/:roomId', authenticateToken, requireWorkspace('calendar:manageRooms'), async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.meetingRoom.findUnique({ where: { id: req.params.roomId }, select: { id: true, name: true } });
+    // Migration slice — org-scoped lookup; without it any org's admin
+    // could delete another org's meeting room by id.
+    const room = await findMeetingRoomInOrg(prisma, req.params.roomId, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Ruang tidak ditemukan' });
     await prisma.meetingRoom.delete({ where: { id: room.id } });
     await writeAudit(prisma, { actorId: req.userId!, action: 'calendar:manageRooms', targetType: 'room', targetId: room.id, meta: { deleted: room.name }, ip: clientIp(req) });
@@ -82,6 +95,13 @@ meetingRooms.delete('/admin/meeting-rooms/:roomId', authenticateToken, requireWo
 meetingRooms.get('/admin/meeting-rooms/:roomId/bookings', authenticateToken, requireWorkspace('calendar:manageAnyBooking'), async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
+    // Migration slice — org-scoped lookup; without it any org's admin
+    // could view another org's real booking titles and organizer identity
+    // just by supplying that org's room id (requireWorkspace checks role
+    // only, never which org the resource belongs to).
+    if (!(await findMeetingRoomInOrg(prisma, req.params.roomId, req.organizationId))) {
+      return res.status(404).json({ error: 'Ruang tidak ditemukan' });
+    }
     const from = new Date(String(req.query.from ?? Date.now()));
     const to = new Date(String(req.query.to ?? Date.now() + 30 * 86400000));
     const rows = await prisma.calendarEvent.findMany({
@@ -102,6 +122,12 @@ meetingRooms.get('/admin/meeting-rooms/:roomId/bookings', authenticateToken, req
 meetingRooms.get('/meeting-rooms/:roomId/busy', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
+    // Migration slice — org-scoped lookup; the roomId here previously came
+    // straight from the also-unscoped GET /meeting-rooms list, so this was
+    // reachable for any org's room id.
+    if (!(await findMeetingRoomInOrg(prisma, req.params.roomId, req.organizationId))) {
+      return res.status(404).json({ error: 'Ruang tidak ditemukan' });
+    }
     const from = new Date(String(req.query.from ?? ''));
     const to = new Date(String(req.query.to ?? ''));
     if (isNaN(from.getTime()) || isNaN(to.getTime()) || to <= from) return res.status(400).json({ error: 'Rentang tidak valid' });
@@ -123,6 +149,13 @@ meetingRooms.delete('/admin/bookings/:eventId', authenticateToken, requireWorksp
     const prisma = getPrisma();
     const event = await prisma.calendarEvent.findUnique({ where: { id: req.params.eventId }, select: { id: true, title: true, roomId: true, organizerId: true } });
     if (!event?.roomId) return res.status(404).json({ error: 'Booking tidak ditemukan' });
+    // Migration slice — org-scoped via the booked ROOM (this is the room
+    // admin's "manage any booking" power, scoped to the rooms that
+    // company actually owns) rather than trusting requireWorkspace's
+    // role-only gate.
+    if (!(await findMeetingRoomInOrg(prisma, event.roomId, req.organizationId))) {
+      return res.status(404).json({ error: 'Booking tidak ditemukan' });
+    }
     await prisma.calendarEvent.update({ where: { id: event.id }, data: { roomId: null } });
     await writeAudit(prisma, {
       actorId: req.userId!, action: 'calendar:manageAnyBooking', targetType: 'event', targetId: event.id,
@@ -140,7 +173,7 @@ meetingRooms.delete('/admin/bookings/:eventId', authenticateToken, requireWorksp
 meetingRooms.get('/meeting-rooms/can-book/:roomId', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.meetingRoom.findUnique({ where: { id: req.params.roomId }, select: { bookableBy: true } });
+    const room = await findMeetingRoomInOrg(prisma, req.params.roomId, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Ruang tidak ditemukan' });
     if (room.bookableBy !== 'admin') return res.json({ canBook: true });
     const wsRole = await resolveWorkspaceRole(prisma, req.userId!);
