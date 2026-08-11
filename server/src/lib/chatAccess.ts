@@ -21,9 +21,17 @@ import { PrismaClient } from '@prisma/client';
 // in the room in any way anyone else could see.
 export async function canAccessRoomChat(
   prisma: PrismaClient,
-  room: { id: string; ownerId: string; isPublic: boolean },
+  room: { id: string; ownerId: string; isPublic: boolean; organizationId: string },
   userId: string,
+  organizationId: string | undefined,
 ): Promise<boolean> {
+  // Multi-tenant Fase 3 — checked FIRST, before isPublic: a public room is
+  // "open to any authenticated user" WITHIN its own company, never across
+  // one. Without this, isPublic's fast path returned true unconditionally
+  // for any authenticated caller regardless of org — the widest bypass
+  // found in this audit, since (per this file's own comment) 190 of 191
+  // rooms are public.
+  if (!organizationId || room.organizationId !== organizationId) return false;
   if (room.isPublic) return true;
   if (userId === room.ownerId) return true;
   const [user, member] = await Promise.all([
@@ -46,6 +54,7 @@ export async function canAccessConversation(
   prisma: PrismaClient,
   conversationId: string,
   userId: string,
+  organizationId: string | undefined,
 ): Promise<boolean> {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
@@ -65,5 +74,5 @@ export async function canAccessConversation(
   // rather than open: this is the branch that would otherwise quietly expose
   // an ex-room's history to everyone.
   if (!conversation.room) return false;
-  return canAccessRoomChat(prisma, conversation.room, userId);
+  return canAccessRoomChat(prisma, conversation.room, userId, organizationId);
 }

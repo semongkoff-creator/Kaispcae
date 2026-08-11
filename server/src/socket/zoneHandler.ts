@@ -87,8 +87,20 @@ async function completeActiveZoneQueueEntry(io: Server, roomSlug: string, zoneId
 export function registerZoneHandlers(io: Server, socket: Socket) {
   let currentRoom: string | null = null;
 
-  socket.on(SocketEvents.JOIN_ROOM, (roomId: string) => {
-    currentRoom = roomId || 'main-office';
+  socket.on(SocketEvents.JOIN_ROOM, async (roomId: string) => {
+    const slug = roomId || 'main-office';
+    // Multi-tenant Fase 3 — this module registers its own independent
+    // JOIN_ROOM listener (see mediaHandler.ts's comment on why roomHandler.ts
+    // rejecting a cross-org join doesn't stop this one from also running).
+    try {
+      const room = await getPrisma().room.findUnique({ where: { slug }, select: { organizationId: true } });
+      if (!room || room.organizationId !== (socket.data as { organizationId?: string }).organizationId) { currentRoom = null; return; }
+    } catch (e) {
+      console.error('[zone] org check failed:', e);
+      currentRoom = null;
+      return;
+    }
+    currentRoom = slug;
   });
 
   socket.on(SocketEvents.ZONE_ENTER, async (zoneId: string) => {

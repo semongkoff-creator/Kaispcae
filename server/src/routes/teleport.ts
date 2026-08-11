@@ -4,14 +4,18 @@ import { getPrisma } from '../lib/prisma';
 import { hasFeatureAccess } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole as resolveRole } from '../lib/roles';
+import { findRoomInOrg } from '../lib/orgScope';
 
 const teleport = Router();
 
 
 const MAX_TELEPORT_LOCATIONS = 20;
 
-async function loadRoomBySlug(prisma: PrismaClient, slug: string) {
-  return prisma.room.findUnique({ where: { slug } });
+// Multi-tenant Fase 3 — teleport.ts was never touched in Fase 2's route
+// sweep; fixed once here so every route below (teleport locations AND
+// owner bookmarks) inherits it.
+async function loadRoomBySlug(prisma: PrismaClient, slug: string, organizationId: string | undefined) {
+  return findRoomInOrg(prisma, slug, organizationId);
 }
 
 // ─── §4.1 Teleport (Admin) — shared, staff+ ────────────────────────────
@@ -19,9 +23,9 @@ async function loadRoomBySlug(prisma: PrismaClient, slug: string) {
 teleport.get('/rooms/:slug/teleport-locations', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await loadRoomBySlug(prisma, req.params.slug);
+    const room = await loadRoomBySlug(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     // Listing is a USE action (needed to pick a destination), so it's open to
     // every member — not gated behind 'teleport:admin' like create/delete/
     // reorder below. (Bug 4: members may use saved locations, not manage them.)
@@ -39,9 +43,9 @@ teleport.get('/rooms/:slug/teleport-locations', authenticateToken, async (req: A
 teleport.post('/rooms/:slug/teleport-locations', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await loadRoomBySlug(prisma, req.params.slug);
+    const room = await loadRoomBySlug(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (!hasFeatureAccess(role, 'teleport:admin')) {
       return res.status(403).json({ error: 'Staff role or higher required' });
     }
@@ -79,9 +83,9 @@ teleport.post('/rooms/:slug/teleport-locations', authenticateToken, async (req: 
 teleport.delete('/rooms/:slug/teleport-locations/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await loadRoomBySlug(prisma, req.params.slug);
+    const room = await loadRoomBySlug(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (!hasFeatureAccess(role, 'teleport:admin')) {
       return res.status(403).json({ error: 'Staff role or higher required' });
     }
@@ -100,9 +104,9 @@ teleport.delete('/rooms/:slug/teleport-locations/:id', authenticateToken, async 
 teleport.put('/rooms/:slug/teleport-locations/reorder', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await loadRoomBySlug(prisma, req.params.slug);
+    const room = await loadRoomBySlug(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (!hasFeatureAccess(role, 'teleport:admin')) {
       return res.status(403).json({ error: 'Staff role or higher required' });
     }
@@ -126,7 +130,7 @@ teleport.put('/rooms/:slug/teleport-locations/reorder', authenticateToken, async
 teleport.get('/rooms/:slug/bookmarks', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await loadRoomBySlug(prisma, req.params.slug);
+    const room = await loadRoomBySlug(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     if (room.ownerId !== req.userId) return res.status(403).json({ error: 'Owner only' });
     // Scoped to (ownerId, roomId) — deliberately never copied from other
@@ -142,7 +146,7 @@ teleport.get('/rooms/:slug/bookmarks', authenticateToken, async (req: AuthReques
 teleport.post('/rooms/:slug/bookmarks', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await loadRoomBySlug(prisma, req.params.slug);
+    const room = await loadRoomBySlug(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     if (room.ownerId !== req.userId) return res.status(403).json({ error: 'Owner only' });
 
@@ -164,7 +168,7 @@ teleport.post('/rooms/:slug/bookmarks', authenticateToken, async (req: AuthReque
 teleport.delete('/rooms/:slug/bookmarks/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await loadRoomBySlug(prisma, req.params.slug);
+    const room = await loadRoomBySlug(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     if (room.ownerId !== req.userId) return res.status(403).json({ error: 'Owner only' });
     await prisma.ownerBookmark.deleteMany({ where: { id: req.params.id, ownerId: req.userId, roomId: room.id } });
@@ -178,7 +182,7 @@ teleport.delete('/rooms/:slug/bookmarks/:id', authenticateToken, async (req: Aut
 teleport.put('/rooms/:slug/bookmarks/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await loadRoomBySlug(prisma, req.params.slug);
+    const room = await loadRoomBySlug(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     if (room.ownerId !== req.userId) return res.status(403).json({ error: 'Owner only' });
     const { label } = req.body;
@@ -194,7 +198,7 @@ teleport.put('/rooms/:slug/bookmarks/:id', authenticateToken, async (req: AuthRe
 teleport.put('/rooms/:slug/bookmarks/reorder', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await loadRoomBySlug(prisma, req.params.slug);
+    const room = await loadRoomBySlug(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     if (room.ownerId !== req.userId) return res.status(403).json({ error: 'Owner only' });
     const { orderedIds } = req.body;

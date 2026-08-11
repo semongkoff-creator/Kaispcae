@@ -45,7 +45,7 @@ export function setMembersIo(io: Server): void {
 async function requireRoomAdmin(prisma: ReturnType<typeof getPrisma>, slug: string, userId: string, organizationId: string | undefined) {
   const room = await findRoomInOrg(prisma, slug, organizationId);
   if (!room) return { error: 404 as const, room: null };
-  const role = await resolveRoomRole(prisma, userId, room.id, room.ownerId);
+  const role = await resolveRoomRole(prisma, userId, room.id, room.ownerId, room.organizationId);
   if (!hasFeatureAccess(role, 'room:update')) return { error: 403 as const, room };
   return { error: null, room };
 }
@@ -59,7 +59,7 @@ async function requireRoomAdmin(prisma: ReturnType<typeof getPrisma>, slug: stri
 async function requireRoomAdminOrCeo(prisma: ReturnType<typeof getPrisma>, slug: string, userId: string, organizationId: string | undefined) {
   const room = await findRoomInOrg(prisma, slug, organizationId);
   if (!room) return { error: 404 as const, room: null };
-  const role = await resolveRoomRole(prisma, userId, room.id, room.ownerId);
+  const role = await resolveRoomRole(prisma, userId, room.id, room.ownerId, room.organizationId);
   if (hasFeatureAccess(role, 'room:update')) return { error: null, room };
   const member = await prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId: room.id } }, select: { isCeo: true } });
   if (member?.isCeo) return { error: null, room };
@@ -351,7 +351,7 @@ roomMembers.post('/channels/:channelId/participants', authenticateToken, async (
     const channel = await prisma.channel.findUnique({ where: { id: req.params.channelId }, include: { room: true } });
     if (!channel || channel.room.organizationId !== req.organizationId) return res.status(404).json({ error: 'Channel not found' });
 
-    const role = await resolveRoomRole(prisma, req.userId!, channel.roomId, channel.room.ownerId);
+    const role = await resolveRoomRole(prisma, req.userId!, channel.roomId, channel.room.ownerId, channel.room.organizationId);
     if (!hasFeatureAccess(role, 'channel:create')) {
       return res.status(403).json({ error: 'Hanya admin yang bisa menambah peserta grup' });
     }

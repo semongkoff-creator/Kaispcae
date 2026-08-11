@@ -722,13 +722,14 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       // supplies and can lie about — the comment further down explains why that
       // distinction already mattered here).
       const enteringUid = (socket.data as { userId?: string }).userId;
+      const enteringOrgId = (socket.data as { organizationId?: string }).organizationId;
       const prisma = getPrisma();
 
       // Two lookups, two different failure policies — deliberately not one
       // try/catch around both. A single catch that denied on any error would
       // fail closed for the ~191 walk-in rooms too, so a DB blip would lock
       // everyone out of rooms that never asked to be gated.
-      let approvalRoom: { id: string; ownerId: string; requiresApproval: boolean; restrictedAccess: boolean; restrictedMinRole: string; queueEnabled: boolean; slug: string; name: string } | null = null;
+      let approvalRoom: { id: string; ownerId: string; requiresApproval: boolean; restrictedAccess: boolean; restrictedMinRole: string; queueEnabled: boolean; slug: string; name: string; organizationId: string } | null = null;
       try {
         approvalRoom = await prisma.room.findUnique({ where: { slug: room } });
       } catch (e) {
@@ -737,6 +738,26 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // thing that distinguishes them, so treat an unreadable answer the same
         // way — matching pre-existing behaviour rather than inventing a lockout.
         console.error('[room] could not read room for approval check:', e);
+      }
+
+      // Multi-tenant Fase 3 — the single most important gate in this whole
+      // handler, and deliberately unconditional (not nested inside the
+      // requiresApproval/restrictedAccess check below): an ORDINARY
+      // walk-in room — the common case, no other gate at all — was
+      // previously joinable by any authenticated account regardless of org,
+      // since nothing here ever compared organizationId. The normal client
+      // flow already can't reach this for a cross-org slug (JoinGate's own
+      // REST precheck, GET /rooms/:slug/membership, 404s first — see
+      // roomMembers.ts), but this socket handler must not rely on the
+      // client only ever asking the nice way. Same "wrong org reads as
+      // not-found" posture as every REST route from Fase 2 — never a
+      // distinct reason that would confirm the room exists elsewhere.
+      // Anonymous (non-guest, unauthenticated) sockets have no org to
+      // mismatch and are unaffected — same pre-existing behavior as
+      // before this fix, not something in scope here.
+      if (enteringUid && approvalRoom && enteringOrgId !== approvalRoom.organizationId) {
+        socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'not-found' });
+        return;
       }
 
       // QA (Akses ruang checklist item 1) — restrictedAccess must be

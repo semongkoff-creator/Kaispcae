@@ -164,7 +164,7 @@ uploads.get('/uploads/:filename', authenticateUploadRead, async (req: AuthReques
       // A chat attachment whose message somehow has no conversation is
       // unreachable rather than public — there is no one to authorize against.
       if (!message.conversationId2) return res.status(403).json({ error: 'Not authorized to read this file' });
-      if (!(await canAccessConversation(prisma, message.conversationId2, req.userId!))) {
+      if (!(await canAccessConversation(prisma, message.conversationId2, req.userId!, req.organizationId))) {
         return res.status(403).json({ error: 'Not authorized to read this file' });
       }
     }
@@ -202,7 +202,7 @@ uploads.get('/files/:token', authenticateUploadRead, async (req: AuthRequest, re
     });
     if (message) {
       if (!message.conversationId2) return res.status(403).json({ error: 'Not authorized to read this file' });
-      if (!(await canAccessConversation(prisma, message.conversationId2, req.userId!))) {
+      if (!(await canAccessConversation(prisma, message.conversationId2, req.userId!, req.organizationId))) {
         return res.status(403).json({ error: 'Not authorized to read this file' });
       }
     }

@@ -8,6 +8,7 @@ import { validate, createChannelSchema, startDmSchema, sanitizeChat } from '../m
 import { resolveRoomRole as resolveRoomRoleShared } from '../lib/roles';
 import { ensureGroupConversation, ensureDmConversation, groupConversationId, dmConversationId } from '../lib/conversations';
 import { canAccessRoomChat } from '../lib/chatAccess';
+import { findRoomInOrg, findUserInOrg } from '../lib/orgScope';
 
 const chat = Router();
 
@@ -32,8 +33,8 @@ function parseLimit(raw: unknown): number {
 // Thin wrapper over the shared resolver (see lib/roles.ts) — kept as a
 // local name matching this file's existing (room, userId) argument order so
 // none of the call sites below needed to change.
-async function resolveRoomRole(prisma: PrismaClient, room: { id: string; ownerId: string }, userId: string): Promise<Role> {
-  return resolveRoomRoleShared(prisma, userId, room.id, room.ownerId);
+async function resolveRoomRole(prisma: PrismaClient, room: { id: string; ownerId: string; organizationId: string }, userId: string): Promise<Role> {
+  return resolveRoomRoleShared(prisma, userId, room.id, room.ownerId, room.organizationId);
 }
 
 function toChannelDto(c: { id: string; roomId: string; name: string; isDefault: boolean; createdAt: Date }, lastMessage?: ConversationPreview): Channel {
@@ -131,9 +132,12 @@ function toDmSummaryDto(
 chat.get('/rooms/:slug/channels', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    // Multi-tenant Fase 3 — chat.ts was never touched in Fase 2's route
+    // sweep; every raw room lookup by slug in this file gets the same
+    // findRoomInOrg treatment as every other file's did.
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    if (!(await canAccessRoomChat(prisma, room, req.userId!))) {
+    if (!(await canAccessRoomChat(prisma, room, req.userId!, req.organizationId))) {
       return res.status(403).json({ error: 'Not a member of this room' });
     }
 
@@ -155,7 +159,7 @@ chat.get('/rooms/:slug/channels', authenticateToken, async (req: AuthRequest, re
 chat.post('/rooms/:slug/channels', authenticateToken, validate(createChannelSchema), async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     const role = await resolveRoomRole(prisma, room, req.userId!);
@@ -183,7 +187,7 @@ chat.post('/rooms/:slug/channels', authenticateToken, validate(createChannelSche
 chat.delete('/rooms/:slug/channels/:channelId', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     const channel = await prisma.channel.findUnique({ where: { id: req.params.channelId } });
@@ -212,9 +216,9 @@ chat.delete('/rooms/:slug/channels/:channelId', authenticateToken, async (req: A
 chat.get('/rooms/:slug/channels/:channelId/messages', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    if (!(await canAccessRoomChat(prisma, room, req.userId!))) {
+    if (!(await canAccessRoomChat(prisma, room, req.userId!, req.organizationId))) {
       return res.status(403).json({ error: 'Not a member of this room' });
     }
 
@@ -257,7 +261,7 @@ chat.get('/messages/:messageId/replies', authenticateToken, async (req: AuthRequ
     if (!parent) return res.status(404).json({ error: 'Message not found' });
 
     if (parent.channel) {
-      if (!(await canAccessRoomChat(prisma, parent.channel.room, req.userId!))) {
+      if (!(await canAccessRoomChat(prisma, parent.channel.room, req.userId!, req.organizationId))) {
         return res.status(403).json({ error: 'Not a member of this room' });
       }
     } else if (parent.conversation) {
@@ -287,7 +291,7 @@ chat.get('/messages/:messageId/replies', authenticateToken, async (req: AuthRequ
 chat.get('/rooms/:slug/dms', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     const conversations = await prisma.directConversation.findMany({
@@ -323,13 +327,17 @@ chat.post('/rooms/:slug/dms', authenticateToken, validate(startDmSchema), async 
       return res.status(400).json({ error: "Can't start a DM with yourself" });
     }
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    if (!(await canAccessRoomChat(prisma, room, req.userId!))) {
+    if (!(await canAccessRoomChat(prisma, room, req.userId!, req.organizationId))) {
       return res.status(403).json({ error: 'Not a member of this room' });
     }
 
-    const otherUser = await prisma.user.findUnique({ where: { id: otherUserId } });
+    // Multi-tenant Fase 3 — the DM partner must be in the same org too;
+    // otherwise a DM (and the chat history it accumulates) could be started
+    // with an account in a different company that merely happens to share
+    // a room slug's guessability.
+    const otherUser = await findUserInOrg(prisma, otherUserId, req.organizationId, { id: true });
     if (!otherUser) return res.status(404).json({ error: 'User not found' });
 
     const [userAId, userBId] = [req.userId!, otherUserId].sort();

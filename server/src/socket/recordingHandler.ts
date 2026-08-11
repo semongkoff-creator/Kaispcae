@@ -42,8 +42,6 @@ export function registerRecordingHandlers(io: Server, socket: Socket): void {
   socket.on(SocketEvents.JOIN_ROOM, async (roomId: string, _playerName?: string, _avatarConfig?: unknown, userId?: string) => {
     const room = roomId || 'main-office';
     const uid = (socket.data as { userId?: string }).userId || userId || socket.id;
-    socketToUid.set(socket.id, uid);
-    socketToRoom.set(socket.id, room);
 
     // QA (Data A/V checklist item 7) — a late joiner must see the banner
     // immediately too, not just learn about it on the NEXT start/stop —
@@ -52,8 +50,15 @@ export function registerRecordingHandlers(io: Server, socket: Socket): void {
     // module doesn't otherwise expose there" shape as MEDIA_LIST arriving
     // right after ROOM_STATE elsewhere in this app).
     try {
-      const dbRoom = await getPrisma().room.findUnique({ where: { slug: room }, select: { id: true } });
-      if (!dbRoom) return;
+      const dbRoom = await getPrisma().room.findUnique({ where: { slug: room }, select: { id: true, organizationId: true } });
+      // Multi-tenant Fase 3 — this module registers its own independent
+      // JOIN_ROOM listener (see mediaHandler.ts's comment on why
+      // roomHandler.ts rejecting a cross-org join doesn't stop this one
+      // from also running). socketToUid/socketToRoom deliberately only
+      // populate AFTER this passes — RECORDING_START/etc. below trust them.
+      if (!dbRoom || dbRoom.organizationId !== (socket.data as { organizationId?: string }).organizationId) return;
+      socketToUid.set(socket.id, uid);
+      socketToRoom.set(socket.id, room);
       const active = await getPrisma().recording.findFirst({ where: { roomId: dbRoom.id, status: { in: ['recording', 'processing'] } } });
       socket.emit(SocketEvents.RECORDING_ACTIVE_CHANGED, { active: !!active });
     } catch (e) {
@@ -72,7 +77,7 @@ export function registerRecordingHandlers(io: Server, socket: Socket): void {
       const dbRoom = await prisma.room.findUnique({ where: { slug: room } });
       if (!dbRoom) return;
 
-      const role = await resolveRole(prisma, uid, dbRoom.id, dbRoom.ownerId);
+      const role = await resolveRole(prisma, uid, dbRoom.id, dbRoom.ownerId, dbRoom.organizationId);
       if (!hasFeatureAccess(role, 'recording:start')) {
         socket.emit('admin:error', { message: 'Admin role required to start a recording' });
         return;
@@ -142,7 +147,7 @@ export function registerRecordingHandlers(io: Server, socket: Socket): void {
           const suid = (s?.data as { userId?: string })?.userId;
           if (!suid) continue;
           const isTarget = suid === data.targetUserId;
-          const viewerRole = isTarget ? null : await resolveRole(prisma, suid, dbRoom.id, dbRoom.ownerId);
+          const viewerRole = isTarget ? null : await resolveRole(prisma, suid, dbRoom.id, dbRoom.ownerId, dbRoom.organizationId);
           if (isTarget || (viewerRole && hasFeatureAccess(viewerRole, 'recording:start'))) {
             io.to(sid).emit(SocketEvents.RECORDING_STARTED, {
               recordingId: row.id,

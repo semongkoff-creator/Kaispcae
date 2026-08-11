@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { SocketEvents, SeatClaimState } from '@virtualmeet/shared';
 import { getPlayerName } from './roomHandler';
 import { getCachedTiles } from '../store/roomStore';
+import { getPrisma } from '../lib/prisma';
 
 // Claimable-seat ownership — "this seat is mine".
 //
@@ -94,8 +95,20 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
   let currentRoom: string | null = null;
   const userId = (): string | undefined => socket.data.userId as string | undefined;
 
-  socket.on(SocketEvents.JOIN_ROOM, (roomId: string) => {
-    currentRoom = roomId || 'main-office';
+  socket.on(SocketEvents.JOIN_ROOM, async (roomId: string) => {
+    const slug = roomId || 'main-office';
+    // Multi-tenant Fase 3 — this module registers its own independent
+    // JOIN_ROOM listener (see mediaHandler.ts's comment on why roomHandler.ts
+    // rejecting a cross-org join doesn't stop this one from also running).
+    try {
+      const room = await getPrisma().room.findUnique({ where: { slug }, select: { organizationId: true } });
+      if (!room || room.organizationId !== (socket.data as { organizationId?: string }).organizationId) { currentRoom = null; return; }
+    } catch (e) {
+      console.error('[seatClaim] org check failed:', e);
+      currentRoom = null;
+      return;
+    }
+    currentRoom = slug;
     // Late joiner catches up on who's sitting where.
     socket.emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
   });

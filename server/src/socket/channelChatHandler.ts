@@ -146,7 +146,7 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
     try {
       const prisma = getPrisma();
       const channel = await prisma.channel.findUnique({ where: { id: channelId }, include: { room: true } });
-      if (!channel || !(await canAccessRoomChat(prisma, channel.room, userId))) return;
+      if (!channel || !(await canAccessRoomChat(prisma, channel.room, userId, socket.data.organizationId as string | undefined))) return;
       socket.join(`channel:${channelId}`);
       socket.emit(SocketEvents.CHAT_READ_STATE_SYNC, {
         channelId,
@@ -269,10 +269,10 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
       const prisma = getPrisma();
       const msg = await prisma.chatMessage.findUnique({ where: { id: payload.messageId } });
       if (!msg) return;
-      let dbRoom: { id: string; ownerId: string };
+      let dbRoom: { id: string; ownerId: string; organizationId: string };
       if (msg.channelId) {
         const channel = await prisma.channel.findUnique({ where: { id: msg.channelId }, include: { room: true } });
-        if (!channel || !(await canAccessRoomChat(prisma, channel.room, userId))) return;
+        if (!channel || !(await canAccessRoomChat(prisma, channel.room, userId, socket.data.organizationId as string | undefined))) return;
         dbRoom = channel.room;
       } else if (msg.conversationId) {
         // ChatMessage.conversationId is a real FK straight to
@@ -286,7 +286,7 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
       } else {
         return; // orphaned message (shouldn't happen) — nothing to authorize against
       }
-      const role = await resolveRoomRole(prisma, userId, dbRoom.id, dbRoom.ownerId);
+      const role = await resolveRoomRole(prisma, userId, dbRoom.id, dbRoom.ownerId, dbRoom.organizationId);
       if (!hasFeatureAccess(role, 'message:pin')) return;
       const pinned = !!payload.pinned;
       await prisma.chatMessage.update({ where: { id: msg.id }, data: { isPinned: pinned } });
@@ -318,7 +318,7 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
       let room: string;
       if (channelId) {
         const channel = await prisma.channel.findUnique({ where: { id: channelId }, include: { room: true } });
-        if (!channel || !(await canAccessRoomChat(prisma, channel.room, userId))) return;
+        if (!channel || !(await canAccessRoomChat(prisma, channel.room, userId, socket.data.organizationId as string | undefined))) return;
         room = `channel:${channelId}`;
       } else {
         if (!(await canAccessDm(prisma, conversationId as string, userId))) return;
@@ -361,7 +361,7 @@ export function registerChannelChatHandlers(io: Server, socket: Socket) {
     try {
       const prisma = getPrisma();
       const channel = await prisma.channel.findUnique({ where: { id: payload.channelId }, include: { room: true } });
-      if (!channel || !(await canAccessRoomChat(prisma, channel.room, userId))) return;
+      if (!channel || !(await canAccessRoomChat(prisma, channel.room, userId, socket.data.organizationId as string | undefined))) return;
 
       // A client-supplied parentId must actually belong to THIS channel —
       // otherwise a reply could be planted under a message pulled from an

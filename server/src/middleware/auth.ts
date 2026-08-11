@@ -92,7 +92,7 @@ function readCookie(req: Request, name: string): string | null {
 // what map media already assumes (a media object's url is broadcast to
 // everyone in the room). Narrowing DM attachments to their participants needs
 // the Conversation/Participant model that doesn't exist yet.
-export function authenticateUploadRead(req: AuthRequest, res: Response, next: NextFunction) {
+export async function authenticateUploadRead(req: AuthRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
   const token = bearer ?? readCookie(req, UPLOAD_COOKIE_NAME);
@@ -105,6 +105,17 @@ export function authenticateUploadRead(req: AuthRequest, res: Response, next: Ne
     return res.status(403).json({ error: 'Invalid or expired session' });
   }
   req.userId = decoded.userId;
+  // Multi-tenant Fase 3 — canAccessConversation (called by this route's own
+  // handler for chat-attachment reads) needs the caller's org; resolved here
+  // once, same fail-OPEN-on-DB-blip posture as authenticateToken's own
+  // organizationId resolution (see that function's comment) — undefined just
+  // means every org-scoped check downstream is required to reject, not skip.
+  try {
+    const user = await getPrisma().user.findUnique({ where: { id: decoded.userId }, select: { organizationId: true } });
+    req.organizationId = user?.organizationId;
+  } catch (e) {
+    console.error('[auth] upload-read org lookup error:', e);
+  }
   next();
 }
 

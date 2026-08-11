@@ -7,6 +7,7 @@ import { hasFeatureAccess } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest, signGuestToken } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
 import { kickRevokedGuestSocket } from '../socket/roomHandler';
+import { findRoomInOrg } from '../lib/orgScope';
 
 const guestInvite = Router();
 
@@ -35,10 +36,14 @@ function generatePassword(length = 8): string {
 // ('guest:manage', shared/permissions.ts), same "resolve the caller's real
 // room role from the DB, never trust the client" pattern as roomMembers.ts's
 // requireRoomAdmin.
-async function requireGuestManage(prisma: ReturnType<typeof getPrisma>, slug: string, userId: string) {
-  const room = await prisma.room.findUnique({ where: { slug } });
+async function requireGuestManage(prisma: ReturnType<typeof getPrisma>, slug: string, userId: string, organizationId: string | undefined) {
+  // Multi-tenant Fase 3 — guestInvite.ts was never touched in Fase 2's route
+  // sweep; a wrong-org slug now reads as "not found" like everywhere else,
+  // instead of letting an admin manage (and read the password of!) another
+  // company's guest links.
+  const room = await findRoomInOrg(prisma, slug, organizationId);
   if (!room) return { error: 404 as const, room: null };
-  const role = await resolveRoomRole(prisma, userId, room.id, room.ownerId);
+  const role = await resolveRoomRole(prisma, userId, room.id, room.ownerId, room.organizationId);
   if (!hasFeatureAccess(role, 'guest:manage')) return { error: 403 as const, room };
   return { error: null, room };
 }
@@ -50,7 +55,7 @@ async function requireGuestManage(prisma: ReturnType<typeof getPrisma>, slug: st
 guestInvite.post('/rooms/:slug/guest-invites', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const { error, room } = await requireGuestManage(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireGuestManage(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Admin role required' });
 
@@ -98,7 +103,7 @@ guestInvite.post('/rooms/:slug/guest-invites', authenticateToken, async (req: Au
 guestInvite.delete('/rooms/:slug/guest-invites/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const { error, room } = await requireGuestManage(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireGuestManage(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Admin role required' });
     const { count } = await prisma.roomInvite.updateMany({ where: { id: req.params.id, roomId: room!.id }, data: { revoked: true } });

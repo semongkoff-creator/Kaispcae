@@ -4,6 +4,7 @@ import { getPrisma } from '../lib/prisma';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
 import { listBotChats } from '../lib/larkIm';
+import { findRoomInOrg } from '../lib/orgScope';
 
 // Bagian 4 — admin mapping API. Lets a room admin bind THIS room to a Lark
 // group the bot is already a member of. Room-admin gated (same bar as
@@ -17,10 +18,10 @@ const router = Router();
 router.get('/rooms/:slug/lark-map', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
-    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (!roleAtLeast(role, 'admin')) {
       return res.status(403).json({ error: 'Only room admins can configure Lark sync' });
     }
@@ -44,10 +45,10 @@ router.get('/rooms/:slug/lark-map', authenticateToken, async (req: AuthRequest, 
 router.put('/rooms/:slug/lark-map', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
-    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (!roleAtLeast(role, 'admin')) {
       return res.status(403).json({ error: 'Only room admins can configure Lark sync' });
     }

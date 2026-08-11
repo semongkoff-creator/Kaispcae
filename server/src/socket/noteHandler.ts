@@ -21,8 +21,21 @@ function toDeskNoteData(n: { id: string; x: number; y: number; authorUserId: str
 export function registerNoteHandlers(io: Server, socket: Socket) {
   let currentRoom: string | null = null;
 
-  socket.on(SocketEvents.JOIN_ROOM, (roomId: string) => {
-    currentRoom = roomId || null;
+  socket.on(SocketEvents.JOIN_ROOM, async (roomId: string) => {
+    const slug = roomId || null;
+    if (!slug) { currentRoom = null; return; }
+    // Multi-tenant Fase 3 — this module registers its own independent
+    // JOIN_ROOM listener (see mediaHandler.ts's comment on why roomHandler.ts
+    // rejecting a cross-org join doesn't stop this one from also running).
+    try {
+      const room = await getPrisma().room.findUnique({ where: { slug }, select: { organizationId: true } });
+      if (!room || room.organizationId !== (socket.data as { organizationId?: string }).organizationId) { currentRoom = null; return; }
+    } catch (e) {
+      console.error('[note] org check failed:', e);
+      currentRoom = null;
+      return;
+    }
+    currentRoom = slug;
   });
 
   socket.on(SocketEvents.NOTE_ADD, async (data: { x: number; y: number; text: string }) => {

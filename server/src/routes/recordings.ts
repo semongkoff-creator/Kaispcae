@@ -7,6 +7,7 @@ import { hasFeatureAccess } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole as resolveRole } from '../lib/roles';
 import { openDownloadStream } from '../lib/larkDrive';
+import { findRoomInOrg } from '../lib/orgScope';
 
 const recordings = Router();
 
@@ -17,10 +18,10 @@ const recordings = Router();
 recordings.get('/rooms/:slug/recordings', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
-    const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     const rows = await prisma.recording.findMany({ where: { roomId: room.id }, orderBy: { startedAt: 'desc' } });
     const visible = hasFeatureAccess(role, 'recording:start')
       ? rows
@@ -50,9 +51,11 @@ recordings.get('/recordings/:id/download', authenticateToken, async (req: AuthRe
     const row = await prisma.recording.findUnique({ where: { id: req.params.id } });
     if (!row) return res.status(404).json({ error: 'Recording not found' });
 
+    // Multi-tenant Fase 3 — looked up by id (not slug), so findRoomInOrg
+    // doesn't apply directly; same fail-closed check inline instead.
     const room = await prisma.room.findUnique({ where: { id: row.roomId } });
-    if (!room) return res.status(404).json({ error: 'Room not found' });
-    const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId);
+    if (!room || room.organizationId !== req.organizationId) return res.status(404).json({ error: 'Room not found' });
+    const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (row.targetUserId !== req.userId && !hasFeatureAccess(role, 'recording:start')) {
       return res.status(403).json({ error: 'Not authorized to download this recording' });
     }

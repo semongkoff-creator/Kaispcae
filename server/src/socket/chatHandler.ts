@@ -14,8 +14,22 @@ const canSendChat = socketRateLimit(5); // max 5 chat messages/sec per socket
 export function registerChatHandlers(io: Server, socket: Socket, playerName: () => string, playerColor: () => string) {
   let currentRoom: string | null = null;
 
-  socket.on(SocketEvents.JOIN_ROOM, (roomId: string) => {
-    currentRoom = roomId || 'main-office';
+  socket.on(SocketEvents.JOIN_ROOM, async (roomId: string) => {
+    const slug = roomId || 'main-office';
+    // Multi-tenant Fase 3 — this module registers its own independent
+    // JOIN_ROOM listener (see mediaHandler.ts's comment on why roomHandler.ts
+    // rejecting a cross-org join doesn't stop this one from also running).
+    // Without this, a rejected socket could still broadcast CHAT_BUBBLE/zone
+    // chat into another company's room by claiming its slug here.
+    try {
+      const room = await getPrisma().room.findUnique({ where: { slug }, select: { organizationId: true } });
+      if (!room || room.organizationId !== (socket.data as { organizationId?: string }).organizationId) { currentRoom = null; return; }
+    } catch (e) {
+      console.error('[chat] org check failed:', e);
+      currentRoom = null;
+      return;
+    }
+    currentRoom = slug;
   });
 
   // Zone-private chat only — the old whole-room broadcast case (no zoneId)

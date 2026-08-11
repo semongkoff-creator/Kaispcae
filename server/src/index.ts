@@ -21,9 +21,10 @@ import { registerFollowHandlers } from './socket/followHandler';
 import { registerMediaHandlers, startMediaExpirySweep } from './socket/mediaHandler';
 import { registerRecordingHandlers } from './socket/recordingHandler';
 import { getRedis } from './store/roomStore';
+import { getPrisma } from './lib/prisma';
 import { loadConfig, getConfig } from './config';
 import { rateLimit } from './middleware/rateLimit';
-import { verifyTokenClaims, verifyGuestTokenClaims, isSessionSuperseded, SESSION_SUPERSEDED, isInviteRevoked, GUEST_LINK_REVOKED } from './middleware/auth';
+import { verifyTokenClaims, verifyGuestTokenClaims, SESSION_SUPERSEDED, isInviteRevoked, GUEST_LINK_REVOKED } from './middleware/auth';
 import { setSessionKickIo } from './lib/sessionKick';
 import authRoutes from './routes/auth';
 import roomRoutes, { setIo } from './routes/rooms';
@@ -160,11 +161,31 @@ io.use(async (socket, next) => {
       // Bug 1 — single active session: reject a socket whose session has been
       // superseded by a newer login, so the old device is disconnected with a
       // clear reason instead of silently receiving live room state.
-      if (await isSessionSuperseded(claims.userId, claims.sessionId)) {
-        return next(new Error(SESSION_SUPERSEDED));
+      //
+      // Multi-tenant Fase 3 — combined with Fase 2's organizationId
+      // resolution into the SAME query (same reasoning as authenticateToken's
+      // REST equivalent, see middleware/auth.ts) so every socket carries its
+      // owner's org for the lifetime of the connection — JOIN_ROOM and every
+      // other handler below reads socket.data.organizationId instead of
+      // re-querying per event. Inlined here rather than reusing the exported
+      // isSessionSuperseded() so this stays one query; that helper is left
+      // alone for whatever else still calls it. Same fail-OPEN posture on a
+      // transient DB error (a blip must not log everyone out) — organizationId
+      // just stays undefined in that case, and every org-scoped check below
+      // is required to treat that as "reject", not "skip the check".
+      let organizationId: string | undefined;
+      try {
+        const user = await getPrisma().user.findUnique({ where: { id: claims.userId }, select: { currentSessionId: true, organizationId: true } });
+        if (user?.currentSessionId && claims.sessionId !== user.currentSessionId) {
+          return next(new Error(SESSION_SUPERSEDED));
+        }
+        organizationId = user?.organizationId;
+      } catch (e) {
+        console.error('[auth] socket session/org lookup error:', e);
       }
       socket.data.userId = claims.userId;
       socket.data.sessionId = claims.sessionId;
+      socket.data.organizationId = organizationId;
     }
   }
   next();

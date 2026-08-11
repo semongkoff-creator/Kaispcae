@@ -1,4 +1,5 @@
 import { Server, Socket } from 'socket.io';
+import { getPrisma } from '../lib/prisma';
 import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointInImpassableArea, RoomTile, JumpEvent, NudgeEvent, PlayerMovePayload, PlayerMovedPayload, PlayerStoppedPayload } from '@virtualmeet/shared';
 import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas, getCachedDoorAreaRects, getCachedZones, getCachedPlayers } from '../store/roomStore';
 import { isDoorUnlocked, isDoorAreaUnlocked, clearUnlockedDoors } from './doorLock';
@@ -134,8 +135,26 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
   // pattern zoneHandler.ts/roomHandler.ts already use for the exact same
   // reason, instead of ever guessing from socket.rooms again.
   let currentRoom: string | null = null;
-  socket.on(SocketEvents.JOIN_ROOM, (roomId: string) => {
-    currentRoom = roomId || null;
+  socket.on(SocketEvents.JOIN_ROOM, async (roomId: string) => {
+    const slug = roomId || null;
+    if (!slug) { currentRoom = null; return; }
+    // Multi-tenant Fase 3 — this module (like ~10 others) registers its own
+    // independent JOIN_ROOM listener; Socket.IO fires every one of them, so
+    // roomHandler.ts rejecting a cross-org join does NOT stop this one from
+    // also running. Without this check, `currentRoom` would still be set to
+    // a room this socket never actually joined (socket.join never ran), and
+    // PLAYER_MOVE broadcasts via io.to(gameRoom) reach a room regardless of
+    // whether the SENDING socket is a member of it — letting a rejected
+    // cross-org socket inject fake movement into another company's room.
+    try {
+      const room = await getPrisma().room.findUnique({ where: { slug }, select: { organizationId: true } });
+      if (!room || room.organizationId !== (socket.data as { organizationId?: string }).organizationId) { currentRoom = null; return; }
+    } catch (e) {
+      console.error('[movement] org check failed:', e);
+      currentRoom = null;
+      return;
+    }
+    currentRoom = slug;
   });
 
   socket.on(SocketEvents.PLAYER_MOVE, (data: PlayerMovePayload) => {

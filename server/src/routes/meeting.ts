@@ -5,6 +5,7 @@ import { getPrisma } from '../lib/prisma';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { reserveMeeting, getActiveMeetingId, getRecordingUrl } from '../lib/larkVc';
 import { logActivity } from '../lib/larkBase';
+import { findRoomInOrg } from '../lib/orgScope';
 
 // A5 — official (recorded) meetings started from a meeting-type zone, via Lark
 // VC. Separate from proximity WebRTC. Recording arrives asynchronously (Lark
@@ -20,6 +21,14 @@ meeting.post('/meeting/start', authenticateToken, async (req: AuthRequest, res: 
   const { roomId, zoneId } = req.body ?? {};
   if (!roomId || !zoneId) return res.status(400).json({ error: 'roomId & zoneId wajib.' });
   const prisma = getPrisma();
+  // Multi-tenant Fase 3 — roomId here is actually the room SLUG (see
+  // App.tsx's <MeetingControl roomId={roomSlug} .../>). Without this check
+  // a caller could start a "meeting" tied to another org's room slug and
+  // broadcast MEETING_STARTED into that Socket.IO room (io.to(roomId)
+  // reaches it regardless of whether the SENDER ever joined it).
+  if (!(await findRoomInOrg(prisma, roomId, req.organizationId))) {
+    return res.status(404).json({ error: 'Room tidak ditemukan.' });
+  }
   const user = await prisma.user.findUnique({ where: { id: req.userId }, select: { larkOpenId: true } });
   if (!user?.larkOpenId) return res.status(400).json({ error: 'Hanya akun yang login lewat Lark yang bisa memulai meeting Lark VC.' });
 
@@ -53,6 +62,15 @@ meeting.post('/meeting/end', authenticateToken, async (req: AuthRequest, res: Re
   const prisma = getPrisma();
   const rec = await prisma.momRecord.findUnique({ where: { id: momRecordId } });
   if (!rec) return res.status(404).json({ error: 'Meeting tidak ditemukan.' });
+  // Multi-tenant Fase 3 — MomRecord.roomId is a plain string (the room
+  // slug), not a Prisma relation (see admin.ts's backup-export comment on
+  // why), so this needs its own lookup rather than a nested where. Checked
+  // BEFORE the startedBy/accountRole branch below — without it, a global
+  // accountRole==='admin' (not org-scoped) could end another company's
+  // meeting.
+  if (!(await findRoomInOrg(prisma, rec.roomId, req.organizationId))) {
+    return res.status(404).json({ error: 'Meeting tidak ditemukan.' });
+  }
   if (rec.endTime) return res.json({ ok: true, alreadyEnded: true });
 
   if (rec.startedBy !== req.userId) {
@@ -78,6 +96,12 @@ meeting.get('/meeting/history', authenticateToken, async (req: AuthRequest, res:
   const roomId = String(req.query.roomId ?? '');
   if (!roomId) return res.json({ meetings: [] });
   const prisma = getPrisma();
+  // Multi-tenant Fase 3 — same treatment as /meeting/start above; without
+  // this, meeting summaries/action items from another company's room were
+  // readable just by supplying their room slug.
+  if (!(await findRoomInOrg(prisma, roomId, req.organizationId))) {
+    return res.json({ meetings: [] });
+  }
   const meetings = await prisma.momRecord.findMany({
     where: { roomId }, orderBy: { startTime: 'desc' }, take: 50,
   });

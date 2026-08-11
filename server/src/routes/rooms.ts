@@ -162,7 +162,7 @@ rooms.patch('/rooms/:slug/cover', authenticateToken, async (req: AuthRequest, re
     const prisma = getPrisma();
     const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (!hasFeatureAccess(role, 'room:update')) {
       return res.status(403).json({ error: 'Admin role required to change the cover' });
     }
@@ -185,7 +185,7 @@ rooms.get('/rooms/:slug/editor-data', authenticateToken, async (req: AuthRequest
     const prisma = getPrisma();
     const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (!hasFeatureAccess(role, 'room:update')) {
       return res.status(403).json({ error: 'Admin role required to edit this room' });
     }
@@ -221,7 +221,7 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
     const prisma = getPrisma();
     const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (!hasFeatureAccess(role, 'room:update')) {
       return res.status(403).json({ error: 'Admin role required to edit this room' });
     }
@@ -463,7 +463,7 @@ rooms.get('/rooms/:slug/editor/media', authenticateToken, async (req: AuthReques
     const prisma = getPrisma();
     const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (!hasFeatureAccess(role, 'room:update')) return res.status(403).json({ error: 'Admin required' });
     const rows = await prisma.mapMediaObject.findMany({ where: { roomId: room.id } });
     return res.json({ mediaObjects: rows.map(mediaShape) });
@@ -475,7 +475,7 @@ rooms.post('/rooms/:slug/editor/media', authenticateToken, async (req: AuthReque
     const prisma = getPrisma();
     const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (!hasFeatureAccess(role, 'room:update')) return res.status(403).json({ error: 'Admin required' });
     const { type, x, y, payload } = req.body ?? {};
     if (!EDITOR_MEDIA_TYPES.includes(type) || !Number.isInteger(x) || !Number.isInteger(y)) return res.status(400).json({ error: 'Bad media data' });
@@ -499,7 +499,7 @@ rooms.delete('/rooms/:slug/editor/media/:id', authenticateToken, async (req: Aut
     const prisma = getPrisma();
     const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (!hasFeatureAccess(role, 'room:update')) return res.status(403).json({ error: 'Admin required' });
     const row = await prisma.mapMediaObject.findFirst({ where: { id: req.params.id, roomId: room.id } });
     if (!row) return res.json({ ok: true });
@@ -558,7 +558,7 @@ rooms.post('/rooms/:slug/soundboard', authenticateToken, soundboardUpload.single
       fs.unlink(req.file.path, () => {});
       return res.status(403).json({ error: 'Not a member of this room' });
     }
-    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (!hasFeatureAccess(role, 'soundboard:upload')) {
       fs.unlink(req.file.path, () => {});
       return res.status(403).json({ error: 'Hanya admin yang bisa menambah suara custom.' });
@@ -604,7 +604,7 @@ rooms.delete('/rooms/:slug/soundboard/:soundId', authenticateToken, async (req: 
     const prisma = getPrisma();
     const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
     if (!hasFeatureAccess(role, 'soundboard:upload')) {
       return res.status(403).json({ error: 'Hanya admin yang bisa menghapus suara custom.' });
     }

@@ -12,16 +12,20 @@ import { Role } from '@virtualmeet/shared';
 // synchronous, per-socket-connection cache for the hot movement/action path
 // and elevates global admins into that cache directly at JOIN_ROOM instead
 // (see its own comment).
-export async function resolveRoomRole(prisma: PrismaClient, userId: string, roomId: string, ownerId: string): Promise<Role> {
+export async function resolveRoomRole(prisma: PrismaClient, userId: string, roomId: string, ownerId: string, roomOrganizationId: string | undefined): Promise<Role> {
   if (userId === ownerId) return 'owner';
 
   const [user, member] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { accountRole: true, larkOpenId: true, workspaceRole: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { accountRole: true, larkOpenId: true, workspaceRole: true, organizationId: true } }),
     prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId } } }),
   ]);
 
   if (member?.role === 'admin') return 'admin';
-  if (user?.accountRole === 'admin') return 'admin';
+  // Multi-tenant Fase 3 — accountRole is a single global flag with no org
+  // dimension of its own; without this check a workspace admin from ANY
+  // org would auto-elevate to room-admin in EVERY room, including another
+  // company's, with zero RoomMember grant needed.
+  if (user?.accountRole === 'admin' && user.organizationId === roomOrganizationId) return 'admin';
   if (member?.role === 'staff') return 'staff';
   // Self-registered (non-Lark) account nobody has promoted — POST
   // /auth/register is public, unlike Lark OAuth which requires actually

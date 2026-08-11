@@ -79,13 +79,23 @@ export function registerMediaHandlers(io: Server, socket: Socket): void {
   socket.on(SocketEvents.JOIN_ROOM, async (roomId: string, _playerName?: string, _avatarConfig?: unknown, userId?: string) => {
     const room = roomId || 'main-office';
     const uid = (socket.data as { userId?: string }).userId || userId || socket.id;
-    socketToUid.set(socket.id, uid);
-    socketToRoom.set(socket.id, room);
 
     try {
       const prisma = getPrisma();
       const dbRoom = await prisma.room.findUnique({ where: { slug: room } });
-      if (!dbRoom) return;
+      // Multi-tenant Fase 3 — this module registers its OWN independent
+      // JOIN_ROOM listener (Socket.IO fires every listener for an event;
+      // roomHandler.ts's own org check rejecting and returning does NOT stop
+      // the other ~10 modules' listeners from also running) — so the same
+      // check has to be repeated here, not just once centrally. socketToRoom/
+      // socketToUid are deliberately only set AFTER this passes — every
+      // action handler below trusts those maps as "the room this socket is
+      // legitimately in", so a rejected cross-org join must never populate
+      // them (a rejected roomHandler.ts join stops socket.join from ever
+      // happening, but that alone doesn't stop THIS module's own state).
+      if (!dbRoom || dbRoom.organizationId !== (socket.data as { organizationId?: string }).organizationId) return;
+      socketToUid.set(socket.id, uid);
+      socketToRoom.set(socket.id, room);
       const rows = await prisma.mapMediaObject.findMany({ where: { roomId: dbRoom.id } });
       socket.emit(SocketEvents.MEDIA_LIST, { mediaObjects: rows.map(toClientShape) });
     } catch (e) {

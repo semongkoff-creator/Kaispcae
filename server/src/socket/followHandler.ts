@@ -5,6 +5,7 @@ import { Server, Socket } from 'socket.io';
 import { SocketEvents, FollowInfo, CONSENT_REQUEST_TIMEOUT_MS, FollowRespondPayload } from '@virtualmeet/shared';
 import { getPlayerName } from './roomHandler';
 import { getPlayers } from '../store/roomStore';
+import { getPrisma } from '../lib/prisma';
 
 // Follow (spec §3) — auto-move a follower's avatar to trail a target
 // player. The actual per-frame trailing movement is entirely client-side
@@ -93,9 +94,21 @@ function sendFollowInfo(io: Server, followerUid: string, rec: FollowRecord | nul
 }
 
 export function registerFollowHandlers(io: Server, socket: Socket): void {
-  socket.on(SocketEvents.JOIN_ROOM, (roomId: string, _playerName?: string, _avatarConfig?: unknown, userId?: string) => {
+  socket.on(SocketEvents.JOIN_ROOM, async (roomId: string, _playerName?: string, _avatarConfig?: unknown, userId?: string) => {
     const room = roomId || 'main-office';
     const uid = (socket.data as { userId?: string }).userId || userId || socket.id;
+    // Multi-tenant Fase 3 — this module registers its own independent
+    // JOIN_ROOM listener (see mediaHandler.ts's comment on why roomHandler.ts
+    // rejecting a cross-org join doesn't stop this one from also running).
+    // uidToSocket/socketToUid/socketToRoom deliberately only populate AFTER
+    // this passes — every FOLLOW_* handler below trusts them.
+    try {
+      const dbRoom = await getPrisma().room.findUnique({ where: { slug: room }, select: { organizationId: true } });
+      if (!dbRoom || dbRoom.organizationId !== (socket.data as { organizationId?: string }).organizationId) return;
+    } catch (e) {
+      console.error('[follow] org check failed:', e);
+      return;
+    }
     uidToSocket.set(uid, socket.id);
     socketToUid.set(socket.id, uid);
     socketToRoom.set(socket.id, room);
