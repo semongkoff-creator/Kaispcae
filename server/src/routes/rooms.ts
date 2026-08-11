@@ -6,6 +6,7 @@ import { getPrisma } from '../lib/prisma';
 import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess, LayerData, layerDataToLegacy, findSpawnPixel, TILE_SIZE, MediaType, MediaPayload, SoundboardSoundData, SOUNDBOARD_MAX_DURATION_MS, SOUNDBOARD_MAX_FILE_BYTES, AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
+import { findRoomInOrg } from '../lib/orgScope';
 import { canEnterRoom } from '../lib/roomMembership';
 import { convertLegacyRoom } from '../lib/convertLegacyRoom';
 import { isValidMediaPayload, isUploadUrl } from '../socket/mediaHandler';
@@ -159,7 +160,7 @@ rooms.patch('/rooms/:slug/cover', authenticateToken, async (req: AuthRequest, re
       return res.status(400).json({ error: 'coverImage tidak valid' });
     }
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
     if (!hasFeatureAccess(role, 'room:update')) {
@@ -182,7 +183,7 @@ rooms.patch('/rooms/:slug/cover', authenticateToken, async (req: AuthRequest, re
 rooms.get('/rooms/:slug/editor-data', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
     if (!hasFeatureAccess(role, 'room:update')) {
@@ -218,7 +219,7 @@ rooms.get('/rooms/:slug/editor-data', authenticateToken, async (req: AuthRequest
 rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
     if (!hasFeatureAccess(role, 'room:update')) {
@@ -460,7 +461,7 @@ const EDITOR_MEDIA_TYPES: MediaType[] = ['image', 'youtube', 'website', 'bgm'];
 rooms.get('/rooms/:slug/editor/media', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
     if (!hasFeatureAccess(role, 'room:update')) return res.status(403).json({ error: 'Admin required' });
@@ -472,7 +473,7 @@ rooms.get('/rooms/:slug/editor/media', authenticateToken, async (req: AuthReques
 rooms.post('/rooms/:slug/editor/media', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
     if (!hasFeatureAccess(role, 'room:update')) return res.status(403).json({ error: 'Admin required' });
@@ -496,7 +497,7 @@ rooms.post('/rooms/:slug/editor/media', authenticateToken, async (req: AuthReque
 rooms.delete('/rooms/:slug/editor/media/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
     if (!hasFeatureAccess(role, 'room:update')) return res.status(403).json({ error: 'Admin required' });
@@ -539,7 +540,7 @@ const soundboardUpload = multer({
 rooms.get('/rooms/:slug/soundboard', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     if (!(await canEnterRoom(prisma, room, req.userId!))) return res.status(403).json({ error: 'Not a member of this room' });
     const rows = await prisma.soundboardSound.findMany({ where: { roomId: room.id }, orderBy: { createdAt: 'asc' } });
@@ -551,7 +552,7 @@ rooms.post('/rooms/:slug/soundboard', authenticateToken, soundboardUpload.single
   try {
     if (!req.file) return res.status(400).json({ error: 'File tidak valid — hanya mp3/ogg/wav, maksimal beberapa ratus KB.' });
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) { fs.unlink(req.file.path, () => {}); return res.status(404).json({ error: 'Room not found' }); }
     if (!(await canEnterRoom(prisma, room, req.userId!))) {
       fs.unlink(req.file.path, () => {});
@@ -601,7 +602,7 @@ rooms.post('/rooms/:slug/soundboard', authenticateToken, soundboardUpload.single
 rooms.delete('/rooms/:slug/soundboard/:soundId', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId);
     if (!hasFeatureAccess(role, 'soundboard:upload')) {
@@ -723,7 +724,7 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
 rooms.delete('/rooms/:slug', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
