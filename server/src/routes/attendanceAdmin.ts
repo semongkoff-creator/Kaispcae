@@ -5,6 +5,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { requireWorkspace, resolveWorkspaceRole } from '../lib/workspace';
 import { writeAudit, clientIp } from '../lib/audit';
 import { rateLimit } from '../middleware/rateLimit';
+import { findUserInOrg } from '../lib/orgScope';
 
 const aa = Router();
 const mutationLimit = rateLimit(60 * 1000, 30);
@@ -71,12 +72,20 @@ aa.patch('/admin/attendance/shifts/:id', authenticateToken, requireWorkspace('at
 });
 
 aa.post('/admin/attendance/assignments', authenticateToken, requireWorkspace('attendance:manageShifts'), mutationLimit, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const userId = String(req.body?.userId ?? '');
     const shiftId = String(req.body?.shiftId ?? '');
     const from = req.body?.effectiveFrom ? new Date(String(req.body.effectiveFrom)) : new Date();
     if (!userId || !shiftId) return res.status(400).json({ error: 'userId dan shiftId wajib' });
+    // Multi-tenant Fase 2 — Shift itself has no organizationId yet (tracked
+    // separately, same class of gap as Department/WorkspacePolicy/LeaveType/
+    // Holiday), but the PERSON being assigned one does — an admin must not
+    // be able to assign a shift to a stranger-org account.
+    if (!(await findUserInOrg(prisma, userId, req.organizationId, { id: true }))) {
+      return res.status(404).json({ error: 'Pengguna tidak ditemukan' });
+    }
     const a = await prisma.shiftAssignment.create({
       data: { userId, shiftId, effectiveFrom: from, effectiveTo: req.body?.effectiveTo ? new Date(String(req.body.effectiveTo)) : null },
     });
@@ -88,10 +97,17 @@ aa.post('/admin/attendance/assignments', authenticateToken, requireWorkspace('at
 // ─── Admin edit of a record — reason REQUIRED (criterion #32) ────────
 
 aa.patch('/admin/attendance/records/:id', authenticateToken, requireWorkspace('attendance:editRecord'), mutationLimit, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
-    const before = await prisma.attendanceRecord.findUnique({ where: { id: req.params.id } });
-    if (!before) return res.status(404).json({ error: 'Record tidak ditemukan' });
+    // Multi-tenant Fase 2 — AttendanceRecord has no organizationId of its
+    // own, but userId is a real relation to User (which does); a wrong-org
+    // record reads as "not found", same as every other cross-org lookup.
+    const before = await prisma.attendanceRecord.findUnique({
+      where: { id: req.params.id },
+      include: { user: { select: { organizationId: true } } },
+    });
+    if (!before || before.user.organizationId !== req.organizationId) return res.status(404).json({ error: 'Record tidak ditemukan' });
 
     // No reason, no edit. A silent attendance edit is exactly what C5 forbids.
     const reason = String(req.body?.reason ?? '').trim();
@@ -175,6 +191,7 @@ aa.post('/admin/attendance/holidays', authenticateToken, requireWorkspace('atten
 // ─── Leave requests ─────────────────────────────────────────────────
 
 aa.post('/attendance/leaves', authenticateToken, mutationLimit, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const typeId = String(req.body?.typeId ?? '');
@@ -209,7 +226,10 @@ aa.post('/attendance/leaves', authenticateToken, mutationLimit, async (req: Auth
     });
     const me = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true, managerId: true } });
     if (type.requiresApproval) {
-      const approvers = me?.managerId ? [me.managerId] : (await prisma.user.findMany({ where: { workspaceRole: 'admin', active: true }, select: { id: true } })).map((u) => u.id);
+      // Multi-tenant Fase 2 — fallback approver fan-out was workspace-wide
+      // with no org filter, so a leave request could page another
+      // company's admins.
+      const approvers = me?.managerId ? [me.managerId] : (await prisma.user.findMany({ where: { workspaceRole: 'admin', active: true, organizationId: req.organizationId }, select: { id: true } })).map((u) => u.id);
       for (const a of approvers) {
         await prisma.notification.create({ data: { recipientId: a, kind: 'workspace', body: `${me?.displayName ?? 'Seseorang'} mengajukan ${type.name}.` } });
       }
@@ -238,8 +258,11 @@ aa.get('/attendance/leaves', authenticateToken, async (req: AuthRequest, res: Re
       return res.json({ leaves, quota });
     }
     // Approver view: your reports, or everyone if admin.
+    // Multi-tenant Fase 2 — the admin branch used to be `{}` (no filter at
+    // all), returning every leave request company-wide regardless of org.
+    if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
     const role = await resolveWorkspaceRole(prisma, req.userId!);
-    const where = role === 'admin' ? {} : { user: { managerId: req.userId! } };
+    const where = role === 'admin' ? { user: { organizationId: req.organizationId } } : { user: { managerId: req.userId! } };
     if (role !== 'admin') {
       const reports = await prisma.user.count({ where: { managerId: req.userId! } });
       if (!reports) return res.status(403).json({ error: 'Tidak ada pengajuan yang perlu kamu setujui' });
@@ -261,10 +284,19 @@ async function canApprove(prisma: ReturnType<typeof getPrisma>, approverId: stri
 }
 
 aa.post('/attendance/leaves/:id/decide', authenticateToken, mutationLimit, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
-    const leave = await prisma.leave.findUnique({ where: { id: req.params.id }, include: { type: true } });
-    if (!leave) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
+    // Multi-tenant Fase 2 — Leave has no organizationId of its own, but
+    // userId is a real relation to User (which does); a wrong-org leave
+    // reads as "not found". (WorkspaceRole itself isn't org-scoped yet —
+    // that's Fase 3 — but this at least stops an admin from touching a
+    // stranger-org leave regardless of how they got gated in.)
+    const leave = await prisma.leave.findUnique({
+      where: { id: req.params.id },
+      include: { type: true, user: { select: { organizationId: true } } },
+    });
+    if (!leave || leave.user.organizationId !== req.organizationId) return res.status(404).json({ error: 'Pengajuan tidak ditemukan' });
     if (leave.userId === req.userId) return res.status(403).json({ error: 'Tidak boleh menyetujui pengajuanmu sendiri' });
     if (!(await canApprove(prisma, req.userId!, leave.userId))) return res.status(403).json({ error: 'Kamu bukan approver untuk orang ini' });
     const status = req.body?.status === 'approved' ? 'approved' : req.body?.status === 'rejected' ? 'rejected' : null;
@@ -286,10 +318,16 @@ aa.post('/attendance/leaves/:id/decide', authenticateToken, mutationLimit, async
 });
 
 aa.post('/attendance/corrections/:id/decide', authenticateToken, mutationLimit, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
-    const c = await prisma.correction.findUnique({ where: { id: req.params.id }, include: { record: true } });
-    if (!c) return res.status(404).json({ error: 'Koreksi tidak ditemukan' });
+    // Multi-tenant Fase 2 — same treatment as the leave decide route above:
+    // Correction has no organizationId of its own, but userId does via User.
+    const c = await prisma.correction.findUnique({
+      where: { id: req.params.id },
+      include: { record: true, user: { select: { organizationId: true } } },
+    });
+    if (!c || c.user.organizationId !== req.organizationId) return res.status(404).json({ error: 'Koreksi tidak ditemukan' });
     if (c.userId === req.userId) return res.status(403).json({ error: 'Tidak boleh menyetujui koreksimu sendiri' });
     if (!(await canApprove(prisma, req.userId!, c.userId))) return res.status(403).json({ error: 'Kamu bukan approver untuk orang ini' });
     const status = req.body?.status === 'approved' ? 'approved' : 'rejected';
@@ -327,14 +365,17 @@ aa.post('/attendance/corrections/:id/decide', authenticateToken, mutationLimit, 
 // ─── Admin report ───────────────────────────────────────────────────
 
 aa.get('/admin/attendance/report', authenticateToken, requireWorkspace('attendance:exportReports'), async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const from = new Date(String(req.query.from ?? new Date(Date.now() - 30 * 86400000).toISOString()));
     const to = new Date(String(req.query.to ?? new Date().toISOString()));
     const departmentId = req.query.departmentId ? String(req.query.departmentId) : undefined;
 
+    // Multi-tenant Fase 2 — used to have no org filter, so an export could
+    // pull every company's attendance rows into one report.
     const rows = await prisma.attendanceRecord.findMany({
-      where: { date: { gte: from, lte: to }, user: departmentId ? { departmentId } : undefined },
+      where: { date: { gte: from, lte: to }, user: { organizationId: req.organizationId, ...(departmentId ? { departmentId } : {}) } },
       include: { user: { select: { id: true, displayName: true, department: { select: { name: true } } } } },
       orderBy: [{ date: 'desc' }],
       take: 5000,

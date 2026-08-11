@@ -8,6 +8,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveWorkspaceRole } from '../lib/workspace';
 import { writeAudit, clientIp } from '../lib/audit';
 import { rateLimit } from '../middleware/rateLimit';
+import { findUserInOrg } from '../lib/orgScope';
 
 const attendance = Router();
 const clockLimit = rateLimit(60 * 1000, 10);
@@ -186,9 +187,11 @@ attendance.get('/attendance/records', authenticateToken, async (req: AuthRequest
     // Peer-to-peer reads are refused: only yourself, your reports, or an admin
     // (criterion #31).
     if (targetId !== req.userId) {
+      // Multi-tenant Fase 2 — targetId is client-supplied; findUserInOrg
+      // treats a stranger-org id the same as "doesn't exist".
       const [viewerRole, target] = await Promise.all([
         resolveWorkspaceRole(prisma, req.userId!),
-        prisma.user.findUnique({ where: { id: targetId }, select: { id: true, managerId: true } }),
+        findUserInOrg(prisma, targetId, req.organizationId, { id: true, managerId: true }),
       ]);
       if (!target) return res.status(404).json({ error: 'Pengguna tidak ditemukan' });
       if (!canViewAttendanceOf({ id: req.userId!, workspaceRole: viewerRole ?? 'member' }, target)) {
@@ -230,6 +233,7 @@ attendance.patch('/attendance/records/:id', authenticateToken, async (_req: Auth
 // ─── Corrections ────────────────────────────────────────────────────
 
 attendance.post('/attendance/corrections', attendanceRetired, authenticateToken, mutationLimit, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const record = await prisma.attendanceRecord.findUnique({ where: { id: String(req.body?.recordId ?? '') } });
@@ -246,7 +250,10 @@ attendance.post('/attendance/corrections', attendanceRetired, authenticateToken,
       },
     });
     const me = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true, managerId: true } });
-    const approvers = me?.managerId ? [me.managerId] : (await prisma.user.findMany({ where: { workspaceRole: 'admin', active: true }, select: { id: true } })).map((u) => u.id);
+    // Multi-tenant Fase 2 — fallback approver fan-out was workspace-wide
+    // with no org filter, so a correction request could page another
+    // company's admins.
+    const approvers = me?.managerId ? [me.managerId] : (await prisma.user.findMany({ where: { workspaceRole: 'admin', active: true, organizationId: req.organizationId }, select: { id: true } })).map((u) => u.id);
     for (const a of approvers) {
       await prisma.notification.create({ data: { recipientId: a, kind: 'workspace', body: `${me?.displayName ?? 'Seseorang'} mengajukan koreksi absensi.` } });
     }
@@ -259,9 +266,12 @@ attendance.get('/attendance/corrections', authenticateToken, async (req: AuthReq
     const prisma = getPrisma();
     const mine = req.query.mine !== 'false';
     const role = await resolveWorkspaceRole(prisma, req.userId!);
+    // Multi-tenant Fase 2 — the admin branch used to be `{}`, returning
+    // every correction request company-wide regardless of org.
+    if (!mine && !req.organizationId) return res.status(401).json({ error: 'Authentication required' });
     const where = mine
       ? { userId: req.userId! }
-      : role === 'admin' ? {} : { user: { managerId: req.userId! } };
+      : role === 'admin' ? { user: { organizationId: req.organizationId } } : { user: { managerId: req.userId! } };
     if (!mine && role !== 'admin') {
       const reports = await prisma.user.count({ where: { managerId: req.userId! } });
       if (!reports) return res.status(403).json({ error: 'Tidak ada yang perlu kamu setujui' });
