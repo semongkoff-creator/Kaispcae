@@ -7,6 +7,7 @@ import { resolveWorkspaceRole, requireWorkspace } from '../lib/workspace';
 import { writeAudit, clientIp } from '../lib/audit';
 import { getOnlineUserIds } from '../socket/roomHandler';
 import { canViewAnalyticsOf, applyOvertimeGrace, finalStatus, workDayOf, ShiftDef, layerDataToLegacy, LayerData, ZoneType } from '@virtualmeet/shared';
+import { findUserInOrg } from '../lib/orgScope';
 
 const router = Router();
 
@@ -508,7 +509,7 @@ router.get('/analytics/individual', authenticateToken, async (req: AuthRequest, 
     if (targetUserId !== req.userId) {
       const [role, target] = await Promise.all([
         resolveWorkspaceRole(prisma, req.userId!),
-        prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true, managerId: true } }),
+        findUserInOrg(prisma, targetUserId, req.organizationId, { id: true, managerId: true }),
       ]);
       if (!target || !canViewAnalyticsOf({ id: req.userId!, workspaceRole: role ?? 'member' }, target)) {
         return res.status(403).json({ error: 'Forbidden' });
@@ -560,7 +561,7 @@ router.get('/analytics/individual/timeline', authenticateToken, async (req: Auth
     if (targetUserId !== req.userId) {
       const [role, target] = await Promise.all([
         resolveWorkspaceRole(prisma, req.userId!),
-        prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true, managerId: true } }),
+        findUserInOrg(prisma, targetUserId, req.organizationId, { id: true, managerId: true }),
       ]);
       if (!target || !canViewAnalyticsOf({ id: req.userId!, workspaceRole: role ?? 'member' }, target)) {
         return res.status(403).json({ error: 'Forbidden' });
@@ -665,11 +666,21 @@ router.get('/analytics/team', authenticateToken, async (req: AuthRequest, res: R
 
 // GET /api/analytics/company — Bagian B.3.3, admin/founder only.
 router.get('/analytics/company', authenticateToken, requireWorkspace('analytics:viewAllCompany'), async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const { type, start, end } = parsePeriod(req.query);
+    // Multi-tenant Fase 2 — `users` used to have no org filter at all
+    // ("select every active employee"), the root pool for this entire
+    // endpoint. `departments` stays unfiltered — Department has no
+    // organizationId column yet (blocked, same class of gap as
+    // WorkspacePolicy/Shift/LeaveType/Holiday) — but every number actually
+    // shown per department below is aggregated from `perUser`, which IS
+    // now org-scoped, so a cross-org department name can appear in the list
+    // with zero real data attached (memberCount 0), never someone else's
+    // numbers.
     const [users, departments, policy] = await Promise.all([
-      prisma.user.findMany({ where: { active: true }, select: { id: true, displayName: true, departmentId: true } }),
+      prisma.user.findMany({ where: { active: true, organizationId: req.organizationId }, select: { id: true, displayName: true, departmentId: true } }),
       prisma.department.findMany({ select: { id: true, name: true } }),
       prisma.workspacePolicy.findUnique({ where: { id: 'singleton' } }),
     ]);
@@ -922,6 +933,7 @@ export async function computeRanking(userIds: string[], names: Map<string, strin
 // Individual tier) holds by construction — this endpoint has no
 // self/individual scope at all, only team/company.
 router.get('/analytics/ranking', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const scope: 'team' | 'company' = req.query.scope === 'company' ? 'company' : 'team';
@@ -935,7 +947,9 @@ router.get('/analytics/ranking', authenticateToken, async (req: AuthRequest, res
       // manual check on the Individual endpoint above).
       const role = await resolveWorkspaceRole(prisma, req.userId!);
       if (role !== 'admin') return res.status(403).json({ error: 'Butuh peran admin workspace' });
-      pool = await prisma.user.findMany({ where: { active: true }, select: { id: true, displayName: true } });
+      // Multi-tenant Fase 2 — used to have no org filter, ranking every
+      // active user company-wide regardless of org.
+      pool = await prisma.user.findMany({ where: { active: true, organizationId: req.organizationId }, select: { id: true, displayName: true } });
     } else {
       pool = await prisma.user.findMany({ where: { managerId: req.userId! }, select: { id: true, displayName: true } });
     }
@@ -967,6 +981,7 @@ router.get('/analytics/ranking', authenticateToken, async (req: AuthRequest, res
 // workbook-building logic is what actually differs per tier, not the
 // permission shape (which is copy-identical to the JSON endpoints above).
 router.get('/analytics/export', authenticateToken, async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
     const tierRaw = String(req.query.tier ?? '');
@@ -980,7 +995,7 @@ router.get('/analytics/export', authenticateToken, async (req: AuthRequest, res:
       if (targetUserId !== req.userId) {
         const [role, target] = await Promise.all([
           resolveWorkspaceRole(prisma, req.userId!),
-          prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true, managerId: true } }),
+          findUserInOrg(prisma, targetUserId, req.organizationId, { id: true, managerId: true }),
         ]);
         if (!target || !canViewAnalyticsOf({ id: req.userId!, workspaceRole: role ?? 'member' }, target)) {
           return res.status(403).json({ error: 'Forbidden' });
@@ -991,7 +1006,9 @@ router.get('/analytics/export', authenticateToken, async (req: AuthRequest, res:
     } else {
       const role = await resolveWorkspaceRole(prisma, req.userId!);
       if (role !== 'admin') return res.status(403).json({ error: 'Butuh peran admin workspace' });
-      poolUsers = await prisma.user.findMany({ where: { active: true }, select: { id: true, displayName: true } });
+      // Multi-tenant Fase 2 — used to have no org filter, exporting every
+      // active user company-wide regardless of org.
+      poolUsers = await prisma.user.findMany({ where: { active: true, organizationId: req.organizationId }, select: { id: true, displayName: true } });
     }
 
     // Unconditional, before the file is even built — same "one exporter,
