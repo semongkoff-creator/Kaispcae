@@ -40,6 +40,11 @@ function LarkIcon() {
 interface LoginPageProps {
   onLogin: (email: string, password: string) => Promise<void>;
   onRegister: (email: string, password: string, displayName: string) => Promise<void>;
+  // Self-serve org creation — a third entry point alongside login/register,
+  // NOT a replacement for onRegister: the existing "Sign Up here!" flow
+  // still joins the single default org, unchanged. This one creates a
+  // brand-new org and lands the caller as its founding admin.
+  onCreateOrganization: (orgName: string, email: string, password: string, displayName: string) => Promise<void>;
   error: string | null;
   // Set instead of `error` when auto-login on mount found a token the
   // server actively rejected (expired/invalid/deleted user) — distinct
@@ -49,8 +54,9 @@ interface LoginPageProps {
   onToggleTheme: () => void;
 }
 
-export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, theme, onToggleTheme }: LoginPageProps) {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+export function LoginPage({ onLogin, onRegister, onCreateOrganization, error, sessionExpiredMessage, theme, onToggleTheme }: LoginPageProps) {
+  const [mode, setMode] = useState<'login' | 'register' | 'createOrg'>('login');
+  const [orgName, setOrgName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -79,6 +85,8 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
     try {
       if (mode === 'login') {
         await onLogin(email, password);
+      } else if (mode === 'createOrg') {
+        await onCreateOrganization(orgName, email, password, displayName);
       } else {
         await onRegister(email, password, displayName);
       }
@@ -98,7 +106,7 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
       </button>
       <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 w-full max-w-md shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700">
         <h1 className="text-[28px] leading-tight font-bold text-gray-900 dark:text-white mb-6">
-          {mode === 'login' ? 'Welcome to KaiSpace' : 'Create your KaiSpace account'}
+          {mode === 'login' ? 'Welcome to KaiSpace' : mode === 'createOrg' ? 'Buat organisasi baru' : 'Create your KaiSpace account'}
         </h1>
 
         {sessionExpiredMessage && (
@@ -114,6 +122,17 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {mode === 'createOrg' && (
+            <label className="block">
+              <span className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Nama organisasi</span>
+              <input
+                type="text" value={orgName} onChange={(e) => setOrgName(e.target.value)}
+                placeholder="mis. DCM"
+                maxLength={80} required autoFocus
+                className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2.5 outline-none border border-purple-100 dark:border-gray-600 focus:border-purple-500 transition-colors text-sm"
+              />
+            </label>
+          )}
           <label className="block">
             <span className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Email</span>
             <input
@@ -130,7 +149,7 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
               className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2.5 outline-none border border-purple-100 dark:border-gray-600 focus:border-purple-500 transition-colors text-sm"
             />
           </label>
-          {mode === 'register' && (
+          {(mode === 'register' || mode === 'createOrg') && (
             <label className="block">
               <span className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Display name</span>
               <input
@@ -220,6 +239,34 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
           >
             {mode === 'login' ? 'Sign Up here!' : 'Sign in'}
           </button>
+        </p>
+
+        <p className="text-gray-500 dark:text-gray-400 text-xs text-center mt-2">
+          {mode === 'createOrg' ? (
+            <>
+              Sudah punya akun?{' '}
+              <button
+                type="button"
+                onClick={() => setMode('login')}
+                style={{ color: FIGMA_PURPLE }}
+                className="font-semibold hover:brightness-110 cursor-pointer"
+              >
+                Login di sini
+              </button>
+            </>
+          ) : (
+            <>
+              Mau bikin organisasi sendiri?{' '}
+              <button
+                type="button"
+                onClick={() => setMode('createOrg')}
+                style={{ color: FIGMA_PURPLE }}
+                className="font-semibold hover:brightness-110 cursor-pointer"
+              >
+                Buat di sini
+              </button>
+            </>
+          )}
         </p>
       </div>
     </div>

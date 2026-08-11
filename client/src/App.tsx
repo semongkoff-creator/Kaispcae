@@ -2627,7 +2627,7 @@ function todayKey(): string {
 const STATUS_PICKED_PREFIX = 'vm_status_picked:';
 
 function MainApp() {
-  const { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, logout, markTutorialSeen, updatePreferences } = useAuth();
+  const { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, createOrganization, logout, markTutorialSeen, updatePreferences } = useAuth();
   const { theme, toggleTheme } = useTheme();
   // Settings feature — sync the store's live tooltipsEnabled/notifKinds
   // mirrors from the account's saved preferences as soon as they're known,
@@ -2916,7 +2916,17 @@ function MainApp() {
 
   // Auth gate
   if (!user) {
-    return <LoginPage onLogin={async (e, p) => { await login(e, p); }} onRegister={async (e, p, n) => { await register(e, p, n); }} error={error} sessionExpiredMessage={sessionExpiredMessage} theme={theme} onToggleTheme={toggleTheme} />;
+    return (
+      <LoginPage
+        onLogin={async (e, p) => { await login(e, p); }}
+        onRegister={async (e, p, n) => { await register(e, p, n); }}
+        onCreateOrganization={async (o, e, p, n) => { await createOrganization(o, e, p, n); }}
+        error={error}
+        sessionExpiredMessage={sessionExpiredMessage}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
+    );
   }
 
   // Lobby
