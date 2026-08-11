@@ -110,6 +110,13 @@ export function authenticateUploadRead(req: AuthRequest, res: Response, next: Ne
 
 export interface AuthRequest extends Request {
   userId?: string;
+  // Multi-tenant foundation (Fase 2) — the caller's org, resolved fresh from
+  // the DB by authenticateToken below (never from the token — the token
+  // predates Organization and isn't reissued just to add a claim). Routes
+  // that filter by organizationId MUST treat undefined as "reject", not
+  // "skip the filter" — Prisma silently treats an undefined where-clause
+  // value as "no filter", which would fail OPEN across every org.
+  organizationId?: string;
   // Set by requireWorkspace() (server/src/lib/workspace.ts) after it resolves
   // the role FROM THE DB. Never populated from the token or the body.
   workspaceRole?: 'admin' | 'member';
@@ -167,10 +174,25 @@ export async function authenticateToken(req: AuthRequest, res: Response, next: N
   if (!decoded) {
     return res.status(403).json({ error: 'Invalid or expired token' });
   }
-  if (await isSessionSuperseded(decoded.userId, decoded.sessionId)) {
-    return res.status(401).json({ error: SESSION_SUPERSEDED, message: SESSION_SUPERSEDED_MESSAGE });
+  // Combined with the session-supersede check (Bug 1) into one query — Fase
+  // 2's organizationId rides along for free instead of adding a second DB
+  // round trip to every authenticated request. Same fail-OPEN posture as the
+  // old isSessionSuperseded on a transient DB error (a blip must not log
+  // everyone out) — req.organizationId simply stays undefined in that case,
+  // and org-filtered routes are required to treat that as "reject", not
+  // "skip the filter" (see AuthRequest's comment).
+  let organizationId: string | undefined;
+  try {
+    const user = await getPrisma().user.findUnique({ where: { id: decoded.userId }, select: { currentSessionId: true, organizationId: true } });
+    if (user?.currentSessionId && decoded.sessionId !== user.currentSessionId) {
+      return res.status(401).json({ error: SESSION_SUPERSEDED, message: SESSION_SUPERSEDED_MESSAGE });
+    }
+    organizationId = user?.organizationId;
+  } catch (e) {
+    console.error('[auth] session/org lookup error:', e);
   }
   req.userId = decoded.userId;
+  req.organizationId = organizationId;
   req.tokenExp = decoded.exp;
   req.sessionId = decoded.sessionId;
   next();

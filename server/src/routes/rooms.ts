@@ -59,11 +59,20 @@ function generateSlug(name: string): string {
 }
 
 // GET /api/rooms — list public rooms
-rooms.get('/rooms', async (_req, res: Response) => {
+// Multi-tenant Fase 2 — this used to have NO auth middleware at all and
+// listed every public room across the whole deployment; now requires a
+// valid session and scopes the list to the caller's own org. The client
+// (Lobby.tsx) only ever calls this once logged in and already sends the
+// Bearer token on every request (see services/api.ts's request()), so this
+// doesn't change anything for a real user — it closes an actual gap where
+// an unauthenticated caller (or, once a second org exists, a member of a
+// DIFFERENT org) could list rooms that were never theirs to see.
+rooms.get('/rooms', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
+    if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
     const prisma = getPrisma();
     const roomList = await prisma.room.findMany({
-      where: { isPublic: true },
+      where: { isPublic: true, organizationId: req.organizationId },
       include: {
         owner: { select: { displayName: true } },
       },
@@ -95,8 +104,16 @@ rooms.get('/rooms', async (_req, res: Response) => {
 });
 
 // GET /api/rooms/:slug — get room by slug
-rooms.get('/rooms/:slug', async (req, res: Response) => {
+// Multi-tenant Fase 2 — same treatment as GET /rooms above: was fully
+// unauthenticated, letting anyone enumerate/guess a slug and read another
+// company's room details. `slug` is still globally unique today (composite
+// per-org uniqueness is a separate, later decision — see the schema
+// comment), so the lookup itself is unchanged; the org check happens AFTER
+// the fetch and returns the identical 404 a truly-missing room would, so a
+// wrong-org caller can't tell "doesn't exist" from "exists in another org".
+rooms.get('/rooms/:slug', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
+    if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
     const prisma = getPrisma();
     const room = await prisma.room.findUnique({
       where: { slug: req.params.slug },
@@ -105,7 +122,7 @@ rooms.get('/rooms/:slug', async (req, res: Response) => {
       },
     });
 
-    if (!room) {
+    if (!room || room.organizationId !== req.organizationId) {
       return res.status(404).json({ error: 'Room not found' });
     }
 
