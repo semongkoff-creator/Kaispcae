@@ -204,31 +204,35 @@ export function LoginPage({ onLogin, onRegister, onCreateOrganization, error, se
             which is untouched. A plain full-page navigation (not fetch): the
             server issues a 302 to Lark's consent screen. Google sits beside
             it purely for Figma fidelity — see GOOGLE_LOGIN_ENABLED above. */}
-        <div className="flex items-center gap-2 my-4">
-          <span className="flex-1 h-px bg-purple-100 dark:bg-gray-700" />
-          <span className="text-gray-400 dark:text-gray-500 text-[11px]">OR</span>
-          <span className="flex-1 h-px bg-purple-100 dark:bg-gray-700" />
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <a
-            href={googleEnabled ? '/api/auth/google/login' : undefined}
-            aria-disabled={!googleEnabled}
-            title={googleEnabled ? undefined : 'Segera hadir'}
-            className={`flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] ${
-              googleEnabled
-                ? 'hover:bg-purple-50 dark:hover:bg-gray-600 cursor-pointer'
-                : 'opacity-40 cursor-not-allowed pointer-events-none'
-            }`}
-          >
-            <GoogleIcon /> Login with Google
-          </a>
-          <a
-            href="/api/auth/lark/login"
-            className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-600 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] cursor-pointer"
-          >
-            <LarkIcon /> Login with Lark
-          </a>
-        </div>
+        {mode !== 'createOrg' && (
+          <>
+            <div className="flex items-center gap-2 my-4">
+              <span className="flex-1 h-px bg-purple-100 dark:bg-gray-700" />
+              <span className="text-gray-400 dark:text-gray-500 text-[11px]">OR</span>
+              <span className="flex-1 h-px bg-purple-100 dark:bg-gray-700" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <a
+                href={googleEnabled ? '/api/auth/google/login' : undefined}
+                aria-disabled={!googleEnabled}
+                title={googleEnabled ? undefined : 'Segera hadir'}
+                className={`flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] ${
+                  googleEnabled
+                    ? 'hover:bg-purple-50 dark:hover:bg-gray-600 cursor-pointer'
+                    : 'opacity-40 cursor-not-allowed pointer-events-none'
+                }`}
+              >
+                <GoogleIcon /> Login with Google
+              </a>
+              <a
+                href="/api/auth/lark/login"
+                className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-600 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] cursor-pointer"
+              >
+                <LarkIcon /> Login with Lark
+              </a>
+            </div>
+          </>
+        )}
 
         <p className="text-gray-500 dark:text-gray-400 text-xs text-center mt-5">
           {mode === 'login' ? "Don't have account?" : 'Already have an account?'}{' '}
