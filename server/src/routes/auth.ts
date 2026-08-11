@@ -10,8 +10,23 @@ import { rateLimit } from '../middleware/rateLimit';
 import { ensureCheckedInToday } from '../lib/larkAttendance';
 import { disconnectUserSockets, disconnectUserSocketsSilently } from '../lib/sessionKick';
 import { DEFAULT_ORG_ID } from '../lib/defaultOrg';
+import { googleConfig } from '../lib/googleConfig';
 
 const auth = Router();
+
+// Fase 5 — lets the client know whether to even offer "Login with Google"
+// before anyone is authenticated (LoginPage/JoinOrgInvite both fetch this
+// on mount), without exposing the credentials themselves. Reuses
+// googleConfig() (not a separately-hand-rolled check) so this can never
+// drift out of sync with what routes/google.ts itself actually accepts —
+// the button and the route it points at always agree.
+auth.get('/config', (_req, res) => {
+  const c = getConfig();
+  res.json({
+    larkEnabled: !!(c.LARK_APP_ID && c.LARK_APP_SECRET),
+    googleEnabled: !!googleConfig(),
+  });
+});
 
 
 // Exported so the Lark OAuth route (routes/lark.ts) issues the EXACT same

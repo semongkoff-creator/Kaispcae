@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { SunFill, MoonFill } from 'react-bootstrap-icons';
 import { Theme } from '@/hooks/useTheme';
+import { api } from '@/services/api';
 
 // Figma "kaispace" reference — closest reading off the screenshot (no exact
 // hex was given). The button below hardcodes this same value in a Tailwind
@@ -36,12 +37,6 @@ function LarkIcon() {
   return <img src="/assets/img/lark-logo.png" alt="" width={16} height={16} className="object-contain" />;
 }
 
-// Google OAuth has no server route/config anywhere in this codebase (see
-// server/.env.example — no GOOGLE_CLIENT_ID). Building that is a real
-// backend feature, out of scope for a "styling only, don't touch auth
-// logic" pass — so the button ships visible (Figma fidelity) but inert.
-const GOOGLE_LOGIN_ENABLED = false;
-
 interface LoginPageProps {
   onLogin: (email: string, password: string) => Promise<void>;
   onRegister: (email: string, password: string, displayName: string) => Promise<void>;
@@ -69,6 +64,14 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
   // argument that "you are creating an account" reads oddly during login.
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+
+  // Fase 5 — Google login now has a real backend behind it (routes/google.ts),
+  // gated server-side by GOOGLE_LOGIN_ENABLED. Defaults to hidden so the
+  // button never flashes "enabled" before this resolves.
+  const [googleEnabled, setGoogleEnabled] = useState(false);
+  useEffect(() => {
+    api.getAuthConfig().then((c) => setGoogleEnabled(c.googleEnabled)).catch(() => {});
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -188,14 +191,18 @@ export function LoginPage({ onLogin, onRegister, error, sessionExpiredMessage, t
           <span className="flex-1 h-px bg-purple-100 dark:bg-gray-700" />
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            disabled={!GOOGLE_LOGIN_ENABLED}
-            title={GOOGLE_LOGIN_ENABLED ? undefined : 'Segera hadir'}
-            className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-purple-50 enabled:dark:hover:bg-gray-600 enabled:cursor-pointer"
+          <a
+            href={googleEnabled ? '/api/auth/google/login' : undefined}
+            aria-disabled={!googleEnabled}
+            title={googleEnabled ? undefined : 'Segera hadir'}
+            className={`flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] ${
+              googleEnabled
+                ? 'hover:bg-purple-50 dark:hover:bg-gray-600 cursor-pointer'
+                : 'opacity-40 cursor-not-allowed pointer-events-none'
+            }`}
           >
             <GoogleIcon /> Login with Google
-          </button>
+          </a>
           <a
             href="/api/auth/lark/login"
             className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-600 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] cursor-pointer"

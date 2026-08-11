@@ -9,6 +9,19 @@ function LarkIcon() {
   return <img src="/assets/img/lark-logo.png" alt="" width={16} height={16} className="object-contain" />;
 }
 
+// Same mark as LoginPage.tsx's own GoogleIcon, duplicated for the same
+// reason as LarkIcon above.
+function GoogleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z" />
+      <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z" />
+      <path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.211 35.091 26.715 36 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z" />
+      <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z" />
+    </svg>
+  );
+}
+
 interface JoinOrgInvitePreview {
   organizationName: string;
   email: string;
@@ -35,12 +48,17 @@ export function JoinOrgInvite({ inviteToken, onAccept }: JoinOrgInviteProps) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Same fetched-not-hardcoded gate as LoginPage.tsx's Google button.
+  const [googleEnabled, setGoogleEnabled] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     api.getOrgInvite(inviteToken)
       .then((p) => { if (!cancelled) setPreview(p); })
       .catch((err) => { if (!cancelled) setPreviewError(err instanceof Error ? err.message : 'Undangan tidak valid.'); });
+    api.getAuthConfig()
+      .then((c) => { if (!cancelled) setGoogleEnabled(c.googleEnabled); })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [inviteToken]);
 
@@ -105,12 +123,22 @@ export function JoinOrgInvite({ inviteToken, onAccept }: JoinOrgInviteProps) {
               <span className="text-gray-400 dark:text-gray-500 text-[11px]">OR</span>
               <span className="flex-1 h-px bg-purple-100 dark:bg-gray-700" />
             </div>
-            <a
-              href={`/api/auth/lark/login?orgInvite=${encodeURIComponent(inviteToken)}`}
-              className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-600 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] cursor-pointer"
-            >
-              <LarkIcon /> Lanjut dengan Lark
-            </a>
+            <div className={googleEnabled ? 'grid grid-cols-2 gap-2' : ''}>
+              {googleEnabled && (
+                <a
+                  href={`/api/auth/google/login?orgInvite=${encodeURIComponent(inviteToken)}`}
+                  className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-600 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] cursor-pointer"
+                >
+                  <GoogleIcon /> Lanjut dengan Google
+                </a>
+              )}
+              <a
+                href={`/api/auth/lark/login?orgInvite=${encodeURIComponent(inviteToken)}`}
+                className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-600 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] cursor-pointer"
+              >
+                <LarkIcon /> Lanjut dengan Lark
+              </a>
+            </div>
           </>
         )}
       </div>

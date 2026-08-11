@@ -39,6 +39,34 @@ export function useAuth() {
         }
       }
 
+      // Google OAuth return (Fase 5) — same "/?googleCode=…" single-use-code
+      // shape as Lark above, handled independently since a real redirect
+      // only ever carries one provider's params at a time.
+      const googleCode = params.get('googleCode');
+      const googleError = params.get('googleError');
+      if (googleCode || googleError) {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+      if (googleError) {
+        // 'no-invite' is the multi-tenant-aware rejection (see
+        // routes/google.ts): a Google account with no matching existing
+        // user AND no valid org-invite backing it — deliberately NOT
+        // landed in any default org. Every other reason collapses to a
+        // generic message.
+        setError(
+          googleError === 'no-invite'
+            ? 'Akun Google ini belum terdaftar di organisasi mana pun. Minta admin mengirim undangan terlebih dahulu.'
+            : 'Login Google gagal. Silakan coba lagi.',
+        );
+      } else if (googleCode) {
+        try {
+          const { token } = await api.exchangeGoogleCode(googleCode);
+          localStorage.setItem('vm_token', token);
+        } catch {
+          setError('Login Google gagal menukar kode. Silakan coba lagi.');
+        }
+      }
+
       const token = localStorage.getItem('vm_token');
       if (!token) {
         setLoading(false);

@@ -301,6 +301,15 @@ export const api = {
   exchangeLarkCode: (code: string) =>
     request<{ token: string }>('/auth/lark/exchange', { method: 'POST', body: JSON.stringify({ code }) }),
 
+  // Google OAuth (Fase 5) — same single-use-code exchange as Lark above.
+  exchangeGoogleCode: (code: string) =>
+    request<{ token: string }>('/auth/google/exchange', { method: 'POST', body: JSON.stringify({ code }) }),
+
+  // Public, unauthenticated — read before anyone is logged in (LoginPage,
+  // JoinOrgInvite) to decide whether the Google button should even render.
+  // Never carries credentials, only booleans.
+  getAuthConfig: () => request<{ larkEnabled: boolean; googleEnabled: boolean }>('/auth/config'),
+
   // Clears the HttpOnly upload-session cookie server-side — JS can't touch it
   // itself. Not routed through request(): the server answers 204 with no
   // body, which res.json() would choke on. The token, if still available

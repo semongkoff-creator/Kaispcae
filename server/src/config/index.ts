@@ -74,6 +74,16 @@ const envSchema = z
     // clearly otherwise rather than crashing. Never sent to the client.
     N8N_CS_WEBHOOK_URL: z.string().optional(),
     CS_N8N_TOKEN: z.string().optional(),
+    // Google OAuth (Cloud Console) — Basic login only (email + profile),
+    // see routes/google.ts. GOOGLE_LOGIN_ENABLED is a SEPARATE explicit
+    // gate from the credentials themselves (checked as the literal string
+    // 'true', not z.coerce.boolean() — that coercion treats the string
+    // "false" as truthy, since Boolean("false") is true) so the button's
+    // visibility can be toggled off without touching/removing credentials.
+    GOOGLE_CLIENT_ID: z.string().optional(),
+    GOOGLE_CLIENT_SECRET: z.string().optional(),
+    GOOGLE_REDIRECT_URI: z.string().optional(),
+    GOOGLE_LOGIN_ENABLED: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     // The default JWT secret is a well-known literal — anyone can forge valid

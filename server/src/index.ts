@@ -42,6 +42,7 @@ import calendarRoutes, { setCalendarIo } from './routes/calendar';
 import meetingRoomRoutes from './routes/meetingRooms';
 import userRoutes, { setUsersIo } from './routes/users';
 import larkRoutes from './routes/lark';
+import googleRoutes from './routes/google';
 import attendanceLarkRoutes from './routes/attendanceLark';
 import meetingRoutes, { setMeetingIo, startRecordingPoller } from './routes/meeting';
 import larkChatMapRoutes from './routes/larkChatMap';
@@ -248,6 +249,7 @@ app.use('/api', userRoutes);
 // Mounted at /api → routes resolve to /api/auth/lark/* (see nginx audit: only
 // /api/ is proxied to the backend).
 app.use('/api', larkRoutes);
+app.use('/api', googleRoutes);
 app.use('/api', attendanceLarkRoutes);
 app.use('/api', larkChatMapRoutes);
 app.use('/api', taskRoutes);
