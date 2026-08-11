@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ThreeDotsVertical, Check, MicFill, VolumeUpFill, CameraVideoFill } from 'react-bootstrap-icons';
 import { webrtcService } from '@/services/webrtcService';
+import { Tooltip } from '@/components/ui/Tooltip';
 
 // Device picker (mic/speaker/camera) — the same affordance Zoom/Meet/Zep
 // use, now behind a single ⋮ trigger instead of two separate carets next to
@@ -75,13 +76,17 @@ export function DeviceMenu() {
     // Now a standalone toolbar control (was a small sub-caret glued to
     // Mic/Camera) — sized to match the other 44px main buttons.
     <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center justify-center w-11 h-11 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 transition-all hover:scale-105 cursor-pointer text-purple-700 dark:text-purple-300"
-        title="Pilih mikrofon / speaker / kamera"
+      <Tooltip
+        label="Pilih Perangkat"
+        detail="Pilih mikrofon, speaker, atau kamera yang ingin dipakai, tanpa perlu mematikan mic/kamera dulu."
       >
-        <ThreeDotsVertical size={18} />
-      </button>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center justify-center w-11 h-11 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 transition-all hover:scale-105 cursor-pointer text-purple-700 dark:text-purple-300"
+        >
+          <ThreeDotsVertical size={18} />
+        </button>
+      </Tooltip>
 
       {open && (
         // bottom-full (not a fixed pixel offset) anchors off this button's

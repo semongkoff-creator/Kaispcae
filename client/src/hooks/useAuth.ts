@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { api, ApiError, UserProfile } from '@/services/api';
+import { api, ApiError, UserProfile, UserPreferences } from '@/services/api';
 
 // Statuses that mean "the server actively rejected this token" (bad
 // signature, expired, or the user id it points to no longer exists) as
@@ -118,6 +118,16 @@ export function useAuth() {
     api.markTutorialCompleted().catch(() => {});
   }, []);
 
+  // Settings feature — same optimistic-update pattern as markTutorialSeen
+  // above: local state updates immediately so a toggle feels instant, then
+  // persists server-side (NOT localStorage, per the cross-device requirement)
+  // fire-and-forget. Shallow-merged locally to mirror the server's own
+  // shallow-merge in PATCH /users/me/preferences.
+  const updatePreferences = useCallback((patch: UserPreferences) => {
+    setUser((prev) => (prev ? { ...prev, preferences: { ...prev.preferences, ...patch } } : prev));
+    api.updatePreferences(patch).catch(() => {});
+  }, []);
+
   const logout = useCallback(() => {
     // Captured BEFORE removing it — the server needs the outgoing token to
     // know WHICH session to invalidate (see auth.ts's /logout), so it must
@@ -131,5 +141,5 @@ export function useAuth() {
     api.logout(token).catch(() => {});
   }, []);
 
-  return { user, loading, error, sessionExpiredMessage, login, register, logout, setError, markTutorialSeen };
+  return { user, loading, error, sessionExpiredMessage, login, register, logout, setError, markTutorialSeen, updatePreferences };
 }

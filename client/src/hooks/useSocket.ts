@@ -588,7 +588,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       // own rule) and the user has actually turned notifications on.
       // A3 — while in Focus/DND, suppress the disruptive popup; the message is
       // still stored/rendered below, just no real-time notification.
-      if (msg.senderId !== useGameStore.getState().localPlayerId && useGameStore.getState().workMode !== 'focus') {
+      if (msg.senderId !== useGameStore.getState().localPlayerId && useGameStore.getState().workMode !== 'focus' && useGameStore.getState().isNotifKindEnabled('chat')) {
         notifyNewMessage(msg.senderName, msg.text);
       }
       if (msg.zoneId) addZoneChatMessage(msg.zoneId, msg);
@@ -645,16 +645,18 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
           // channel it happened in. senderId !== localUserId above already
           // means you never get this for mentioning yourself.
           if (textMentionsUser(msg.text, state.localUserId)) {
-            const channelName = state.channels.find((c) => c.id === msg.channelId)?.name;
-            notifyNewMessage(
-              `${msg.senderName} menyebut kamu${channelName ? ` di #${channelName}` : ''}`,
-              msg.text,
-              () => {
-                useGameStore.getState().setActiveChatTarget({ type: 'channel', id: msg.channelId! });
-                useGameStore.getState().setChatPanelOpen(true);
-              },
-            );
-          } else {
+            if (state.isNotifKindEnabled('mention')) {
+              const channelName = state.channels.find((c) => c.id === msg.channelId)?.name;
+              notifyNewMessage(
+                `${msg.senderName} menyebut kamu${channelName ? ` di #${channelName}` : ''}`,
+                msg.text,
+                () => {
+                  useGameStore.getState().setActiveChatTarget({ type: 'channel', id: msg.channelId! });
+                  useGameStore.getState().setChatPanelOpen(true);
+                },
+              );
+            }
+          } else if (state.isNotifKindEnabled('chat')) {
             notifyNewMessage(msg.senderName, msg.text);
           }
         }
@@ -673,7 +675,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       }
       if (msg.senderId !== state.localUserId) {
         // A3 — Focus/DND mutes the popup but STILL marks unread (message kept).
-        if (state.workMode !== 'focus') notifyNewMessage(msg.senderName, msg.text);
+        if (state.workMode !== 'focus' && state.isNotifKindEnabled('chat')) notifyNewMessage(msg.senderName, msg.text);
         markUnreadIfHidden(`dm:${msg.conversationId}`);
       }
     });
@@ -771,7 +773,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       // A3 — Focus/DND: a nudge is pure real-time disruption (nothing to read
       // later), so mute its sound + toast + OS notification entirely.
       if (state.workMode !== 'focus') {
-        playNudgeSound(isMe);
+        if (state.isNotifKindEnabled('nudge')) playNudgeSound(isMe);
         if (isMe) {
           const nudgerName = state.playerRecords[event.fromId]?.name ?? 'Seseorang';
           // In-app toast — shows even while the tab is focused, which the
@@ -779,7 +781,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
           // when the tab is in the background, to avoid double-pinging someone
           // already looking at the screen).
           state.setNudgedBy(nudgerName);
-          notifyNudge(nudgerName);
+          if (state.isNotifKindEnabled('nudge')) notifyNudge(nudgerName);
         }
       }
     });
@@ -793,7 +795,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       const slapperUserId = data.fromId ? state.playerRecords[data.fromId]?.userId : undefined;
       if (slapperUserId && state.mutedUserIds.has(slapperUserId)) return;
       navigator.vibrate?.(200);
-      playSlapSound(true);
+      if (state.isNotifKindEnabled('slap')) playSlapSound(true);
       if (state.localPlayerId) state.triggerNudge(state.localPlayerId, Date.now(), data.fromId);
       state.setSlappedBy(data.fromName || 'Seseorang');
     });
@@ -802,7 +804,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // sound so a slap is audible on exactly 2 devices (sender + target) and
     // nowhere else in the room.
     socket.on(SocketEvents.SLAP_SENT, () => {
-      playSlapSound(false);
+      if (useGameStore.getState().isNotifKindEnabled('slap')) playSlapSound(false);
     });
 
     // Bug 14 — someone in my zone raised their hand. Server already scoped this
@@ -810,7 +812,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // chime. A3 — Focus/DND mutes the SOUND only; the ✋ badge still updates via
     // PLAYER_HAND_UPDATED above, so a focused user can still see it.
     socket.on(SocketEvents.HAND_RAISED_ALERT, () => {
-      if (useGameStore.getState().workMode !== 'focus') playHandRaiseSound();
+      const state = useGameStore.getState();
+      if (state.workMode !== 'focus' && state.isNotifKindEnabled('handRaise')) playHandRaiseSound();
     });
 
     socket.on(SocketEvents.ROOM_UPDATED, (data: RoomUpdatePayload) => {

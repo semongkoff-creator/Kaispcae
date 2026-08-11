@@ -1,6 +1,7 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect } from 'react';
 import { CameraVideoFill, CameraVideoOffFill } from 'react-bootstrap-icons';
 import { isTypingTarget } from '@/utils/hotkeys';
+import { Tooltip } from '@/components/ui/Tooltip';
 
 interface CameraButtonProps {
   enabled: boolean;
@@ -23,18 +24,22 @@ export function CameraButton({ enabled, onToggle }: CameraButtonProps) {
   }, [onToggle]);
 
   return (
-    <button
-      onClick={onToggle}
-      // Same active-state convention as MicButton: camera on = solid purple
-      // (the capability is actively broadcasting), off = glass + red icon.
-      className={`flex items-center justify-center w-11 h-11 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
-        enabled
-          ? 'bg-purple-600 border-purple-500 shadow-purple-500/30'
-          : 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
-      }`}
-      title="Toggle Camera (V)"
+    <Tooltip
+      label={`Kamera (V) — ${enabled ? 'Aktif' : 'Mati'}`}
+      detail="Nyalakan/matikan kameramu. Video hanya terlihat oleh orang yang sedang satu zone/meeting denganmu."
     >
-      {enabled ? <CameraVideoFill className="text-white" size={18} /> : <CameraVideoOffFill className="text-red-500" size={18} />}
-    </button>
+      <button
+        onClick={onToggle}
+        // Same active-state convention as MicButton: camera on = solid purple
+        // (the capability is actively broadcasting), off = glass + red icon.
+        className={`flex items-center justify-center w-11 h-11 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
+          enabled
+            ? 'bg-purple-600 border-purple-500 shadow-purple-500/30'
+            : 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
+        }`}
+      >
+        {enabled ? <CameraVideoFill className="text-white" size={18} /> : <CameraVideoOffFill className="text-red-500" size={18} />}
+      </button>
+    </Tooltip>
   );
 }

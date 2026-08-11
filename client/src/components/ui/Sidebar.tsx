@@ -3,7 +3,6 @@ import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, Ho
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
-import { NotificationSettings } from './NotificationSettings';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { Theme } from '@/hooks/useTheme';
 import { ManualStatus } from '@/data/presence';
@@ -523,12 +522,11 @@ export function Sidebar({
           {hiddenActive ? <EyeSlashFill size={14} /> : <EyeFill size={14} />}
         </SidebarIcon>
       )}
-      <NotificationSettings />
-      {/* New Settings panel — coexists with the bell above for now (Tahap
-          2/3 of this build). NotificationSettings' two toggles move into
-          Settings' own "Notifikasi" section and this bell gets removed once
-          that lands (Tahap 4) — removing it before the replacement exists
-          would leave a gap with no way to reach those toggles at all. */}
+      {/* The notification bell (browser-notif + sound toggles) was removed
+          here in Tahap 4 — both toggles, plus new per-kind ones, now live in
+          Settings' own "Notifikasi" section (see SettingsPanel.tsx), which
+          reuses the exact same browserNotifications.ts functions rather than
+          duplicating them. */}
       <SidebarIcon title="Settings" onClick={onOpenSettings}>
         <GearFill size={14} />
       </SidebarIcon>

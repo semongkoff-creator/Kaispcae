@@ -83,7 +83,7 @@ import { LoginPage } from './pages/LoginPage';
 import { GuestEntry, GuestSession } from './pages/GuestEntry';
 import { useAuth } from './hooks/useAuth';
 import { useTheme, Theme } from './hooks/useTheme';
-import { api } from './services/api';
+import { api, UserPreferences } from './services/api';
 import { createDefaultRoom, isTileBlocked } from './utils/createDefaultRoom';
 import { useGameStore } from './stores/gameStore';
 import { useSocket } from './hooks/useSocket';
@@ -148,7 +148,7 @@ const AFK_IDLE_MS = 120000; // 2 minutes
 // picked once per trigger (see handleInteractiveTrigger below).
 const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#ddd6fe'];
 
-function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean }) {
+function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest, onUpdatePreferences }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean; onUpdatePreferences?: (patch: UserPreferences) => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
   const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
@@ -2486,7 +2486,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         />
       )}
 
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} onUpdatePreferences={onUpdatePreferences} onLogout={onLogout} />}
 
       <Minimap
         players={Object.values(allPlayers)}
@@ -2604,8 +2604,19 @@ function todayKey(): string {
 const STATUS_PICKED_PREFIX = 'vm_status_picked:';
 
 function MainApp() {
-  const { user, loading, error, sessionExpiredMessage, login, register, logout, markTutorialSeen } = useAuth();
+  const { user, loading, error, sessionExpiredMessage, login, register, logout, markTutorialSeen, updatePreferences } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  // Settings feature — sync the store's live tooltipsEnabled/notifKinds
+  // mirrors from the account's saved preferences as soon as they're known,
+  // at this top level (not inside Game) so they're already correct if
+  // Settings is opened from Lobby, before ever entering a room. Guests keep
+  // the store's defaults (tooltips on, every notif kind on).
+  useEffect(() => {
+    if (user) useGameStore.getState().setTooltipsEnabled(user.preferences?.tooltipsEnabled ?? true);
+  }, [user?.preferences?.tooltipsEnabled]);
+  useEffect(() => {
+    if (user) useGameStore.getState().setNotifKinds(user.preferences?.notifKinds);
+  }, [user?.preferences?.notifKinds]);
   // QA #1/#6 — "next-next sebelum masuk": gates <Game> itself, not just an
   // overlay on top of it, so a first-time user never sees the canvas/HUD
   // before finishing the walkthrough. Guests get their own client-only flag
@@ -2846,6 +2857,9 @@ function MainApp() {
         onToggleTheme={toggleTheme}
       />
     );
+    // Guests have no account to persist preferences to — onUpdatePreferences
+    // is left undefined, so the Settings toggle only affects this tab's live
+    // store state (see Tooltip.tsx), never attempts a PATCH.
   }
 
   // Auth gate
@@ -2855,7 +2869,7 @@ function MainApp() {
 
   // Lobby
   if (!roomSlug) {
-    return <Lobby user={user} onJoinRoom={setRoomSlug} onLogout={logout} theme={theme} onToggleTheme={toggleTheme} />;
+    return <Lobby user={user} onJoinRoom={setRoomSlug} onLogout={logout} theme={theme} onToggleTheme={toggleTheme} onUpdatePreferences={updatePreferences} />;
   }
 
   // Blocked from entering — show why, and how to ask.
@@ -2931,7 +2945,7 @@ function MainApp() {
   // window still open, with no signal anything changed underneath. Forcing
   // a remount on room change gives every room a clean slate, matching what
   // already happens when leaving to the Lobby and rejoining.
-  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} />;
+  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} onUpdatePreferences={updatePreferences} />;
 }
 
 // ZEP Room Editor opens in its own tab as /?roomEditor=<slug> (a query param on

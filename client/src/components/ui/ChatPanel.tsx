@@ -7,6 +7,7 @@ import { useGameStore } from '@/stores/gameStore';
 import { ChatAvatar, avatarColor } from './ChatAvatar';
 import { AttachmentLightbox, type LightboxTarget } from './AttachmentLightbox';
 import { AttachmentMenuButton } from './AttachmentMenuButton';
+import { Tooltip } from './Tooltip';
 import { useProfiles } from '@/hooks/useProfiles';
 import { textMentionsUser, renderWithMentions } from '@/utils/mentions';
 
@@ -448,17 +449,25 @@ export function ChatPanel({
           uses the "Ethereal Collaboration" glass upgrade (backdrop-blur-xl,
           translucent border/glow) from the separately-approved restyle pass
           — only the toolbar placement was undone, not that styling. */}
-      <button
-        onClick={() => onToggleOpen(!open)}
-        className="absolute bottom-4 right-4 z-50 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl px-3 py-2 rounded-lg text-sm text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 cursor-pointer pointer-events-auto inline-flex items-center gap-1.5"
-      >
-        <ChatDotsFill size={14} /> {open ? 'Hide' : 'Chat'}
-        {!open && totalUnread > 0 && (
-          <span className="ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold inline-flex items-center justify-center">
-            {totalUnread > 99 ? '99+' : totalUnread}
-          </span>
-        )}
-      </button>
+      <div className="absolute bottom-4 right-4 z-50 pointer-events-auto">
+        <Tooltip
+          label="Chat"
+          detail="Buka panel chat untuk kirim pesan ke channel, zone, atau langsung (DM) ke satu orang."
+          align="end"
+        >
+          <button
+            onClick={() => onToggleOpen(!open)}
+            className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl px-3 py-2 rounded-lg text-sm text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 cursor-pointer inline-flex items-center gap-1.5"
+          >
+            <ChatDotsFill size={14} /> {open ? 'Hide' : 'Chat'}
+            {!open && totalUnread > 0 && (
+              <span className="ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold inline-flex items-center justify-center">
+                {totalUnread > 99 ? '99+' : totalUnread}
+              </span>
+            )}
+          </button>
+        </Tooltip>
+      </div>
 
       {open && (
         <div

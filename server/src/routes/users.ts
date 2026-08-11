@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { Server } from 'socket.io';
+import { Prisma } from '@prisma/client';
 import { getPrisma } from '../lib/prisma';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { rateLimit } from '../middleware/rateLimit';
@@ -57,6 +58,55 @@ users.post('/users/me/tutorial-completed', authenticateToken, async (req: AuthRe
   } catch (e) {
     console.error('[users] mark tutorial completed failed:', e);
     return res.status(500).json({ error: 'Gagal menyimpan status tutorial.' });
+  }
+});
+
+// PATCH /api/users/me/preferences — partial update (shallow-merge) of the
+// lightweight, cross-device UI preferences added for the Settings feature.
+// Merges into the existing JSON rather than replacing it, so e.g. toggling
+// tooltips in one request doesn't clobber notifKinds set in another. Keys
+// are whitelisted to keep this a small, predictable blob, not a general
+// JSON dumping ground.
+const ALLOWED_PREF_KEYS = new Set(['tooltipsEnabled', 'notifKinds']);
+const ALLOWED_NOTIF_KINDS = new Set(['chat', 'mention', 'nudge', 'slap', 'handRaise']);
+
+users.patch('/users/me/preferences', authenticateToken, async (req: AuthRequest, res: Response) => {
+  const patch: unknown = req.body;
+  if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+    return res.status(400).json({ error: 'Body harus berupa objek preferensi.' });
+  }
+  const body = patch as Record<string, unknown>;
+  for (const key of Object.keys(body)) {
+    if (!ALLOWED_PREF_KEYS.has(key)) {
+      return res.status(400).json({ error: `Preferensi tidak dikenal: ${key}` });
+    }
+  }
+  if (body.tooltipsEnabled !== undefined && typeof body.tooltipsEnabled !== 'boolean') {
+    return res.status(400).json({ error: 'tooltipsEnabled harus boolean.' });
+  }
+  if (body.notifKinds !== undefined) {
+    if (typeof body.notifKinds !== 'object' || body.notifKinds === null || Array.isArray(body.notifKinds)) {
+      return res.status(400).json({ error: 'notifKinds harus berupa objek.' });
+    }
+    for (const [k, v] of Object.entries(body.notifKinds as Record<string, unknown>)) {
+      if (!ALLOWED_NOTIF_KINDS.has(k) || typeof v !== 'boolean') {
+        return res.status(400).json({ error: `notifKinds.${k} tidak valid.` });
+      }
+    }
+  }
+  try {
+    const prisma = getPrisma();
+    const existing = await prisma.user.findUnique({ where: { id: req.userId }, select: { preferences: true } });
+    const current = (existing?.preferences as Record<string, unknown> | null) ?? {};
+    const merged: Record<string, unknown> = { ...current, ...body };
+    if (body.notifKinds) {
+      merged.notifKinds = { ...((current.notifKinds as Record<string, unknown> | undefined) ?? {}), ...(body.notifKinds as Record<string, unknown>) };
+    }
+    await prisma.user.update({ where: { id: req.userId }, data: { preferences: merged as Prisma.InputJsonValue } });
+    return res.json({ ok: true, preferences: merged });
+  } catch (e) {
+    console.error('[users] update preferences failed:', e);
+    return res.status(500).json({ error: 'Gagal menyimpan preferensi.' });
   }
 });
 

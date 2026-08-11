@@ -3,6 +3,7 @@ import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Fur
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 import { appendMovementSnapshot, MovementSnapshot, sampleMovementSnapshots } from './movementSmoothing';
+import type { UserPreferences } from '../services/api';
 
 // §7 — only ever populated for clients who are allowed to see it at all
 // (the target being recorded, or an admin+) — see recordingHandler.ts's
@@ -765,6 +766,27 @@ export interface GameState {
 
   // Player count (derived from playerRecords)
   playerCount: () => number;
+
+  // Settings feature — live mirror of user.preferences.tooltipsEnabled
+  // (App.tsx syncs it in on load/change). Lives here, not threaded as a prop
+  // through the HUD tree, because the toolbar's ~9 buttons sit under several
+  // layers of unrelated parents — a store read is one line per button vs.
+  // plumbing a new prop through every intermediate component. Defaults true
+  // so behavior is unchanged (tooltips already always showed) until someone
+  // explicitly turns this off in Settings.
+  tooltipsEnabled: boolean;
+  setTooltipsEnabled: (enabled: boolean) => void;
+
+  // Settings feature (Tahap 4) — live mirror of
+  // user.preferences.notifKinds, same reasoning as tooltipsEnabled above:
+  // useSocket.ts's event handlers already read other flags off this store
+  // via getState() inside socket callbacks, so this is one more field there
+  // rather than a prop threaded through the whole socket-setup call chain.
+  // A kind absent from this object (fresh account, or one that's never
+  // touched this specific toggle) means "on" — see isNotifKindEnabled.
+  notifKinds: NonNullable<UserPreferences['notifKinds']>;
+  setNotifKinds: (kinds: UserPreferences['notifKinds']) => void;
+  isNotifKindEnabled: (kind: keyof NonNullable<UserPreferences['notifKinds']>) => boolean;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -1626,4 +1648,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
 
   playerCount: () => Object.keys(get().playerRecords).length,
+
+  tooltipsEnabled: true,
+  setTooltipsEnabled: (enabled) => set({ tooltipsEnabled: enabled }),
+
+  notifKinds: {},
+  setNotifKinds: (kinds) => set({ notifKinds: kinds ?? {} }),
+  isNotifKindEnabled: (kind) => get().notifKinds[kind] !== false,
 }));

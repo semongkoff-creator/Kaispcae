@@ -96,7 +96,7 @@ auth.post('/register', authRateLimit, validate(registerSchema), async (req, res:
     setUploadSessionCookie(req, res, token);
 
     return res.status(201).json({
-      user: { id: user.id, email: user.email, displayName: user.displayName, accountRole: user.accountRole, workspaceRole: user.workspaceRole, timezone: user.timezone, tutorialCompletedAt: user.tutorialCompletedAt },
+      user: { id: user.id, email: user.email, displayName: user.displayName, accountRole: user.accountRole, workspaceRole: user.workspaceRole, timezone: user.timezone, tutorialCompletedAt: user.tutorialCompletedAt, preferences: user.preferences },
       token,
     });
   } catch (err) {
@@ -140,6 +140,7 @@ auth.post('/login', authRateLimit, validate(loginSchema), async (req, res: Respo
         workspaceRole: user.workspaceRole,
         timezone: user.timezone,
         tutorialCompletedAt: user.tutorialCompletedAt,
+        preferences: user.preferences,
       },
       token,
     });
@@ -162,7 +163,7 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
     const user = await prisma.user.findUnique({
       where: { id: req.userId },
       select: {
-        id: true, email: true, displayName: true, avatarConfig: true,
+        id: true, email: true, displayName: true, avatarConfig: true, preferences: true,
         accountRole: true, workspaceRole: true, timezone: true, active: true,
         // larkOpenId (a short field, unlike profilePhoto) so we can trigger the
         // Lark attendance check-in below for Lark accounts only.
@@ -251,6 +252,7 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
         workspaceRole: user.workspaceRole,
         timezone: user.timezone,
         tutorialCompletedAt: user.tutorialCompletedAt,
+        preferences: user.preferences,
       },
       ...(refreshedToken ? { token: refreshedToken } : {}),
     });

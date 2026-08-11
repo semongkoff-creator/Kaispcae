@@ -1,5 +1,5 @@
-import { useState } from 'react';
 import { TelephoneXFill } from 'react-bootstrap-icons';
+import { Tooltip } from '@/components/ui/Tooltip';
 
 interface LeaveButtonProps {
   onLeave: () => void;
@@ -12,22 +12,17 @@ interface LeaveButtonProps {
 // Solid red at rest (not just on hover) — marked as destructive per spec,
 // separated from the rest of the bar by a divider (see App.tsx).
 export function LeaveButton({ onLeave }: LeaveButtonProps) {
-  const [showLabel, setShowLabel] = useState(false);
-
   return (
-    <button
-      onClick={onLeave}
-      onMouseEnter={() => setShowLabel(true)}
-      onMouseLeave={() => setShowLabel(false)}
-      className="relative flex items-center justify-center w-11 h-11 rounded-full bg-red-500 hover:bg-red-600 backdrop-blur-xl border border-red-400 shadow-lg shadow-red-500/30 transition-all hover:scale-105 cursor-pointer"
-      title="Keluar room"
+    <Tooltip
+      label="Keluar Room"
+      detail="Kembali ke daftar Space. Ini tidak menutup akunmu — kamu tetap login."
     >
-      <TelephoneXFill className="text-white" size={18} />
-      {showLabel && (
-        <span className="absolute -top-8 whitespace-nowrap text-xs bg-white dark:bg-gray-800 text-red-600 dark:text-red-400 border border-red-100 dark:border-gray-700 shadow-sm px-2 py-0.5 rounded">
-          Keluar room
-        </span>
-      )}
-    </button>
+      <button
+        onClick={onLeave}
+        className="relative flex items-center justify-center w-11 h-11 rounded-full bg-red-500 hover:bg-red-600 backdrop-blur-xl border border-red-400 shadow-lg shadow-red-500/30 transition-all hover:scale-105 cursor-pointer"
+      >
+        <TelephoneXFill className="text-white" size={18} />
+      </button>
+    </Tooltip>
   );
 }

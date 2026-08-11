@@ -214,11 +214,27 @@ async function downloadRecordingBlob(id: string, filename: string): Promise<void
   URL.revokeObjectURL(url);
 }
 
+// Lightweight, cross-device UI preferences — server-synced (Settings
+// feature), NOT localStorage, so they follow the user between devices.
+// Partial on purpose: an account that's never touched Settings has none of
+// these set yet, so every field must have a sensible default at the call site.
+export interface UserPreferences {
+  tooltipsEnabled?: boolean;
+  notifKinds?: {
+    chat?: boolean;
+    mention?: boolean;
+    nudge?: boolean;
+    slap?: boolean;
+    handRaise?: boolean;
+  };
+}
+
 export interface UserProfile {
   id: string;
   email: string;
   displayName: string;
   avatarConfig?: any;
+  preferences?: UserPreferences | null;
   // Global, account-level role (see shared/permissions.ts's AccountRole) —
   // 'admin' accounts can create rooms; everyone else can only join existing
   // ones (see routes/rooms.ts's POST /rooms gate).
@@ -530,6 +546,14 @@ export const api = {
     request<{ success: boolean }>('/users/me/avatar', {
       method: 'PUT',
       body: JSON.stringify(config),
+    }),
+
+  // Partial update — merges server-side, so this only needs to send the
+  // keys that actually changed (e.g. just { tooltipsEnabled }).
+  updatePreferences: (patch: UserPreferences) =>
+    request<{ ok: boolean; preferences: UserPreferences }>('/users/me/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
     }),
 
   deleteRoom: (slug: string) =>

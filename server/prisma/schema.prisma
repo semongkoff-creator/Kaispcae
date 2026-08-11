@@ -20,6 +20,11 @@ model User {
   password                String
   displayName             String
   avatarConfig            Json?
+  // Lightweight, cross-device UI preferences — e.g. { tooltipsEnabled, notifKinds }.
+  // Server-synced by design (Settings feature) so they follow the user between
+  // devices, unlike the browser-Notification-permission flag in
+  // browserNotifications.ts which is deliberately per-browser/localStorage-only.
+  preferences             Json?
   // Chat profile photo, stored as a data-URL string (client resizes+compresses
   // to <=256px WebP, ~<100KB, before it ever reaches here). Deliberately a
   // heavy TEXT column kept OUT of hot queries via Prisma `omit`/explicit

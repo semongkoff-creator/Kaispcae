@@ -4,7 +4,7 @@ import { SettingsPanel } from '@/components/ui/SettingsPanel';
 import { io } from 'socket.io-client';
 import { RoomTheme, RoomTemplateId, ROOM_TEMPLATES } from '@virtualmeet/shared';
 import { api, RoomInfo } from '@/services/api';
-import { UserProfile } from '@/services/api';
+import { UserProfile, UserPreferences } from '@/services/api';
 import { CreditsModal } from '@/components/ui/CreditsModal';
 import { Theme } from '@/hooks/useTheme';
 import { SERVER_URL } from '@/services/serverUrl';
@@ -16,6 +16,7 @@ interface LobbyProps {
   onLogout: () => void;
   theme: Theme;
   onToggleTheme: () => void;
+  onUpdatePreferences: (patch: UserPreferences) => void;
 }
 
 // Small preview images for the theme picker — one representative crop per theme.
@@ -24,7 +25,7 @@ const THEME_OPTIONS: { value: RoomTheme; label: string; preview: string }[] = [
   { value: 'scifi-office', label: 'Sci-Fi Office', preview: '/assets/tilesets/scifi-office/Machines/arcade.rsi/icon.png' },
 ];
 
-export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: LobbyProps) {
+export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpdatePreferences }: LobbyProps) {
   const isAdmin = user.accountRole === 'admin';
   // Initials for the header avatar chip — first letters of the first two
   // words (e.g. "Budi Santoso" → "BS"), or the first two characters for a
@@ -532,7 +533,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme }: Lobb
         </button>
       </footer>
       {showCredits && <CreditsModal onClose={() => setShowCredits(false)} />}
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} onUpdatePreferences={onUpdatePreferences} onLogout={onLogout} />}
       <input
         ref={coverFileInputRef}
         type="file"
