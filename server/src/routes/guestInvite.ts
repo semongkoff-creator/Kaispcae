@@ -6,6 +6,7 @@ import { getPrisma } from '../lib/prisma';
 import { hasFeatureAccess } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest, signGuestToken } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
+import { kickRevokedGuestSocket } from '../socket/roomHandler';
 
 const guestInvite = Router();
 
@@ -106,17 +107,25 @@ guestInvite.delete('/rooms/:slug/guest-invites/:id', authenticateToken, async (r
     // blocks FUTURE joins would leave anyone already in via this link
     // connected indefinitely. Walk the room's currently-connected sockets
     // (not a DB query — there's no table of "who's connected", the socket
-    // server IS that state) and force-disconnect any whose guestInviteId
-    // matches. disconnect(true) also closes the underlying transport, which
-    // is what actually triggers roomHandler.ts's handleLeave cleanup
-    // (guestAllowlist removal, presence broadcast) — same path a guest
-    // closing their own tab takes.
+    // server IS that state) and kick any whose guestInviteId matches.
+    // Was previously a raw `s.disconnect(true)` here — that routed through
+    // the ordinary DISCONNECT handler's 4s reconnect-grace timer (meant for
+    // real network blips, not an explicit removal) instead of leaving the
+    // room immediately, AND never told the guest's client anything, so
+    // their tab just sat frozen with no notice. kickRevokedGuestSocket
+    // fixes both: same "notice event, then handleLeave immediately" shape
+    // PLAYER_KICK already uses for admin-kicked real users.
+    // fetchSockets() returns RemoteSocket, not this file's Socket type —
+    // pass ids through and let kickRevokedGuestSocket re-resolve real
+    // Socket instances via io.sockets.sockets.get, same as roomHandler.ts's
+    // other force-removal helpers do.
     if (count > 0 && ioRef) {
       const sockets = await ioRef.in(req.params.slug).fetchSockets();
-      for (const s of sockets) {
-        if ((s.data as { guestInviteId?: string }).guestInviteId === req.params.id) {
-          s.disconnect(true);
-        }
+      const matchedSocketIds = sockets
+        .filter((s) => (s.data as { guestInviteId?: string }).guestInviteId === req.params.id)
+        .map((s) => s.id);
+      for (const socketId of matchedSocketIds) {
+        await kickRevokedGuestSocket(ioRef, socketId, req.params.slug);
       }
     }
     res.json({ ok: true });

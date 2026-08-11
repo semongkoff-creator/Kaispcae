@@ -24,6 +24,7 @@ import { getNearbyRecipients } from './proximityBroadcast';
 import { sendUserDm } from '../lib/larkIm';
 import { relayBroadcastToLark } from '../lib/larkChatSync';
 import { sanitizeChat } from '../middleware/validate';
+import { GUEST_LINK_REVOKED, GUEST_LINK_REVOKED_MESSAGE } from '../middleware/auth';
 
 const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec per socket
 const canTeleport = socketRateLimit(2); // max 2 teleport requests/sec per socket
@@ -554,6 +555,24 @@ export async function forceLeaveForQueue(io: Server, userId: string, roomSlug: s
   const targetSocket = io.sockets.sockets.get(targetSocketId);
   if (!targetSocket) return;
   targetSocket.emit(SocketEvents.QUEUE_SESSION_ENDED, { roomSlug, roomName });
+  await handleLeave(io, targetSocket, roomSlug);
+}
+
+// QA (Akses tamu checklist item 7, "Revoke") — force-remove a guest socket
+// whose invite link was just revoked (called from guestInvite.ts's DELETE
+// handler, which has no socket of its own — same "outside caller" shape as
+// forceLeaveForQueue above). Takes a socket id rather than the RemoteSocket
+// objects guestInvite.ts's fetchSockets() scan produces: that's a narrower
+// type than Socket.IO's own Socket (matters if a cluster adapter is ever
+// introduced later), so this re-resolves a real local Socket the same way
+// PLAYER_KICK/forceLeaveForQueue already do above. Emits BEFORE handleLeave
+// so the guest's client still has a live socket to receive the notice on
+// (handleLeave itself doesn't disconnect the transport, only leaves the
+// room — see its own doc comment above).
+export async function kickRevokedGuestSocket(io: Server, socketId: string, roomSlug: string): Promise<void> {
+  const targetSocket = io.sockets.sockets.get(socketId);
+  if (!targetSocket) return;
+  targetSocket.emit(GUEST_LINK_REVOKED, { message: GUEST_LINK_REVOKED_MESSAGE });
   await handleLeave(io, targetSocket, roomSlug);
 }
 

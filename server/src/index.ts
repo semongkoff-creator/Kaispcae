@@ -22,7 +22,7 @@ import { registerRecordingHandlers } from './socket/recordingHandler';
 import { getRedis } from './store/roomStore';
 import { loadConfig, getConfig } from './config';
 import { rateLimit } from './middleware/rateLimit';
-import { verifyTokenClaims, verifyGuestTokenClaims, isSessionSuperseded, SESSION_SUPERSEDED } from './middleware/auth';
+import { verifyTokenClaims, verifyGuestTokenClaims, isSessionSuperseded, SESSION_SUPERSEDED, isInviteRevoked, GUEST_LINK_REVOKED } from './middleware/auth';
 import { setSessionKickIo } from './lib/sessionKick';
 import authRoutes from './routes/auth';
 import roomRoutes, { setIo } from './routes/rooms';
@@ -137,6 +137,13 @@ io.use(async (socket, next) => {
     // without needing its own special-casing.
     const guestClaims = verifyGuestTokenClaims(token);
     if (guestClaims) {
+      // QA (Akses tamu checklist item 7, "Revoke") — a revoked link's JWT
+      // is still cryptographically valid until it expires, so this DB
+      // check is what actually stops a kicked guest from reconnecting
+      // (e.g. on refresh) with their still-stored token.
+      if (await isInviteRevoked(guestClaims.inviteId)) {
+        return next(new Error(GUEST_LINK_REVOKED));
+      }
       socket.data.guestId = guestClaims.guestId;
       socket.data.guestName = guestClaims.name;
       socket.data.guestRoomSlug = guestClaims.roomSlug;

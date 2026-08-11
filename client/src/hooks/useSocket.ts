@@ -1008,12 +1008,33 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       if (err?.message === 'SESSION_SUPERSEDED') {
         window.dispatchEvent(new CustomEvent('vm-session-superseded', { detail: 'Akun ini baru saja login di perangkat lain. Sesi ini telah berakhir.' }));
       }
+      // QA (Akses tamu checklist item 7, "Revoke") — the handshake itself was
+      // rejected because this guest's link was revoked (e.g. they reloaded
+      // after already being kicked, or their tab never even got the live-kick
+      // event). Reuses kickedNotice — same "show a message, then onLeave()"
+      // effect in App.tsx that the live-kick GUEST_LINK_REVOKED event below
+      // triggers, so both paths converge on identical behavior.
+      if (err?.message === 'GUEST_LINK_REVOKED') {
+        useGameStore.getState().setKickedNotice('Akses tamu ini sudah dicabut oleh admin.');
+      }
     });
 
     // Bug 1 — server-initiated kick when a NEW login supersedes this live
     // socket (emitted just before the forced disconnect, see lib/sessionKick).
     socket.on('SESSION_SUPERSEDED', (d: { message?: string }) => {
       window.dispatchEvent(new CustomEvent('vm-session-superseded', { detail: d?.message }));
+    });
+
+    // QA (Akses tamu checklist item 7, "Revoke") — this guest's session is
+    // still live (transport connected) but the admin just revoked the link
+    // they came in on. Sent only to this socket (see roomHandler.ts's
+    // kickRevokedGuestSocket) — same "reuse kickedNotice" shape as the
+    // PLAYER_KICKED listener above, so the same App.tsx effect shows it
+    // and then calls onLeave() (handleGuestLeave for a guest — clears the
+    // stored token and reloads to a clean slate, there's no Lobby to
+    // fall back to).
+    socket.on('GUEST_LINK_REVOKED', (d: { message?: string }) => {
+      useGameStore.getState().setKickedNotice(d?.message || 'Akses tamu ini sudah dicabut oleh admin.');
     });
 
     // All listeners attached — safe to connect now

@@ -8,6 +8,13 @@ import { getPrisma } from '../lib/prisma';
 export const SESSION_SUPERSEDED = 'SESSION_SUPERSEDED';
 export const SESSION_SUPERSEDED_MESSAGE = 'Akun ini baru saja login di perangkat lain. Sesi ini telah berakhir.';
 
+// QA (Akses tamu checklist item 7, "Revoke") — same dual-use shape as
+// SESSION_SUPERSEDED above: used both as the socket handshake's rejection
+// reason (index.ts's io.use) and as the raw event name emitted to a guest
+// socket that's kicked live (roomHandler.ts's kickRevokedGuestSocket).
+export const GUEST_LINK_REVOKED = 'GUEST_LINK_REVOKED';
+export const GUEST_LINK_REVOKED_MESSAGE = 'Akses tamu ini sudah dicabut oleh admin.';
+
 // A browser loading <img src="/api/uploads/<uuid>.png"> cannot attach an
 // Authorization header, and passing the token as a query param would leak it
 // into server logs and browser history — the exact tradeoff routes/uploads.ts
@@ -126,6 +133,24 @@ export async function isSessionSuperseded(userId: string, sessionId?: string): P
     // Fail OPEN on a transient DB error: a DB blip must not log everyone out,
     // and the socket handshake + /auth/me enforce the same rule anyway.
     console.error('[auth] session check error:', e);
+    return false;
+  }
+}
+
+// QA (Akses tamu checklist item 7, "Revoke") — closes the reconnect gap:
+// verifyGuestTokenClaims below only checks the JWT signature/expiry, never
+// the DB, so a guest whose link was revoked mid-session could still
+// reconnect with their still-valid stored token (e.g. a page refresh)
+// after being kicked (see roomHandler.ts's kickRevokedGuestSocket for the
+// live-kick half of this fix — this is the other half, blocking re-entry).
+// Fails OPEN on a transient DB error, same posture as isSessionSuperseded
+// above — a DB blip must not lock out every guest link at once.
+export async function isInviteRevoked(inviteId: string): Promise<boolean> {
+  try {
+    const invite = await getPrisma().roomInvite.findUnique({ where: { id: inviteId }, select: { revoked: true } });
+    return !!invite?.revoked;
+  } catch (e) {
+    console.error('[auth] guest invite revoke check error:', e);
     return false;
   }
 }
