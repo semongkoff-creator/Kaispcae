@@ -151,7 +151,8 @@ auth.post('/create-organization', authRateLimit, validate(createOrganizationSche
     const baseSlug = slugifyOrgName(orgName);
 
     const MAX_SLUG_ATTEMPTS = 20;
-    let created: User | null = null;
+    let created: { org: { id: string }; user: User } | null = null;
+    let winningSlug: string | null = null;
     let lastCollisionErr: unknown = null;
 
     for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt++) {
@@ -159,14 +160,16 @@ auth.post('/create-organization', authRateLimit, validate(createOrganizationSche
       try {
         created = await prisma.$transaction(async (tx) => {
           const org = await tx.organization.create({ data: { name: orgName, slug: candidateSlug } });
-          return tx.user.create({
+          const user = await tx.user.create({
             data: {
               email, password: hashed, displayName,
               accountRole, workspaceRole,
               organizationId: org.id,
             },
           });
+          return { org, user };
         });
+        winningSlug = candidateSlug;
         lastCollisionErr = null;
         break;
       } catch (e) {
@@ -186,17 +189,23 @@ auth.post('/create-organization', authRateLimit, validate(createOrganizationSche
       return res.status(500).json({ error: 'Gagal membuat organisasi, coba nama lain' });
     }
 
-    const sessionId = await startNewSession(created.id);
-    const token = signToken(created, sessionId);
+    const { org, user } = created;
+
+    const sessionId = await startNewSession(user.id);
+    const token = signToken(user, sessionId);
     setUploadSessionCookie(req, res, token);
 
+    // targetId/meta.slug must reflect the ACTUAL persisted org, not the
+    // pre-retry-loop id/slug — on a slug collision the winning slug can
+    // differ from baseSlug (e.g. 'dcm-2'), and org.id only exists once the
+    // transaction closure above has returned.
     void writeAudit(prisma, {
-      actorId: created.id, action: 'org:create', targetType: 'organization', targetId: created.id,
-      meta: { orgName, slug: baseSlug }, ip: clientIp(req),
+      actorId: user.id, action: 'org:create', targetType: 'organization', targetId: org.id,
+      meta: { orgName, slug: winningSlug }, ip: clientIp(req),
     });
 
     return res.status(201).json({
-      user: { id: created.id, email: created.email, displayName: created.displayName, accountRole: created.accountRole, workspaceRole: created.workspaceRole, timezone: created.timezone, tutorialCompletedAt: created.tutorialCompletedAt, preferences: created.preferences },
+      user: { id: user.id, email: user.email, displayName: user.displayName, accountRole: user.accountRole, workspaceRole: user.workspaceRole, timezone: user.timezone, tutorialCompletedAt: user.tutorialCompletedAt, preferences: user.preferences },
       token,
     });
   } catch (err) {
