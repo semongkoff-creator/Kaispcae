@@ -11,6 +11,7 @@ import { groupConversationId } from '../lib/conversations';
 import { requireWorkspace } from '../lib/workspace';
 import { getConnectedAdminSocketIds, getConnectedCeoSocketIds, forceLeaveForQueue, forceZoneExitForQueue, broadcastZoneQueueSessionCleared, markSpawnNearUser, advanceZoneQuickQueue } from '../socket/roomHandler';
 import { advanceQueue, QUEUE_MIN_MINUTES, QUEUE_MAX_MINUTES } from '../lib/roomQueue';
+import { findRoomInOrg, findUserInOrg } from '../lib/orgScope';
 
 // Reads a room's current zone list regardless of which map format it's
 // stored in — a ZEP-edited room's zones live in layerData (layerDataToLegacy
@@ -38,8 +39,11 @@ export function setMembersIo(io: Server): void {
 // Deciding who gets into the room is the same class of action, so it reuses
 // that gate rather than inventing a parallel one; an ordinary member can
 // neither see the queue nor decide on it.
-async function requireRoomAdmin(prisma: ReturnType<typeof getPrisma>, slug: string, userId: string) {
-  const room = await prisma.room.findUnique({ where: { slug } });
+// Multi-tenant Fase 2 — organizationId threaded through so a slug from a
+// different org 404s here (same as "doesn't exist"), same helper as
+// rooms.ts's own room lookups use. Every caller below passes req.organizationId.
+async function requireRoomAdmin(prisma: ReturnType<typeof getPrisma>, slug: string, userId: string, organizationId: string | undefined) {
+  const room = await findRoomInOrg(prisma, slug, organizationId);
   if (!room) return { error: 404 as const, room: null };
   const role = await resolveRoomRole(prisma, userId, room.id, room.ownerId);
   if (!hasFeatureAccess(role, 'room:update')) return { error: 403 as const, room };
@@ -52,8 +56,8 @@ async function requireRoomAdmin(prisma: ReturnType<typeof getPrisma>, slug: stri
 // privilege (see roomHandler.ts's RoomAdminState.ceoUserIds doc comment).
 // It's their queue to approve/reject — an ordinary admin can still act on
 // it too (moderation override), this only widens who ALSO can.
-async function requireRoomAdminOrCeo(prisma: ReturnType<typeof getPrisma>, slug: string, userId: string) {
-  const room = await prisma.room.findUnique({ where: { slug } });
+async function requireRoomAdminOrCeo(prisma: ReturnType<typeof getPrisma>, slug: string, userId: string, organizationId: string | undefined) {
+  const room = await findRoomInOrg(prisma, slug, organizationId);
   if (!room) return { error: 404 as const, room: null };
   const role = await resolveRoomRole(prisma, userId, room.id, room.ownerId);
   if (hasFeatureAccess(role, 'room:update')) return { error: null, room };
@@ -68,7 +72,7 @@ async function requireRoomAdminOrCeo(prisma: ReturnType<typeof getPrisma>, slug:
 roomMembers.post('/rooms/:slug/join-request', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     const entry = await resolveEntry(prisma, room, req.userId!);
@@ -142,7 +146,7 @@ roomMembers.post('/rooms/:slug/join-request', authenticateToken, async (req: Aut
 roomMembers.get('/rooms/:slug/join-requests', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa melihat antrean' });
 
@@ -173,7 +177,7 @@ roomMembers.post('/rooms/:slug/join-requests/:userId', authenticateToken, async 
       return res.status(400).json({ error: "decision harus 'approve' atau 'reject'" });
     }
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa memutuskan' });
 
@@ -229,7 +233,7 @@ roomMembers.post('/rooms/:slug/join-requests/:userId', authenticateToken, async 
 roomMembers.get('/rooms/:slug/membership', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     const entry = await resolveEntry(prisma, room, req.userId!);
     return res.json({ allowed: entry.allowed, reason: entry.reason, requiresApproval: room.requiresApproval });
@@ -246,11 +250,14 @@ roomMembers.get('/rooms/:slug/membership', authenticateToken, async (req: AuthRe
 //
 // Gated by the WORKSPACE role, not per-room admin: this deliberately spans
 // rooms, so a per-room check has nothing to check against.
-roomMembers.get('/admin/join-requests', authenticateToken, requireWorkspace('workspace:manageMembers'), async (_req: AuthRequest, res: Response) => {
+roomMembers.get('/admin/join-requests', authenticateToken, requireWorkspace('workspace:manageMembers'), async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
+    // Multi-tenant Fase 2 — used to have no org filter, so a workspace
+    // admin saw pending join requests for every room in every org.
     const rows = await prisma.roomMember.findMany({
-      where: { status: 'pending' },
+      where: { status: 'pending', room: { organizationId: req.organizationId } },
       orderBy: { requestedAt: 'asc' },
       include: {
         user: { select: { id: true, displayName: true, email: true } },
@@ -280,7 +287,7 @@ roomMembers.get('/admin/join-requests', authenticateToken, requireWorkspace('wor
 roomMembers.get('/rooms/:slug/members', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     const entry = await resolveEntry(prisma, room, req.userId!);
@@ -315,7 +322,10 @@ roomMembers.get('/channels/:channelId/participants', authenticateToken, async (r
   try {
     const prisma = getPrisma();
     const channel = await prisma.channel.findUnique({ where: { id: req.params.channelId }, include: { room: true } });
-    if (!channel) return res.status(404).json({ error: 'Channel not found' });
+    // Multi-tenant Fase 2 — Channel has no organizationId of its own, but its
+    // room relation does; a channel whose room belongs to another org reads
+    // as "not found", same as every other cross-org lookup in this codebase.
+    if (!channel || channel.room.organizationId !== req.organizationId) return res.status(404).json({ error: 'Channel not found' });
 
     const entry = await resolveEntry(prisma, channel.room, req.userId!);
     if (!entry.allowed) return res.status(403).json({ error: 'Bukan anggota room ini' });
@@ -339,7 +349,7 @@ roomMembers.post('/channels/:channelId/participants', authenticateToken, async (
     }
     const prisma = getPrisma();
     const channel = await prisma.channel.findUnique({ where: { id: req.params.channelId }, include: { room: true } });
-    if (!channel) return res.status(404).json({ error: 'Channel not found' });
+    if (!channel || channel.room.organizationId !== req.organizationId) return res.status(404).json({ error: 'Channel not found' });
 
     const role = await resolveRoomRole(prisma, req.userId!, channel.roomId, channel.room.ownerId);
     if (!hasFeatureAccess(role, 'channel:create')) {
@@ -378,10 +388,14 @@ roomMembers.post('/channels/:channelId/participants', authenticateToken, async (
 
 // GET /api/admin/rooms-approval — every room plus whether it is gated, for
 // the admin console's toggle list. Workspace-scoped like the queue above.
-roomMembers.get('/admin/rooms-approval', authenticateToken, requireWorkspace('workspace:manageMembers'), async (_req: AuthRequest, res: Response) => {
+roomMembers.get('/admin/rooms-approval', authenticateToken, requireWorkspace('workspace:manageMembers'), async (req: AuthRequest, res: Response) => {
+  if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
+    // Multi-tenant Fase 2 — used to have no where at all, returning every
+    // room in the deployment to any workspace admin.
     const rooms = await prisma.room.findMany({
+      where: { organizationId: req.organizationId },
       orderBy: { createdAt: 'desc' },
       select: { slug: true, name: true, requiresApproval: true, isPublic: true, restrictedAccess: true, restrictedMinRole: true, queueEnabled: true },
     });
@@ -408,7 +422,7 @@ roomMembers.patch('/rooms/:slug/approval', authenticateToken, async (req: AuthRe
       return res.status(400).json({ error: 'requiresApproval harus boolean' });
     }
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa mengubah setelan ini' });
 
@@ -447,7 +461,7 @@ roomMembers.patch('/rooms/:slug/restricted', authenticateToken, async (req: Auth
       return res.status(400).json({ error: 'queueEnabled harus boolean' });
     }
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa mengubah setelan ini' });
 
@@ -493,7 +507,7 @@ roomMembers.get('/rooms/:slug/queue/mine', authenticateToken, async (req: AuthRe
   try {
     const zoneId = normalizeZoneId(req.query.zoneId);
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     const entry = await prisma.roomQueueEntry.findFirst({
@@ -544,7 +558,7 @@ roomMembers.post('/rooms/:slug/queue/join', authenticateToken, async (req: AuthR
     const zoneId = normalizeZoneId(req.body?.zoneId);
 
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     let zoneName: string | null = null;
@@ -683,7 +697,7 @@ roomMembers.post('/rooms/:slug/queue/cancel', authenticateToken, async (req: Aut
   try {
     const zoneId = normalizeZoneId(req.body?.zoneId);
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     const entry = await prisma.roomQueueEntry.findFirst({
@@ -714,7 +728,7 @@ roomMembers.get('/rooms/:slug/queue', authenticateToken, async (req: AuthRequest
   try {
     const zoneId = normalizeZoneId(req.query.zoneId);
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdminOrCeo(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdminOrCeo(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa melihat antrean' });
 
@@ -754,7 +768,7 @@ roomMembers.get('/rooms/:slug/queue', authenticateToken, async (req: AuthRequest
 roomMembers.post('/rooms/:slug/queue/:entryId/skip', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdminOrCeo(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdminOrCeo(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa mengubah antrean' });
 
@@ -807,7 +821,7 @@ roomMembers.post('/rooms/:slug/queue/:entryId/skip', authenticateToken, async (r
 roomMembers.post('/rooms/:slug/queue/:entryId/approve', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdminOrCeo(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdminOrCeo(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa menyetujui antrean' });
 
@@ -862,7 +876,7 @@ roomMembers.post('/rooms/:slug/queue/:entryId/approve', authenticateToken, async
 roomMembers.get('/rooms/:slug/zone-restrictions', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa melihat ini' });
 
@@ -884,7 +898,7 @@ roomMembers.get('/rooms/:slug/zone-restrictions', authenticateToken, async (req:
 roomMembers.get('/rooms/:slug/booking-zones', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const room = await prisma.room.findUnique({ where: { slug: req.params.slug } });
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
     const rows = await prisma.zoneRestriction.findMany({ where: { roomId: room.id, bookingMode: true } });
@@ -927,7 +941,7 @@ roomMembers.patch('/rooms/:slug/zones/:zoneId/restriction', authenticateToken, a
     }
 
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa mengubah setelan ini' });
 
@@ -959,7 +973,7 @@ roomMembers.patch('/rooms/:slug/zones/:zoneId/restriction', authenticateToken, a
 roomMembers.get('/rooms/:slug/access-list', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa melihat ini' });
 
@@ -993,11 +1007,14 @@ roomMembers.post('/rooms/:slug/access-grant', authenticateToken, async (req: Aut
     if (role !== 'staff' && role !== 'admin') return res.status(400).json({ error: 'role harus staff atau admin' });
 
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa memberi akses' });
 
-    const target = await prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true, displayName: true } });
+    // Multi-tenant Fase 2 — the user being granted room access must be in
+    // the same org as the room itself; otherwise a room admin could hand a
+    // stranger-org account a staff/admin role in their room.
+    const target = await findUserInOrg(prisma, targetUserId, req.organizationId, { id: true, displayName: true });
     if (!target) return res.status(404).json({ error: 'User tidak ditemukan' });
 
     await prisma.roomMember.upsert({
@@ -1026,7 +1043,7 @@ roomMembers.post('/rooms/:slug/access-revoke', authenticateToken, async (req: Au
     if (typeof targetUserId !== 'string' || !targetUserId) return res.status(400).json({ error: 'userId wajib diisi' });
 
     const prisma = getPrisma();
-    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!);
+    const { error, room } = await requireRoomAdmin(prisma, req.params.slug, req.userId!, req.organizationId);
     if (error === 404) return res.status(404).json({ error: 'Room not found' });
     if (error === 403) return res.status(403).json({ error: 'Hanya admin room yang bisa mencabut akses' });
     if (targetUserId === room!.ownerId) return res.status(400).json({ error: 'Tidak bisa mencabut akses pemilik room' });
