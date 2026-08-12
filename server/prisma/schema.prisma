@@ -1,8 +1,5 @@
 generator client {
   provider = "prisma-client-js"
-  // omitApi: lets lib/prisma.ts globally `omit` the Lark token columns so they
-  // never appear in a query result unless explicitly re-selected (Bagian 4).
-  previewFeatures = ["omitApi"]
   // "native" covers local dev; "linux-musl-openssl-3.0.x" is the engine the
   // production Docker image (node:20-alpine) needs. Committed here so the VPS
   // no longer needs a local uncommitted edit that blocked every `git pull`.
@@ -52,44 +49,8 @@ model User {
   // PATCH /admin/members/:userId. Read by lib/roles.ts (REST) and
   // socket/roomHandler.ts (sockets) — the two must always agree.
   memberVerifiedAt        DateTime?
-  // Set for accounts created via "Login with Lark" (OAuth) — the Lark user's
-  // open_id. Nullable + unique: existing manual-login users all have null (no
-  // clash), and a given Lark identity maps to exactly one local account
-  // (find-or-create keys on this). A Lark account's `password` is a random
-  // unusable value (never a real hash), so it can't be used for manual login
-  // unless the user later sets one — out of scope here. See routes/lark.ts.
-  larkOpenId              String?                   @unique
-  // Lark `user_id` (a.k.a. employee_id) — needed by the Attendance API, which
-  // does NOT accept open_id. Captured at login when Lark returns it, else
-  // resolved once from open_id via the contact API. Not unique (nullable, and
-  // manual users don't have it). See lib/larkAttendance.ts.
-  larkUserId              String?
-  // Idempotency marker ONLY (not the source of truth — that's Lark Attendance):
-  // 'YYYY-MM-DD' in WIB of the last day we successfully punched check-in for
-  // this user, so repeated /auth/me hits the same day don't re-punch.
-  lastAttendanceCheckInDate String?
-  // Same idea for check-out (A12): 'YYYY-MM-DD' WIB of the last successful
-  // checkout punch from MeetKai — a fast idempotency guard against double
-  // checkout. Display/status is read live from Lark (user_tasks/query), which
-  // also reflects checkouts done in the Lark app itself.
-  lastAttendanceCheckOutDate String?
-  // Bagian 4 upgrade — the user's own Lark OAuth tokens, so chat messages can
-  // be sent to Lark AS the real user (im:message.send_as_user) instead of the
-  // bot. SENSITIVE: these are impersonation credentials — stored AES-256-GCM
-  // encrypted (see lib/tokenCrypto.ts), and excluded from every query by a
-  // global Prisma `omit` (see lib/prisma.ts) so they can never leak to the
-  // frontend; only the send path re-selects them explicitly. Captured/rotated
-  // at Lark login (routes/lark.ts) and on refresh (lib/larkUserToken.ts).
-  // Null for manual-login users → the bot+prefix fallback handles them.
-  larkUserAccessToken   String?   @db.Text
-  larkRefreshToken      String?   @db.Text
-  // When the access token / refresh token expire (absolute instants). Not
-  // secret, so not omitted — used to decide "still valid?" vs "refresh" vs
-  // "give up and use the bot".
-  larkTokenExpiresAt    DateTime?
-  larkRefreshExpiresAt  DateTime?
   // Bug 1 — single active session. Random id minted at each successful login
-  // (manual OR Lark) and embedded in the JWT as a `sessionId` claim. Auth
+  // and embedded in the JWT as a `sessionId` claim. Auth
   // (REST + socket) rejects a token whose sessionId != this, so logging in on a
   // new device supersedes the old one. Null = legacy/no login since the feature
   // launched (grace-accepted, then adopted on the next /auth/me). Sliding
@@ -359,15 +320,10 @@ model WorkspacePolicy {
   analyticsPlatformMonthlyCostIdr           Int?
   analyticsAvgHourlyRateIdr                 Int?
   analyticsSchedulingSavedMinutesPerMeeting Int   @default(5)
-  // Lark chat_id the weekly Hall of Fame announcement is pushed to (see
-  // lib/larkIm.ts's sendGroupText) — null = Lark push skipped, in-app
-  // Notification + in-game Notice pin still happen.
-  analyticsHallOfFameLarkChatId             String?
-  // Which "Status" option value(s) in the Lark Base Daily Task table count
-  // as completed (see lib/larkTasks.ts's listTasksInRange) — the Base's
-  // actual option labels aren't known at build time (Bagian D's own "PERLU
-  // KONFIRMASI" case), so this ships as an admin-editable best-effort
-  // default rather than a hardcoded guess baked into code.
+  // Which task status value(s) count as completed. No task source populates
+  // TaskCompletionSnapshot today (see its own doc comment), so this is dormant
+  // until one does; kept because the option labels are a per-workspace choice
+  // rather than something to hardcode.
   analyticsTaskDoneStatusValues              String[] @default(["Done", "Selesai", "Completed"])
   updatedAt                DateTime @updatedAt
   updatedById              String?
@@ -606,32 +562,6 @@ model MeetingRoom {
   @@index([organizationId])
 }
 
-// A5 — a recorded "official meeting" started from inside a meeting-type Zone,
-// backed by a Lark VC reservation (auto_record). Distinct from MeetingRoom
-// (calendar room booking). Foundation for A6 (AI summary). Standalone (no FK
-// relations) — roomId is the room slug, startedBy/zoneId are plain ids.
-model MomRecord {
-  id              String    @id @default(cuid())
-  roomId          String
-  zoneId          String
-  startedBy       String
-  startTime       DateTime  @default(now())
-  endTime         DateTime?
-  larkReserveId   String?
-  larkMeetingNo   String?
-  larkMeetingId   String?
-  // 'live' → meeting reserved/ongoing; 'ended' → ended, no recording yet;
-  // 'recording_pending' → waiting on Lark to finish processing; 'recorded' →
-  // recordingUrl filled; 'unavailable' → plan/permission has no recording.
-  recordingStatus String    @default("live")
-  recordingUrl    String?
-  summary         String?   @db.Text
-  actionItems     Json?
-  createdAt       DateTime  @default(now())
-
-  @@index([roomId])
-}
-
 model CalendarEvent {
   id          String       @id @default(cuid())
   calendarId  String
@@ -824,10 +754,7 @@ model DocVersion {
 
 // ─── Workspace notifications ─────────────────────────────────────────
 // Shared by attendance / calendar / reminders / admin (each calls
-// notification.create). Originally created alongside the Lark Base module and
-// coupled to it via baseId; the Base feature was removed in A7, so that column
-// and its FK were dropped, but the table itself stays — many features depend on
-// it. `recordId` is a free-form pointer kept for legacy rows.
+// notification.create). `recordId` is a free-form pointer kept for legacy rows.
 model Notification {
   id          String   @id @default(cuid())
   recipientId String
@@ -922,14 +849,6 @@ model Room {
   // Provenance back-relation only — these survive the room's deletion
   // (onDelete: SetNull), unlike everything else on this list.
   conversationsV2   Conversation[]
-  // Bagian 4 — optional Lark group this room's "general" channel syncs with.
-  larkChatMap       RoomChatMap?
-  // A8 — Lark Drive folder (under LARK_DRIVE_ROOT_FOLDER_TOKEN) holding this
-  // room's chat attachments + recordings. Created best-effort at room creation;
-  // null until then (or if Drive isn't configured) — lazily created on first
-  // upload (see lib/larkDrive.ensureRoomFolder), which also covers retry after
-  // a failed create and rooms that predate this feature.
-  larkFolderToken   String?
   // ZEP Room Editor (Potong 1) — new layered map format, stored BESIDE the
   // legacy tilemapData/furniture/zones columns (which stay as archive/fallback).
   // Nullable: a room without layerData still renders via the legacy path,
@@ -1425,39 +1344,6 @@ model ChatMessage {
   @@index([attachmentUrl])
 }
 
-// Bagian 4 — Two-way Lark ↔ MeetKai chat sync (channel/room ONLY, never DM
-// or zone-private chat). One Lark group chat maps to one MeetKai room; the
-// sync target is that room's default ("general") Channel. Both ids are unique:
-// roomId so a room has at most one mapping, chatId so an inbound webhook can
-// resolve the room from the Lark chat_id with a single indexed lookup.
-model RoomChatMap {
-  id        String   @id @default(cuid())
-  roomId    String   @unique
-  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  // Lark group chat_id (e.g. "oc_xxx") this room mirrors.
-  chatId    String   @unique
-  // Cached Lark group name for display in the admin mapping UI — advisory only,
-  // never used for routing (chatId is authoritative).
-  chatName  String?
-  // Cached room name, mirrors the spec's RoomChatMap shape; display-only.
-  roomName  String
-  createdAt DateTime @default(now())
-}
-
-// Bagian 4 — anti-echo ledger. Every message MeetKai sends OUT to Lark has its
-// returned Lark message_id recorded here; the inbound webhook skips any event
-// whose message_id is present, so a message we just relayed to Lark can't come
-// back through the webhook and double-post in MeetKai. Rows are disposable —
-// only recent ids matter (a message only ever echoes back within seconds), so
-// createdAt is indexed for a cheap periodic prune.
-model LarkSentMessage {
-  id        String   @id @default(cuid())
-  messageId String   @unique
-  createdAt DateTime @default(now())
-
-  @@index([createdAt])
-}
-
 // ── Messenger migration, step 2: workspace-level conversations ────────
 // Chat is currently pinned to a Room: Channel.roomId and
 // DirectConversation.roomId are both required, both Cascade. That makes a DM
@@ -1594,10 +1480,14 @@ model DailyVibeCounter {
   @@unique([userId, date])
 }
 
-// Daily snapshot of Lark Base "Daily Task" completions (see lib/larkTasks.ts's
-// listTasksInRange) — Lark Base itself has no "created date" field and isn't
-// cheap to query company-wide on every dashboard load, so this is synced
-// once/day by analyticsSweep.ts rather than queried live per request.
+// Daily per-user snapshot of task completion, aggregated by routes/
+// analytics.ts rather than counted live per dashboard load.
+//
+// NOTHING WRITES THIS TODAY. It was fed by an external task board that this
+// product no longer integrates with; the table and the aggregation are kept
+// so a native task feature can populate them without a migration, but until
+// one exists every reader sees zero — which is why the dashboard card that
+// displayed it is currently hidden rather than showing a permanent 0.
 model TaskCompletionSnapshot {
   id             String   @id @default(cuid())
   userId         String
@@ -1607,10 +1497,9 @@ model TaskCompletionSnapshot {
   // denominator for Bagian B.3.1's "task selesai / task assigned due".
   dueCount       Int      @default(0)
   completedCount Int      @default(0)
-  // Lark Base exposes no completion timestamp (only Due Date — see
-  // lib/larkTasks.ts's module doc comment), so this sweep cannot actually
-  // distinguish "completed on time" from "completed late" — it currently
-  // always equals completedCount. Kept as a separate column (not just
+  // The retired external source exposed no completion timestamp (only a due
+  // date), so "on time" could never actually be distinguished from "done" —
+  // this always equalled completedCount. Kept as a separate column (not just
   // reusing completedCount) so a future real signal can populate it without
   // another migration.
   onTimeCount    Int      @default(0)

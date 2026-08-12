@@ -174,10 +174,13 @@ export function AnalyticsPanel({ userId }: { userId?: string }) {
               <p className={cardLabel}><CameraVideo size={12} /> Waktu meeting</p>
               <p className={cardValue}>{fmtMinutes(data.meetingMinutes)}</p>
             </div>
-            <div className={card}>
-              <p className={cardLabel}><CheckCircle size={12} /> Task selesai</p>
-              <p className={cardValue}>{data.taskSelesai.completed}/{data.taskSelesai.due}</p>
-            </div>
+            {/* "Task selesai" was fed by an external task board this product
+                no longer integrates with, so nothing writes
+                TaskCompletionSnapshot and the card could only ever read 0/0 —
+                worse than absent, since a real zero and "no data source" look
+                identical to whoever reads the dashboard. The server still
+                aggregates it, so restoring this block is all that's needed
+                once a native task feature populates those rows. */}
             <div className={card}>
               <p className={cardLabel}><PeopleFill size={12} /> Connections</p>
               <p className={cardValue}>{data.connections.count}</p>
