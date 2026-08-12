@@ -104,7 +104,11 @@ export type PanelId =
   // so this is its own panel, not a tab inside AdminConsole. Team/
   // All-Kaitech tiers land inside AdminConsole instead (Phase 3), since
   // those really are manager/admin-only surfaces.
-  | 'myAnalytics';
+  | 'myAnalytics'
+  // Operator-only, cross-org organization list (see
+  // specs/2026-08-12-operator-org-list-design.md) — gated on
+  // currentUser.isOperator, not workspaceRole, unlike adminConsole above.
+  | 'operatorConsole';
 
 // Keeps the feed skimmable and bounds its memory — old entries just fall
 // off the end rather than needing a separate pruning pass (see

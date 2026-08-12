@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill, GearFill, HourglassSplit } from 'react-bootstrap-icons';
+import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, Buildings, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill, GearFill, HourglassSplit } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -139,6 +139,14 @@ interface SidebarProps {
   adminViewActive: boolean;
   onToggleAdminView: () => void;
 
+  // Deployment operator's cross-org organization list — a DIFFERENT gate
+  // from isWorkspaceAdmin above (org-scoped workspace admin vs. the one
+  // person operating this whole deployment). See
+  // specs/2026-08-12-operator-org-list-design.md.
+  isOperator: boolean;
+  operatorConsoleActive: boolean;
+  onToggleOperatorConsole: () => void;
+
   // Productivity Analytics — Individual tier, open to every real employee
   // (not gated by isWorkspaceAdmin, see the MenuRow's own comment).
   myAnalyticsActive: boolean;
@@ -249,6 +257,9 @@ export function Sidebar({
   isWorkspaceAdmin,
   adminViewActive,
   onToggleAdminView,
+  isOperator,
+  operatorConsoleActive,
+  onToggleOperatorConsole,
   myAnalyticsActive,
   onToggleMyAnalytics,
   miniModeSupported,
@@ -396,6 +407,9 @@ export function Sidebar({
             )}
             {isWorkspaceAdmin && (
               <MenuRow icon={<ShieldLock size={15} />} label={adminViewActive ? 'Tutup Konsol Admin' : 'Konsol Admin'} active={adminViewActive} onClick={closeAnd(onToggleAdminView)} />
+            )}
+            {isOperator && (
+              <MenuRow icon={<Buildings size={15} />} label={operatorConsoleActive ? 'Tutup Semua Organisasi' : 'Semua Organisasi'} active={operatorConsoleActive} onClick={closeAnd(onToggleOperatorConsole)} />
             )}
 
             {(isAdmin || canTeleport) && <MenuDivider />}

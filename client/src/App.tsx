@@ -21,6 +21,9 @@ import { LarkSyncPanel } from './components/ui/LarkSyncPanel';
 // common case (an ordinary member who never opens it) never pays for its
 // code at all.
 const AdminConsole = lazy(() => import('./admin/AdminConsole').then((m) => ({ default: m.AdminConsole })));
+// Operator-only, same "don't pay for code you never load" reasoning as
+// AdminConsole above — an even smaller audience (one person today).
+const OperatorConsole = lazy(() => import('./operator/OperatorConsole').then((m) => ({ default: m.OperatorConsole })));
 // Productivity Analytics — every real employee can open this (see PanelId's
 // doc comment), so it's split out for the same "don't pay for code you
 // never load" reason as AdminConsole above, just for a much larger audience.
@@ -1012,6 +1015,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const dailyTaskActive = activePanel === 'dailyTask';
   const leaveActive = activePanel === 'leave';
   const adminViewActive = activePanel === 'adminConsole';
+  const operatorConsoleActive = activePanel === 'operatorConsole';
   const myAnalyticsActive = activePanel === 'myAnalytics';
   const calendarViewActive = activePanel === 'calendar';
   const attendanceViewActive = activePanel === 'attendance';
@@ -1932,6 +1936,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         isWorkspaceAdmin={currentUser.workspaceRole === 'admin'}
         adminViewActive={adminViewActive}
         onToggleAdminView={() => openPanel('adminConsole')}
+        isOperator={currentUser.isOperator}
+        operatorConsoleActive={operatorConsoleActive}
+        onToggleOperatorConsole={() => openPanel('operatorConsole')}
         myAnalyticsActive={myAnalyticsActive}
         onToggleMyAnalytics={() => openPanel('myAnalytics')}
         onToggleDailyTask={() => openPanel('dailyTask')}
@@ -1996,6 +2003,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {adminViewActive && (
         <Suspense fallback={null}>
           <AdminConsole currentUser={currentUser} onClose={closePanel} />
+        </Suspense>
+      )}
+      {operatorConsoleActive && (
+        <Suspense fallback={null}>
+          <OperatorConsole currentUser={currentUser} onClose={closePanel} />
         </Suspense>
       )}
       {myAnalyticsActive && (
