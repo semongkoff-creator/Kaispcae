@@ -1348,16 +1348,30 @@ class WebRTCService {
     // Rising edge fires immediately (the ring should appear the moment
     // someone starts talking), but it takes several consecutive quiet ticks
     // to drop again — otherwise the gap between two words switches it off
-    // and back on, which reads as flicker rather than speech.
+    // and back on, which reads as flicker rather than speech. Applies to the
+    // local mic too (tracked under the 'local' key in the same `quiet` map
+    // as remote peers below) — it used to flip on the raw threshold with no
+    // debounce at all, so your OWN ring flickered on every short pause even
+    // after remote peers were already smoothed out.
     const QUIET_TICKS_TO_STOP = 4; // ~400ms at the 100ms interval below
     const quiet = new Map<string, number>();
 
     this.analyserInterval = setInterval(() => {
       if (this.analyserNode) {
-        const speaking = WebRTCService.loudness(this.analyserNode, data) > SPEAKING_THRESHOLD;
-        if (speaking !== localSpeaking) {
-          localSpeaking = speaking;
-          this.onSpeakingChange?.('local', speaking);
+        const loud = WebRTCService.loudness(this.analyserNode, data) > SPEAKING_THRESHOLD;
+        if (loud) {
+          quiet.set('local', 0);
+          if (!localSpeaking) {
+            localSpeaking = true;
+            this.onSpeakingChange?.('local', true);
+          }
+        } else if (localSpeaking) {
+          const n = (quiet.get('local') ?? 0) + 1;
+          quiet.set('local', n);
+          if (n >= QUIET_TICKS_TO_STOP) {
+            localSpeaking = false;
+            this.onSpeakingChange?.('local', false);
+          }
         }
       }
 

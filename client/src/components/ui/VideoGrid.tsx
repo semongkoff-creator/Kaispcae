@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
-import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff, Grid3x3GapFill } from 'react-bootstrap-icons';
+import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff, Grid3x3GapFill } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
@@ -617,8 +617,14 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           pointer-events-none element is excluded from hit-testing
           entirely, including wheel scroll. The column has no real empty
           space of its own beyond its children (flex-col sizes to content),
-          so this doesn't reintroduce a dead click-through zone over the map. */}
-      <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 max-h-[calc(100vh-6rem)] overflow-y-auto pointer-events-auto">
+          so this doesn't reintroduce a dead click-through zone over the map.
+          overflow-x-hidden alongside it — CSS forces an axis left at its
+          default 'visible' to compute as 'auto' too the moment the OTHER
+          axis is anything but 'visible', so leaving x unset here let a
+          speaking tile's ring/glow (painted outside its own box, even
+          though it doesn't affect layout) trigger a stray horizontal
+          scrollbar. This column is never meant to scroll sideways. */}
+      <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 max-h-[calc(100vh-6rem)] overflow-y-auto overflow-x-hidden pointer-events-auto">
         {/* Meeting View + hide/show, grouped side by side (was hideButton
             alone) rather than stacked in this otherwise-vertical column. */}
         <div className="flex items-center gap-1.5">
@@ -711,6 +717,17 @@ export function VideoTile({
   isGuest?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Per-listener manual volume (§6) — purely local UI state; the peer's
+  // actual manualVolume in webrtcService also starts at 1 (see
+  // PeerConnection's default), so initializing to 1 here can't drift out of
+  // sync with it on mount. A rebuild of the slider that used to live here:
+  // that one flickered and got removed entirely (see commit 1b43b27) — the
+  // real causes turned out to be the speaking ring's missing local-mic
+  // debounce and a stray scrollbar from an unset overflow axis (both fixed
+  // separately, see webrtcService.ts's startSpeakingDetection and the
+  // overflow-x/y additions on this tile's ancestor containers), not this
+  // slider's own markup — so it's safe to bring back unchanged in shape.
+  const [volume, setVolume] = useState(1);
   // A remote peer who turns their camera off doesn't remove the track — it
   // stays attached and goes 'muted', which is the only signal we get. No
   // extra socket event needed, and it also covers "no video track at all"
@@ -746,6 +763,10 @@ export function VideoTile({
   // Screen shares are exempt: a paused screen share is still the screen, and
   // showing someone's walking avatar in place of it would be misleading.
   const showAvatar = !isScreen && (isLocal ? !!cameraOff : (!stream || remoteVideoOff));
+  // Whether this tile has a volume slider at all (never for local/screen
+  // tiles — see the slider block below). Name tag and slider share the same
+  // bottom-1 spot and swap on hover rather than stacking (see both below).
+  const hasVolumeSlider = !isLocal && !isScreen && !!onVolumeChange;
 
   return (
     <div
@@ -878,11 +899,16 @@ export function VideoTile({
           mic/camera-off status moved to its own glass badge top-right (see
           below, and the enlarge button's move to bottom-right above so the
           two don't stack). Same `name`/`speaking` props as before — this is
-          a repositioning, not a new signal. */}
+          a repositioning, not a new signal.
+          Name tag and volume slider below share this exact bottom-1 spot
+          and swap on hover instead of stacking: hovering a tile that has a
+          slider fades this out (group-hover:opacity-0) as the slider fades
+          in, so only one is ever showing. Tiles with no slider (local/
+          screen) are unaffected — hasVolumeSlider gates it. */}
       <span
         className={`absolute left-1 bottom-1 max-w-[80%] flex items-center gap-1 bg-black/45 backdrop-blur-md text-white rounded-full transition-opacity duration-150 ${
           large ? 'px-2.5 py-1 text-xs' : 'px-1.5 py-0.5 text-[9px]'
-        }`}
+        } ${hasVolumeSlider ? 'group-hover:opacity-0' : ''}`}
       >
         <span className="truncate">{name}</span>
         {/* QA (Akses tamu checklist item 6, "Label Guest") — same pairing
@@ -902,6 +928,41 @@ export function VideoTile({
           </span>
         )}
       </span>
+      {/* §6 — manual per-listener volume, purely client-side (my own
+          listening preference; no server sync, no effect on anyone else).
+          Not shown for screen-share tiles or my own tile — screen share
+          carries no audio track here, and muting yourself already has the
+          mic button. Shares the name tag's exact spot and swaps with it on
+          hover (see the name tag's own comment above): only hovering
+          reveals the slider, and only while hovering, so it's always
+          exactly one or the other, never both, never neither.
+          step=0.05 (finer than the original 0.1) plus a taller h-1.5 track
+          — both purely to make the handle land where you actually drop it;
+          native <input type="range"> already maps value<->position exactly,
+          so imprecision here was a grab-target/step-size problem, not a
+          rendering bug. */}
+      {hasVolumeSlider && (
+        <div
+          className={`absolute left-1 right-1 bottom-1 flex items-center gap-1.5 bg-black/45 backdrop-blur-md rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-150 ${
+            large ? 'px-2 py-1' : 'px-1.5 py-0.5'
+          }`}
+        >
+          {volume === 0 ? <VolumeMuteFill size={large ? 11 : 9} className="text-white/80 shrink-0" /> : <VolumeUpFill size={large ? 11 : 9} className="text-white/80 shrink-0" />}
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={volume}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setVolume(v);
+              onVolumeChange?.(v);
+            }}
+            className="flex-1 accent-purple-600 h-1.5 cursor-pointer"
+          />
+        </div>
+      )}
       {/* Mic-muted shown for remote tiles too (broadcast via PLAYER_MIC —
           see Avatar.micMuted), not just the local preview; camera-off stays
           local-only since a remote camera-off already shows as the avatar

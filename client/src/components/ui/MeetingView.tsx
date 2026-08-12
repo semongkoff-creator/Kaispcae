@@ -242,7 +242,12 @@ export function MeetingView({
           // explicit gridColumns/gridRows above, not CSS auto-fit — see that
           // comment for why. Click any tile to pin it.
           <div
-            className="w-full h-full grid gap-3 place-content-center overflow-y-auto py-1"
+            // overflow-x-hidden alongside overflow-y-auto — otherwise CSS
+            // computes the unset x-axis as 'auto' too (an axis left at
+            // 'visible' is forced to 'auto' the moment the other one isn't),
+            // letting a speaking tile's ring/glow trigger a stray horizontal
+            // scrollbar in a grid that only ever needs to scroll vertically.
+            className="w-full h-full grid gap-3 place-content-center overflow-y-auto overflow-x-hidden py-1"
             style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${gridRows}, minmax(120px, 1fr))` }}
           >
             {tiles.map((t) => (
@@ -266,7 +271,9 @@ export function MeetingView({
           covers "nobody's featured". */}
       {thumbnails.length > 0 && (
         <div className="shrink-0 flex justify-center pl-20 pr-6 pt-3">
-          <div className="flex gap-2 overflow-x-auto max-w-full pb-1">
+          {/* overflow-y-hidden alongside overflow-x-auto, same reasoning as
+              the tiled grid above — this row never scrolls vertically. */}
+          <div className="flex gap-2 overflow-x-auto overflow-y-hidden max-w-full pb-1">
             {thumbnails.map((t) => (
               <button
                 key={t.key}
