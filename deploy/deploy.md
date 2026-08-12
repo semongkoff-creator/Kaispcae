@@ -25,6 +25,33 @@ Contoh lokasi project:
 cd /var/www/office
 ```
 
+## Pindah ke Domain / Server Baru
+
+Alamat publik tidak di-hardcode di mana pun. Cukup satu variabel di `.env`:
+
+```bash
+PUBLIC_URL=https://<domain-anda>
+```
+
+Itu mengisi tiga hal sekaligus: `CLIENT_URL` dan `CORS_ORIGIN` untuk server, plus
+`VITE_SERVER_URL` yang **dipanggang ke dalam bundle frontend saat build**. Karena
+yang terakhir itu build-time, ganti domain **wajib** disertai rebuild —
+`./deploy/deploy.sh` sudah melakukannya (`docker compose build server nginx`), tapi
+restart saja tidak cukup.
+
+Yang tidak ikut otomatis dan harus disesuaikan manual:
+
+- **Nginx host VPS** — buat `/etc/nginx/sites-enabled/<domain-anda>` yang
+  `proxy_pass` ke `http://127.0.0.1:8090` (contoh lengkap di bagian Nginx di bawah),
+  lalu terbitkan sertifikat TLS untuk domain baru.
+- **Google OAuth** — `GOOGLE_REDIRECT_URI` di `.env` harus jadi
+  `https://<domain-anda>/api/auth/google/callback`, **dan** URI yang sama harus
+  didaftarkan di Google Cloud Console. Kalau salah satu tertinggal, login Google
+  gagal dengan `redirect_uri_mismatch`.
+- **Database** — server baru berarti Postgres baru dan kosong. `deploy.sh` sudah
+  menjalankan `prisma migrate deploy`, jadi skema terbentuk sendiri. Akun pertama
+  yang mendaftar otomatis jadi admin workspace.
+
 ## Deploy Normal
 
 Jalankan dari root project:
