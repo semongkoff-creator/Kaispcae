@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
-import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff, Grid3x3GapFill } from 'react-bootstrap-icons';
+import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff, Grid3x3GapFill } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
@@ -649,7 +649,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
 
 // Exported for MeetingView.tsx (the "Dedicated Meeting View" full-screen
 // grid) — same tile, just sized up via `large` instead of a second
-// hand-maintained copy of the mirror/PIP/volume-slider logic.
+// hand-maintained copy of the mirror/PIP logic.
 export function VideoTile({
   name,
   avatarName,
@@ -711,7 +711,6 @@ export function VideoTile({
   isGuest?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [volume, setVolume] = useState(1);
   // A remote peer who turns their camera off doesn't remove the track — it
   // stays attached and goes 'muted', which is the only signal we get. No
   // extra socket event needed, and it also covers "no video track at all"
@@ -747,11 +746,6 @@ export function VideoTile({
   // Screen shares are exempt: a paused screen share is still the screen, and
   // showing someone's walking avatar in place of it would be misleading.
   const showAvatar = !isScreen && (isLocal ? !!cameraOff : (!stream || remoteVideoOff));
-  // Whether this tile has a volume slider at all (never for local/screen
-  // tiles — see the slider block below). Name tag and slider share the same
-  // bottom-1 spot and swap on hover rather than stacking (see both below).
-  const hasVolumeSlider = !isLocal && !isScreen && !!onVolumeChange;
-
 
   return (
     <div
@@ -761,9 +755,9 @@ export function VideoTile({
       // and nudge its neighbours every time someone starts talking.
       // h-full flex flex-col on the large path: the tile fills the grid cell
       // it was given, and the video area (flex-1 min-h-0, the only flow
-      // child) takes 100% of it — the name tag and volume slider are both
-      // absolute overlays now (see below), not flow siblings competing for
-      // the same space, so nothing shrinks the video to make room for them.
+      // child) takes 100% of it — the name tag is an absolute overlay now
+      // (see below), not a flow sibling competing for the same space, so
+      // nothing shrinks the video to make room for it.
       className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border shadow-lg transition-all duration-300 animate-fade-in group relative ${large ? 'w-full h-full flex flex-col' : 'w-24'} ${
         speaking ? 'border-purple-500 ring-2 ring-purple-400/60 animate-speaking-glow' : 'border-purple-200'
       }`}
@@ -839,8 +833,7 @@ export function VideoTile({
       {/* Enlarge — opens the live camera picture full-size in the same focus
           panel screen shares use. Only while there's an actual picture to
           enlarge (!showAvatar); a placeholder initials tile has nothing
-          bigger to show. Hover-revealed via the tile's own `group`, same
-          convention as the volume slider below. */}
+          bigger to show. Hover-revealed via the tile's own `group`. */}
       {onEnlarge && !showAvatar && !isScreen && (
         <button
           onClick={onEnlarge}
@@ -885,17 +878,11 @@ export function VideoTile({
           mic/camera-off status moved to its own glass badge top-right (see
           below, and the enlarge button's move to bottom-right above so the
           two don't stack). Same `name`/`speaking` props as before — this is
-          a repositioning, not a new signal.
-          Bug fix — this used to stay visible while the volume slider below
-          ALSO appeared on hover, so the two collided in the same corner.
-          They now share the exact same spot and swap instead: hovering a
-          tile that has a slider fades this out (group-hover:opacity-0) as
-          the slider fades in, so only one is ever showing. Tiles with no
-          slider (local/screen) are unaffected — hasVolumeSlider gates it. */}
+          a repositioning, not a new signal. */}
       <span
         className={`absolute left-1 bottom-1 max-w-[80%] flex items-center gap-1 bg-black/45 backdrop-blur-md text-white rounded-full transition-opacity duration-150 ${
           large ? 'px-2.5 py-1 text-xs' : 'px-1.5 py-0.5 text-[9px]'
-        } ${hasVolumeSlider ? 'group-hover:opacity-0' : ''}`}
+        }`}
       >
         <span className="truncate">{name}</span>
         {/* QA (Akses tamu checklist item 6, "Label Guest") — same pairing
@@ -919,48 +906,15 @@ export function VideoTile({
           see Avatar.micMuted), not just the local preview; camera-off stays
           local-only since a remote camera-off already shows as the avatar
           placeholder instead of video. Bumped up on the large path (Meeting
-          View's own tiles, much bigger than the ambient strip's w-24 ones) —
-          the icon was easy to miss at the same 12px used everywhere else. */}
+          View's own tiles, much bigger than the ambient strip's w-24 ones).
+          The small-tile icon was bumped from 9px to 13px (padding p-1 ->
+          p-1.5 to match) — at 9px it was too easy to miss who was muted at
+          a glance in the ambient strip, the exact case this exists for. */}
       {(micMuted || (isLocal && cameraOff)) && (
-        <span className={`absolute top-1 right-1 flex gap-1 bg-black/45 backdrop-blur-md rounded-full ${large ? 'p-2' : 'p-1'}`}>
-          {micMuted && <MicMuteFill className="text-red-400" size={large ? 18 : 9} />}
-          {isLocal && cameraOff && <CameraVideoOffFill className="text-red-400" size={large ? 18 : 9} />}
+        <span className={`absolute top-1 right-1 flex gap-1 bg-black/45 backdrop-blur-md rounded-full ${large ? 'p-2' : 'p-1.5'}`}>
+          {micMuted && <MicMuteFill className="text-red-400" size={large ? 18 : 13} />}
+          {isLocal && cameraOff && <CameraVideoOffFill className="text-red-400" size={large ? 18 : 13} />}
         </span>
-      )}
-      {/* §6 — manual per-listener volume, purely client-side (spec's own
-          rule: no server sync needed, it's just my own listening preference).
-          Not shown for screen-share tiles or my own tiles — screen share
-          carries no audio track here, and muting yourself already has the
-          mic button. */}
-      {/* Bug fix — this used to stack above the name tag (or, before that,
-          sit in normal document flow below the video) — both approaches
-          still ended up visually colliding with the name tag in practice.
-          Now it shares the EXACT same bottom-1 spot as the name tag and the
-          two swap on hover (see the name tag's own comment above): only
-          hovering reveals the slider, and only while hovering — no longer
-          kept visible just because volume was turned down, so it's always
-          exactly one or the other, never both, never neither. */}
-      {hasVolumeSlider && (
-        <div
-          className={`absolute left-1 right-1 bottom-1 flex items-center gap-1 bg-black/45 backdrop-blur-md rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-150 ${
-            large ? 'px-2 py-1 gap-1.5' : 'px-1.5 py-0.5'
-          }`}
-        >
-          {volume === 0 ? <VolumeMuteFill size={large ? 10 : 8} className="text-white/80 shrink-0" /> : <VolumeUpFill size={large ? 10 : 8} className="text-white/80 shrink-0" />}
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.1}
-            value={volume}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              setVolume(v);
-              onVolumeChange(v);
-            }}
-            className="flex-1 accent-purple-600 h-1"
-          />
-        </div>
       )}
     </div>
   );
