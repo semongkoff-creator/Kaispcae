@@ -88,12 +88,12 @@ export function CalendarApp({ currentUser, onClose, onStartMeeting }: {
   };
 
   const startMeeting = (e: CalendarEventDto) => {
-    // MeetKai integration, honestly scoped: this opens/creates a room session
+    // Room integration, honestly scoped: this opens/creates a room session
     // for the event. There is no transcript/notulen pipeline in this repo, so
     // nothing beyond the room link is claimed.
     const slug = e.meetkaiRoomSlug;
     if (slug && onStartMeeting) { onStartMeeting(slug); return; }
-    window.alert('Belum ada room MeetKai yang tertaut ke acara ini.');
+    window.alert('Belum ada room yang tertaut ke acara ini.');
   };
 
   const ViewComp = view === 'day' ? DayView : view === 'week' ? WeekView : view === 'month' ? MonthView : AgendaView;

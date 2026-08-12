@@ -7,7 +7,7 @@ import { AnalyticsPanel } from './AnalyticsPanel';
 // unlike AdminConsole which re-gates on workspaceRole — see PanelId's doc
 // comment in gameStore.ts. Same full-screen chrome shape as AdminConsole's
 // own header, minus the tab nav (nothing else to switch to here — Team/
-// All-Kaitech tiers live inside AdminConsole instead).
+// company-wide tiers live inside AdminConsole instead).
 export function MyAnalyticsPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };

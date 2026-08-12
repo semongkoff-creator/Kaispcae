@@ -19,7 +19,7 @@ import {
   Zone,
   doesRectOverlapImpassableArea,
   roleAtLeast,
-} from '@virtualmeet/shared';
+} from '@kaispace/shared';
 import { useGameStore, OVERVIEW_ZOOM_THRESHOLD } from '@/stores/gameStore';
 import { useMovement } from '@/hooks/useMovement';
 import { drawAvatar } from './AvatarSprite';

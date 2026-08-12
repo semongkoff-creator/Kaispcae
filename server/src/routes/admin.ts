@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import { Server } from 'socket.io';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { getPrisma } from '../lib/prisma';
-import { WORKSPACE_ACTIONS } from '@virtualmeet/shared';
+import { WORKSPACE_ACTIONS } from '@kaispace/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { requireWorkspace } from '../lib/workspace';
 import { writeAudit, clientIp } from '../lib/audit';
@@ -431,7 +431,7 @@ admin.get('/admin/backup/export', authenticateToken, requireWorkspace('workspace
     });
 
     const backup = { exportedAt: new Date().toISOString(), exportedBy: req.userId, notes, attendance };
-    const filename = `meetkai-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    const filename = `kaispace-backup-${new Date().toISOString().slice(0, 10)}.json`;
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(JSON.stringify(backup, null, 2));

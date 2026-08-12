@@ -1,4 +1,4 @@
-// One-off, idempotent creator/updater for the "Kaitech" office room —
+// One-off, idempotent creator/updater for the sample office room —
 // requested to be built directly through the application's own data layer
 // (not by clicking through the UI), following the exact same Prisma writes
 // POST /api/rooms performs (see routes/rooms.ts) so this room ends up in
@@ -6,7 +6,7 @@
 // RoomMember, a "general" Channel + mirror Conversation, and one
 // TeleportLocation per zone.
 //
-// Idempotent by a FIXED slug ('kaitech', not the app's own generateSlug()
+// Idempotent by a FIXED slug ('office', not the app's own generateSlug()
 // which always appends a random suffix — that would make two runs of this
 // script produce two different rooms instead of updating the same one). A
 // second run REPLACES the existing room's layout in place (tilemapData/
@@ -14,24 +14,24 @@
 // NOT touch membership/channels/teleport locations on a re-run, since those
 // are one-time bootstrap state, not part of "the layout".
 //
-// Run with: npx tsx server/scripts/seedKaitechRoom.ts
-// Optional: KAITECH_OWNER_EMAIL=someone@kaitech.io npx tsx server/scripts/seedKaitechRoom.ts
+// Run with: npx tsx server/scripts/seedOfficeRoom.ts
+// Optional: OWNER_EMAIL=someone@example.com npx tsx server/scripts/seedOfficeRoom.ts
 //   (defaults to the first admin-role account found, with a warning, if unset)
 
 import 'dotenv/config';
 import { getPrisma } from '../src/lib/prisma';
 import { ensureGroupConversation } from '../src/lib/conversations';
-import { createKaitechOfficeLayout, findZoneEntryTile } from '@virtualmeet/shared';
+import { createCorporateOfficeLayout, findZoneEntryTile } from '@kaispace/shared';
 
-const SLUG = 'kaitech';
-const ROOM_NAME = 'Kaitech';
-const TEMPLATE = 'kaitech-office';
+const SLUG = 'office';
+const ROOM_NAME = 'Kantor';
+const TEMPLATE = 'corporate-office';
 const THEME = 'modern-interiors';
 
 async function main() {
   const prisma = getPrisma();
 
-  const ownerEmail = process.env.KAITECH_OWNER_EMAIL;
+  const ownerEmail = process.env.OWNER_EMAIL;
   const owner = ownerEmail
     ? await prisma.user.findUnique({ where: { email: ownerEmail } })
     : await prisma.user.findFirst({ where: { accountRole: 'admin' } });
@@ -40,14 +40,14 @@ async function main() {
     throw new Error(
       ownerEmail
         ? `No user found with email ${ownerEmail}`
-        : 'No admin-role user found in the database — set KAITECH_OWNER_EMAIL to an existing user, or promote one to admin first.',
+        : 'No admin-role user found in the database — set OWNER_EMAIL to an existing user, or promote one to admin first.',
     );
   }
   if (!ownerEmail) {
-    console.warn(`[seedKaitechRoom] KAITECH_OWNER_EMAIL not set — defaulting to first admin found: ${owner.email}`);
+    console.warn(`[seedOfficeRoom] OWNER_EMAIL not set — defaulting to first admin found: ${owner.email}`);
   }
 
-  const layout = createKaitechOfficeLayout(THEME);
+  const layout = createCorporateOfficeLayout(THEME);
 
   const existing = await prisma.room.findUnique({ where: { slug: SLUG } });
 
@@ -73,7 +73,7 @@ async function main() {
         layerData: null,
       },
     });
-    console.log(`[seedKaitechRoom] Updated existing room '${SLUG}' (id=${existing.id}) in place — layout replaced (including a stale layerData conversion, if any), membership/channels/teleport locations untouched.`);
+    console.log(`[seedOfficeRoom] Updated existing room '${SLUG}' (id=${existing.id}) in place — layout replaced (including a stale layerData conversion, if any), membership/channels/teleport locations untouched.`);
     await prisma.$disconnect();
     return;
   }
@@ -111,12 +111,11 @@ async function main() {
     });
   }
 
-  console.log(`[seedKaitechRoom] Created room '${SLUG}' (id=${room.id}), owner=${owner.email}, ${layout.zones.length} zones -> teleport locations, general channel ready.`);
-  console.log('[seedKaitechRoom] NOTE: Lark Drive folder creation was intentionally skipped (best-effort in the real endpoint too) — it will lazily create itself on first upload if Lark Drive is configured.');
+  console.log(`[seedOfficeRoom] Created room '${SLUG}' (id=${room.id}), owner=${owner.email}, ${layout.zones.length} zones -> teleport locations, general channel ready.`);
   await prisma.$disconnect();
 }
 
 main().catch((err) => {
-  console.error('[seedKaitechRoom] FAILED:', err);
+  console.error('[seedOfficeRoom] FAILED:', err);
   process.exit(1);
 });

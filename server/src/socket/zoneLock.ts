@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, ZoneLockState } from '@virtualmeet/shared';
+import { SocketEvents, ZoneLockState } from '@kaispace/shared';
 import { getPlayerName } from './roomHandler';
 import { getPrisma } from '../lib/prisma';
 

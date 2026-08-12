@@ -3,7 +3,7 @@
 // future theme means adding one entry to each map below — nothing else in
 // this file, or its callers, needs to change per-theme special-casing.
 
-import { RoomTheme, TileType } from '@virtualmeet/shared';
+import { RoomTheme, TileType } from '@kaispace/shared';
 import { PaletteEntry, TILE_PALETTE, TILE_PALETTE_BY_ID } from './tilePaletteManifest';
 import { SCIFI_OFFICE_PALETTE, SCIFI_OFFICE_PALETTE_BY_ID } from './scifiOfficePaletteManifest';
 import { LIMEZU_OFFICE_ENTRIES } from './limezu-office-manifest';

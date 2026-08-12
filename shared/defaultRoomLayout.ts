@@ -524,7 +524,7 @@ export function createDefaultOfficeLayout(theme: RoomTheme = 'scifi-office'): { 
   // Default spawn point for every new player, and the only zone connected
   // to every other one via the vertical corridor above it.
   setTile(tiles, 24, 34, 'spawn');
-  addBanner(furniture, 20, 32, 10, 'Welcome to MeetKai', '#6B2FBF');
+  addBanner(furniture, 20, 32, 10, 'Welcome', '#6B2FBF');
   // Offset from directly above the spawn tile (24,34) — placing it at x=24
   // would completely block the only path out of the entrance, since a
   // fresh spawn's immediate north neighbor is the one tile every new
@@ -622,7 +622,7 @@ export function createSmallTeamLayout(theme: RoomTheme = 'scifi-office'): { tile
 
   // ── Entrance / Reception — (2,33) 46x2, spans the bottom ─────────────
   setTile(tiles, 25, 34, 'spawn');
-  addBanner(furniture, 20, 32, 10, 'Welcome to MeetKai', '#6B2FBF');
+  addBanner(furniture, 20, 32, 10, 'Welcome', '#6B2FBF');
   placeFurniture(tiles, furniture, 'plant-tall', 4, 33, theme);
   placeFurniture(tiles, furniture, 'plant-accent', 45, 33, theme);
 
@@ -719,7 +719,7 @@ export function createLoungeLayout(theme: RoomTheme = 'scifi-office'): { tiles: 
 
   // ── Entrance / Reception — (2,33) 46x2, spans the bottom ─────────────
   setTile(tiles, 25, 34, 'spawn');
-  addBanner(furniture, 20, 32, 10, 'Welcome to MeetKai', '#6B2FBF');
+  addBanner(furniture, 20, 32, 10, 'Welcome', '#6B2FBF');
   placeFurniture(tiles, furniture, 'plant-tall', 4, 33, theme);
   placeFurniture(tiles, furniture, 'plant-accent', 45, 33, theme);
 
@@ -727,15 +727,15 @@ export function createLoungeLayout(theme: RoomTheme = 'scifi-office'): { tiles: 
 }
 
 /**
- * "Kaitech" template — v2, rebuilt against an actual reference floor-plan
+ * Corporate-office template — v2, built against a real reference floor-plan
  * IMAGE (the first version was built from a text description alone, before
  * the image was available — see git history for that version's own notes on
  * substitutions, still mostly true here too). Three building clusters:
- * left = the main Kaitech building (CEO office, AI Team + Odoo Team open-plan
+ * left = the main building (CEO office, AI Team + Dev Team open-plan
  * areas, ground-floor entrance plaza); right = a Consulting building (4
  * separate small consulting rooms around a central glass hallway) with a
  * Lounge below it (bar counter + dining); bottom = a small annex building
- * with 3 breakout meeting rooms (AI Team's own, a general one, Odoo Team's
+ * with 3 breakout meeting rooms (AI Team's own, a general one, Dev Team's
  * own) — the image reuses the team names here for a SEPARATE small meeting
  * room each, distinct from their open-plan desk area upstairs, not a
  * duplicate of it.
@@ -766,7 +766,7 @@ export function createLoungeLayout(theme: RoomTheme = 'scifi-office'): { tiles: 
  * machines → omitted (no matching asset at all), glass hallway → left
  * un-walled entirely rather than a solid-wall stand-in.
  */
-export function createKaitechOfficeLayout(theme: RoomTheme = 'modern-interiors'): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
+export function createCorporateOfficeLayout(theme: RoomTheme = 'modern-interiors'): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
   const tiles: RoomTile[][] = [];
   for (let y = 0; y < MAP_HEIGHT; y++) {
     const row: RoomTile[] = [];
@@ -824,20 +824,20 @@ export function createKaitechOfficeLayout(theme: RoomTheme = 'modern-interiors')
   placeDeskIsland(tiles, furniture, 21, 11, theme, ['desk-basic', 'desk-computer-a', 'desk-computer-c', 'desk-basic']);
   placeDeskIsland(tiles, furniture, 16, 18, theme, ['desk-computer-a', 'desk-computer-b', 'desk-basic', 'desk-computer-c']);
   placeDeskIsland(tiles, furniture, 21, 18, theme, ['desk-computer-b', 'desk-basic', 'desk-computer-c', 'desk-computer-a']);
-  addBanner(furniture, 15, 1, 6, 'ODOO TEAM', '#8b5cf6');
+  addBanner(furniture, 15, 1, 6, 'DEV TEAM', '#8b5cf6');
   placeFurniture(tiles, furniture, 'plant-tall', 26, 1, theme);
   placeFurniture(tiles, furniture, 'pinboard', 14, 23, theme);
   zones.push({
-    id: 'odoo-team', name: 'Odoo Team',
+    id: 'dev-team', name: 'Dev Team',
     x: 14, y: 1, width: 13, height: 24,
-    label: 'ODOO TEAM', color: '#8b5cf6', type: 'desk',
+    label: 'DEV TEAM', color: '#8b5cf6', type: 'desk',
   });
 
   // ── Entrance plaza — (1,25) 26x2, spans the bottom of the left building ─
   setFloor(tiles, 1, 25, 26, 26, 'floor-tile-gray', theme);
   setTile(tiles, 13, 25, 'spawn');
-  addBanner(furniture, 4, 25, 4, 'KAITECH', '#1e3a8a');
-  addBanner(furniture, 19, 25, 4, 'KAITECH', '#1e3a8a');
+  addBanner(furniture, 4, 25, 4, 'OFFICE', '#1e3a8a');
+  addBanner(furniture, 19, 25, 4, 'OFFICE', '#1e3a8a');
   placeFurniture(tiles, furniture, 'meeting-table', 8, 26, theme);
   placeFurniture(tiles, furniture, 'chair-office', 7, 26, theme);
   placeFurniture(tiles, furniture, 'chair-office', 10, 26, theme);
@@ -888,9 +888,9 @@ export function createKaitechOfficeLayout(theme: RoomTheme = 'modern-interiors')
   placeFurniture(tiles, furniture, 'chair-office', 20, 32, theme);
   placeFurniture(tiles, furniture, 'chair-office', 22, 32, theme);
   zones.push({
-    id: 'odoo-team-meeting', name: 'Odoo Team Meeting Room',
+    id: 'dev-team-meeting', name: 'Dev Team Meeting Room',
     x: 18, y: 27, width: 9, height: 8,
-    label: 'ODOO TEAM', color: '#8b5cf6', type: 'meeting',
+    label: 'DEV TEAM', color: '#8b5cf6', type: 'meeting',
   });
 
   // ══ Corridor — cols 27-28, connects left building, right building, and ══
@@ -999,13 +999,13 @@ export function createKaitechOfficeLayout(theme: RoomTheme = 'modern-interiors')
 // unlike RoomTheme (a reskin applied to whichever layout is already there),
 // a template is a completely different tile/furniture/zone layout — the
 // room's floor plan itself, not just the art drawn over it.
-export type RoomTemplateId = 'main-office' | 'small-team' | 'open-lounge' | 'kaitech-office';
+export type RoomTemplateId = 'main-office' | 'small-team' | 'open-lounge' | 'corporate-office';
 
 export const ROOM_TEMPLATES: { id: RoomTemplateId; name: string; description: string }[] = [
   { id: 'main-office', name: 'Main Office', description: '8 zones, 4 team clusters — a full multi-team office' },
   { id: 'small-team', name: 'Small Team', description: 'One meeting room, 2 desk clusters, and a lounge corner' },
   { id: 'open-lounge', name: 'Open Lounge', description: 'Mostly social space, a small desk nook, one meeting room' },
-  { id: 'kaitech-office', name: 'Kaitech Office', description: 'Kaitech\'s real floor plan — CEO office, AI/Odoo teams, 4 consulting rooms, lounge, breakout meeting rooms' },
+  { id: 'corporate-office', name: 'Kantor Perusahaan', description: 'Denah kantor lengkap — ruang CEO, dua area tim open-plan, 4 ruang konsultasi, lounge, dan ruang meeting breakout' },
 ];
 
 export function createRoomLayoutFromTemplate(
@@ -1015,7 +1015,7 @@ export function createRoomLayoutFromTemplate(
   switch (templateId) {
     case 'small-team': return createSmallTeamLayout(theme);
     case 'open-lounge': return createLoungeLayout(theme);
-    case 'kaitech-office': return createKaitechOfficeLayout(theme);
+    case 'corporate-office': return createCorporateOfficeLayout(theme);
     case 'main-office':
     default: return createDefaultOfficeLayout(theme);
   }

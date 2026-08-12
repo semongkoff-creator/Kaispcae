@@ -1,6 +1,6 @@
 import { StarFill, AwardFill, PersonBadgeFill, BriefcaseFill } from 'react-bootstrap-icons';
 import { useGameStore } from '@/stores/gameStore';
-import { Role, roleAtLeast } from '@virtualmeet/shared';
+import { Role, roleAtLeast } from '@kaispace/shared';
 
 interface AdminPanelProps {
   onGrantAdmin: (userId: string) => void;

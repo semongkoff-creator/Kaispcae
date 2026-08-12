@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { DocRole } from '@virtualmeet/shared';
+import { DocRole } from '@kaispace/shared';
 
 // Resolve a user's role on a doc FROM THE DATABASE. Called on every request
 // and on every realtime edit — never cached in a token, never taken from the

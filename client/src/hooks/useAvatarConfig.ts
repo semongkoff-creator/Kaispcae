@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { AvatarConfig, BodyShape, Accessory, Expression } from '@virtualmeet/shared';
+import { AvatarConfig, BodyShape, Accessory, Expression } from '@kaispace/shared';
 
 const STORAGE_KEY = 'virtualmeet-avatar-config';
 

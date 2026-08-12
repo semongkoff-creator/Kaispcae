@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
 import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff, Grid3x3GapFill } from 'react-bootstrap-icons';
-import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@virtualmeet/shared';
+import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
 import { ChatAvatar, avatarColor } from './ChatAvatar';

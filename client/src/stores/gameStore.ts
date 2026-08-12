@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@virtualmeet/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@kaispace/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 import { appendMovementSnapshot, MovementSnapshot, sampleMovementSnapshots } from './movementSmoothing';
@@ -98,7 +98,7 @@ export type PanelId =
   // employee ("cermin evaluasi diri"), unlike adminConsole above which is
   // gated to workspaceRole==='admin' and invisible to ordinary members —
   // so this is its own panel, not a tab inside AdminConsole. Team/
-  // All-Kaitech tiers land inside AdminConsole instead (Phase 3), since
+  // company-wide tiers land inside AdminConsole instead (Phase 3), since
   // those really are manager/admin-only surfaces.
   | 'myAnalytics'
   // Operator-only, cross-org organization list (see

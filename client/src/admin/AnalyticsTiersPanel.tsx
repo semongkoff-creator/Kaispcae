@@ -7,7 +7,7 @@ type Tier = 'individual' | 'team' | 'company';
 const TIERS: { id: Tier; label: string }[] = [
   { id: 'individual', label: 'Individu' },
   { id: 'team', label: 'Team' },
-  { id: 'company', label: 'All Kaitech' },
+  { id: 'company', label: 'Semua Perusahaan' },
 ];
 
 // Bagian B.1's three tiers, presented together for whoever can already open
@@ -16,7 +16,7 @@ const TIERS: { id: Tier; label: string }[] = [
 // employee reaches the same Individual tier via the separate, non-admin-
 // gated "Analitik Saya" entry (see MyAnalyticsPanel.tsx) — that one is NOT
 // reachable from here. Team is scoped server-side to the admin's own direct
-// reports (may be empty if they don't manage anyone); All Kaitech is
+// reports (may be empty if they don't manage anyone); the company-wide tier is
 // server-gated to workspaceRole==='admin', which is redundant with
 // AdminConsole's own gate but kept for defense-in-depth, same posture as
 // every other admin route in this app.

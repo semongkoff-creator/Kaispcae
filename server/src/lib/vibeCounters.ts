@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { workDayOf } from '@virtualmeet/shared';
+import { workDayOf } from '@kaispace/shared';
 
 export type VibeCounterField = 'emoteCount' | 'waveCount' | 'chatCount' | 'furnitureCount';
 

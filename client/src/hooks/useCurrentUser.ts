@@ -1,5 +1,5 @@
 import { UserProfile } from '@/services/api';
-import { WorkspaceAction, WorkspaceRole, canWorkspace } from '@virtualmeet/shared';
+import { WorkspaceAction, WorkspaceRole, canWorkspace } from '@kaispace/shared';
 
 // The shared identity shape the suite modules (Base / Calendar / Attendance /
 // Docs) read. This app holds the session in App.tsx's useAuth() and passes it

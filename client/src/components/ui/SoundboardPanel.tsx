@@ -13,7 +13,7 @@ import {
   BellFill,
   TrophyFill,
 } from 'react-bootstrap-icons';
-import { SoundboardSoundData, SOUNDBOARD_DEFAULT_SOUNDS, SOUNDBOARD_MAX_DURATION_MS, SOUNDBOARD_MAX_FILE_BYTES, hasFeatureAccess } from '@virtualmeet/shared';
+import { SoundboardSoundData, SOUNDBOARD_DEFAULT_SOUNDS, SOUNDBOARD_MAX_DURATION_MS, SOUNDBOARD_MAX_FILE_BYTES, hasFeatureAccess } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { api, ApiError } from '@/services/api';
 

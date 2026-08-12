@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { isUserInLockedZone } from './zoneLock';
 import { zoneIdOfSocket } from './zoneHandler';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, FollowInfo, CONSENT_REQUEST_TIMEOUT_MS, FollowRespondPayload } from '@virtualmeet/shared';
+import { SocketEvents, FollowInfo, CONSENT_REQUEST_TIMEOUT_MS, FollowRespondPayload } from '@kaispace/shared';
 import { getPlayerName } from './roomHandler';
 import { getPlayers } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';

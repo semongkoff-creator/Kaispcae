@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { CalendarRole } from '@virtualmeet/shared';
+import { CalendarRole } from '@kaispace/shared';
 
 // Resolve a user's role on a calendar FROM THE DATABASE, on every request.
 //

@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { getPrisma } from '../lib/prisma';
-import { ShiftDef, computeTotals, finalStatus, canViewAttendanceOf } from '@virtualmeet/shared';
+import { ShiftDef, computeTotals, finalStatus, canViewAttendanceOf } from '@kaispace/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { requireWorkspace, resolveWorkspaceRole } from '../lib/workspace';
 import { writeAudit, clientIp } from '../lib/audit';

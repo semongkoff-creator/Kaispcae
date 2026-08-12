@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import { DateTime } from 'luxon';
-import { PROXIMITY_THRESHOLD, TILE_SIZE } from '@virtualmeet/shared';
+import { PROXIMITY_THRESHOLD, TILE_SIZE } from '@kaispace/shared';
 import { getPrisma } from '../lib/prisma';
 import { getActiveRoomSlugs, pinSystemNotice } from './roomHandler';
 import { getCachedPlayers } from '../store/roomStore';

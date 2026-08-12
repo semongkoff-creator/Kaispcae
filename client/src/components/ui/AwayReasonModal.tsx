@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AWAY_REASON_MAX_LENGTH, AWAY_REASON_PROMPT_TIMEOUT_MS } from '@virtualmeet/shared';
+import { AWAY_REASON_MAX_LENGTH, AWAY_REASON_PROMPT_TIMEOUT_MS } from '@kaispace/shared';
 
 interface AwayReasonModalProps {
   open: boolean;

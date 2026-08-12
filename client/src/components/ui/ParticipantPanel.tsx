@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CameraVideoFill, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill, MegaphoneFill, MicMuteFill, GeoAltFill, Search, VolumeMuteFill, VolumeUpFill, FlagFill } from 'react-bootstrap-icons';
-import { roleAtLeast, Role, WorkMode } from '@virtualmeet/shared';
+import { roleAtLeast, Role, WorkMode } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
 

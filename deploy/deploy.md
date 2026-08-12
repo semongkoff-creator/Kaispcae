@@ -7,7 +7,7 @@ Dokumen ini menjelaskan cara deploy project Office di VPS menggunakan Docker Com
 - `deploy/deploy.sh` — script deploy utama untuk VPS.
 - `docker-compose.yml` — definisi service `postgres`, `redis`, `server`, dan `nginx`.
 - `nginx/nginx.conf` — konfigurasi Nginx di dalam container client.
-- `/etc/nginx/sites-enabled/office.dev-kaitech.com` — konfigurasi Nginx host VPS, dikelola manual di server.
+- `/etc/nginx/sites-enabled/<domain-anda>` — konfigurasi Nginx host VPS, dikelola manual di server.
 
 ## Prasyarat VPS
 
@@ -79,7 +79,7 @@ Opsi yang tersedia:
 Contoh override health check:
 
 ```bash
-./deploy/deploy.sh --health-url https://office.dev-kaitech.com/api/health
+./deploy/deploy.sh --health-url https://<domain-anda>/api/health
 ```
 
 ## Setelah Deploy
@@ -106,7 +106,7 @@ curl -fsS http://127.0.0.1:8090/api/health
 Cek header asset setelah perubahan gzip/cache:
 
 ```bash
-curl -I -H 'Accept-Encoding: gzip' https://office.dev-kaitech.com/assets/<nama-file-hashed>.js
+curl -I -H 'Accept-Encoding: gzip' https://<domain-anda>/assets/<nama-file-hashed>.js
 ```
 
 Yang diharapkan untuk JS/CSS hashed:
@@ -119,7 +119,7 @@ Yang diharapkan untuk JS/CSS hashed:
 Script ini hanya deploy Docker stack project. Konfigurasi Nginx host VPS tetap dikelola manual di:
 
 ```bash
-/etc/nginx/sites-enabled/office.dev-kaitech.com
+/etc/nginx/sites-enabled/<domain-anda>
 ```
 
 Setelah mengubah Nginx host:

@@ -20,7 +20,7 @@ export async function refreshZoneRestrictionCache(
 
 // Zone entry — the same question roomMembership.ts's resolveEntry answers
 // for a whole Room, one level down. Exists because "ruang CEO" turned out to
-// be a ZONE inside the shared "Kaitech" office (Zone.id 'ceo-office'), not a
+// be a ZONE inside the shared office room (Zone.id 'ceo-office'), not a
 // separate Room — Room.restrictedAccess has no way to reach a sub-area of a
 // room you're already standing in, so this is an independent, per-zone gate
 // (see schema.prisma's ZoneRestriction doc comment).

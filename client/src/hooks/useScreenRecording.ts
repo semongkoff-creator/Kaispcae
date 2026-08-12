@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
-import { RECORDING_MAX_DURATION_MS } from '@virtualmeet/shared';
+import { RECORDING_MAX_DURATION_MS } from '@kaispace/shared';
 import { webrtcService } from '@/services/webrtcService';
 import { api } from '@/services/api';
 

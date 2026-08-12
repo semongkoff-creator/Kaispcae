@@ -1,5 +1,5 @@
 import { Socket } from 'socket.io-client';
-import { SocketEvents } from '@virtualmeet/shared';
+import { SocketEvents } from '@kaispace/shared';
 
 // STUN alone only tells a peer its public address — it can't help when the
 // network refuses direct peer-to-peer traffic at all, which is the norm on

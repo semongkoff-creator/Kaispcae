@@ -8,7 +8,7 @@ interface Slide {
 
 // QA #1/#4/#6/#7 — "next-next sebelum masuk", clear Indonesian, teaches a
 // total beginner to move/chat/meeting on their own, and calls out where
-// MeetKai works differently from Gather/ZEP so an ex-user of those isn't
+// KaiSpace works differently from Gather/ZEP so an ex-user of those isn't
 // confused looking for a feature that's just placed somewhere else here.
 const SLIDES: Slide[] = [
   {

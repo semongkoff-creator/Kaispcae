@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, AnalyticsActivityType, AnalyticsActivityPayload } from '@virtualmeet/shared';
+import { SocketEvents, AnalyticsActivityType, AnalyticsActivityPayload } from '@kaispace/shared';
 import { getPrisma } from '../lib/prisma';
 
 // v2 Bagian B.2 #5 — Office Activity Feed. In-memory userId -> managerId

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { TILE_SIZE } from '@virtualmeet/shared';
+import { TILE_SIZE } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 
 // Potong 6 — Background Music. Plays a 'bgm' media object's audio (looped, low

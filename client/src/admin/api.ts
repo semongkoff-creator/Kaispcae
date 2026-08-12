@@ -1,4 +1,4 @@
-import { WorkspaceRole } from '@virtualmeet/shared';
+import { WorkspaceRole } from '@kaispace/shared';
 
 const API_BASE = '/api';
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { Direction, TILE_SIZE, PLAYER_SPEED, PLAYER_RUN_SPEED, ImpassableAreaRect, doesRectOverlapImpassableArea } from '@virtualmeet/shared';
+import { Direction, TILE_SIZE, PLAYER_SPEED, PLAYER_RUN_SPEED, ImpassableAreaRect, doesRectOverlapImpassableArea } from '@kaispace/shared';
 
 // Bug 7 — half-width of the movement hitbox while standing/arriving on a
 // door tile, vs. the normal TILE_SIZE/2 - 2 (14px, i.e. a 28px hitbox) used

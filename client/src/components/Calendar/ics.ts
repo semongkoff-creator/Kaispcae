@@ -31,7 +31,7 @@ export function toIcs(events: CalendarEventDto[], zone: string): string {
   const lines: string[] = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//MeetKai//Kalender//ID',
+    'PRODID:-//KaiSpace//Kalender//ID',
     'CALSCALE:GREGORIAN',
   ];
   const stamp = DateTime.utc().toFormat("yyyyMMdd'T'HHmmss'Z'");

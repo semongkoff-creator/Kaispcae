@@ -1,4 +1,4 @@
-import { Avatar, RoomState, AvatarConfig, RoomTile, WorkMode, ImpassableAreaRect, DoorAreaRect, Zone } from '@virtualmeet/shared';
+import { Avatar, RoomState, AvatarConfig, RoomTile, WorkMode, ImpassableAreaRect, DoorAreaRect, Zone } from '@kaispace/shared';
 import { Redis } from 'ioredis';
 import { clearLivePlayerMovement, mergeLivePlayerMovement, setLivePlayerMovement } from './playerLiveState';
 

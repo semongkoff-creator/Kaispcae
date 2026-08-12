@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, MegaphoneFill, ChevronLeft, ChevronRight, XLg, Headset } from 'react-bootstrap-icons';
-import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@virtualmeet/shared';
+import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@kaispace/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { ChatAvatar, avatarColor } from './ChatAvatar';

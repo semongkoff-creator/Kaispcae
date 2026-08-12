@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { RecordCircleFill, StopCircleFill, Download } from 'react-bootstrap-icons';
-import { Recording } from '@virtualmeet/shared';
+import { Recording } from '@kaispace/shared';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { api, ApiError } from '@/services/api';
 

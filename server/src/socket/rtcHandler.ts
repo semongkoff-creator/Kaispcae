@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, RtcSignal } from '@virtualmeet/shared';
+import { SocketEvents, RtcSignal } from '@kaispace/shared';
 
 
 // A socket only ever joins one room (the room slug) via socket.join() in

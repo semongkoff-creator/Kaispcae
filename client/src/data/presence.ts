@@ -1,4 +1,4 @@
-import type { WorkMode } from '@virtualmeet/shared';
+import type { WorkMode } from '@kaispace/shared';
 
 // A11 — shared presence metadata so the HUD dropdown, avatar badge, and
 // Participant panel all render the same label/emoji per status.

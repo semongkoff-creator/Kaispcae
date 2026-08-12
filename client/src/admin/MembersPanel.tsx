@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { PersonPlusFill } from 'react-bootstrap-icons';
-import { WORKSPACE_ROLE_LABELS, WorkspaceRole } from '@virtualmeet/shared';
+import { WORKSPACE_ROLE_LABELS, WorkspaceRole } from '@kaispace/shared';
 import { CurrentUser } from '@/hooks/useCurrentUser';
 import { adminApi, AdminMember, AdminDepartment } from './api';
 import { InviteMemberModal } from './InviteMemberModal';

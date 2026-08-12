@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { getPrisma } from '../lib/prisma';
-import { hasFeatureAccess } from '@virtualmeet/shared';
+import { hasFeatureAccess } from '@kaispace/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole as resolveRole } from '../lib/roles';
 import { findRoomInOrg } from '../lib/orgScope';

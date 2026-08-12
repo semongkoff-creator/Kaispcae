@@ -1,4 +1,4 @@
-import { Avatar, BodyShape, Accessory, Expression, Direction, TILE_SIZE } from '@virtualmeet/shared';
+import { Avatar, BodyShape, Accessory, Expression, Direction, TILE_SIZE } from '@kaispace/shared';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
 
 // Radius for the shape-fallback avatar (drawn only while no sprite is

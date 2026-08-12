@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, CsReplyPayload } from '@virtualmeet/shared';
+import { SocketEvents, CsReplyPayload } from '@kaispace/shared';
 
 // Customer Service chat, Tahap 4 — tracks which live socket(s) belong to
 // which real user, purely so an admin reply arriving via POST /api/cs/reply

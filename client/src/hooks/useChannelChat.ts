@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { ChannelMessage } from '@virtualmeet/shared';
+import { ChannelMessage } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { api } from '@/services/api';
 

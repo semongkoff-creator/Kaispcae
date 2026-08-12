@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle } from 'react-bootstrap-icons';
-import { ChannelMessage, Channel, DirectConversationSummary } from '@virtualmeet/shared';
+import { ChannelMessage, Channel, DirectConversationSummary } from '@kaispace/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { GroupMembers } from './GroupMembers';

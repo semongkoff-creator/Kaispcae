@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { Socket } from 'socket.io-client';
-import { ProximityPlayer, DISCONNECT_DEBOUNCE_MS } from '@virtualmeet/shared';
+import { ProximityPlayer, DISCONNECT_DEBOUNCE_MS } from '@kaispace/shared';
 import { webrtcService, MAX_VIDEO_PEERS } from '@/services/webrtcService';
 import { calcGain } from './useProximity';
 

@@ -3,10 +3,10 @@
 // Google Stitch) as a visual inventory for a redesign pass.
 //
 // Usage:
-//   UI_EMAIL=you@kaitech.io UI_PASSWORD=yourpass npm run screenshot-ui
+//   UI_EMAIL=you@example.com UI_PASSWORD=yourpass npm run screenshot-ui
 //
 // Env vars:
-//   UI_BASE_URL   default: https://office.dev-kaitech.com
+//   UI_BASE_URL   default: http://localhost:5173
 //   UI_EMAIL      required — an existing account's login email
 //   UI_PASSWORD   required — that account's password
 //   UI_ROOM_SLUG  optional — a specific room's slug/join-code to open;
@@ -36,14 +36,14 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 
-const BASE_URL = (process.env.UI_BASE_URL || 'https://office.dev-kaitech.com').replace(/\/$/, '');
+const BASE_URL = (process.env.UI_BASE_URL || 'http://localhost:5173').replace(/\/$/, '');
 const EMAIL = process.env.UI_EMAIL;
 const PASSWORD = process.env.UI_PASSWORD;
 const ROOM_SLUG = process.env.UI_ROOM_SLUG || '';
 const HEADLESS = process.env.UI_HEADLESS !== 'false';
 
 if (!EMAIL || !PASSWORD) {
-  console.error('Missing UI_EMAIL / UI_PASSWORD. Example:\n  UI_EMAIL=you@kaitech.io UI_PASSWORD=yourpass npm run screenshot-ui');
+  console.error('Missing UI_EMAIL / UI_PASSWORD. Example:\n  UI_EMAIL=you@example.com UI_PASSWORD=yourpass npm run screenshot-ui');
   process.exit(1);
 }
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, ExclamationTriangleFill } from 'react-bootstrap-icons';
-import { Furniture, InteractivePasswordResultPayload, InteractiveChoiceResultPayload } from '@virtualmeet/shared';
+import { Furniture, InteractivePasswordResultPayload, InteractiveChoiceResultPayload } from '@kaispace/shared';
 
 // Bug — image_popup's <img> had no onLoad/onError handling at all, so a slow
 // or failed load (wrong URL, revoked auth, a storage outage/misconfig,

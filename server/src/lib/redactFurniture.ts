@@ -1,4 +1,4 @@
-import { Furniture, RoomTile, DoorAreaRect } from '@virtualmeet/shared';
+import { Furniture, RoomTile, DoorAreaRect } from '@kaispace/shared';
 
 // Fitur 15B — two Interactive Object types carry a real "secret" a normal
 // player must never see in their own client's data (both password and

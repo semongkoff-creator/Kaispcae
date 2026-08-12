@@ -1,4 +1,4 @@
-import { Avatar, RoomTheme, RoomTemplateId, createRoomLayoutFromTemplate, findSpawnPixel, BLOCKED_TILES, isTileBlocked, isDoorTile } from '@virtualmeet/shared';
+import { Avatar, RoomTheme, RoomTemplateId, createRoomLayoutFromTemplate, findSpawnPixel, BLOCKED_TILES, isTileBlocked, isDoorTile } from '@kaispace/shared';
 
 // Re-exported for existing consumers (GameCanvas.tsx's movement collision
 // check, App.tsx's minimap click-to-teleport handler) — the actual

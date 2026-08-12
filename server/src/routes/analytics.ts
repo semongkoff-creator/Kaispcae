@@ -6,7 +6,7 @@ import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveWorkspaceRole, requireWorkspace } from '../lib/workspace';
 import { writeAudit, clientIp } from '../lib/audit';
 import { getOnlineUserIds } from '../socket/roomHandler';
-import { canViewAnalyticsOf, applyOvertimeGrace, finalStatus, workDayOf, ShiftDef, layerDataToLegacy, LayerData, ZoneType } from '@virtualmeet/shared';
+import { canViewAnalyticsOf, applyOvertimeGrace, finalStatus, workDayOf, ShiftDef, layerDataToLegacy, LayerData, ZoneType } from '@kaispace/shared';
 import { findUserInOrg } from '../lib/orgScope';
 
 const router = Router();
@@ -1024,7 +1024,7 @@ router.get('/analytics/export', authenticateToken, async (req: AuthRequest, res:
     const workbook = new ExcelJS.Workbook();
     const zone = 'Asia/Jakarta';
     const periodLabel = `${DateTime.fromJSDate(start).setZone(zone).setLocale('id').toFormat('d LLL yyyy')} – ${DateTime.fromJSDate(end).setZone(zone).setLocale('id').toFormat('d LLL yyyy')}`;
-    const tierLabel = tier === 'individual' ? 'Individu' : tier === 'team' ? 'Team' : 'All Kaitech';
+    const tierLabel = tier === 'individual' ? 'Individu' : tier === 'team' ? 'Team' : 'Semua Perusahaan';
     const addHeader = (sheet: ExcelJS.Worksheet) => {
       sheet.addRow([`KaiSpace Productivity Analytics — ${tierLabel}`]);
       sheet.addRow([`Periode: ${periodLabel}`]);

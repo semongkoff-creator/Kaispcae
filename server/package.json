@@ -1,5 +1,5 @@
 {
-  "name": "@virtualmeet/server",
+  "name": "@kaispace/server",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
-    "@virtualmeet/shared": "*",
+    "@kaispace/shared": "*",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",

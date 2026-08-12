@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { DateTime, Interval } from 'luxon';
 import { ChevronLeft, ChevronRight, PencilSquare } from 'react-bootstrap-icons';
-import { AttendanceStatus, STATUS_LABELS } from '@virtualmeet/shared';
+import { AttendanceStatus, STATUS_LABELS } from '@kaispace/shared';
 import { attendanceApi, AttendanceRecordDto, CorrectionDto } from './api';
 
 const STATUS_COLOR: Record<AttendanceStatus, string> = {

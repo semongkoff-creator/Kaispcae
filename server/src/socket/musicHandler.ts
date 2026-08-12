@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, ChatMessage, MusicTrack, MusicSessionState, MUSIC_BOT_SENDER_ID, MUSIC_BOT_NAME, MUSIC_PLAY_COOLDOWN_MS } from '@virtualmeet/shared';
+import { SocketEvents, ChatMessage, MusicTrack, MusicSessionState, MUSIC_BOT_SENDER_ID, MUSIC_BOT_NAME, MUSIC_PLAY_COOLDOWN_MS } from '@kaispace/shared';
 import { getSocketIdsInZone } from './zoneHandler';
 import { searchYoutube, getVideoDurationSec } from '../lib/youtubeService';
 

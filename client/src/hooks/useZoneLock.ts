@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Socket } from 'socket.io-client';
-import { SocketEvents, ZoneLockState, ZoneKnockRequest, ZoneApprovalRequest, ZoneRestrictionState } from '@virtualmeet/shared';
+import { SocketEvents, ZoneLockState, ZoneKnockRequest, ZoneApprovalRequest, ZoneRestrictionState } from '@kaispace/shared';
 import { api } from '@/services/api';
 
 // Client state for per-zone locks. The server is authoritative for every

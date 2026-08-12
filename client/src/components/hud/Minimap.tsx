@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
-import { Avatar, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, roleAtLeast } from '@virtualmeet/shared';
+import { Avatar, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, roleAtLeast } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { drawMiniTileType, drawMiniZoneBackground, MINI_FURNITURE, MINI_WALL_AREA } from '@/components/canvas/miniRender';
 

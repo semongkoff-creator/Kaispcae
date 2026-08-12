@@ -6,7 +6,7 @@ import { RecordingControl } from './RecordingControl';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { Theme } from '@/hooks/useTheme';
 import { ManualStatus } from '@/data/presence';
-import { Role } from '@virtualmeet/shared';
+import { Role } from '@kaispace/shared';
 
 interface SidebarProps {
   onEditAvatar: () => void;

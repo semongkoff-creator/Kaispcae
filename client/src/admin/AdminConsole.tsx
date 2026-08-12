@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { XLg, People, ShieldLock, ClockHistory, Sliders, BarChartFill, GraphUp, CalendarEvent, PersonCheck, CloudDownload } from 'react-bootstrap-icons';
-import { WORKSPACE_ROLE_LABELS } from '@virtualmeet/shared';
+import { WORKSPACE_ROLE_LABELS } from '@kaispace/shared';
 import { CurrentUser } from '@/hooks/useCurrentUser';
 import { ApprovalPanel } from './ApprovalPanel';
 import { MembersPanel } from './MembersPanel';
@@ -27,7 +27,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'attendance', label: 'Absensi', icon: <ClockHistory size={14} /> },
   { id: 'approvals', label: 'Persetujuan', icon: <PersonCheck size={14} /> },
   { id: 'report', label: 'Laporan', icon: <BarChartFill size={14} /> },
-  // Productivity Analytics — Team/All-Kaitech tiers (Bagian B.1). Separate
+  // Productivity Analytics — Team/company-wide tiers (Bagian B.1). Separate
   // from "Laporan" (attendance-only) above; see AnalyticsTiersPanel.tsx's
   // own doc comment for why the Individual tier here is self-view only.
   { id: 'analytics', label: 'Analitik', icon: <GraphUp size={14} /> },

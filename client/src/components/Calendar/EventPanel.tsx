@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DateTime } from 'luxon';
 import { XLg, Trash, CameraVideo, People, GeoAlt, Bell, ArrowRepeat } from 'react-bootstrap-icons';
-import { EditScope, Rsvp, RSVP_LABELS, describeRule } from '@virtualmeet/shared';
+import { EditScope, Rsvp, RSVP_LABELS, describeRule } from '@kaispace/shared';
 import { calendarApi, CalendarEventDto, CalendarSummary, MeetingRoomDto, EventInput, BusyBlock } from './api';
 
 const RRULE_PRESETS: { label: string; value: string | null }[] = [
@@ -314,7 +314,7 @@ export function EventPanel({
 
       {event && onStartMeeting && !event.busyOnly && (
         <button onClick={() => onStartMeeting(event)} className="mt-3 w-full inline-flex items-center justify-center gap-1.5 py-2 rounded-lg bg-green-600 text-white text-xs font-medium cursor-pointer hover:bg-green-700">
-          <CameraVideo size={12} /> Mulai meeting MeetKai
+          <CameraVideo size={12} /> Mulai meeting
         </button>
       )}
 

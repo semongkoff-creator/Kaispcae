@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, EmoteEvent } from '@virtualmeet/shared';
+import { SocketEvents, EmoteEvent } from '@kaispace/shared';
 import { getPrisma } from '../lib/prisma';
 import { incrementDailyVibeCounter } from '../lib/vibeCounters';
 import { recordResponseIfPending } from '../lib/pokeResponse';

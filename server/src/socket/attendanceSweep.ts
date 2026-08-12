@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
-import { ShiftDef, computeTotals, shiftBounds, LOCATION_RETENTION_DAYS } from '@virtualmeet/shared';
+import { ShiftDef, computeTotals, shiftBounds, LOCATION_RETENTION_DAYS } from '@kaispace/shared';
 
 // Two scheduled jobs for Attendance.
 //

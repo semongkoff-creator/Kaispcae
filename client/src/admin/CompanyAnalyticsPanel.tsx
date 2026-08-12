@@ -42,7 +42,7 @@ function heatColor(minutes: number, max: number): string {
   return `rgba(124,58,237,${0.08 + alpha * 0.82})`;
 }
 
-// Bagian B.3.3 — All Kaitech tier, admin/founder only (server-gated via
+// Bagian B.3.3 — company-wide tier, admin/founder only (server-gated via
 // requireWorkspace('analytics:viewAllCompany'), see routes/analytics.ts).
 export function CompanyAnalyticsPanel() {
   const [period, setPeriod] = useState<PeriodValue>(defaultPeriodValue());

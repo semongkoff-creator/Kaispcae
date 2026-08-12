@@ -5,7 +5,7 @@ import { getPrisma } from '../lib/prisma';
 import {
   CalendarRole, canCalendar, canSeeEventDetails, canWorkspace,
   expandOccurrences, normaliseRule, truncateRuleBefore, EditScope,
-} from '@virtualmeet/shared';
+} from '@kaispace/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveCalendarRole } from '../lib/calendarAccess';
 import { resolveWorkspaceRole } from '../lib/workspace';

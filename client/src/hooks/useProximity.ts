@@ -8,7 +8,7 @@ import {
   Zone,
   Furniture,
   TILE_SIZE,
-} from '@virtualmeet/shared';
+} from '@kaispace/shared';
 
 // §6 (RTC upgrade) — Chebyshev distance (max(|dx|,|dy|)), not Euclidean:
 // movement here is grid-based with 8 directions (see useMovement.ts), so

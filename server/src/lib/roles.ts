@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { Role } from '@virtualmeet/shared';
+import { Role } from '@kaispace/shared';
 
 // The one place a per-room Role gets resolved from DB data (owner match,
 // RoomMember grant, or a global accountRole='admin' account — see

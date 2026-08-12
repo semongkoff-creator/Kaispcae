@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { DateTime } from 'luxon';
 import { GeoAlt, ExclamationTriangle } from 'react-bootstrap-icons';
-import { STATUS_LABELS, lateMinutes, ShiftDef } from '@virtualmeet/shared';
+import { STATUS_LABELS, lateMinutes, ShiftDef } from '@kaispace/shared';
 import { attendanceApi, TodayDto, getCoords } from './api';
 
 // Clock in/out. The ticking display uses the browser clock (it's just a

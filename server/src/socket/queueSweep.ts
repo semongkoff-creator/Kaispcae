@@ -1,5 +1,5 @@
 import { Server } from 'socket.io';
-import { SocketEvents } from '@virtualmeet/shared';
+import { SocketEvents } from '@kaispace/shared';
 import { getPrisma } from '../lib/prisma';
 import { advanceQueue, QUEUE_CALL_GRACE_MS } from '../lib/roomQueue';
 import { forceLeaveForQueue, forceZoneExitForQueue, broadcastZoneQueueSessionCleared, autoSummonToZoneForQueue, advanceZoneQuickQueue } from './roomHandler';

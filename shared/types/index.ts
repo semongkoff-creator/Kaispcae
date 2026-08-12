@@ -1982,7 +1982,7 @@ export interface RoomUpdatePayload {
   doorAreaRects?: DoorAreaRect[];
 }
 
-export { createDefaultOfficeLayout, createKaitechOfficeLayout, findSpawnPixel, createRoomLayoutFromTemplate, ROOM_TEMPLATES } from '../defaultRoomLayout';
+export { createDefaultOfficeLayout, createCorporateOfficeLayout, findSpawnPixel, createRoomLayoutFromTemplate, ROOM_TEMPLATES } from '../defaultRoomLayout';
 export type { RoomTemplateId } from '../defaultRoomLayout';
 export { BLOCKED_TILES, isTileBlocked, isDoorTile, findZoneEntryTile, findAdjacentFreeTile, isPointInImpassableArea, doesRectOverlapImpassableArea } from '../tileCollision';
 // ZEP Room Editor — Potong 1 layered map format + legacy adaptors.

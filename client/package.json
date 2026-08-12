@@ -1,5 +1,5 @@
 {
-  "name": "@virtualmeet/client",
+  "name": "@kaispace/client",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -23,7 +23,7 @@
     "@tiptap/pm": "^3.28.0",
     "@tiptap/react": "^3.28.0",
     "@tiptap/starter-kit": "^3.28.0",
-    "@virtualmeet/shared": "*",
+    "@kaispace/shared": "*",
     "lowlight": "^3.3.0",
     "luxon": "^3.7.2",
     "react": "^18.3.1",

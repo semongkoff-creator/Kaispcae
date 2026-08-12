@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { MicFill, MicMuteFill, CameraVideoFill, CameraVideoOffFill } from 'react-bootstrap-icons';
-import { ProximityPlayer } from '@virtualmeet/shared';
+import { ProximityPlayer } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { getVideoTiles } from './VideoGrid';
 
@@ -89,7 +89,7 @@ export async function openMiniModeWindow(): Promise<Window | null> {
         }
       }
     });
-    win.document.title = 'MeetKai — Mini Mode';
+    win.document.title = 'KaiSpace — Mini Mode';
     win.document.body.style.margin = '0';
     win.document.body.style.background = '#111827';
   } catch (e) {

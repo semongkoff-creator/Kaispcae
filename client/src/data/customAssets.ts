@@ -1,4 +1,4 @@
-import { CustomAssetEntry } from '@virtualmeet/shared';
+import { CustomAssetEntry } from '@kaispace/shared';
 import { PaletteEntry } from './tilePaletteManifest';
 import { PALETTE_BY_ID } from './themeAssets';
 

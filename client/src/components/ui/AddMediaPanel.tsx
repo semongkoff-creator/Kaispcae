@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Image, PlayBtnFill, StickyFill, Paperclip, CameraFill, JournalText } from 'react-bootstrap-icons';
-import { MediaType, MediaPayload, TILE_SIZE } from '@virtualmeet/shared';
+import { MediaType, MediaPayload, TILE_SIZE } from '@kaispace/shared';
 import { api, ApiError } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { parseYouTubeId } from '@/utils/youtube';

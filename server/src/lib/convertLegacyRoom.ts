@@ -2,7 +2,7 @@ import { getPrisma } from './prisma';
 import {
   RoomTile, RoomTheme, Furniture, Zone, LayerData,
   createDefaultOfficeLayout, legacyToLayerData, layerDataToLegacy, MAP_FORMAT_VERSION,
-} from '@virtualmeet/shared';
+} from '@kaispace/shared';
 
 // ZEP Room Editor — Potong 1 lazy migration. Converts ONE room's legacy map
 // (tilemapData/furniture/zones) into the new LayerData format, exactly once,

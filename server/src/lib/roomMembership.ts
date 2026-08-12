@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { Role, roleAtLeast } from '@virtualmeet/shared';
+import { Role, roleAtLeast } from '@kaispace/shared';
 
 // Room entry — a separate question from room ROLE.
 //

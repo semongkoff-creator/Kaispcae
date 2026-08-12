@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { DateTime } from 'luxon';
 import { Download } from 'react-bootstrap-icons';
-import { AttendanceStatus, STATUS_LABELS } from '@virtualmeet/shared';
+import { AttendanceStatus, STATUS_LABELS } from '@kaispace/shared';
 import { adminApi, AdminDepartment } from './api';
 
 const API = '/api';

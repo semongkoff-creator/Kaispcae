@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { getPrisma } from '../lib/prisma';
-import { expandOccurrences, canWorkspace } from '@virtualmeet/shared';
+import { expandOccurrences, canWorkspace } from '@kaispace/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { requireWorkspace, resolveWorkspaceRole } from '../lib/workspace';
 import { writeAudit, clientIp } from '../lib/audit';

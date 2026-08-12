@@ -1,7 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, ChannelMessage, ChatReadEntry, hasFeatureAccess } from '@virtualmeet/shared';
+import { SocketEvents, ChannelMessage, ChatReadEntry, hasFeatureAccess } from '@kaispace/shared';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { sanitizeChat } from '../middleware/validate';
 import { ensureGroupConversation, ensureDmConversation } from '../lib/conversations';

@@ -1,4 +1,4 @@
-import { RoomTile, Zone } from '@virtualmeet/shared';
+import { RoomTile, Zone } from '@kaispace/shared';
 
 // Shared flat-color "floor plan" palette — walls/doors/desks/chairs as plain
 // blocks, no pixel-art sprites. Single source for both Minimap.tsx (the

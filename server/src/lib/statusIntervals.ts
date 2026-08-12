@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { WorkMode } from '@virtualmeet/shared';
+import { WorkMode } from '@kaispace/shared';
 
 // Productivity Analytics — Bagian A.3's status-time distribution + Bagian
 // B.3.1's Focus/Meeting-time cards, backed by StatusInterval rows (see

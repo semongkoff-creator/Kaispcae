@@ -3,7 +3,7 @@ import { Server } from 'socket.io';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { getPrisma } from '../lib/prisma';
-import { hasFeatureAccess } from '@virtualmeet/shared';
+import { hasFeatureAccess } from '@kaispace/shared';
 import { authenticateToken, AuthRequest, signGuestToken } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
 import { kickRevokedGuestSocket } from '../socket/roomHandler';

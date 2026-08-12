@@ -1051,7 +1051,7 @@ model RoomQueueEntry {
   @@index([zoneId, mode, status, bookingStart])
 }
 
-// "CEO Office" turned out to be a ZONE inside the shared "Kaitech" map, not
+// "CEO Office" turned out to be a ZONE inside the shared office map, not
 // a separate Room — Room.restrictedAccess (above) gates walking into a
 // whole different office and has no way to reach a sub-area of one you're
 // already in. This is that same idea one level down: which zones (by

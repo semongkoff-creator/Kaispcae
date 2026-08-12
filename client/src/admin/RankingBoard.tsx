@@ -23,7 +23,7 @@ interface RankingResponse {
 
 const MEDAL = ['🥇', '🥈', '🥉'];
 
-// Bagian C — Task 2, embedded inside Team/All-Kaitech (not a separate top-
+// Bagian C — Task 2, embedded inside Team/company-wide (not a separate top-
 // level tab — the brief lists "papan achievement" as one section WITHIN
 // each of those tiers, see B.3.2/B.3.3). Never mounted anywhere reachable
 // from the Individual tier — C.1's "the worst is never shown publicly/at

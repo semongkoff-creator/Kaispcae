@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, DeskNoteData } from '@virtualmeet/shared';
+import { SocketEvents, DeskNoteData } from '@kaispace/shared';
 import { getPrisma } from '../lib/prisma';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { getPlayerName } from './roomHandler';

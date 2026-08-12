@@ -10,7 +10,7 @@ import {
   MoonStarsFill,
   Fire,
 } from 'react-bootstrap-icons';
-import { EMOTE_LIST, EMOTE_LABELS, EmoteType } from '@virtualmeet/shared';
+import { EMOTE_LIST, EMOTE_LABELS, EmoteType } from '@kaispace/shared';
 
 // Bootstrap Icon for each emote's picker button. The floating bubble that
 // appears above the avatar in the game world is drawn on the <canvas> 2D

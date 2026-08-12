@@ -1,4 +1,4 @@
-import { TILE_SIZE, SOURCE_TILE_SIZE, TileType, RoomTile, Furniture, RoomTheme } from '@virtualmeet/shared';
+import { TILE_SIZE, SOURCE_TILE_SIZE, TileType, RoomTile, Furniture, RoomTheme } from '@kaispace/shared';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
 import { PALETTE_BY_ID, THEME_TILE_SPRITES } from '@/data/themeAssets';
 import { ensureLimezuEntry } from '@/data/limezuInteriors';

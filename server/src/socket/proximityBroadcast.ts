@@ -1,4 +1,4 @@
-import { TILE_SIZE, TRANSLUCENT_THRESHOLD } from '@virtualmeet/shared';
+import { TILE_SIZE, TRANSLUCENT_THRESHOLD } from '@kaispace/shared';
 import { getPlayers } from '../store/roomStore';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 

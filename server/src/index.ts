@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import { SocketEvents } from '@virtualmeet/shared';
+import { SocketEvents } from '@kaispace/shared';
 import { registerRoomHandlers, getPlayerName, getPlayerColor } from './socket/roomHandler';
 import { registerCsHandlers } from './socket/csHandler';
 import { registerMovementHandlers } from './socket/movementHandler';

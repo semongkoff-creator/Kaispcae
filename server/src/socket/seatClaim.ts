@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, SeatClaimState } from '@virtualmeet/shared';
+import { SocketEvents, SeatClaimState } from '@kaispace/shared';
 import { getPlayerName } from './roomHandler';
 import { getCachedTiles } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';

@@ -1,7 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke } from '@virtualmeet/shared';
+import { SocketEvents, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke } from '@kaispace/shared';
 import { getPlayerName } from './roomHandler';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { deleteUploadedFile } from '../routes/uploads';

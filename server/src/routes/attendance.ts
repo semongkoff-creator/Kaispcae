@@ -3,7 +3,7 @@ import { getPrisma } from '../lib/prisma';
 import {
   ShiftDef, clockInStatus, finalStatus, computeTotals, workDayOf, isWorkday,
   checkGeofence, canViewAttendanceOf, lateMinutes, STATUS_LABELS,
-} from '@virtualmeet/shared';
+} from '@kaispace/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveWorkspaceRole } from '../lib/workspace';
 import { writeAudit, clientIp } from '../lib/audit';

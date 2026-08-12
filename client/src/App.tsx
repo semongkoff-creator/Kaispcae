@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill } from 'react-bootstrap-icons';
-import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents } from '@virtualmeet/shared';
+import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents } from '@kaispace/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
 import { GameCanvas } from './components/canvas/GameCanvas';

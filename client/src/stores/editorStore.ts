@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import type { LayerData, Furniture, TileEffect, AreaEffect, CustomAssetEntry, ReferenceImageData, Direction } from '@virtualmeet/shared';
-import { AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@virtualmeet/shared';
+import type { LayerData, Furniture, TileEffect, AreaEffect, CustomAssetEntry, ReferenceImageData, Direction } from '@kaispace/shared';
+import { AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@kaispace/shared';
 
 // 'impassableArea' — Item #9's draggable/resizable collision RECTANGLE tool,
 // distinct from the older per-tile 'impassable' above (same distinction as

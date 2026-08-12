@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, hasFeatureAccess } from '@virtualmeet/shared';
+import { SocketEvents, hasFeatureAccess } from '@kaispace/shared';
 import { mayEnterZone, isZoneLocked, isSealedIn } from './zoneLock';
 import { sendMusicStateToSocket } from './musicHandler';
 import { getCachedZones, getCachedZoneRestriction } from '../store/roomStore';

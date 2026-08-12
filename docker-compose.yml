@@ -39,8 +39,8 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/kaispace
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set — see .env.example}
-      CLIENT_URL: https://office.dev-kaitech.com
-      CORS_ORIGIN: https://office.dev-kaitech.com
+      CLIENT_URL: ${PUBLIC_URL:-http://localhost:8090}
+      CORS_ORIGIN: ${PUBLIC_URL:-http://localhost:8090}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -66,7 +66,7 @@ services:
       context: .
       dockerfile: client/Dockerfile
       args:
-        VITE_SERVER_URL: https://office.dev-kaitech.com
+        VITE_SERVER_URL: ${PUBLIC_URL:-http://localhost:8090}
         VITE_TURN_URL: ""
         VITE_TURN_USERNAME: ""
         VITE_TURN_CREDENTIAL: ""

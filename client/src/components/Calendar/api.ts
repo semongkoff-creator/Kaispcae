@@ -1,4 +1,4 @@
-import { CalendarRole, Rsvp, EditScope } from '@virtualmeet/shared';
+import { CalendarRole, Rsvp, EditScope } from '@kaispace/shared';
 
 const API_BASE = '/api';
 

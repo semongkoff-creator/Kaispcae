@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { XLg, PinFill } from 'react-bootstrap-icons';
-import { ProximityPlayer, EmoteType, EMOTE_LIST, EMOTE_EMOJI, EMOTE_LABELS } from '@virtualmeet/shared';
+import { ProximityPlayer, EmoteType, EMOTE_LIST, EMOTE_EMOJI, EMOTE_LABELS } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
 import { getVideoTiles, VideoTile, latestReaction } from './VideoGrid';
@@ -203,7 +203,7 @@ export function MeetingView({
       {/* pl-20 clears the fixed Sidebar rail (z-50) pinned to the left edge. */}
       <div className="flex items-center justify-between pl-20 pr-6 py-3 shrink-0">
         <p className="text-white/70 text-sm font-medium">Meeting View — {tiles.length} {tiles.length === 1 ? 'peserta' : 'peserta'}</p>
-        {/* Closest real equivalent to a "leave" action in this app — MeetKai
+        {/* Closest real equivalent to a "leave" action in this app — KaiSpace
             has no discrete hang-up/disconnect (you leave by proximity or by
             closing this view), so the spec's "leave merah" is applied here:
             neutral at rest, red on hover/focus to signal what it does. */}

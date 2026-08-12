@@ -23,7 +23,7 @@ test('KaiSpace favicon asset is wired into the document head', () => {
   assert.match(html, /href="\/assets\/img\/favico\.png"/);
 });
 
-test('login page uses the KaiSpace favicon mark, not the Kaitech horizontal logo', () => {
+test('login page uses the KaiSpace favicon mark, not a legacy horizontal logo', () => {
   assert.equal(existsSync('client/public/assets/img/favico.png'), true);
 
   const loginPage = readFileSync('client/src/pages/LoginPage.tsx', 'utf8');
@@ -32,7 +32,7 @@ test('login page uses the KaiSpace favicon mark, not the Kaitech horizontal logo
   assert.match(loginPage, /alt="KaiSpace"/);
   assert.match(loginPage, />\s*KaiSpace\s*</);
   assert.doesNotMatch(loginPage, /inline-flex bg-white rounded-xl p-2/);
-  assert.doesNotMatch(loginPage, /Kaitech-Logo-Horizontal\.png/);
+  assert.doesNotMatch(loginPage, /-Logo-Horizontal\.png/);
 });
 
 if (process.exitCode) {

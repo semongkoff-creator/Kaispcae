@@ -1,4 +1,4 @@
-import { TeleportLocation, OwnerBookmark, Recording, RoomTemplateId, Channel, ChannelMessage, DirectConversationSummary, WorkspaceRole, LayerData, SoundboardSoundData } from '@virtualmeet/shared';
+import { TeleportLocation, OwnerBookmark, Recording, RoomTemplateId, Channel, ChannelMessage, DirectConversationSummary, WorkspaceRole, LayerData, SoundboardSoundData } from '@kaispace/shared';
 
 const API_BASE = '/api';
 

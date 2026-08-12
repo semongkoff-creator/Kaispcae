@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, ChatMessage } from '@virtualmeet/shared';
+import { SocketEvents, ChatMessage } from '@kaispace/shared';
 import { getSocketIdsInZone, isSocketInZone } from './zoneHandler';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { isMusicCommand, handleMusicCommand } from './musicHandler';

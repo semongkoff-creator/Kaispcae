@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointInImpassableArea, RoomTile, JumpEvent, NudgeEvent, PlayerMovePayload, PlayerMovedPayload, PlayerStoppedPayload } from '@virtualmeet/shared';
+import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointInImpassableArea, RoomTile, JumpEvent, NudgeEvent, PlayerMovePayload, PlayerMovedPayload, PlayerStoppedPayload } from '@kaispace/shared';
 import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas, getCachedDoorAreaRects, getCachedZones, getCachedPlayers } from '../store/roomStore';
 import { isDoorUnlocked, isDoorAreaUnlocked, clearUnlockedDoors } from './doorLock';
 import { isDoorOverrideActive } from './roomHandler';

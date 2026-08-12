@@ -1,4 +1,4 @@
-import { Avatar } from '@virtualmeet/shared';
+import { Avatar } from '@kaispace/shared';
 
 type LivePlayerMovement = Pick<Avatar, 'x' | 'y' | 'direction' | 'isMoving' | 'isRunning'>;
 

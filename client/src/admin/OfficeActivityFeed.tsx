@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, AnalyticsActivityPayload } from '@virtualmeet/shared';
+import { SocketEvents, AnalyticsActivityPayload } from '@kaispace/shared';
 import { EmojiSmile, ChatDotsFill, PeopleFill, HandIndexThumb } from 'react-bootstrap-icons';
 import { SERVER_URL } from '@/services/serverUrl';
 

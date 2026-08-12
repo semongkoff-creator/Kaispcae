@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
-import { expandOccurrences } from '@virtualmeet/shared';
+import { expandOccurrences } from '@kaispace/shared';
 import { DateTime } from 'luxon';
 
 // Event reminders. A scheduled sweep, not a timer-per-event: timers would die

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { X, TrashFill, Download, EraserFill } from 'react-bootstrap-icons';
-import { MapMediaObject, WhiteboardStroke, WHITEBOARD_SIZE } from '@virtualmeet/shared';
+import { MapMediaObject, WhiteboardStroke, WHITEBOARD_SIZE } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 
 interface MediaViewerModalProps {

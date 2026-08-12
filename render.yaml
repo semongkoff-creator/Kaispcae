@@ -1,7 +1,7 @@
 # Render Blueprint — backend MeetKai (Express + Socket.IO + Prisma).
 #
 # CATATAN PENTING soal root directory: sengaja TIDAK diset ke `server`.
-# server/package.json bergantung pada "@virtualmeet/shared": "*", yang merupakan
+# server/package.json bergantung pada "@kaispace/shared": "*", yang merupakan
 # paket workspace dan tidak pernah diterbitkan ke npm (private: true — sudah
 # diuji: registry mengembalikan 404). Kalau `npm install` dijalankan di dalam
 # server/, folder itu bukan workspace root, npm mencari paketnya di registry

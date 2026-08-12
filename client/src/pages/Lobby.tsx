@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, ChevronDown, ThreeDotsVertical, Search, BoxArrowInRight, Image, GearFill } from 'react-bootstrap-icons';
 import { SettingsPanel } from '@/components/ui/SettingsPanel';
 import { io } from 'socket.io-client';
-import { RoomTheme, RoomTemplateId, ROOM_TEMPLATES } from '@virtualmeet/shared';
+import { RoomTheme, RoomTemplateId, ROOM_TEMPLATES } from '@kaispace/shared';
 import { api, RoomInfo } from '@/services/api';
 import { UserProfile, UserPreferences } from '@/services/api';
 import { CreditsModal } from '@/components/ui/CreditsModal';
@@ -462,7 +462,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                     // object-contain, not cover — a cover can be any aspect
                     // ratio (a wide logo wordmark, a photo, etc.); cropping
                     // it to fill this 16:9 box zoomed into an arbitrary
-                    // center slice (e.g. Kaitech's wordmark lost its first
+                    // center slice (e.g. a wordmark losing its first
                     // and last letters). Showing the whole image letterboxed
                     // against the same gradient background is more
                     // predictable than guessing a crop that happens to work.

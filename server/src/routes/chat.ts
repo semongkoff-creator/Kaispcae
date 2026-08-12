@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import { Server } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, Channel, ChannelMessage, ConversationPreview, DirectConversationSummary, DirectConversationStarted, Role, hasFeatureAccess } from '@virtualmeet/shared';
+import { SocketEvents, Channel, ChannelMessage, ConversationPreview, DirectConversationSummary, DirectConversationStarted, Role, hasFeatureAccess } from '@kaispace/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { validate, createChannelSchema, startDmSchema, sanitizeChat } from '../middleware/validate';
 import { resolveRoomRole as resolveRoomRoleShared } from '../lib/roles';

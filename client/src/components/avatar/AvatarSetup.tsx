@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Tools, LightningFill, PersonSquare, Trash3 } from 'react-bootstrap-icons';
-import { AvatarConfig, SpriteMode } from '@virtualmeet/shared';
+import { AvatarConfig, SpriteMode } from '@kaispace/shared';
 import { drawAvatar } from '@/components/canvas/AvatarSprite';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
 import { PALETTE } from '@/hooks/useAvatarConfig';

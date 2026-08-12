@@ -117,7 +117,7 @@ export function LoginPage({ onLogin, onRegister, onCreateOrganization, error, se
               <span className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Nama organisasi</span>
               <input
                 type="text" value={orgName} onChange={(e) => setOrgName(e.target.value)}
-                placeholder="mis. DCM"
+                placeholder="mis. Acme Corp"
                 maxLength={80} required autoFocus
                 className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2.5 outline-none border border-purple-100 dark:border-gray-600 focus:border-purple-500 transition-colors text-sm"
               />

@@ -227,7 +227,7 @@ auth.post('/create-organization', authRateLimit, validate(createOrganizationSche
 
     // targetId/meta.slug must reflect the ACTUAL persisted org, not the
     // pre-retry-loop id/slug — on a slug collision the winning slug can
-    // differ from baseSlug (e.g. 'dcm-2'), and org.id only exists once the
+    // differ from baseSlug (e.g. 'acme-2'), and org.id only exists once the
     // transaction closure above has returned.
     void writeAudit(prisma, {
       actorId: user.id, action: 'org:create', targetType: 'organization', targetId: org.id,

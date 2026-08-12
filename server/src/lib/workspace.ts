@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { getPrisma } from './prisma';
 import { Response, NextFunction } from 'express';
-import { WorkspaceAction, WorkspaceRole, canWorkspace } from '@virtualmeet/shared';
+import { WorkspaceAction, WorkspaceRole, canWorkspace } from '@kaispace/shared';
 import { AuthRequest } from '../middleware/auth';
 
 // Local client, matching the per-file convention used by every route in this

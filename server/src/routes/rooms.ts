@@ -3,7 +3,7 @@ import { Server } from 'socket.io';
 import multer from 'multer';
 import fs from 'fs';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess, LayerData, layerDataToLegacy, findSpawnPixel, TILE_SIZE, MediaType, MediaPayload, SoundboardSoundData, SOUNDBOARD_MAX_DURATION_MS, SOUNDBOARD_MAX_FILE_BYTES, AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@virtualmeet/shared';
+import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess, LayerData, layerDataToLegacy, findSpawnPixel, TILE_SIZE, MediaType, MediaPayload, SoundboardSoundData, SOUNDBOARD_MAX_DURATION_MS, SOUNDBOARD_MAX_FILE_BYTES, AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@kaispace/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
 import { findRoomInOrg } from '../lib/orgScope';

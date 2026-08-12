@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { GeoAltFill, BookmarkFill, ArrowUp, ArrowDown, Trash, PlusCircle } from 'react-bootstrap-icons';
-import { TeleportLocation, OwnerBookmark, TILE_SIZE } from '@virtualmeet/shared';
+import { TeleportLocation, OwnerBookmark, TILE_SIZE } from '@kaispace/shared';
 import { api, ApiError } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 

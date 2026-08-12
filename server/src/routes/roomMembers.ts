@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import { Server } from 'socket.io';
 import { Prisma } from '@prisma/client';
 import { getPrisma } from '../lib/prisma';
-import { hasFeatureAccess, SocketEvents, Zone, LayerData, layerDataToLegacy } from '@virtualmeet/shared';
+import { hasFeatureAccess, SocketEvents, Zone, LayerData, layerDataToLegacy } from '@kaispace/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole } from '../lib/roles';
 import { resolveEntry } from '../lib/roomMembership';

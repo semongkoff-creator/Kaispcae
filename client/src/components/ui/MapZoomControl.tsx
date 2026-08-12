@@ -1,5 +1,5 @@
 import { useGameStore, MIN_MAP_ZOOM, MAX_MAP_ZOOM } from '@/stores/gameStore';
-import { hasFeatureAccess } from '@virtualmeet/shared';
+import { hasFeatureAccess } from '@kaispace/shared';
 
 // Camera zoom for the main game view (GameCanvas.tsx) — purely a local
 // rendering preference, read/written via gameStore's mapZoom so GameCanvas

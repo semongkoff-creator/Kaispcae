@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, hasFeatureAccess, LayerData, Furniture } from '@virtualmeet/shared';
+import { SocketEvents, hasFeatureAccess, LayerData, Furniture } from '@kaispace/shared';
 import { getPrisma } from '../lib/prisma';
 import { socketRateLimit } from '../middleware/rateLimit';
 

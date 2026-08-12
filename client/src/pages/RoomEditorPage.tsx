@@ -4,7 +4,7 @@ import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, RoomTile, Furniture, Zone, RoomTheme,
   LayerData, TileEffect, AreaEffect, legacyToLayerData, CustomAssetEntry, ReferenceImageData, InteractiveObjectType, TriggerMethod,
   AVATAR_SCALE_MIN, AVATAR_SCALE_MAX,
-} from '@virtualmeet/shared';
+} from '@kaispace/shared';
 import { api, ApiError } from '@/services/api';
 import { adminApi } from '@/admin/api';
 import { useEditorStore, EDITOR_LAYERS, EDITOR_TOOLS, EditorLayer, EditorTool } from '@/stores/editorStore';
@@ -455,7 +455,7 @@ function ObjectSettingsPanel({
 
       {interactiveType === 'api_call' && (
         <>
-          <p className="text-[11px] text-white/40 mb-2">Call API. Kirim POST ke URL ini lewat server MeetKai (bukan langsung dari browser) tiap kali objek ini di-trigger.</p>
+          <p className="text-[11px] text-white/40 mb-2">Call API. Kirim POST ke URL ini lewat server KaiSpace (bukan langsung dari browser) tiap kali objek ini di-trigger.</p>
           <p className="text-[11px] text-white/50 mb-1.5">Link API</p>
           <input
             type="text" value={furniture.interactiveConfig?.apiUrl ?? ''}

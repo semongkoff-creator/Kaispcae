@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { LockFill, HandIndexThumbFill, PersonBadgeFill, HourglassSplit, PeopleFill, XLg } from 'react-bootstrap-icons';
-import { ZoneKnockRequest, ZoneLockState, ZoneApprovalRequest } from '@virtualmeet/shared';
+import { ZoneKnockRequest, ZoneLockState, ZoneApprovalRequest } from '@kaispace/shared';
 
 const ZONE_QUEUE_DURATION_OPTIONS = [15, 30, 45, 60];
 

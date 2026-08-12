@@ -1,5 +1,5 @@
 import { PinAngleFill, X } from 'react-bootstrap-icons';
-import { Notice } from '@virtualmeet/shared';
+import { Notice } from '@kaispace/shared';
 
 interface NoticeBannerProps {
   notice: Notice;

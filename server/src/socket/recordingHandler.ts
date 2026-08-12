@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, hasFeatureAccess, RECORDING_DOWNLOAD_TTL_MS, RECORDING_MAX_DOWNLOADS } from '@virtualmeet/shared';
+import { SocketEvents, hasFeatureAccess, RECORDING_DOWNLOAD_TTL_MS, RECORDING_MAX_DOWNLOADS } from '@kaispace/shared';
 import { getPlayerName } from './roomHandler';
 import { resolveRoomRole as resolveRole } from '../lib/roles';
 

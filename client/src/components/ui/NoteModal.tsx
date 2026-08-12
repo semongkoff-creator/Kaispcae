@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, TrashFill } from 'react-bootstrap-icons';
-import { DeskNoteData } from '@virtualmeet/shared';
+import { DeskNoteData } from '@kaispace/shared';
 
 const NOTE_MAX_LENGTH = 300;
 

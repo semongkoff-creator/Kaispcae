@@ -1,4 +1,4 @@
-import { AttendanceStatus } from '@virtualmeet/shared';
+import { AttendanceStatus } from '@kaispace/shared';
 
 const API_BASE = '/api';
 
