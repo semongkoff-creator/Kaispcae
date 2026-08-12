@@ -196,7 +196,7 @@ export function LoginPage({ onLogin, onRegister, onCreateOrganization, error, se
             type="submit" disabled={loading}
             className="w-full bg-[#3B1E54] hover:bg-[#4A1E6D] disabled:opacity-50 text-white font-semibold rounded-lg py-2.5 transition-colors text-sm cursor-pointer"
           >
-            {loading ? 'Please wait...' : mode === 'login' ? 'Login' : 'Create Account'}
+            {loading ? 'Please wait...' : mode === 'login' ? 'Login' : mode === 'createOrg' ? 'Buat organisasi' : 'Create Account'}
           </button>
         </form>
 
@@ -234,16 +234,18 @@ export function LoginPage({ onLogin, onRegister, onCreateOrganization, error, se
           </>
         )}
 
-        <p className="text-gray-500 dark:text-gray-400 text-xs text-center mt-5">
-          {mode === 'login' ? "Don't have account?" : 'Already have an account?'}{' '}
-          <button
-            onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-            style={{ color: FIGMA_PURPLE }}
-            className="font-semibold hover:brightness-110 cursor-pointer"
-          >
-            {mode === 'login' ? 'Sign Up here!' : 'Sign in'}
-          </button>
-        </p>
+        {mode !== 'createOrg' && (
+          <p className="text-gray-500 dark:text-gray-400 text-xs text-center mt-5">
+            {mode === 'login' ? "Don't have account?" : 'Already have an account?'}{' '}
+            <button
+              onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
+              style={{ color: FIGMA_PURPLE }}
+              className="font-semibold hover:brightness-110 cursor-pointer"
+            >
+              {mode === 'login' ? 'Sign Up here!' : 'Sign in'}
+            </button>
+          </p>
+        )}
 
         <p className="text-gray-500 dark:text-gray-400 text-xs text-center mt-2">
           {mode === 'createOrg' ? (
