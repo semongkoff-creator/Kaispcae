@@ -294,13 +294,6 @@ export const api = {
   getWorkspacePeople: () => request<{ people: { id: string; displayName: string }[] }>('/workspace/people'),
 
   // A5 — recorded meetings (Lark VC).
-  startMeeting: (roomId: string, zoneId: string) =>
-    request<{ momRecordId: string; url: string; meetingNo: string }>('/meeting/start', { method: 'POST', body: JSON.stringify({ roomId, zoneId }) }),
-  endMeeting: (momRecordId: string) =>
-    request<{ ok: boolean; recordingStatus?: string }>('/meeting/end', { method: 'POST', body: JSON.stringify({ momRecordId }) }),
-  getMeetingHistory: (roomId: string) =>
-    request<{ meetings: MomRecord[] }>(`/meeting/history?roomId=${encodeURIComponent(roomId)}`),
-
   getRooms: () => request<{ rooms: RoomInfo[] }>('/rooms'),
 
   // ── Room join approval (see server/src/lib/roomMembership.ts) ──────

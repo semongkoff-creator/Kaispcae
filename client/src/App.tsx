@@ -11,7 +11,6 @@ import { NameModal } from './components/ui/NameModal';
 import { AvatarSetup } from './components/avatar/AvatarSetup';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
-import { MeetingControl } from './components/ui/MeetingControl';
 // QA (Kompat checklist item 7) — same reasoning as RoomEditorPage above:
 // only a workspace admin ever opens this (AdminConsole itself re-gates on
 // workspaceRole, see its own file), so splitting it out means the far more
@@ -329,9 +328,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     updateSoundboardVolumes(nearby);
   }, [nearby, updateProximity]);
 
-  // A5 — Meeting zone detection. The MeetingControl (Start/Join/End + history)
-  // renders only while the local avatar is inside a Zone of type 'meeting'.
-  // Purely derived; also feeds the A11 presence status below.
+  // Meeting zone detection — purely derived; feeds the A11 presence status
+  // below, so standing inside a Zone of type 'meeting' shows as "In a
+  // meeting". Conversation itself happens over the room's own proximity
+  // WebRTC, with the zone's audio isolation deciding who can hear whom.
   const meetingZone = useMemo(
     () => findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'meeting')),
     [localPlayer.x, localPlayer.y, zones],
@@ -1628,11 +1628,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
           Room ini sedang direkam
         </div>
-      )}
-
-      {/* A5 — meeting controls, only while standing inside a meeting-type zone */}
-      {meetingZone && !editorMode && (
-        <MeetingControl roomId={roomSlug} zoneId={meetingZone.id} />
       )}
 
       {miniModeWindow && (

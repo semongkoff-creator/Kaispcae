@@ -5,7 +5,6 @@ import { getPrisma } from '../lib/prisma';
 import { getActiveRoomSlugs, pinSystemNotice } from './roomHandler';
 import { getCachedPlayers } from '../store/roomStore';
 import { computeRanking } from '../routes/analytics';
-import { sendGroupText } from '../lib/larkIm';
 import { broadcastAnalyticsActivity } from './analyticsFeed';
 import { prunePendingPokes } from '../lib/pokeResponse';
 
@@ -160,13 +159,6 @@ async function runWeeklyHallOfFameOnce(io: Server): Promise<void> {
             where: { organizationId, slug: { in: activeRoomSlugs } }, select: { slug: true },
           });
           for (const { slug } of orgActiveRooms) pinSystemNotice(io, slug, noticeText, 'Hall of Fame');
-        }
-
-        const policy = await prisma.workspacePolicy.findUnique({ where: { organizationId } });
-        if (policy?.analyticsHallOfFameLarkChatId) {
-          void sendGroupText(policy.analyticsHallOfFameLarkChatId, noticeText).catch((e) =>
-            console.error('[analytics] Lark Hall of Fame push failed:', e),
-          );
         }
       } catch (e) {
         console.error('[analytics] hall of fame sweep error for org:', organizationId, e);

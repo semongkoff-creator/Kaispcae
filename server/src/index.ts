@@ -43,10 +43,8 @@ import meetingRoomRoutes from './routes/meetingRooms';
 import userRoutes, { setUsersIo } from './routes/users';
 import googleRoutes from './routes/google';
 import operatorRoutes from './routes/operator';
-import meetingRoutes, { setMeetingIo, startRecordingPoller } from './routes/meeting';
 import analyticsRoutes from './routes/analytics';
 import csRoutes, { setIo as setCsIo } from './routes/cs';
-import { startLarkEventStream } from './lib/larkWs';
 import { startReminderSweep } from './socket/reminderSweep';
 import { startAttendanceSweep } from './socket/attendanceSweep';
 import { startQueueSweep } from './socket/queueSweep';
@@ -212,7 +210,6 @@ setAdminIo(io);
 setUsersIo(io);
 setGuestInviteIo(io);
 setCalendarIo(io);
-setMeetingIo(io);
 setCsIo(io);
 
 // ── REST routes ──────────────────────────────────────────────────
@@ -224,9 +221,7 @@ app.get('/api/health', async (_req, res) => {
   // startup logs to know what was active at all, and nothing tracked usage
   // trend over a day. `configured` is a cheap presence check (env vars
   // set); the quota/relay fields are the actual in-memory counters (see
-  // youtubeService.ts / rtcHandler.ts — Lark itself has no per-call quota
-  // to track, it's an enterprise SSO/workspace API, not billed per
-  // request, so it only gets a configured flag here, not a usage counter).
+  // youtubeService.ts / rtcHandler.ts).
   res.json({
     status: 'ok',
     dbConnected: true,
@@ -234,7 +229,6 @@ app.get('/api/health', async (_req, res) => {
     uptime: process.uptime(),
     timestamp: Date.now(),
     integrations: {
-      lark: { configured: !!(config.LARK_APP_ID && config.LARK_APP_SECRET) },
       youtube: { configured: !!config.YOUTUBE_API_KEY, ...getYoutubeQuotaStatus() },
       turn: getTurnRelayStatus(),
     },
@@ -261,7 +255,6 @@ app.use('/api', userRoutes);
 // only /api/ is proxied to the backend).
 app.use('/api', googleRoutes);
 app.use('/api', operatorRoutes);
-app.use('/api', meetingRoutes);
 app.use('/api', adminRoutes);
 app.use('/api', attendanceRoutes);
 app.use('/api', attendanceAdminRoutes);
@@ -330,10 +323,6 @@ async function start() {
 
   httpServer.listen(config.PORT, () => {
     console.log(`[server] VirtualMeet running on http://localhost:${config.PORT}`);
-    // A5 — background poll for finished Lark VC recordings.
-    startRecordingPoller();
-    // Bagian 4 — open the Lark persistent connection for inbound chat events.
-    startLarkEventStream(io);
   });
 }
 

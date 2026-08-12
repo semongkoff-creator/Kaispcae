@@ -410,11 +410,6 @@ export enum SocketEvents {
   BROADCAST_SEND = 'broadcast:send',
   BROADCAST_RECEIVED = 'broadcast:received',
 
-  // A5 — official meeting (Lark VC) started/ended in a meeting zone. Server
-  // broadcasts to the room so everyone sees the "join via Lark" banner.
-  MEETING_STARTED = 'meeting:started',
-  MEETING_ENDED = 'meeting:ended',
-
   // Akses & Password Pintu audit item #9 — emergency override: an admin
   // toggles EVERY password door in the room open at once, bypassing
   // doorLock.ts's normal per-socket unlock entirely (see movementHandler.ts's

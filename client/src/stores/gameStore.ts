@@ -335,12 +335,6 @@ export interface GameState {
   // manualStatus isn't 'away' at all.
   awayReason: string | null;
   setAwayReason: (reason: string | null) => void;
-  // A5 — active recorded meetings, keyed by zoneId. Set/cleared by the
-  // MEETING_STARTED/ENDED socket broadcasts so everyone in the room sees the
-  // "join via Lark" banner.
-  activeMeetings: Record<string, { momRecordId: string; url: string; startedBy: string }>;
-  setMeetingStarted: (zoneId: string, info: { momRecordId: string; url: string; startedBy: string }) => void;
-  setMeetingEnded: (zoneId: string) => void;
   // Music Bot — one MusicSessionState per zone that currently has one (see
   // musicHandler.ts), keyed by zoneId. Replaced wholesale on every
   // MUSIC_STATE broadcast rather than patched in place — the server always
@@ -960,13 +954,6 @@ export const useGameStore = create<GameState>((set, get) => ({
     awayReason: reason,
     localPlayer: { ...s.localPlayer, awayReason: reason ?? undefined },
   })),
-  activeMeetings: {},
-  setMeetingStarted: (zoneId, info) => set((s) => ({ activeMeetings: { ...s.activeMeetings, [zoneId]: info } })),
-  setMeetingEnded: (zoneId) => set((s) => {
-    const next = { ...s.activeMeetings };
-    delete next[zoneId];
-    return { activeMeetings: next };
-  }),
   musicSessionsByZone: {},
   setMusicSessionState: (state) =>
     set((s) => ({ musicSessionsByZone: { ...s.musicSessionsByZone, [state.zoneId]: state } })),

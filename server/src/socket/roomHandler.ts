@@ -12,7 +12,6 @@ import { getPrisma } from '../lib/prisma';
 import { resolveEntry } from '../lib/roomMembership';
 import { admitCalledEntry, advanceQueue } from '../lib/roomQueue';
 import { refreshZoneRestrictionCache } from '../lib/zoneMembership';
-import { logActivity } from '../lib/larkBase';
 import { openStatusInterval, closeOpenStatusInterval, resolveEffectiveStatus } from '../lib/statusIntervals';
 import { incrementDailyVibeCounter } from '../lib/vibeCounters';
 import { recordResponseIfPending } from '../lib/pokeResponse';
@@ -21,8 +20,6 @@ import { socketRateLimit } from '../middleware/rateLimit';
 import { redactInteractiveSecrets, redactDoorPasswords, redactDoorAreaPasswords } from '../lib/redactFurniture';
 import { unlockDoor, unlockDoorArea, clearUnlockedDoorsForRoom } from './doorLock';
 import { getNearbyRecipients } from './proximityBroadcast';
-import { sendUserDm } from '../lib/larkIm';
-import { relayBroadcastToLark } from '../lib/larkChatSync';
 import { sanitizeChat } from '../middleware/validate';
 import { GUEST_LINK_REVOKED, GUEST_LINK_REVOKED_MESSAGE } from '../middleware/auth';
 
@@ -422,22 +419,30 @@ async function persistCeoGrant(roomSlug: string, userId: string, isCeo: boolean)
   }
 }
 
-// "Tarik Paksa" (Force-pull) — best-effort Lark DM for a target who's
-// offline right now. Fire-and-forget from the caller's perspective: a Lark
-// outage or a user with no linked larkOpenId must never fail the force-pull
-// itself (the queued landing spot is already saved regardless).
+// "Tarik Paksa" (Force-pull) — leave a notification for a target who's
+// offline right now, so they find out they were summoned rather than just
+// landing somewhere unexpected on their next visit. This used to be a chat
+// DM through the workspace integration; a Notification row reaches the same
+// person through this app's own notification surface and, unlike the DM,
+// works for every account rather than only linked ones.
+//
+// Fire-and-forget from the caller's perspective: failing to record the
+// notice must never fail the force-pull itself, whose queued landing spot is
+// already saved regardless.
 async function notifyForcePullOffline(targetUserId: string, actorName: string, roomSlug: string): Promise<void> {
   try {
     const prisma = getPrisma();
-    const [target, dbRoom] = await Promise.all([
-      prisma.user.findUnique({ where: { id: targetUserId }, select: { larkOpenId: true } }),
-      prisma.room.findUnique({ where: { slug: roomSlug }, select: { name: true } }),
-    ]);
-    if (!target?.larkOpenId) return; // no linked Lark account — nothing to send
+    const dbRoom = await prisma.room.findUnique({ where: { slug: roomSlug }, select: { name: true } });
     const roomName = dbRoom?.name || roomSlug;
-    await sendUserDm(target.larkOpenId, `${actorName} menarik Anda ke room "${roomName}" di KaiSpace. Buka KaiSpace untuk bergabung.`);
+    await prisma.notification.create({
+      data: {
+        recipientId: targetUserId,
+        kind: 'workspace',
+        body: `${actorName} menarik kamu ke room "${roomName}".`,
+      },
+    });
   } catch (e) {
-    console.error('[room] force-pull Lark notify failed:', e);
+    console.error('[room] force-pull notify failed:', e);
   }
 }
 
@@ -1961,8 +1966,8 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     if (!targetSocket) {
       // Offline right now — queue the landing spot for their next join to
       // THIS room (same slot a normal reconnect already resumes from, see
-      // getLastKnownPosition in JOIN_ROOM above) and best-effort notify via
-      // Lark since there's no live client to tell directly.
+      // getLastKnownPosition in JOIN_ROOM above) and leave a notification,
+      // since there's no live client to tell directly.
       saveLastKnownPosition(targetUserId, room, landX, landY, 'down');
       pendingForcePullNotices.set(targetUserId, actorName);
       notifyForcePullOffline(targetUserId, actorName, room).catch((e) => console.error('[room] force-pull notify error:', e));
@@ -2036,11 +2041,6 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // bystanders never receive an event to play a sound from.
     io.to(target.id).emit(SocketEvents.SLAPPED, { fromName: getPlayerName(socket.id), fromId: socket.id });
     socket.emit(SocketEvents.SLAP_SENT, { targetName: target.name });
-
-    // Optional, non-fatal: usage stats. logActivity is a guarded no-op unless
-    // the Lark Base activity table is configured (see lib/larkBase).
-    const uid = findUserIdBySocket(socket.id);
-    if (uid) void logActivity({ eventType: 'slap', userId: uid, room, detail: { targetId: findUserIdBySocket(target.id) ?? target.id } });
   });
 
   socket.on(SocketEvents.AVATAR_UPDATE, (avatarConfig: AvatarConfig) => {
@@ -2152,19 +2152,10 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       : undefined;
     socket.to(room).emit(SocketEvents.WORK_MODE_CHANGED, { id: socket.id, workMode: mode, reason });
     updatePlayerWorkMode(room, socket.id, mode, reason);
-    // A11 — log presence changes to Lark Base. Guarded no-op until the
-    // table/scope are set up, so a logging failure never affects the live
-    // change above.
-    const uid = (socket.data as { userId?: string }).userId ?? socket.id;
-    void logActivity({
-      eventType: 'presence_change',
-      userId: uid,
-      room,
-      detail: { to: mode, zoneId: data?.zoneId, reason },
-    });
     // Productivity Analytics — same "never a guest, never blocking" posture
-    // as the JOIN_ROOM hook above. A guest's uid falls back to socket.id
-    // (see the line above), which has no User row, so guard the same way.
+    // as the JOIN_ROOM hook above. A guest's uid falls back to socket.id,
+    // which has no User row, so guard the same way.
+    const uid = (socket.data as { userId?: string }).userId ?? socket.id;
     if (!(socket.data as { guestId?: string }).guestId) {
       const prisma = getPrisma();
       void openStatusInterval(prisma, uid, room, resolveEffectiveStatus(mode), new Date(), data?.zoneId).catch((e) =>
@@ -2207,8 +2198,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
   // QA #9/#10 — CEO/admin-only text broadcast, the text counterpart to
   // Spotlight above. 1/sec is deliberately tighter than any chat rate
   // limit — this is a room-wide PA push shown to everyone at once, not a
-  // conversation. Fire-and-forget Lark relay (an outage there must never
-  // block the in-app broadcast, same posture as relayChannelMessageToLark).
+  // conversation.
   socket.on(SocketEvents.BROADCAST_SEND, async (data: { text: string }) => {
     const room = currentRoom; if (!room) return;
     const senderUid = findUserIdBySocket(socket.id);
@@ -2224,13 +2214,6 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const senderName = getPlayerName(socket.id);
     const sentAt = Date.now();
     io.to(room).emit(SocketEvents.BROADCAST_RECEIVED, { text, senderName, sentAt });
-
-    try {
-      const dbRoom = await getPrisma().room.findUnique({ where: { slug: room }, select: { id: true } });
-      if (dbRoom) void relayBroadcastToLark(getPrisma(), dbRoom.id, senderName, text).catch((e) => console.error('[room] broadcast Lark relay failed:', e));
-    } catch (e) {
-      console.error('[room] broadcast Lark lookup failed:', e);
-    }
   });
 
   socket.on(SocketEvents.PLAYER_SIT, (data: { sitting: boolean; x: number; y: number; direction: Avatar['direction']; seatFurnitureId?: string }) => {

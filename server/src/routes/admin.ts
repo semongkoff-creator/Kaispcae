@@ -406,22 +406,14 @@ admin.get('/admin/backup/export', authenticateToken, requireWorkspace('workspace
   if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
     const prisma = getPrisma();
-    // Multi-tenant Fase 2 — all three of these used to have no where at all,
-    // dumping every room's notes/MoM and every user's attendance company-
-    // wide into one export. deskNote/attendanceRecord have real relations
-    // (room/user) so a nested filter works directly; MomRecord.roomId is a
-    // plain string (stores the room SLUG — see routes/meeting.ts's
-    // POST /meeting/start, not a Prisma relation), so it needs the same
-    // two-step "resolve org's room slugs, then filter by them" the checklist
-    // flagged for this exact model.
-    const orgRoomSlugs = (await prisma.room.findMany({ where: { organizationId: req.organizationId }, select: { slug: true } })).map((r) => r.slug);
-    const [notes, moms, attendance] = await Promise.all([
+    // Multi-tenant Fase 2 — both of these used to have no where at all,
+    // dumping every room's notes and every user's attendance company-wide
+    // into one export.
+    const [notes, attendance] = await Promise.all([
       prisma.deskNote.findMany({ where: { room: { organizationId: req.organizationId } }, orderBy: { createdAt: 'asc' } }),
-      prisma.momRecord.findMany({ where: { roomId: { in: orgRoomSlugs } }, orderBy: { createdAt: 'asc' } }),
-      // Deliberately excludes clockIn/clockOut lat/lng/accuracy — that data
-      // already has its own dedicated auto-purge retention sweep
-      // (lib/larkAttendance's LOCATION_RETENTION_DAYS); a manual export
-      // would otherwise create an unmanaged copy that outlives it.
+      // Deliberately excludes clockIn/clockOut lat/lng/accuracy — location is
+      // the most sensitive column here, and a manual export would create an
+      // unmanaged copy of it sitting outside the app entirely.
       prisma.attendanceRecord.findMany({
         where: { user: { organizationId: req.organizationId } },
         orderBy: { date: 'asc' },
@@ -434,11 +426,11 @@ admin.get('/admin/backup/export', authenticateToken, requireWorkspace('workspace
 
     await writeAudit(getPrisma(), {
       actorId: req.userId!, action: 'backup:export', targetType: 'workspace',
-      meta: { noteCount: notes.length, momCount: moms.length, attendanceCount: attendance.length },
+      meta: { noteCount: notes.length, attendanceCount: attendance.length },
       ip: clientIp(req),
     });
 
-    const backup = { exportedAt: new Date().toISOString(), exportedBy: req.userId, notes, moms, attendance };
+    const backup = { exportedAt: new Date().toISOString(), exportedBy: req.userId, notes, attendance };
     const filename = `meetkai-backup-${new Date().toISOString().slice(0, 10)}.json`;
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
