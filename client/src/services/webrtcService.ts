@@ -1353,7 +1353,13 @@ class WebRTCService {
     // as remote peers below) — it used to flip on the raw threshold with no
     // debounce at all, so your OWN ring flickered on every short pause even
     // after remote peers were already smoothed out.
-    const QUIET_TICKS_TO_STOP = 4; // ~400ms at the 100ms interval below
+    // Was 4 (~400ms) — still shorter than a lot of ordinary conversational
+    // pauses (breath, sentence boundary, thinking), so the ring kept
+    // dropping and re-triggering multiple times over a single continuous
+    // turn of speech, not just once at the true start/end. 6 (~600ms) still
+    // reads as prompt but tolerates a normal mid-sentence pause without
+    // flapping.
+    const QUIET_TICKS_TO_STOP = 6; // ~600ms at the 100ms interval below
     const quiet = new Map<string, number>();
 
     this.analyserInterval = setInterval(() => {

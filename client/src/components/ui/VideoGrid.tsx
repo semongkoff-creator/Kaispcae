@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo } from 'react';
+import { useRef, useEffect, useState, useMemo, memo } from 'react';
 import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff, Grid3x3GapFill } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
@@ -449,11 +449,11 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localHandRaised = localPlayer.handRaised;
-  // The same two pieces of state the map already uses to ring a speaking
-  // avatar (see GameCanvas) — the tile just renders them differently. No
-  // second source of truth for who is talking.
-  const speakingPlayers = useGameStore((s) => s.speakingPlayers);
-  const localSpeaking = useGameStore((s) => s.localSpeaking);
+  // Speaking state (same source GameCanvas uses to ring an avatar on the
+  // map) is deliberately NOT read here any more — VideoTile now selects its
+  // own speakingId/isLocal slice directly (see its doc comment), so this
+  // component doesn't re-render, and hence doesn't re-render every tile in
+  // the grid, every time anyone's speaking status changes.
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const localUserId = useGameStore((s) => s.localUserId);
   const emoteEvents = useGameStore((s) => s.emoteEvents);
@@ -579,7 +579,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   const cameraTiles = (
     <>
       {localStream && (
-        <VideoTile name="You" avatarName={profiles.get(localUserId)?.name || localPlayer.name} photoUrl={profiles.get(localUserId)?.photo ?? undefined} stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} speaking={localSpeaking && !micMuted} onEnlarge={() => setFeaturedKey('local-camera')} />
+        <VideoTile name="You" avatarName={profiles.get(localUserId)?.name || localPlayer.name} photoUrl={profiles.get(localUserId)?.photo ?? undefined} stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} onEnlarge={() => setFeaturedKey('local-camera')} />
       )}
       {videoTiles.map((tile) => {
         const uid = playerRecords[tile.id]?.userId;
@@ -592,7 +592,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
             stream={tile.stream}
             isLocal={false}
             micMuted={!!playerRecords[tile.id]?.micMuted}
-            speaking={speakingPlayers.has(tile.id)}
+            speakingId={tile.id}
             translucent={tile.translucent}
             onVolumeChange={(v) => onManualVolumeChange(tile.id, v)}
             isBeingRecorded={tile.isBeingRecorded}
@@ -674,7 +674,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
 // Exported for MeetingView.tsx (the "Dedicated Meeting View" full-screen
 // grid) — same tile, just sized up via `large` instead of a second
 // hand-maintained copy of the mirror/PIP logic.
-export function VideoTile({
+export const VideoTile = memo(function VideoTile({
   name,
   avatarName,
   photoUrl,
@@ -689,7 +689,7 @@ export function VideoTile({
   handRaised,
   reaction,
   large,
-  speaking,
+  speakingId,
   onEnlarge,
   connectionFailed,
   isGuest,
@@ -716,7 +716,17 @@ export function VideoTile({
   handRaised?: boolean;
   reaction?: { emoji: string; ts: number } | null;
   large?: boolean;
-  speaking?: boolean;
+  // The id to look up in the speaking-players store — NOT a plain `speaking`
+  // boolean prop any more. Passing a raw boolean meant the parent had to
+  // read the store itself (`speakingPlayers.has(id)`) and re-render on every
+  // change to ANY player's speaking state, which re-rendered every tile in
+  // the grid (VideoGrid/MeetingView both subscribed to the whole Set at
+  // their own top level). Reading it here instead — one Zustand selector
+  // per tile, returning a plain boolean — means THIS tile only re-renders
+  // when ITS OWN speaking value actually flips. Omit entirely for a
+  // non-speaking-eligible tile (screen shares); `isLocal` tiles ignore this
+  // and read `localSpeaking` from the store directly instead (see below).
+  speakingId?: string;
   // Opens this tile's live video full-size in the same focus panel screen
   // shares use (see VideoGrid's featuredKey). Only rendered while there's
   // actually a live picture to enlarge (!showAvatar) — an avatar placeholder
@@ -734,6 +744,13 @@ export function VideoTile({
   // Never set on the local/isScreen tile — see call sites.
   isGuest?: boolean;
 }) {
+  // See speakingId's own doc comment above — this is the fix for the tile
+  // flicker: a per-tile selector, not a boolean computed by the parent from
+  // the whole speakingPlayers Set. isLocal reads localSpeaking directly
+  // (ANDed with !micMuted, same as before — a muted mic never shows the
+  // ring even if the analyser still detects sound) instead of going through
+  // speakingId at all.
+  const speaking = useGameStore((s) => (isLocal ? s.localSpeaking && !micMuted : !!speakingId && s.speakingPlayers.has(speakingId)));
   const videoRef = useRef<HTMLVideoElement>(null);
   // Per-listener manual volume (§6) — purely local UI state; the peer's
   // actual manualVolume in webrtcService also starts at 1 (see
@@ -1002,4 +1019,4 @@ export function VideoTile({
       )}
     </div>
   );
-}
+});
