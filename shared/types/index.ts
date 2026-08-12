@@ -948,28 +948,11 @@ export enum SocketEvents {
   ROSTER_LIST_REQUEST = 'roster:list_request',
   ROSTER_SNAPSHOT = 'roster:snapshot',
   ROSTER_UPDATED = 'roster:updated',
-
-  // Customer Service chat, Tahap 4 — n8n -> MeetKai admin reply arriving
-  // back (see server/src/routes/cs.ts's POST /api/cs/reply and
-  // server/src/socket/csHandler.ts's pushCsReply). Sent only to the
-  // session's owning user, on every live socket they currently have open
-  // (see csHandler.ts — a user's CsChatWidget connection today, but also
-  // any other authenticated socket of theirs, e.g. a room socket, since
-  // there's nothing room-specific about this event).
-  CS_REPLY = 'cs:reply',
 }
 
 // Sent only to the removed player's own socket — see PLAYER_KICKED above.
 export interface PlayerKickedPayload {
   byName: string;
-}
-
-// See CS_REPLY above.
-export interface CsReplyPayload {
-  sessionId: string;
-  from: 'admin';
-  text: string;
-  createdAt: string;
 }
 
 // My own follow relationship (I am the follower) — sent only to me, never

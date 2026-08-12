@@ -482,24 +482,25 @@ export const api = {
       body: JSON.stringify(patch),
     }),
 
-  // Customer Service chat.
+  // Customer Service chat — bot FAQ (server/src/data/csFaq.ts) plus a
+  // "Hubungi admin" wa.me handoff. waLink is a wa.me deep link when
+  // CS_ADMIN_WHATSAPP_NUMBER is configured server-side — see
+  // routes/cs.ts's buildWhatsAppLink.
   csOpenSession: () =>
-    request<{ sessionId: string; mode: 'bot' | 'human'; messages: CsMessage[] }>('/cs/session', {
+    request<{ sessionId: string; messages: CsMessage[] }>('/cs/session', {
       method: 'POST',
     }),
 
   csSendMessage: (sessionId: string, text: string) =>
-    request<{ userMessage: CsMessage; botMessage: CsMessage | null; offerAdmin: boolean; mode: 'bot' | 'human'; relayed: boolean | null; waLink: string | null }>(`/cs/session/${sessionId}/message`, {
+    request<{ userMessage: CsMessage; botMessage: CsMessage | null; offerAdmin: boolean; waLink: string | null }>(`/cs/session/${sessionId}/message`, {
       method: 'POST',
       body: JSON.stringify({ text }),
     }),
 
   // The "Hubungi admin" button's own trigger (distinct from typing "admin"
   // as a message, which csSendMessage above already handles server-side).
-  // waLink is a wa.me deep link when CS_ADMIN_WHATSAPP_NUMBER is configured
-  // server-side — see routes/cs.ts's buildWhatsAppLink.
   csHandoff: (sessionId: string) =>
-    request<{ mode: 'bot' | 'human'; botMessage: CsMessage | null; waLink: string | null }>(`/cs/session/${sessionId}/handoff`, {
+    request<{ botMessage: CsMessage | null; waLink: string | null }>(`/cs/session/${sessionId}/handoff`, {
       method: 'POST',
     }),
 

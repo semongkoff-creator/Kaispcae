@@ -209,7 +209,6 @@ export function ChatPanel({
   // entirely (see CsChatConversation.tsx), nothing here needs to touch
   // useChannelChat.ts's channel/DM join-leave/fetch logic to add it.
   const [csTabActive, setCsTabActive] = useState(false);
-  const [csUnread, setCsUnread] = useState(false);
   const [showNewChannel, setShowNewChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
   const [expandedThreadId, setExpandedThreadId] = useState<string | null>(null);
@@ -545,19 +544,15 @@ export function ChatPanel({
                 session server-side anyway, see routes/cs.ts's
                 authenticateToken, but hiding the tab for them isn't the
                 enforcement, just tidiness — matches the CsChatWidget-era
-                scoping). Unread badge mirrors channel/DM tabs' own
-                unreadByTarget dot, cleared the moment this tab is opened. */}
+                scoping). */}
             <button
-              onClick={() => { setViewingZone(false); setCsTabActive(true); setCsUnread(false); }}
+              onClick={() => { setViewingZone(false); setCsTabActive(true); }}
               className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
                 csTabActive ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
               }`}
               title="Customer Service"
             >
               <Headset size={10} className="inline -mt-0.5 mr-1" /> CS
-              {csUnread && (
-                <span className="ml-1 w-1.5 h-1.5 rounded-full bg-red-500 inline-block align-middle" />
-              )}
             </button>
             {isAdmin && (
               <button
@@ -587,7 +582,7 @@ export function ChatPanel({
           )}
 
           {csTabActive ? (
-            <CsChatConversation active={csTabActive} onUnread={() => setCsUnread(true)} />
+            <CsChatConversation active={csTabActive} />
           ) : (
           <>
           {/* Telegram-style pinned bar — one message at a time, chevrons to
