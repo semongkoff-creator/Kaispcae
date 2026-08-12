@@ -1325,6 +1325,23 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       }
     : null;
 
+  // A correct door password should just let the player walk through — no
+  // "Password benar" confirmation to dismiss. Movement itself is already
+  // unblocked server-side the instant the check succeeds; this only closes
+  // the now-redundant modal instead of leaving it up until a manual click.
+  useEffect(() => {
+    if (doorPasswordResultAdapted?.correct) {
+      setDoorPasswordTile(null);
+      useGameStore.getState().setInteractiveDoorPasswordResult(null);
+    }
+  }, [doorPasswordResultAdapted?.correct]);
+  useEffect(() => {
+    if (doorAreaPasswordResultAdapted?.correct) {
+      setDoorAreaPasswordAreaId(null);
+      useGameStore.getState().setInteractiveDoorAreaPasswordResult(null);
+    }
+  }, [doorAreaPasswordResultAdapted?.correct]);
+
   // Fitur 15B — 'website'/'website_tab' and 'api_call' have no modal of
   // their own (ZEP's own behavior for both website types is just opening a
   // new window/tab, and api_call has nothing to show but a toast) — all are
