@@ -52,6 +52,8 @@ services:
       # misconfiguration, because nothing errors.
       OPERATOR_EMAILS: ${OPERATOR_EMAILS:-}
       CS_ADMIN_WHATSAPP_NUMBER: ${CS_ADMIN_WHATSAPP_NUMBER:-}
+      N8N_CS_WEBHOOK_URL: ${N8N_CS_WEBHOOK_URL:-}
+      CS_N8N_TOKEN: ${CS_N8N_TOKEN:-}
     volumes:
       # server/src/routes/uploads.ts writes chat attachments and Add-Media
       # files to ./uploads (process.cwd()/uploads = /app/uploads here).
