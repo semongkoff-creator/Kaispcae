@@ -2,10 +2,10 @@ import { PrismaClient } from '@prisma/client';
 
 // Fase 5 (org-resolution foundation) — the OrgInvite table has existed
 // since Fase 1's org_foundation migration but was never wired to any
-// route: every signup (manual register, Lark login) hardcoded
+// route: every signup hardcoded
 // DEFAULT_ORG_ID because nothing else could resolve which org a new
 // account belonged to. This is the shared lookup both routes/orgInvite.ts
-// (manual accept) and routes/lark.ts (Lark login) use to answer that.
+// (manual accept) and routes/google.ts (Google login) use to answer that.
 
 export const ORG_INVITE_TTL_MS = 7 * 24 * 3600_000; // 7 days
 

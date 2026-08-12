@@ -632,8 +632,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       // exceptions: 'focusArea' WANTS 'focus' zoneType (App.tsx auto-sets
       // workMode to 'focus'/DND for anyone standing inside), 'meetingArea'
       // WANTS 'meeting' zoneType (App.tsx auto-sets workMode to 'in_meeting'
-      // + mounts MeetingControl's "Start Meeting → Lark" button — see
-      // MeetingControl.tsx). Before this, there was no editor tool that ever
+      // for anyone standing inside). Before this, there was no editor tool that ever
       // produced zoneType 'meeting' at all — a room built from scratch had
       // no way to get a working meeting area, only a room whose zones were
       // seeded directly in the database could have one. label=name so the

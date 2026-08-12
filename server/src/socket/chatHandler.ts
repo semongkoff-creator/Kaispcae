@@ -76,7 +76,7 @@ export function registerChatHandlers(io: Server, socket: Socket, playerName: () 
       isProximity: !!isProximity,
       zoneId,
       // Potongan C3 — the upload itself already happened over REST (same
-      // Lark-Drive-backed /api/uploads used by #general/DM); this only
+      // /api/uploads used by #general/DM); this only
       // carries the resulting locator through the live relay. Trusted as
       // given (same trust level as `text`) — this event already requires a
       // real zone membership check above, and the URL only ever resolves to

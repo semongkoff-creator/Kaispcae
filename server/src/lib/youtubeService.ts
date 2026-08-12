@@ -1,6 +1,6 @@
 import { getConfig } from '../config';
 
-// Music Bot's YouTube Data API v3 caller — same shape as larkVc.ts's
+// Music Bot's YouTube Data API v3 caller — same shape as the other
 // feature-specific service functions: read config, return a clear "not
 // configured" result when the key is unset (never throw), wrap the fetch in
 // try/catch, and log with a [youtube] prefix on any failure.
@@ -20,7 +20,7 @@ const YT_BASE = 'https://www.googleapis.com/youtube/v3';
 // getVideoDurationSec below still keep that reactive handling too, as a
 // backstop for whatever this estimate doesn't perfectly track). Resets at
 // WIB midnight — arbitrary but consistent with this codebase's other
-// daily-boundary conventions (see larkAttendance.ts's own wibToday).
+// daily-boundary conventions.
 // Conservative default (80% of the free tier) leaves headroom for the
 // duration-lookup calls layered on top of every search.
 const DAILY_UNIT_BUDGET = Number(process.env.YOUTUBE_DAILY_UNIT_BUDGET) || 8000;

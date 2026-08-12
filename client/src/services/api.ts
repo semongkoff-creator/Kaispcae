@@ -7,19 +7,6 @@ const API_BASE = '/api';
 // plain network failure (offline, server down), where fetch() itself throws
 // a status-less TypeError instead. useAuth.ts uses this distinction to only
 // show "session expired" for an actual 401/403/404, not a network blip.
-export interface MomRecord {
-  id: string;
-  roomId: string;
-  zoneId: string;
-  startedBy: string;
-  startTime: string;
-  endTime: string | null;
-  larkMeetingNo: string | null;
-  recordingStatus: string;
-  recordingUrl: string | null;
-  summary: string | null;
-}
-
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -64,7 +51,7 @@ async function uploadFile(path: string, file: File, roomSlugOverride?: string): 
   const form = new FormData();
   form.append('file', file);
   // A8 — tell the server which room this upload belongs to, so it lands in that
-  // room's Lark Drive folder. Prefer an explicit slug (the Room Editor edits a
+  // room. Prefer an explicit slug (the Room Editor edits a
   // room that may differ from the last one entered); else the last room.
   const roomSlug = roomSlugOverride || localStorage.getItem('vm_last_room_slug');
   if (roomSlug) form.append('roomSlug', roomSlug);
@@ -87,7 +74,6 @@ async function uploadRecordingBlob(blob: Blob): Promise<{ url: string }> {
   const token = localStorage.getItem('vm_token');
   const form = new FormData();
   form.append('file', blob, 'recording.webm');
-  // A8 — route the recording into the room's Lark Drive folder.
   const roomSlug = localStorage.getItem('vm_last_room_slug');
   if (roomSlug) form.append('roomSlug', roomSlug);
   const res = await fetch(`${API_BASE}/uploads/recording`, {
@@ -293,7 +279,6 @@ export const api = {
   // ROSTER_UPDATED) — this REST call alone doesn't know who's online.
   getWorkspacePeople: () => request<{ people: { id: string; displayName: string }[] }>('/workspace/people'),
 
-  // A5 — recorded meetings (Lark VC).
   getRooms: () => request<{ rooms: RoomInfo[] }>('/rooms'),
 
   // ── Room join approval (see server/src/lib/roomMembership.ts) ──────

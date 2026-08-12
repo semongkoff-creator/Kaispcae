@@ -62,11 +62,11 @@ const config = getConfig();
 // ENTIRE process on an unhandled promise rejection, and Express 4 (unlike 5)
 // never forwards an async handler's thrown/rejected error to error-handling
 // middleware in the first place, so it has nowhere else to go. That means a
-// single bug in, say, one Lark sub-feature could take down every room's
+// single bug in, say, one integration could take down every room's
 // live socket connections along with it — the opposite of "1 integrasi down
 // → space tetap jalan". These are a last-resort safety net, not a
 // substitute for the try/catch each integration module already does at its
-// own boundary (see lib/lark*.ts) — just log loudly enough to actually
+// own boundary — just log loudly enough to actually
 // find and fix the gap, and keep the space running for everyone already
 // connected instead of dropping every live socket over one stray error.
 process.on('unhandledRejection', (reason) => {

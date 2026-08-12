@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --sourcemap --external:@prisma/client --external:express --external:socket.io --external:cors --external:bcryptjs --external:jsonwebtoken --external:ioredis --external:zod --external:dotenv --external:multer --external:@larksuiteoapi/node-sdk --external:exceljs",
+    "build": "tsc --noEmit && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --sourcemap --external:@prisma/client --external:express --external:socket.io --external:cors --external:bcryptjs --external:jsonwebtoken --external:ioredis --external:zod --external:dotenv --external:multer --external:exceljs",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
@@ -14,7 +14,6 @@
     "db:migrate:deploy": "prisma migrate deploy"
   },
   "dependencies": {
-    "@larksuiteoapi/node-sdk": "^1.71.1",
     "@prisma/client": "^5.22.0",
     "@virtualmeet/shared": "*",
     "bcryptjs": "^2.4.3",

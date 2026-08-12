@@ -12,12 +12,11 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 
-// Same in-memory Map + TTL shape as lark.ts's own pendingStates/
-// oneTimeCodes (see that file's comment on why this is enough for a
-// single-process server) — kept as its own separate pair of Maps rather
-// than sharing Lark's, same "small deliberate duplication for decoupling"
-// precedent used elsewhere in this codebase (mediaHandler.ts/
-// followHandler.ts).
+// Short-lived in-memory state for the OAuth round trip: `pendingStates`
+// guards against CSRF on the callback, `oneTimeCodes` hands the minted JWT
+// back to the SPA without ever putting it in a URL. Both are plain Maps with
+// a TTL sweep, which is enough for a single-process server — a multi-process
+// deployment would need these in Redis alongside the room state.
 const pendingStates = new Map<string, { exp: number; orgInviteToken?: string }>();
 const oneTimeCodes = new Map<string, { token: string; exp: number }>();
 const STATE_TTL_MS = 10 * 60 * 1000;
@@ -31,7 +30,7 @@ function sweep<T>(m: Map<string, T>, expOf: (v: T) => number) {
 // Kick off the OAuth dance: redirect the browser to Google's consent
 // screen. ?orgInvite=<token> (present when this login started from an
 // org-invite link, see JoinOrgInvite.tsx) rides along in `state` exactly
-// like Lark's own login route does.
+// like every other login route does.
 google.get('/auth/google/login', (req: Request, res: Response) => {
   const cfg = googleConfig();
   if (!cfg) return res.status(503).send('Login Google belum dikonfigurasi di server.');
@@ -50,9 +49,9 @@ google.get('/auth/google/login', (req: Request, res: Response) => {
 });
 
 // Google redirects back here with ?code&state. Exchange the code, resolve
-// the user, mint OUR JWT (same helper as manual login and Lark), then
+// the user, mint OUR JWT (same helper as manual login), then
 // bounce to the SPA with a one-time code — never the JWT itself — in the
-// URL, same posture as Lark's callback.
+// URL.
 google.get('/auth/google/callback', async (req: Request, res: Response) => {
   const cfg = googleConfig();
   if (!cfg) return res.status(503).send('Login Google belum dikonfigurasi di server.');
@@ -94,9 +93,8 @@ google.get('/auth/google/callback', async (req: Request, res: Response) => {
     // (see below) — an unverified email is just a claim, not an identity.
     if (!email || !emailVerified) return fail('unverified');
 
-    // 3) Resolve the local account. Unlike Lark (keyed on a provider id,
-    // larkOpenId — Lark doesn't always return a real email, hence
-    // syntheticLarkEmail), Google always returns a verified email, so this
+    // 3) Resolve the local account. Google always returns a verified
+    // email — no synthetic address is ever needed — so this
     // "Basic" scope keys on that email directly rather than adding a new
     // googleId column — see the plan doc for this trade-off.
     const prisma = getPrisma();
@@ -105,10 +103,9 @@ google.get('/auth/google/callback', async (req: Request, res: Response) => {
 
     if (!user) {
       // Brand-new identity — ONLY created behind a still-valid org invite.
-      // Multi-tenant is live: unlike Lark's new-user branch (which still
-      // falls back to DEFAULT_ORG_ID when there's no invite — a known,
-      // not-yet-closed gap), Google refuses outright rather than silently
-      // landing a stranger in the wrong org.
+      // Multi-tenant is live, so this refuses outright rather than landing a
+      // stranger in some default organization: a verified Google address
+      // proves who someone is, never that they belong to this workspace.
       const invite = pending.orgInviteToken ? await resolvePendingInvite(prisma, pending.orgInviteToken) : null;
       if (!invite) return fail('no-invite');
 
@@ -116,7 +113,7 @@ google.get('/auth/google/callback', async (req: Request, res: Response) => {
         data: {
           email: normalizedEmail,
           displayName: name || normalizedEmail,
-          // Same trick as Lark's `lark-oauth:...` placeholder — a random,
+          // A random,
           // non-bcrypt value so manual login's bcrypt.compare can never
           // match it; this account is Google-only until it sets a real
           // password (out of scope for this Basic pass).
@@ -134,10 +131,10 @@ google.get('/auth/google/callback', async (req: Request, res: Response) => {
     }
     // Existing user (found by email): org is whatever's already stored on
     // that row — never touched here. Any invite token present is ignored,
-    // same posture as Lark's existing-account branch.
+    // never overwritten by a later sign-in.
 
-    // 4) OUR token, minted the one and only way (identical to manual login
-    // and Lark). Bug 1 — single active session, same as both.
+    // 4) OUR token, minted the one and only way — the same signToken helper
+    // manual login uses. Bug 1 — single active session, same as manual login.
     const sessionId = crypto.randomUUID();
     await prisma.user.update({ where: { id: user.id }, data: { currentSessionId: sessionId } });
     disconnectUserSockets(user.id);
@@ -156,7 +153,7 @@ google.get('/auth/google/callback', async (req: Request, res: Response) => {
 
 // The SPA posts the one-time code back here to receive the JWT, then
 // stores it exactly like a manual login. Single-use + short TTL, same as
-// Lark's own exchange route.
+// the manual login route.
 google.post('/auth/google/exchange', (req: Request, res: Response) => {
   const code = req.body?.code;
   const entry = typeof code === 'string' ? oneTimeCodes.get(code) : undefined;

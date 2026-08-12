@@ -1187,7 +1187,7 @@ class WebRTCService {
   // not an ongoing subscription; a stray timeout-path response arriving
   // late must not leak a listener that fires again on some later unrelated
   // grant/deny. The 4s timeout is a pure safety net (server unreachable,
-  // request dropped) — treated as "granted" so a Lark/socket hiccup can
+  // request dropped) — treated as "granted" so a socket hiccup can
   // never permanently block a legitimate share, matching this app's
   // existing "a check that can't be verified fails open, not closed"
   // posture elsewhere (see roomHandler.ts's own approval-gate comments).

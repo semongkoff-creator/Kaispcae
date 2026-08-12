@@ -56,7 +56,7 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
   // and nothing did that automatically before this: the join effect below
   // only re-ran when activeChatTarget itself CHANGED. Silently missing your
   // own room membership doesn't show up as an error — the send still
-  // persists+broadcasts to everyone else (and relays to Lark) — only YOUR
+  // persists+broadcasts to everyone else — only YOUR
   // OWN confirmation (CHANNEL_MESSAGE_NEW) never arrives, so the optimistic
   // bubble just times out and shows "Gagal terkirim" for a message that
   // actually went through. isConnected here as a join-effect dependency
@@ -237,7 +237,7 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
       });
 
       try {
-        // Potongan C3 — roomSlug is what makes this actually land in Lark
+        // Potongan C3 — roomSlug scopes the message to this room
         // Drive (see routes/uploads.ts's resolveRoomFolder): without it the
         // upload silently fell back to local disk every time, even with
         // Drive fully configured and working everywhere else.

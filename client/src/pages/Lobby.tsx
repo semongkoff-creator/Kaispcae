@@ -36,13 +36,13 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
     return (parts[0][0] + parts[1][0]).toUpperCase();
   })();
-  // Real photo (from Lark, for accounts that logged in that way) — same
+  // Real photo (for accounts that have one) — same
   // batched lookup ChatPanel/VideoGrid already use for OTHER people's
   // avatars, reused here for this account's own. Deliberately not added to
   // /auth/me's UserProfile (see that endpoint's own doc comment: the photo
   // column is heavy enough it's kept out of the hot path on purpose).
   // Falls back to the existing initials circle when null (self-registered
-  // accounts with no Lark photo, or before the lookup resolves).
+  // accounts with no photo, or before the lookup resolves).
   const myPhoto = useProfiles([user.id]).get(user.id)?.photo ?? null;
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
   const [loading, setLoading] = useState(true);

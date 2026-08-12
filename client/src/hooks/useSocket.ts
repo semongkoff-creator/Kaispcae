@@ -391,7 +391,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // Reuses the activity feed rather than a bespoke toast, same lightweight
     // one-way-notice pattern as the door-unlock notice.
     socket.on(SocketEvents.FORCE_PULL_RESULT, (data: { targetUserId: string; delivered: boolean }) => {
-      useGameStore.getState().addActivity(data.delivered ? '✅ Berhasil menarik paksa.' : '📨 Target sedang offline — diberitahu lewat Lark.');
+      useGameStore.getState().addActivity(data.delivered ? '✅ Berhasil menarik paksa.' : '📨 Target sedang offline — notifikasi dikirim.');
     });
 
     socket.on(SocketEvents.FORCE_PULLED, (data: { byName: string }) => {

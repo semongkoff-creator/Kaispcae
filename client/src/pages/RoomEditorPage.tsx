@@ -2049,7 +2049,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               </div>
               <p className="text-[11px] text-white/50 mt-3 leading-relaxed">
                 {mediaMode
-                  ? 'Stamp: klik tile untuk menaruh (image/BGM → upload; YouTube/Website → tempel URL). Eraser: klik untuk hapus. File → Lark Drive room ini.'
+                  ? 'Stamp: klik tile untuk menaruh (image/BGM → upload; YouTube/Website → tempel URL). Eraser: klik untuk hapus.'
                   : (EFFECTS.find((e) => e.id === selectedEffect)?.hint ?? 'Pilih efek/media lalu gambar di kanvas. Overlay ini hanya tampil di editor.')}
               </p>
             </>

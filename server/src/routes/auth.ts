@@ -32,9 +32,9 @@ auth.get('/config', (_req, res) => {
 });
 
 
-// Exported so the Lark OAuth route (routes/lark.ts) issues the EXACT same
+// Exported so the OAuth routes (routes/google.ts) issue the EXACT same
 // token shape as manual login — same claims, same secret, same expiry — so the
-// socket handshake middleware treats a Lark session identically. There must be
+// socket handshake middleware treats an OAuth session identically. There must be
 // only one way to mint a MeetKai JWT. Bug 1: the sessionId claim is what auth
 // (REST + socket) checks against User.currentSessionId for single-session.
 export function signToken(user: { id: string; email: string }, sessionId: string): string {
@@ -47,7 +47,7 @@ export function signToken(user: { id: string; email: string }, sessionId: string
 }
 
 // Bug 1 — establish a brand-new active session for this user (on a successful
-// manual/Lark login): mint a fresh id, persist it as THE session, kick any
+// manual/OAuth login): mint a fresh id, persist it as THE session, kick any
 // other live sockets, and return the id to embed in the JWT.
 async function startNewSession(userId: string): Promise<string> {
   const sessionId = randomUUID();

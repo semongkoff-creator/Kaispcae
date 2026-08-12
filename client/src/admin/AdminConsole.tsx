@@ -10,18 +10,21 @@ import { AttendanceReport } from './AttendanceReport';
 import { CalendarSettings } from './CalendarSettings';
 import { BackupPanel } from './BackupPanel';
 import { AnalyticsTiersPanel } from './AnalyticsTiersPanel';
+import { DepartmentsPanel } from './DepartmentsPanel';
+import { AttendanceSettings } from './AttendanceSettings';
 
-// Departemen/Absensi tabs removed per explicit request — department and
-// attendance are both already managed through Lark (Lark org chart / Lark
-// Attendance sync), so a second, separate management UI for the same data
-// here was redundant. The underlying data/sync (Department model,
-// AttendanceRecord, lib/larkAttendance.ts) is untouched — only these two
-// admin-console SETTINGS surfaces are gone. DepartmentsPanel/
-// AttendanceSettings component files are left in place, just unused here.
-type Tab = 'members' | 'approvals' | 'report' | 'analytics' | 'calendar' | 'policy' | 'audit' | 'backup';
+// Departemen/Absensi were hidden here while an external workspace suite owned
+// the org chart and the attendance clock. It doesn't any more, and these are
+// now the ONLY places to define a shift, assign one, or add a leave type —
+// without them attendance is switched on but unusable, since clock-in refuses
+// with "Kamu belum punya shift" and nothing can create one. The components
+// were never deleted, so this is just remounting them.
+type Tab = 'members' | 'departments' | 'attendance' | 'approvals' | 'report' | 'analytics' | 'calendar' | 'policy' | 'audit' | 'backup';
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'members', label: 'Anggota', icon: <People size={14} /> },
+  { id: 'departments', label: 'Departemen', icon: <People size={14} /> },
+  { id: 'attendance', label: 'Absensi', icon: <ClockHistory size={14} /> },
   { id: 'approvals', label: 'Persetujuan', icon: <PersonCheck size={14} /> },
   { id: 'report', label: 'Laporan', icon: <BarChartFill size={14} /> },
   // Productivity Analytics — Team/All-Kaitech tiers (Bagian B.1). Separate
@@ -66,7 +69,7 @@ export function AdminConsole({ currentUser, onClose }: { currentUser: CurrentUse
   }
 
   return (
-    // pl-14 clears the room's Sidebar rail (w-14, z-50), same as LarkBaseApp.
+    // pl-14 clears the room's Sidebar rail (w-14, z-50).
     <div className="absolute inset-0 z-40 flex flex-col bg-white dark:bg-gray-900 overflow-hidden pl-14">
       <header className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-700 shrink-0">
         <button onClick={onClose} aria-label="Tutup konsol admin" className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 cursor-pointer">
@@ -100,6 +103,8 @@ export function AdminConsole({ currentUser, onClose }: { currentUser: CurrentUse
 
       <div className="flex-1 overflow-y-auto p-4">
         {tab === 'members' && <MembersPanel currentUser={currentUser} />}
+        {tab === 'departments' && <DepartmentsPanel />}
+        {tab === 'attendance' && <AttendanceSettings />}
         {tab === 'approvals' && <ApprovalPanel />}
         {tab === 'report' && <AttendanceReport />}
         {tab === 'analytics' && <AnalyticsTiersPanel />}

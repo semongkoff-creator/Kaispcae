@@ -5,7 +5,7 @@ import { X, Download, FileEarmarkFill, ExclamationTriangleFill } from 'react-boo
 // Bug 10 — in-app lightbox for chat attachments (was: open in a new browser
 // tab). Shared by ChatPanel and MessengerApp so both surfaces behave the same.
 // It only changes how a file is DISPLAYED — the URL still points at the same
-// MeetKai backend proxy in front of Lark Drive (A8), and the browser sends the
+// backend upload route, and the browser sends the
 // same auth cookie for <img>/<video>/<iframe>/download, so old and new
 // messages resolve identically.
 

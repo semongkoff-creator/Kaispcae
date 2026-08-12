@@ -6,7 +6,7 @@ import { Paperclip, Image, CameraVideoFill, FileEarmarkFill } from 'react-bootst
 // pre-filtered via the input's `accept`. "Dokumen" clears the filter so any
 // file type can still be sent — the menu only makes filtering easier, it never
 // restricts what's allowed. The upload itself is unchanged: the chosen File is
-// handed straight to onFile (which uploads to Lark Drive via the backend, A8).
+// handed straight to onFile (which uploads it via the backend).
 
 interface AttachmentMenuButtonProps {
   onFile: (file: File) => void;

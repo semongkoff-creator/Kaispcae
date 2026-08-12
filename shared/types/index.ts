@@ -128,7 +128,7 @@ export interface Avatar {
 // QA #1 (Status) — 'wfo'/'wfa'/'cuti' added so the login-time status picker
 // (App.tsx's StatusPickModal) can offer the full WFO/WFH/WFA/Cuti/Meeting
 // set the checklist asks for. 'cuti' is display-only here — it does NOT
-// create or check a real Lark leave approval (see routes/leave.ts for that);
+// create or check a real leave approval (see routes/attendanceAdmin.ts);
 // this is purely the same-shape badge every other WorkMode value already is.
 export type WorkMode = 'available' | 'in_meeting' | 'focus' | 'lunch' | 'away' | 'wfh' | 'wfo' | 'wfa' | 'cuti' | 'break';
 
@@ -405,8 +405,6 @@ export enum SocketEvents {
   // shared/permissions.ts, re-checked server-side) and same io.to(room)
   // delivery (everyone, including any admin who sent it, sees the banner —
   // simpler than special-casing the sender's own client). Also relayed to
-  // the room's mapped Lark group (see larkChatSync.ts's relayBroadcastToLark)
-  // — "sinkron Lark" per the QA text.
   BROADCAST_SEND = 'broadcast:send',
   BROADCAST_RECEIVED = 'broadcast:received',
 
@@ -668,7 +666,7 @@ export enum SocketEvents {
   // "force" instead of a second Summon): FORCE_PULL moves the target
   // straight away if they're online (same "land beside, not on top of"
   // mechanic + locked-zone bypass as Summon's accept path), or queues their
-  // landing spot for their next join + sends a Lark DM if they're offline
+  // landing spot for their next join + leaves a notification if they're offline
   // right now. FORCE_PULL_RESULT tells the ADMIN's own client what
   // happened (delivered now vs queued); FORCE_PULLED tells the TARGET's
   // client it happened to them (right away if online, or on the join that
@@ -1141,13 +1139,13 @@ export interface FollowResultPayload {
 export type MediaType = 'image' | 'youtube' | 'whiteboard' | 'file' | 'website' | 'bgm';
 
 export interface MediaPayload {
-  url?: string; // image / file — /api/uploads/<name> or /api/files/<token> (Lark Drive, A8)
+  url?: string; // image / file — /api/uploads/<name>
   fileName?: string; // file only — original name, for the download link's label
   videoId?: string; // youtube only — parsed from whatever URL shape the user pasted
   strokes?: WhiteboardStroke[]; // whiteboard only — full history, appended to on each stroke
   // Potong 6
   websiteUrl?: string; // 'website' — always https:// (validated on placement)
-  audioUrl?: string; // 'bgm' — uploaded audio, same Lark Drive path as attachments
+  audioUrl?: string; // 'bgm' — uploaded audio, same upload path as attachments
   areaW?: number; // 'bgm' — area size in tiles (music plays while inside x..x+areaW)
   areaH?: number;
   volume?: number; // 'bgm' — default playback volume 0..1
@@ -1739,7 +1737,7 @@ export interface ChatMessage {
   // the ChatMessage Prisma model), this zone chat is NEVER persisted at all
   // (see server/src/socket/chatHandler.ts) — purely a live relay to whoever
   // is currently in the zone. The FILE itself still lands permanently in
-  // Lark Drive same as any other chat attachment; only the message pointing
+  // on disk same as any other chat attachment; only the message pointing
   // to it disappears once the zone empties out / a client reloads.
   attachmentUrl?: string;
   attachmentName?: string;

@@ -42,7 +42,7 @@ export function Avatar({ name, seed, size = 40 }: { name: string; seed: string; 
 }
 
 // A channel reads as a "#" tile rather than a person — the same distinction
-// Lark draws between a group and a DM.
+// most chat apps draw between a group and a DM.
 export function ChannelTile({ size = 40 }: { size?: number }) {
   return (
     <div

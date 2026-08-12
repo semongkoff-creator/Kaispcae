@@ -3,7 +3,7 @@ import { X, ExclamationTriangleFill } from 'react-bootstrap-icons';
 import { Furniture, InteractivePasswordResultPayload, InteractiveChoiceResultPayload } from '@virtualmeet/shared';
 
 // Bug — image_popup's <img> had no onLoad/onError handling at all, so a slow
-// or failed load (wrong URL, revoked auth, a Lark Drive outage/misconfig,
+// or failed load (wrong URL, revoked auth, a storage outage/misconfig,
 // plain network hiccup) rendered as a silent blank white box — visually
 // identical to "still loading" and to "success", with nothing to tell an
 // admin which one they were looking at. `key={src}` on the call site resets
