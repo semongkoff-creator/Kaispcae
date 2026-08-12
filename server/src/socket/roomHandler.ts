@@ -22,6 +22,7 @@ import { unlockDoor, unlockDoorArea, clearUnlockedDoorsForRoom } from './doorLoc
 import { getNearbyRecipients } from './proximityBroadcast';
 import { sanitizeChat } from '../middleware/validate';
 import { GUEST_LINK_REVOKED, GUEST_LINK_REVOKED_MESSAGE } from '../middleware/auth';
+import { findAssignedSeat } from './furnitureHandler';
 
 const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec per socket
 const canTeleport = socketRateLimit(2); // max 2 teleport requests/sec per socket
@@ -1080,6 +1081,23 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const remembered = getLastKnownPosition(uid, room);
     let spawn = remembered ?? findSpawnPixel(tiles);
 
+    // A member with a permanently-assigned seat in THIS room
+    // (Furniture.assignedToUserId, see furnitureHandler.ts's FURNITURE_ASSIGN)
+    // always spawns there instead — overriding both the remembered position
+    // and the Starting Point default, so it's true every single join, not
+    // just the first one / the one right after a server restart clears
+    // getLastKnownPosition's in-memory map. "You have your own desk" is a
+    // more deliberate, durable signal than either. Guests can never have one
+    // (furniture:assign is member-only), so this is always a no-op for them.
+    // Furniture.x/y are tile coordinates, same as every other spawn source
+    // here — converted the same way findSpawnPixel/the near-placement block
+    // below do.
+    const assignedSeat = dbRoom ? findAssignedSeat(dbRoom, uid) : null;
+    const assignedSeatPixel = assignedSeat
+      ? { x: assignedSeat.x * TILE_SIZE + TILE_SIZE / 2, y: assignedSeat.y * TILE_SIZE + TILE_SIZE / 2 }
+      : null;
+    if (assignedSeatPixel) spawn = assignedSeatPixel;
+
     // "Spawn near whoever let you in" — consumed at most once per admit/
     // approve decision (see markSpawnNearUser's own doc comment), so an
     // ordinary reconnect (which never calls the setter) always finds nothing
@@ -1117,7 +1135,14 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // chair after sitting a while" report (long sits are precisely when a
     // reconnect happens). Rescue to the nearest adjacent free tile, same
     // helper the My Seat/summon landings already use.
-    {
+    // Skipped when we just landed on an assigned seat (still landed there
+    // via `spawn === assignedSeatPixel`, not shifted by near-placement above)
+    // — same as TELEPORT_REQUEST's own kind:'seat' exemption: a chair tile
+    // is meant to be stood/sat on by design, not something to rescue away
+    // from. useMovement.ts's own "already embedded" escape hatch already
+    // lets the player freely walk off it the moment they press a key.
+    const onAssignedSeat = !!assignedSeatPixel && spawn.x === assignedSeatPixel.x && spawn.y === assignedSeatPixel.y;
+    if (!onAssignedSeat) {
       const spawnTileX = Math.floor(spawn.x / TILE_SIZE);
       const spawnTileY = Math.floor(spawn.y / TILE_SIZE);
       if (isTileBlocked(tiles, spawnTileX, spawnTileY)) {
@@ -1733,12 +1758,12 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
 
       if (data.kind === 'seat') {
         // No locationId to look up — resolved straight from the requester's
-        // own uid. Reads the room's furniture the same way the rest of this
-        // file loads saved map data (dbRoom.furniture JSON), not through
-        // furnitureHandler.ts's private state, matching this handler's own
-        // existing "small deliberate duplication for decoupling" convention.
-        const furnitureList = Array.isArray(dbRoom.furniture) ? (dbRoom.furniture as any[]) : [];
-        const seat = furnitureList.find((f) => f?.assignedToUserId === uid);
+        // own uid, via the same layerData-first/legacy-fallback lookup
+        // JOIN_ROOM's own seat-spawn override uses below (findAssignedSeat)
+        // — this used to only check the legacy `furniture` column directly,
+        // which silently found nothing for any room that had moved to
+        // layerData (the modern Room Editor's storage) since assignment.
+        const seat = findAssignedSeat(dbRoom, uid);
         if (!seat) {
           socket.emit('admin:error', { message: "You don't have an assigned seat in this room" });
           return;

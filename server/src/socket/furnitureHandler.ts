@@ -21,6 +21,29 @@ function findFurnitureInLayerData(layerData: LayerData, furnitureId: string): Fu
   return layerData.objects.find((f) => f.id === furnitureId) ?? layerData.topObjects.find((f) => f.id === furnitureId);
 }
 
+// Where a user's permanently-assigned seat actually is, checked the SAME way
+// findFurnitureInLayerData/FURNITURE_ASSIGN above resolve furniture: layerData
+// first (a room ever opened in the modern Room Editor stores furniture there,
+// not in the legacy column — see this file's top doc comment), falling back
+// to the legacy `furniture` array only when a room has no layerData at all.
+// Exported for roomHandler.ts to use in two places: JOIN_ROOM's spawn
+// computation, and the "Go to My Seat" TELEPORT_REQUEST handler — which used
+// to only check the legacy column, so it silently found nothing for anyone
+// whose assigned seat lives in a layerData room. One correct lookup shared by
+// both instead of a second, narrower copy of the same logic.
+export function findAssignedSeat(dbRoom: { layerData?: unknown; furniture: unknown }, uid: string): { id: string; x: number; y: number } | null {
+  if (dbRoom.layerData) {
+    const layerData = dbRoom.layerData as unknown as LayerData;
+    const item = layerData.objects.find((f) => f.assignedToUserId === uid) ?? layerData.topObjects.find((f) => f.assignedToUserId === uid);
+    return item ? { id: item.id, x: item.x, y: item.y } : null;
+  }
+  if (Array.isArray(dbRoom.furniture)) {
+    const item = (dbRoom.furniture as Furniture[]).find((f) => f?.assignedToUserId === uid);
+    return item ? { id: item.id, x: item.x, y: item.y } : null;
+  }
+  return null;
+}
+
 // Permanent seat assignment (ZEP-style "this is my desk"), distinct from the
 // transient sit-down in roomHandler.ts's PLAYER_SIT. Persisted straight into
 // the room's furniture storage in Postgres, same as ROOM_UPDATE does for the
