@@ -1,12 +1,10 @@
 import { Router, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { Readable } from 'node:stream';
 import { getPrisma } from '../lib/prisma';
 import { hasFeatureAccess } from '@virtualmeet/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { resolveRoomRole as resolveRole } from '../lib/roles';
-import { openDownloadStream } from '../lib/larkDrive';
 import { findRoomInOrg } from '../lib/orgScope';
 
 const recordings = Router();
@@ -79,20 +77,9 @@ recordings.get('/recordings/:id/download', authenticateToken, async (req: AuthRe
       return res.status(410).json({ error: 'Download link has expired or reached its maximum download count' });
     }
 
-    // The permission + atomic count + expiry checks above are unchanged by A8 —
-    // ONLY the byte source below moved. Recordings uploaded after A8 live in
-    // Lark Drive ("drive:<file_token>"); older ones are still on local disk. In
-    // BOTH cases MeetKai's backend serves the bytes itself; the client never
-    // receives a Lark Drive link.
+    // The backend always serves the bytes itself — the client never receives a
+    // storage-level link, only this gated endpoint.
     const safeName = `${(row.title || 'recording').replace(/[^\w.-]+/g, '_')}.webm`;
-    if (row.fileUrl.startsWith('drive:')) {
-      const dl = await openDownloadStream(row.fileUrl.slice('drive:'.length));
-      if (!dl) return res.status(404).json({ error: 'Recording file not found' });
-      res.setHeader('Content-Type', 'video/webm');
-      res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- DOM vs node:stream/web ReadableStream typing
-      return Readable.fromWeb(dl.body as any).pipe(res);
-    }
     const filename = path.basename(row.fileUrl);
     const filePath = path.join(process.cwd(), 'uploads', filename);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Recording file not found' });

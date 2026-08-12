@@ -3,30 +3,18 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import multer from 'multer';
-import { Readable } from 'node:stream';
 import { authenticateToken, authenticateUploadRead, AuthRequest } from '../middleware/auth';
 import { getPrisma } from '../lib/prisma';
 import { canAccessConversation } from '../lib/chatAccess';
-import { driveEnabled, ensureRoomFolder, uploadFileFromPath, openDownloadStream, deleteFile } from '../lib/larkDrive';
 
-// A8 — when Lark Drive is configured, chat attachments + recordings are stored
-// there (in the room's folder) instead of local disk. multer still writes a
-// temp file to disk first; we upload that to Drive, delete the temp, and hand
-// back a Drive-backed locator. If Drive isn't configured, or resolving the
-// room folder / the upload fails, we gracefully keep the file on disk and
-// return the legacy /api/uploads/<name> url — an upload must never hard-fail
-// just because Drive is unavailable.
+// Chat attachments, Add Media files and recordings all land on local disk and
+// are served back through this module. There is exactly one locator shape:
 //
-// Locator shapes:
-//   attachments  →  /api/files/<file_token>   (served by GET /files below, gated)
-//   recordings   →  drive:<file_token>        (served ONLY via /recordings/:id/download)
-//   legacy/disk  →  /api/uploads/<uuid>.<ext> (served by GET /uploads below)
-async function resolveRoomFolder(roomSlug: unknown): Promise<string | null> {
-  if (!driveEnabled() || typeof roomSlug !== 'string' || !roomSlug) return null;
-  const room = await getPrisma().room.findUnique({ where: { slug: roomSlug }, select: { id: true } });
-  return room ? ensureRoomFolder(room.id) : null;
-}
-
+//   /api/uploads/<uuid>.<ext>   (served by GET /uploads below, access-gated)
+//
+// An external object store previously sat in front of this, with disk as its
+// fallback; the fallback was always the real implementation, so removing the
+// remote path left the storage behaviour unchanged.
 const uploads = Router();
 
 export const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
@@ -87,15 +75,6 @@ uploads.post('/uploads', authenticateToken, upload.single('file'), async (req: A
     return res.status(400).json({ error: 'No file provided, or file type not allowed' });
   }
   const fileName = req.file.originalname;
-  const folder = await resolveRoomFolder(req.body?.roomSlug);
-  if (folder) {
-    const fileToken = await uploadFileFromPath(folder, fileName, req.file.path);
-    if (fileToken) {
-      fs.unlink(req.file.path, () => {}); // temp copy is now in Drive
-      return res.status(201).json({ url: `/api/files/${fileToken}`, fileName });
-    }
-    // upload to Drive failed → fall through, keep the disk copy (graceful)
-  }
   return res.status(201).json({ url: `/api/uploads/${req.file.filename}`, fileName });
 });
 
@@ -112,16 +91,6 @@ const recordingUpload = multer({
 uploads.post('/uploads/recording', authenticateToken, recordingUpload.single('file'), async (req: AuthRequest, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file provided, or not a video/webm recording' });
-  }
-  const folder = await resolveRoomFolder(req.body?.roomSlug);
-  if (folder) {
-    const fileToken = await uploadFileFromPath(folder, req.file.originalname || `${req.file.filename}`, req.file.path);
-    if (fileToken) {
-      fs.unlink(req.file.path, () => {});
-      // 'drive:' locator — never a servable path; only /recordings/:id/download
-      // (which enforces role + atomic count + expiry) can read it.
-      return res.status(201).json({ url: `drive:${fileToken}` });
-    }
   }
   return res.status(201).json({ url: `/api/uploads/${req.file.filename}` });
 });
@@ -186,56 +155,9 @@ uploads.get('/uploads/:filename', authenticateUploadRead, async (req: AuthReques
   return res.sendFile(filePath);
 });
 
-// A8 — Drive-backed attachment proxy. Same access gate as GET /uploads above
-// (resolve the URL back to its ChatMessage and ask the conversation), but the
-// bytes come from Lark Drive server-to-server instead of disk. The Drive link
-// is NEVER handed to the client. Recordings are NOT served here — their locator
-// is `drive:<token>`, not `/api/files/<token>`, and their only download path is
-// /recordings/:id/download with its own stricter gate.
-uploads.get('/files/:token', authenticateUploadRead, async (req: AuthRequest, res: Response) => {
-  const token = req.params.token;
-  try {
-    const prisma = getPrisma();
-    const message = await prisma.chatMessage.findFirst({
-      where: { attachmentUrl: `/api/files/${token}` },
-      select: { conversationId2: true },
-    });
-    if (message) {
-      if (!message.conversationId2) return res.status(403).json({ error: 'Not authorized to read this file' });
-      if (!(await canAccessConversation(prisma, message.conversationId2, req.userId!, req.organizationId))) {
-        return res.status(403).json({ error: 'Not authorized to read this file' });
-      }
-    }
-  } catch (err) {
-    console.error('[uploads] Drive attachment authorization check failed:', err);
-    return res.status(500).json({ error: 'Failed to serve file' }); // fail CLOSED
-  }
-
-  const dl = await openDownloadStream(token);
-  if (!dl) return res.status(404).json({ error: 'File not found' });
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Content-Type', dl.contentType);
-  // application/pdf included alongside image/video — same reasoning as the
-  // legacy disk route above: AttachmentLightbox previews PDFs in an <iframe>,
-  // which never got the chance to render while this forced a download first.
-  res.setHeader('Content-Disposition', /^(image|video)\/|^application\/pdf$/.test(dl.contentType) ? 'inline' : 'attachment');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- fetch body is
-  // typed as the DOM ReadableStream; Readable.fromWeb wants node:stream/web's.
-  Readable.fromWeb(dl.body as any).pipe(res);
-});
-
 export function deleteUploadedFile(url: string): void {
-  // Called by mediaHandler's TTL sweep with a url this module generated. Route
-  // to Drive or disk based on the locator shape.
-  if (url.startsWith('/api/files/')) {
-    void deleteFile(url.slice('/api/files/'.length));
-    return;
-  }
-  if (url.startsWith('drive:')) {
-    void deleteFile(url.slice('drive:'.length));
-    return;
-  }
-  // Legacy disk file. path.basename guards against a full/relative path.
+  // Called by mediaHandler's TTL sweep with a url this module generated.
+  // path.basename guards against a full/relative path.
   const filePath = path.join(UPLOAD_DIR, path.basename(url));
   fs.unlink(filePath, () => {}); // best-effort — a missing file is not an error here
 }

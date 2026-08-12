@@ -15,8 +15,10 @@ import { deleteUploadedFile } from '../routes/uploads';
 // resolve role, since this module has no socket-layer admin state to reuse.
 
 const MEDIA_TYPES: MediaType[] = ['image', 'youtube', 'whiteboard', 'file', 'website', 'bgm'];
-// Uploaded-file locators: legacy disk (/api/uploads/) or Lark Drive (/api/files/, A8).
-export const isUploadUrl = (u: unknown): u is string => typeof u === 'string' && (u.startsWith('/api/uploads/') || u.startsWith('/api/files/'));
+// Uploaded-file locator — disk only. The /api/files/ proxy that used to sit
+// beside this is gone along with the external store behind it, so a URL of
+// that shape can no longer be served and must not be accepted.
+export const isUploadUrl = (u: unknown): u is string => typeof u === 'string' && u.startsWith('/api/uploads/');
 const IMAGE_FILE_TTL_MS = 24 * 60 * 60 * 1000; // 24h — spec §6's table, Image row (and File, see doc comment on the model)
 
 const canAddMedia = socketRateLimit(2);

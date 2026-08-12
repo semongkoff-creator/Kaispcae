@@ -21,22 +21,15 @@ export const GUEST_LINK_REVOKED_MESSAGE = 'Akses tamu ini sudah dicabut oleh adm
 // used to justify serving uploads to anyone at all. The session therefore
 // ALSO rides as an HttpOnly cookie, minted alongside every token we hand out.
 //
-// Path used to be narrowed to /api/uploads — fine until routes/uploads.ts (A8)
-// added a SECOND read route, GET /api/files/:token, for Lark-Drive-backed
-// attachments. A cookie's path match is a plain prefix test with no OR, so
-// /api/uploads never matched /api/files: the browser silently dropped the
-// cookie on every Drive-backed request, authenticateUploadRead saw no
-// credential at all, and every such attachment 401'd — invisibly, since nginx
-// logs a 401 same as any other response, and the failure reads identically to
-// "the upload itself failed" from the chat bubble. Renaming either route
-// isn't an option (every attachmentUrl already stored in the DB points at the
-// old path), so the cookie's path widens to their common ancestor instead.
-// /api is still far narrower than "every route": authenticateUploadRead is
-// the ONLY place that ever reads this cookie's value, so it riding along on
-// other /api/* requests doesn't hand any OTHER endpoint a credential to act
-// on — there is nothing there to widen a CSRF/XSS surface INTO.
+// Scoped as tightly as the routes that actually read it. This was briefly
+// widened to /api because a second read route (GET /api/files/:token) served
+// attachments from an external store, and a cookie's path match is a plain
+// prefix test with no OR — /api/uploads simply never matched /api/files, so
+// the browser dropped the cookie and those attachments 401'd. That route and
+// the store behind it are gone, so the reason to send this credential on
+// every /api/* request went with them.
 export const UPLOAD_COOKIE_NAME = 'mk_upload_sess';
-const UPLOAD_COOKIE_PATH = '/api';
+const UPLOAD_COOKIE_PATH = '/api/uploads';
 
 // Secure is keyed off the request's ACTUAL protocol, not NODE_ENV. Tying it
 // to NODE_ENV would be a trap: nginx/nginx.conf currently terminates on plain

@@ -18,11 +18,13 @@ import { resolveRoomRole as resolveRole } from '../lib/roles';
 const socketToUid = new Map<string, string>();
 const socketToRoom = new Map<string, string>();
 
-// The two shapes POST /uploads/recording can produce: a legacy disk .webm
-// (/api/uploads/<uuid>.webm) or an A8 Lark Drive locator (drive:<file_token>).
-// Both are server-generated; a client can't forge an arbitrary path/URL here.
+// The only shape POST /uploads/recording can produce: a disk .webm under
+// /api/uploads/<uuid>.webm. Server-generated; a client can't forge an
+// arbitrary path/URL here. An external-store locator was accepted alongside
+// this once — no longer produced and no longer servable, so accepting it now
+// would only let a caller persist a URL that is guaranteed to 404 later.
 function isValidRecordingUrl(url: unknown): url is string {
-  return typeof url === 'string' && (/^\/api\/uploads\/[a-zA-Z0-9-]+\.webm$/.test(url) || /^drive:[a-zA-Z0-9_-]+$/.test(url));
+  return typeof url === 'string' && /^\/api\/uploads\/[a-zA-Z0-9-]+\.webm$/.test(url);
 }
 
 // Finds the live socket (if any) for a given account userId within a room —
