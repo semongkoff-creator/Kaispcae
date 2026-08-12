@@ -14,7 +14,7 @@ const SESSION_REUSE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const MAX_MESSAGE_CHARS = 2000;
 
-const GREETING_TEXT = 'Halo! Ada yang bisa dibantu? Tanya seputar cara pakai KaiSpace, atau ketik "admin" kalau ingin bicara dengan tim kami.';
+const GREETING_TEXT = 'Halo! 👋 Selamat datang di KaiSpace, senang kamu di sini! Ada yang bisa dibantu? Tanya aja seputar cara pakainya, atau ketik "admin" kalau mau ngobrol langsung sama tim kami.';
 const FALLBACK_TEXT = 'Maaf, aku belum punya jawaban untuk itu. Mau coba tanya dengan kata lain, atau langsung hubungi admin?';
 const HANDOFF_NOT_CONFIGURED_TEXT = 'Fitur hubungi admin belum tersedia saat ini. Coba lagi nanti.';
 const WA_LINK_TEXT = 'Klik tombol di bawah untuk chat langsung dengan admin kami di WhatsApp.';
