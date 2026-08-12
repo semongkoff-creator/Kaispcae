@@ -347,7 +347,7 @@ Lihat `.env.example` di root untuk daftar lengkap & nilai default dev:
 NODE_ENV=development
 PORT=3001
 
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/virtualmeet
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/kaispace
 REDIS_URL=redis://localhost:6379          # opsional — fallback ke in-memory kalau tidak connect
 
 JWT_SECRET=change-this-to-a-random-string

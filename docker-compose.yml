@@ -1,10 +1,21 @@
+# Docker Compose otherwise derives the project name from the enclosing
+# DIRECTORY name. This product was forked from another one whose checkout is
+# also called "meetkai", so both would resolve to the same project — meaning
+# the same postgres container and, critically, the same `pgdata` VOLUME. The
+# two would then share one database server no matter how differently
+# POSTGRES_DB/DATABASE_URL are set, and this app's migrations would run
+# against the other product's data. Pinning the name here makes the isolation
+# a property of the file rather than of whatever the folder happens to be
+# called. Keep it distinct from the other product's project name.
+name: kaispace
+
 services:
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: virtualmeet
+      POSTGRES_DB: kaispace
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -25,7 +36,7 @@ services:
       dockerfile: server/Dockerfile
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/virtualmeet
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/kaispace
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set — see .env.example}
       CLIENT_URL: https://office.dev-kaitech.com

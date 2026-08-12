@@ -2,7 +2,13 @@ node_modules/
 dist/
 .env
 .env.local
+# Plain `.env` only matches that exact name — a copy like
+# `.env.backup-2026-08-12` would otherwise be committed WITH its credentials.
+.env.backup*
+.env.*.local
 *.log
+# TypeScript incremental build state — a build artifact, not source.
+*.tsbuildinfo
 .DS_Store
 server/uploads/
 # scripts/screenshotUI.mjs output — working reference images for a UI
