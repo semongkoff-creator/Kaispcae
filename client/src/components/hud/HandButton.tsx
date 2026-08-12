@@ -50,15 +50,15 @@ export function HandButton({ raised, onToggle }: HandButtonProps) {
             dark:text-purple-300` className) — used it as a CSS mask instead
             of an <img> so bg-* classes tint it the same way, same color
             language as those siblings rather than a fixed-tint image.
-            Sized past the siblings' 16px (w-7 = 28px) — the source art is a
-            thin outline/line-art glyph, not a bold filled shape like the
-            siblings' icons, so it still needs more box to read with similar
-            visual weight at a glance; trimmed down from w-8/32px, which read
-            oversized next to the rest of the bar. */}
+            Slightly past the siblings' 16px (w-5 = 20px) — the source art is
+            a thin outline/line-art glyph, not a bold filled shape like the
+            siblings' icons, so it keeps a touch more box to stay legible —
+            trimmed down twice now (w-8/32px, then w-7/28px) after both still
+            read oversized next to the rest of the bar. */}
         <span
           role="img"
           aria-label=""
-          className={`w-7 h-7 ${raised ? 'bg-white animate-bounce' : 'bg-purple-700 dark:bg-purple-300'}`}
+          className={`w-5 h-5 ${raised ? 'bg-white animate-bounce' : 'bg-purple-700 dark:bg-purple-300'}`}
           style={{
             maskImage: 'url(/assets/img/raise-hand-icon.png)',
             maskSize: 'contain',
