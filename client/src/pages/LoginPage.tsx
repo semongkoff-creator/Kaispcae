@@ -95,6 +95,19 @@ export function LoginPage({ onLogin, onRegister, onCreateOrganization, error, se
         {theme === 'dark' ? <SunFill size={14} /> : <MoonFill size={14} />}
       </button>
       <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 w-full max-w-md shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700">
+        {/* The product mark — the same asset as the browser-tab favicon, the
+            only logo this app ships. The wordmark beside it is aria-hidden so
+            the name is announced once, by the image's alt, instead of twice. */}
+        <div className="flex items-center gap-2 mb-5">
+          <img
+            src="/assets/img/favico.png"
+            alt="KaiSpace"
+            width={32}
+            height={32}
+            className="w-8 h-8 object-contain"
+          />
+          <span aria-hidden="true" className="text-lg font-semibold text-gray-900 dark:text-white">KaiSpace</span>
+        </div>
         <h1 className="text-[28px] leading-tight font-bold text-gray-900 dark:text-white mb-6">
           {mode === 'login' ? 'Welcome to KaiSpace' : mode === 'createOrg' ? 'Buat organisasi baru' : 'Create your KaiSpace account'}
         </h1>
