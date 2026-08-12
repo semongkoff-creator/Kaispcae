@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { findTilePath, getCardinalWaypointTarget, simplifyPath, TileNode } from '../client/src/utils/pathfinding';
+import { findFollowRouteTarget, findTilePath, getCardinalWaypointTarget, simplifyPath, TileNode } from '../client/src/utils/pathfinding';
 
 let passed = 0;
 function test(name: string, fn: () => void) {
@@ -43,6 +43,92 @@ test('click-to-move targets one waypoint axis at a time', () => {
     getCardinalWaypointTarget(34, 117, { x: 24, y: 120 }),
     { x: 24, y: 117 },
   );
+});
+
+test('waypoint targeting stops inside the snap box instead of taking a diagonal cleanup step', () => {
+  assert.deepEqual(
+    getCardinalWaypointTarget(77, 45, { x: 80, y: 48 }),
+    { x: 77, y: 45 },
+  );
+});
+
+test('follow route targets the trailing tile through cardinal pathfinding', () => {
+  const result = findFollowRouteTarget({
+    currentX: 16,
+    currentY: 16,
+    targetX: 80,
+    targetY: 80,
+    targetDirection: 'down',
+    blocked: (tileX, tileY) => tileX === 1 && tileY === 0,
+    cols: 4,
+    rows: 4,
+    tileSize: 32,
+    route: { targetTile: null, waypoints: null },
+  });
+
+  assert.deepEqual(result.route.targetTile, { x: 2, y: 1 });
+  assert.deepEqual(result.route.waypoints, [
+    { x: 16, y: 48 },
+    { x: 80, y: 48 },
+  ]);
+  assert.deepEqual(result.axisTarget, { x: 16, y: 48 });
+});
+
+test('follow route caches unreachable paths briefly instead of pathfinding every frame', () => {
+  let blockedCalls = 0;
+  const blocked = (tileX: number, tileY: number) => {
+    blockedCalls++;
+    return (tileX === 1 && tileY === 0) || (tileX === 0 && tileY === 1);
+  };
+
+  const first = findFollowRouteTarget({
+    currentX: 16,
+    currentY: 16,
+    targetX: 80,
+    targetY: 80,
+    targetDirection: 'down',
+    blocked,
+    cols: 4,
+    rows: 4,
+    tileSize: 32,
+    route: { targetTile: null, waypoints: null },
+    nowMs: 1000,
+    failedRetryMs: 500,
+  });
+  const afterFirst = blockedCalls;
+
+  const second = findFollowRouteTarget({
+    currentX: 16,
+    currentY: 16,
+    targetX: 80,
+    targetY: 80,
+    targetDirection: 'down',
+    blocked,
+    cols: 4,
+    rows: 4,
+    tileSize: 32,
+    route: first.route,
+    nowMs: 1100,
+    failedRetryMs: 500,
+  });
+  assert.equal(blockedCalls, afterFirst);
+  assert.equal(second.axisTarget, null);
+
+  findFollowRouteTarget({
+    currentX: 16,
+    currentY: 16,
+    targetX: 80,
+    targetY: 80,
+    targetDirection: 'down',
+    blocked,
+    cols: 4,
+    rows: 4,
+    tileSize: 32,
+    route: second.route,
+    nowMs: 1600,
+    failedRetryMs: 500,
+  });
+  assert.ok(blockedCalls > afterFirst);
 });
 
 test('click-to-move starts from a single canvas click', () => {
