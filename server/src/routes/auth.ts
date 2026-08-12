@@ -15,6 +15,7 @@ import { Prisma, User } from '@prisma/client';
 import { accountFieldsForInviteRole } from '../lib/orgInvite';
 import { writeAudit, clientIp } from '../lib/audit';
 import { slugifyOrgName } from '../lib/orgSlug';
+import { publicUser, publicUserWithAvatar } from '../lib/publicUser';
 
 const auth = Router();
 
@@ -120,7 +121,7 @@ auth.post('/register', authRateLimit, validate(registerSchema), async (req, res:
     setUploadSessionCookie(req, res, token);
 
     return res.status(201).json({
-      user: { id: user.id, email: user.email, displayName: user.displayName, accountRole: user.accountRole, workspaceRole: user.workspaceRole, timezone: user.timezone, tutorialCompletedAt: user.tutorialCompletedAt, preferences: user.preferences },
+      user: publicUser(user),
       token,
     });
   } catch (err) {
@@ -176,9 +177,20 @@ auth.post('/create-organization', authRateLimit, validate(createOrganizationSche
         // P2002 = unique constraint violation. Only retry on a slug
         // collision specifically — any other failure must surface
         // immediately, not get silently swallowed into more retries.
-        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002' && (e.meta?.target as string[] | undefined)?.includes('slug')) {
-          lastCollisionErr = e;
-          continue;
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+          const target = e.meta?.target as string[] | undefined;
+          if (target?.includes('slug')) {
+            lastCollisionErr = e;
+            continue;
+          }
+          // The upfront findUnique check above is a courtesy, not a lock —
+          // two concurrent requests for the same email can both pass it and
+          // race into tx.user.create. This is that race actually landing:
+          // report it the same way the upfront check does (409, not the
+          // generic 500 the outer catch would otherwise produce).
+          if (target?.includes('email')) {
+            return res.status(409).json({ error: 'Email already registered' });
+          }
         }
         throw e;
       }
@@ -186,7 +198,10 @@ auth.post('/create-organization', authRateLimit, validate(createOrganizationSche
 
     if (!created) {
       console.error('[auth] create-organization: exhausted slug attempts for', orgName, lastCollisionErr);
-      return res.status(500).json({ error: 'Gagal membuat organisasi, coba nama lain' });
+      // A real naming conflict (every generated slug variant is taken), not
+      // a server fault — 409 matches the email-conflict response above
+      // rather than the generic 500 the outer catch uses for genuine errors.
+      return res.status(409).json({ error: 'Gagal membuat organisasi, coba nama lain' });
     }
 
     const { org, user } = created;
@@ -205,7 +220,7 @@ auth.post('/create-organization', authRateLimit, validate(createOrganizationSche
     });
 
     return res.status(201).json({
-      user: { id: user.id, email: user.email, displayName: user.displayName, accountRole: user.accountRole, workspaceRole: user.workspaceRole, timezone: user.timezone, tutorialCompletedAt: user.tutorialCompletedAt, preferences: user.preferences },
+      user: publicUser(user),
       token,
     });
   } catch (err) {
@@ -240,17 +255,7 @@ auth.post('/login', authRateLimit, validate(loginSchema), async (req, res: Respo
     setUploadSessionCookie(req, res, token);
 
     return res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        displayName: user.displayName,
-        avatarConfig: user.avatarConfig,
-        accountRole: user.accountRole,
-        workspaceRole: user.workspaceRole,
-        timezone: user.timezone,
-        tutorialCompletedAt: user.tutorialCompletedAt,
-        preferences: user.preferences,
-      },
+      user: publicUserWithAvatar(user),
       token,
     });
   } catch (err) {
@@ -352,17 +357,7 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
     if (user.larkOpenId) void ensureCheckedInToday(user.id);
 
     return res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        displayName: user.displayName,
-        avatarConfig: user.avatarConfig,
-        accountRole: user.accountRole,
-        workspaceRole: user.workspaceRole,
-        timezone: user.timezone,
-        tutorialCompletedAt: user.tutorialCompletedAt,
-        preferences: user.preferences,
-      },
+      user: publicUserWithAvatar(user),
       ...(refreshedToken ? { token: refreshedToken } : {}),
     });
   } catch (err) {

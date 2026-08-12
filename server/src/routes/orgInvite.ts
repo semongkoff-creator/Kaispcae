@@ -8,6 +8,7 @@ import { writeAudit, clientIp } from '../lib/audit';
 import { rateLimit } from '../middleware/rateLimit';
 import { resolvePendingInvite, markInviteAccepted, accountFieldsForInviteRole, ORG_INVITE_TTL_MS } from '../lib/orgInvite';
 import { signToken } from './auth';
+import { publicUser } from '../lib/publicUser';
 
 const orgInvite = Router();
 const mutationLimit = rateLimit(60 * 1000, 30);
@@ -152,7 +153,7 @@ orgInvite.post('/org-invites/:token/accept', acceptLimit, async (req: Request, r
     setUploadSessionCookie(req, res, token);
 
     return res.status(201).json({
-      user: { id: user.id, email: user.email, displayName: user.displayName, accountRole: user.accountRole, workspaceRole: user.workspaceRole, timezone: user.timezone, tutorialCompletedAt: user.tutorialCompletedAt, preferences: user.preferences },
+      user: publicUser(user),
       token,
     });
   } catch (err) {
