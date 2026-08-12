@@ -33,7 +33,7 @@ export function HandButton({ raised, onToggle }: HandButtonProps) {
     >
       <button
         onClick={onToggle}
-        className={`relative flex items-center justify-center w-11 h-11 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
+        className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
           raised
             ? 'bg-amber-400 border-amber-300 shadow-amber-400/30'
             : 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
@@ -46,19 +46,19 @@ export function HandButton({ raised, onToggle }: HandButtonProps) {
             shows, see AvatarSprite.ts/VideoGrid.tsx/ParticipantPanel.tsx).
             A flat-colored PNG can't be recolored via text-* classes the way
             every sibling button's react-bootstrap-icons SVG can (ScreenShare/
-            People/DeviceMenu all use `size={18}` + a `text-purple-700
+            People/DeviceMenu all use `size={16}` + a `text-purple-700
             dark:text-purple-300` className) — used it as a CSS mask instead
             of an <img> so bg-* classes tint it the same way, same color
             language as those siblings rather than a fixed-tint image.
-            Sized well past the siblings' 18px (w-8 = 32px, was w-6/24px —
-            bumped again after still reading too small/thin next to them):
-            the source art is a thin outline/line-art glyph, not a bold
-            filled shape like the siblings' icons, so it needs more box to
-            read with similar visual weight at a glance. */}
+            Sized past the siblings' 16px (w-7 = 28px) — the source art is a
+            thin outline/line-art glyph, not a bold filled shape like the
+            siblings' icons, so it still needs more box to read with similar
+            visual weight at a glance; trimmed down from w-8/32px, which read
+            oversized next to the rest of the bar. */}
         <span
           role="img"
           aria-label=""
-          className={`w-8 h-8 ${raised ? 'bg-white animate-bounce' : 'bg-purple-700 dark:bg-purple-300'}`}
+          className={`w-7 h-7 ${raised ? 'bg-white animate-bounce' : 'bg-purple-700 dark:bg-purple-300'}`}
           style={{
             maskImage: 'url(/assets/img/raise-hand-icon.png)',
             maskSize: 'contain',

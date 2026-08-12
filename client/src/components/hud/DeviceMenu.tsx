@@ -82,9 +82,9 @@ export function DeviceMenu() {
       >
         <button
           onClick={() => setOpen((v) => !v)}
-          className="flex items-center justify-center w-11 h-11 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 transition-all hover:scale-105 cursor-pointer text-purple-700 dark:text-purple-300"
+          className="flex items-center justify-center w-10 h-10 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 transition-all hover:scale-105 cursor-pointer text-purple-700 dark:text-purple-300"
         >
-          <ThreeDotsVertical size={18} />
+          <ThreeDotsVertical size={16} />
         </button>
       </Tooltip>
 

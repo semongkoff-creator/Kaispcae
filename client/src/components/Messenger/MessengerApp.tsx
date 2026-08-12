@@ -371,7 +371,7 @@ export function MessengerApp({
     // position now instead of inner padding.
     <div className="absolute inset-y-0 left-14 z-40 flex w-[720px] max-w-[75vw] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 overflow-hidden border-r border-purple-100 dark:border-gray-700 shadow-2xl">
       {/* ── Kolom daftar percakapan ───────────────────────────────── */}
-      <aside className="w-[300px] shrink-0 border-r border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-850">
+      <aside className="w-[300px] shrink-0 border-r border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-900">
         <div className="px-4 pt-4 pb-3">
           <div className="flex items-center justify-between mb-3">
             <h1 className="text-lg font-semibold">Chats</h1>

@@ -19,13 +19,13 @@ export function EmojiButton({ open, onToggle }: EmojiButtonProps) {
     >
       <button
         onClick={onToggle}
-        className={`relative flex items-center justify-center w-11 h-11 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
+        className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
           open
             ? 'bg-purple-600 border-purple-500 shadow-purple-500/30'
             : 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
         }`}
       >
-        <EmojiSmile className={open ? 'text-white' : 'text-purple-700 dark:text-purple-300'} size={18} />
+        <EmojiSmile className={open ? 'text-white' : 'text-purple-700 dark:text-purple-300'} size={16} />
       </button>
     </Tooltip>
   );

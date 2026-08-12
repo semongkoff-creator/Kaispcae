@@ -36,13 +36,13 @@ export function MicButton({ muted, onToggle }: MicButtonProps) {
         // uses for "currently sharing"), not just a neutral glass icon. Muted
         // keeps the glass surface with a red icon/ring — that part was already
         // on-spec, untouched.
-        className={`relative flex items-center justify-center w-11 h-11 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
+        className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
           muted
             ? 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
             : 'bg-purple-600 border-purple-500 shadow-purple-500/30'
         }`}
       >
-        {muted ? <MicMuteFill className="text-red-500" size={18} /> : <MicFill className="text-white" size={18} />}
+        {muted ? <MicMuteFill className="text-red-500" size={16} /> : <MicFill className="text-white" size={16} />}
         {muted && (
           <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-pulse" />
         )}
