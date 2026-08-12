@@ -3,6 +3,7 @@ import { XLg, PinFill } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteType, EMOTE_LIST, EMOTE_EMOJI, EMOTE_LABELS } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { getVideoTiles, VideoTile, latestReaction } from './VideoGrid';
 
 interface MeetingViewProps {
@@ -207,13 +208,14 @@ export function MeetingView({
             has no discrete hang-up/disconnect (you leave by proximity or by
             closing this view), so the spec's "leave merah" is applied here:
             neutral at rest, red on hover/focus to signal what it does. */}
-        <button
-          onClick={onClose}
-          title="Keluar Meeting View"
-          className="w-9 h-9 rounded-full bg-white/10 hover:bg-red-500/80 text-white flex items-center justify-center cursor-pointer transition-colors"
-        >
-          <XLg size={16} />
-        </button>
+        <Tooltip label="Keluar Meeting View" detail="Kembali ke tampilan peta biasa.">
+          <button
+            onClick={onClose}
+            className="w-9 h-9 rounded-full bg-white/10 hover:bg-red-500/80 text-white flex items-center justify-center cursor-pointer transition-colors"
+          >
+            <XLg size={16} />
+          </button>
+        </Tooltip>
       </div>
 
       {/* Featured stage — fills the bulk of the screen. */}
@@ -226,13 +228,19 @@ export function MeetingView({
           <div className="relative h-full aspect-video max-w-full mx-auto">
             {renderTile(featured)}
             {isPinned && (
-              <button
-                onClick={() => setPinnedKey(null)}
-                title="Lepas sorotan (kembali otomatis)"
-                className="absolute top-2 right-2 z-10 inline-flex items-center gap-1 rounded-full bg-black/50 hover:bg-black/70 text-white text-[11px] px-2.5 py-1 backdrop-blur cursor-pointer"
-              >
-                <PinFill size={11} /> Lepas
-              </button>
+              // wrapperClassName carries the absolute positioning — Tooltip's
+              // own wrapper div is `position: relative`, so it would
+              // otherwise anchor `absolute top-2 right-2` to itself (and
+              // collapse to 0×0, since it has no in-flow content) instead of
+              // the featured-stage container.
+              <Tooltip label="Lepas Sorotan" detail="Jadikan orang ini tampilan utama, atau kembali ke mode otomatis." wrapperClassName="absolute top-2 right-2 z-10">
+                <button
+                  onClick={() => setPinnedKey(null)}
+                  className="inline-flex items-center gap-1 rounded-full bg-black/50 hover:bg-black/70 text-white text-[11px] px-2.5 py-1 backdrop-blur cursor-pointer"
+                >
+                  <PinFill size={11} /> Lepas
+                </button>
+              </Tooltip>
             )}
           </div>
         ) : tiles.length > 0 ? (
@@ -251,14 +259,14 @@ export function MeetingView({
             style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${gridRows}, minmax(120px, 1fr))` }}
           >
             {tiles.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setPinnedKey(t.key)}
-                title={`Sorot ${t.name}`}
-                className="relative rounded-lg overflow-hidden cursor-pointer ring-1 ring-white/10 hover:ring-purple-400/70 transition-all"
-              >
-                {renderTile(t)}
-              </button>
+              <Tooltip key={t.key} label="Sorot Peserta Ini" detail="Jadikan orang ini tampilan utama, atau kembali ke mode otomatis." wrapperClassName="w-full h-full">
+                <button
+                  onClick={() => setPinnedKey(t.key)}
+                  className="relative rounded-lg overflow-hidden cursor-pointer ring-1 ring-white/10 hover:ring-purple-400/70 transition-all w-full h-full"
+                >
+                  {renderTile(t)}
+                </button>
+              </Tooltip>
             ))}
           </div>
         ) : (
@@ -275,14 +283,14 @@ export function MeetingView({
               the tiled grid above — this row never scrolls vertically. */}
           <div className="flex gap-2 overflow-x-auto overflow-y-hidden max-w-full pb-1">
             {thumbnails.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setPinnedKey(t.key)}
-                title={`Sorot ${t.name}`}
-                className="shrink-0 w-40 h-24 rounded-lg overflow-hidden cursor-pointer ring-1 ring-white/10 hover:ring-purple-400/70 transition-all"
-              >
-                {renderTile(t)}
-              </button>
+              <Tooltip key={t.key} label="Sorot Peserta Ini" detail="Jadikan orang ini tampilan utama, atau kembali ke mode otomatis." wrapperClassName="shrink-0">
+                <button
+                  onClick={() => setPinnedKey(t.key)}
+                  className="shrink-0 w-40 h-24 rounded-lg overflow-hidden cursor-pointer ring-1 ring-white/10 hover:ring-purple-400/70 transition-all"
+                >
+                  {renderTile(t)}
+                </button>
+              </Tooltip>
             ))}
           </div>
         </div>
@@ -300,14 +308,14 @@ export function MeetingView({
         <div className="shrink-0 flex justify-center pt-2 animate-fade-in">
           <div className="flex items-center gap-1 bg-white/10 border border-white/15 rounded-full px-2 py-1.5 backdrop-blur-sm pointer-events-auto">
             {EMOTE_LIST.map((emote) => (
-              <button
-                key={emote}
-                onClick={() => onEmote(emote)}
-                title={EMOTE_LABELS[emote]}
-                className="w-9 h-9 rounded-full flex items-center justify-center text-xl hover:bg-white/20 hover:scale-110 active:scale-95 transition-all cursor-pointer"
-              >
-                {EMOTE_EMOJI[emote]}
-              </button>
+              <Tooltip key={emote} label="Kirim Reaksi" detail="Kirim reaksi emoji cepat, kelihatan oleh semua orang di meeting.">
+                <button
+                  onClick={() => onEmote(emote)}
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-xl hover:bg-white/20 hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                >
+                  {EMOTE_EMOJI[emote]}
+                </button>
+              </Tooltip>
             ))}
           </div>
         </div>

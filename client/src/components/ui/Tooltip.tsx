@@ -13,6 +13,18 @@ interface TooltipProps {
   // — for triggers that sit near the right edge of the screen (Chat), where
   // a centered popover would overflow the viewport.
   align?: 'center' | 'end';
+  // Which edge of the trigger the popover opens from. Default 'top' matches
+  // every existing caller (HUD buttons in a horizontal row, popping the
+  // tooltip up above them). 'right' is for the left Sidebar's narrow icon
+  // rail, where popping upward would overlap the row above/below in a
+  // tightly-stacked vertical list — same problem a VS Code/Slack-style icon
+  // rail solves by opening its labels sideways instead.
+  side?: 'top' | 'right';
+  // Extra classes for the wrapper div — needed when the trigger itself is
+  // `w-full`/block-level (e.g. a full-width menu row): the wrapper defaults
+  // to `inline-flex`, which shrinks to content width and would otherwise
+  // collapse a w-full child instead of letting it fill its row.
+  wrapperClassName?: string;
 }
 
 // Replaces the 5x-copy-pasted hover-label pattern previously inline in each
@@ -20,21 +32,25 @@ interface TooltipProps {
 // LeaveButton) and adds the same affordance to the 3 that only had a native
 // `title` (CameraButton/ScreenShareButton/DeviceMenu) plus the floating Chat
 // button — one place to gate all of them on the tooltipsEnabled preference.
-export function Tooltip({ label, detail, children, align = 'center' }: TooltipProps) {
+export function Tooltip({ label, detail, children, align = 'center', side = 'top', wrapperClassName = '' }: TooltipProps) {
   const [hover, setHover] = useState(false);
   const tooltipsEnabled = useGameStore((s) => s.tooltipsEnabled);
   const show = hover && tooltipsEnabled;
 
+  const positionClass = side === 'right'
+    ? 'left-full ml-2 top-1/2 -translate-y-1/2'
+    : `bottom-full mb-2 ${align === 'end' ? 'right-0' : 'left-1/2 -translate-x-1/2'}`;
+
   return (
     <div
-      className="relative inline-flex"
+      className={`relative inline-flex ${wrapperClassName}`}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
       {children}
       {show && (
         <div
-          className={`absolute bottom-full mb-2 ${align === 'end' ? 'right-0' : 'left-1/2 -translate-x-1/2'} w-max max-w-[220px] text-xs bg-white dark:bg-gray-800 text-purple-700 dark:text-purple-300 border border-purple-100 dark:border-gray-700 shadow-lg px-2.5 py-1.5 rounded-lg z-[60] pointer-events-none`}
+          className={`absolute ${positionClass} w-max max-w-[220px] text-xs bg-white dark:bg-gray-800 text-purple-700 dark:text-purple-300 border border-purple-100 dark:border-gray-700 shadow-lg px-2.5 py-1.5 rounded-lg z-[60] pointer-events-none`}
         >
           <div className="font-semibold">{label}</div>
           {detail && (

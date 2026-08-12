@@ -3,6 +3,7 @@ import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, Plus
 import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { ChatAvatar, avatarColor } from './ChatAvatar';
 
 // What a tile shows while someone's camera is off — the SAME ChatAvatar used in
@@ -271,51 +272,56 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
             {Math.round(zoom * 100)}%
           </span>
         )}
-        <button
-          onClick={() => applyZoom(zoom / 1.25, 0, 0)}
-          disabled={zoom <= MIN_ZOOM}
-          title="Perkecil isi"
-          className={`shrink-0 cursor-pointer p-0.5 rounded disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent ${dim}`}
-        >
-          <DashLg size={12} />
-        </button>
-        <button
-          onClick={() => applyZoom(zoom * 1.25, 0, 0)}
-          disabled={zoom >= MAX_ZOOM}
-          title="Perbesar isi"
-          className={`shrink-0 cursor-pointer p-0.5 rounded disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent ${dim}`}
-        >
-          <PlusLg size={12} />
-        </button>
-        {zoom > 1 && (
+        <Tooltip label="Perkecil" detail="Perkecil tampilan konten ini.">
           <button
-            onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}
-            title="Kembalikan ke 100%"
-            className={`shrink-0 cursor-pointer p-0.5 rounded ${dim}`}
+            onClick={() => applyZoom(zoom / 1.25, 0, 0)}
+            disabled={zoom <= MIN_ZOOM}
+            className={`shrink-0 cursor-pointer p-0.5 rounded disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent ${dim}`}
           >
-            <ArrowCounterclockwise size={12} />
+            <DashLg size={12} />
           </button>
+        </Tooltip>
+        <Tooltip label="Perbesar" detail="Perbesar tampilan konten ini.">
+          <button
+            onClick={() => applyZoom(zoom * 1.25, 0, 0)}
+            disabled={zoom >= MAX_ZOOM}
+            className={`shrink-0 cursor-pointer p-0.5 rounded disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent ${dim}`}
+          >
+            <PlusLg size={12} />
+          </button>
+        </Tooltip>
+        {zoom > 1 && (
+          <Tooltip label="Ukuran 100%" detail="Kembalikan zoom ke ukuran normal.">
+            <button
+              onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}
+              className={`shrink-0 cursor-pointer p-0.5 rounded ${dim}`}
+            >
+              <ArrowCounterclockwise size={12} />
+            </button>
+          </Tooltip>
         )}
         {/* Named for what it does. It used to say "Perbesar", which collided
             with the enlarge button on the thumbnail — two different actions
             wearing the same word. */}
-        <button
-          onClick={() => setMaximized((v) => !v)}
-          title={maximized ? 'Keluar layar penuh (Esc)' : 'Layar penuh'}
-          className={`shrink-0 cursor-pointer p-0.5 rounded ${dim}`}
-        >
-          {maximized ? <FullscreenExit size={12} /> : <ArrowsFullscreen size={12} />}
-        </button>
+        <Tooltip label="Layar Penuh" detail="Perbesar panel ini agar memenuhi layar, atau kembali ke ukuran biasa.">
+          <button
+            onClick={() => setMaximized((v) => !v)}
+            className={`shrink-0 cursor-pointer p-0.5 rounded ${dim}`}
+          >
+            {maximized ? <FullscreenExit size={12} /> : <ArrowsFullscreen size={12} />}
+          </button>
+        </Tooltip>
         {/* Back to a thumbnail. Without this there is no way out of the focus
             panel short of the presenter stopping — a dead end the spec
             explicitly forbids. */}
-        <button
-          onClick={onClose}
-          title="Kecilkan ke kolom peserta"
-          className={`shrink-0 cursor-pointer p-0.5 rounded ${variant === 'dark' ? 'text-white/70 hover:text-red-300 hover:bg-white/20' : 'text-gray-500 hover:text-red-500 dark:text-gray-300 hover:bg-red-50 dark:hover:bg-gray-600'}`}
-        >
-          <XLg size={11} />
-        </button>
+        <Tooltip label="Tutup" detail="Tutup panel dan kembali ke kolom peserta.">
+          <button
+            onClick={onClose}
+            className={`shrink-0 cursor-pointer p-0.5 rounded ${variant === 'dark' ? 'text-white/70 hover:text-red-300 hover:bg-white/20' : 'text-gray-500 hover:text-red-500 dark:text-gray-300 hover:bg-red-50 dark:hover:bg-gray-600'}`}
+          >
+            <XLg size={11} />
+          </button>
+        </Tooltip>
       </>
     );
   };
@@ -522,32 +528,35 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
       <div className="absolute top-16 right-4 z-20 flex items-center gap-1.5 pointer-events-auto">
         {/* Kept reachable even with tiles hidden — otherwise hiding the
             camera strip would also hide the only way into Meeting View. */}
-        <button
-          onClick={onToggleMeetingView}
-          title="Meeting View"
-          className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
-        >
-          <Grid3x3GapFill size={11} />
-        </button>
-        <button
-          onClick={() => setHidden(false)}
-          title="Show camera tiles"
-          className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm rounded-full px-2.5 py-1.5 flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 cursor-pointer hover:bg-white"
-        >
-          <CameraVideoFill size={12} /> {totalTiles}
-        </button>
+        <Tooltip label="Meeting View" detail="Buka tampilan video-call layar penuh.">
+          <button
+            onClick={onToggleMeetingView}
+            className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+          >
+            <Grid3x3GapFill size={11} />
+          </button>
+        </Tooltip>
+        <Tooltip label="Tampilkan Tile Kamera" detail="Tampilkan lagi strip video yang disembunyikan.">
+          <button
+            onClick={() => setHidden(false)}
+            className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm rounded-full px-2.5 py-1.5 flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 cursor-pointer hover:bg-white"
+          >
+            <CameraVideoFill size={12} /> {totalTiles}
+          </button>
+        </Tooltip>
       </div>
     );
   }
 
   const hideButton = (
-    <button
-      onClick={() => setHidden(true)}
-      title="Hide camera tiles"
-      className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
-    >
-      <EyeSlashFill size={11} />
-    </button>
+    <Tooltip label="Sembunyikan Tile Kamera" detail="Sembunyikan strip video sementara, tanpa mematikan kamera/mic siapa pun.">
+      <button
+        onClick={() => setHidden(true)}
+        className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+      >
+        <EyeSlashFill size={11} />
+      </button>
+    </Tooltip>
   );
 
   // Meeting View entry — moved here from Sidebar's Room Features dropdown,
@@ -555,13 +564,14 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // same size/style as hideButton for a matched pair). Function unchanged —
   // still just calls onToggleMeetingView (openPanel('meeting') in App.tsx).
   const meetingViewButton = (
-    <button
-      onClick={onToggleMeetingView}
-      title="Meeting View"
-      className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
-    >
-      <Grid3x3GapFill size={11} />
-    </button>
+    <Tooltip label="Meeting View" detail="Buka tampilan video-call layar penuh.">
+      <button
+        onClick={onToggleMeetingView}
+        className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+      >
+        <Grid3x3GapFill size={11} />
+      </button>
+    </Tooltip>
   );
 
   // Identical in both layouts — only where they sit changes, never what they
@@ -638,13 +648,21 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
         {otherScreens.map((s) => (
           <div key={s.key} className="pointer-events-auto relative group/screen">
             <VideoTile name={s.name} stream={s.stream} isLocal={s.isLocal} isScreen />
-            <button
-              onClick={() => setFeaturedKey(s.key)}
-              title={`Perbesar ${s.name}`}
-              className="absolute top-0.5 right-0.5 w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover/screen:opacity-100 transition-opacity cursor-pointer"
-            >
-              <ArrowsFullscreen size={9} />
-            </button>
+            {/* wrapperClassName carries the absolute positioning — Tooltip's
+                own wrapper div is itself `position: relative`, so leaving
+                `absolute top-0.5 right-0.5` on the button would anchor it to
+                that wrapper (which collapses to 0×0, since an
+                absolutely-positioned child contributes nothing to its
+                auto-sized parent) instead of this tile's `group/screen`
+                container. */}
+            <Tooltip label="Perbesar" detail="Jadikan share layar ini tampilan utama." wrapperClassName="absolute top-0.5 right-0.5">
+              <button
+                onClick={() => setFeaturedKey(s.key)}
+                className="w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover/screen:opacity-100 transition-opacity cursor-pointer"
+              >
+                <ArrowsFullscreen size={9} />
+              </button>
+            </Tooltip>
           </div>
         ))}
         {cameraTiles}
@@ -856,15 +874,20 @@ export function VideoTile({
           enlarge (!showAvatar); a placeholder initials tile has nothing
           bigger to show. Hover-revealed via the tile's own `group`. */}
       {onEnlarge && !showAvatar && !isScreen && (
-        <button
-          onClick={onEnlarge}
-          title={`Perbesar video ${isLocal ? 'Anda' : name}`}
-          // Moved from top-right to bottom-right — top-right is now the
-          // mic-status glass badge (see below); the two shouldn't stack.
-          className="absolute bottom-0.5 right-0.5 w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-        >
-          <ArrowsFullscreen size={9} />
-        </button>
+        // wrapperClassName carries the absolute positioning (see the
+        // matching comment on the screen-thumbnail enlarge button above) —
+        // otherwise it would anchor to Tooltip's own 0×0 wrapper instead of
+        // this tile's root div.
+        <Tooltip label="Perbesar Video" detail="Lihat video orang ini dalam ukuran penuh." wrapperClassName="absolute bottom-0.5 right-0.5">
+          <button
+            onClick={onEnlarge}
+            // Moved from top-right to bottom-right — top-right is now the
+            // mic-status glass badge (see below); the two shouldn't stack.
+            className="w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+          >
+            <ArrowsFullscreen size={9} />
+          </button>
+        </Tooltip>
       )}
       {/* Quick reaction — a single emoji floating up from the bottom-center
           of the tile, restarting whenever a newer reaction arrives (keyed by

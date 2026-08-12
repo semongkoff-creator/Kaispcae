@@ -4,23 +4,29 @@ import { CameraVideoFill, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFil
 import { roleAtLeast, Role, WorkMode } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
+import { Tooltip } from '@/components/ui/Tooltip';
 
 // One labelled row inside a participant's action menu. Icon plus wording,
 // because five bare icons crowded into a row said nothing until you hovered
-// each one to find out what it did.
-function MenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
+// each one to find out what it did. `detail` is optional, longer copy shown
+// via the shared Tooltip component — the row's own `label` text already
+// identifies the action, so this is only for the extra "what this actually
+// does" line, same split every other Tooltip caller uses.
+function MenuItem({ icon, label, onClick, danger, detail }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean; detail?: string }) {
   return (
-    <button
-      onClick={onClick}
-      className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left cursor-pointer transition-colors ${
-        danger
-          ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30'
-          : 'text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'
-      }`}
-    >
-      <span className="shrink-0 w-4 flex justify-center">{icon}</span>
-      {label}
-    </button>
+    <Tooltip label={label} detail={detail} wrapperClassName="w-full">
+      <button
+        onClick={onClick}
+        className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left cursor-pointer transition-colors ${
+          danger
+            ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30'
+            : 'text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'
+        }`}
+      >
+        <span className="shrink-0 w-4 flex justify-center">{icon}</span>
+        {label}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -179,13 +185,14 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollo
             <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">Participants</span>
             <div className="flex items-center gap-2">
               <span className="text-gray-400 dark:text-gray-500 text-xs">{totalOnline} online</span>
-              <button
-                onClick={onClose}
-                title="Close"
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
-              >
-                <X size={14} />
-              </button>
+              <Tooltip label="Tutup" detail="Tutup panel Peserta.">
+                <button
+                  onClick={onClose}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
+                >
+                  <X size={14} />
+                </button>
+              </Tooltip>
             </div>
           </div>
 
@@ -476,24 +483,26 @@ function ParticipantRow({
             STATE as much as an action, and having to open a menu to discover
             you're already following someone defeats the point of showing it. */}
         {!isLocal && isFollowingThem && (
-          <button
-            onClick={onUnfollow}
-            title="Berhenti mengikuti"
-            className="text-purple-600 hover:text-purple-800 cursor-pointer inline-flex items-center gap-0.5 text-[10px] font-medium bg-purple-100 px-1.5 py-0.5 rounded"
-          >
-            <X size={10} /> Mengikuti
-          </button>
+          <Tooltip label="Berhenti mengikuti" detail="Berhenti mengikuti pergerakan orang ini.">
+            <button
+              onClick={onUnfollow}
+              className="text-purple-600 hover:text-purple-800 cursor-pointer inline-flex items-center gap-0.5 text-[10px] font-medium bg-purple-100 px-1.5 py-0.5 rounded"
+            >
+              <X size={10} /> Mengikuti
+            </button>
+          </Tooltip>
         )}
         {hasActions && (
           <>
+            <Tooltip label={`Aksi untuk ${name}`} detail="Buka menu aksi untuk orang ini.">
             <button
               ref={triggerRef}
               onClick={() => (menuOpen ? closeMenu() : openMenu())}
-              title={`Aksi untuk ${name}`}
               className={`cursor-pointer rounded px-0.5 ${menuOpen ? 'text-purple-600 bg-purple-100 dark:bg-gray-600' : 'text-gray-400 dark:text-gray-500 hover:text-purple-600'}`}
             >
               <ThreeDotsVertical size={13} />
             </button>
+            </Tooltip>
             {menuPos && createPortal(
               // Rendered on document.body, NOT inside the row. An absolutely
               // positioned menu is clipped by any ancestor whose overflow
@@ -512,44 +521,47 @@ function ParticipantRow({
                 className="fixed z-[60] w-44 py-1 rounded-lg bg-white dark:bg-gray-800 border border-purple-200 dark:border-gray-600 shadow-xl overflow-hidden"
               >
                 {onLocate && (
-                  <MenuItem icon={<GeoAltFill size={12} />} label="Temukan" onClick={pick(onLocate)} />
+                  <MenuItem icon={<GeoAltFill size={12} />} label="Temukan" detail="Pusatkan kamera ke posisi orang ini di peta." onClick={pick(onLocate)} />
                 )}
                 {!isFollowingThem && onFollow && (
-                  <MenuItem icon={<PersonWalking size={12} />} label="Ikuti" onClick={pick(onFollow)} />
+                  <MenuItem icon={<PersonWalking size={12} />} label="Ikuti" detail="Ikuti otomatis ke mana pun orang ini berjalan." onClick={pick(onFollow)} />
                 )}
                 {onSummon && (
-                  <MenuItem icon={<MagnetFill size={12} />} label="Panggil ke sini" onClick={pick(onSummon)} />
+                  <MenuItem icon={<MagnetFill size={12} />} label="Panggil ke sini" detail="Undang orang ini ke lokasimu — dia harus menyetujui dulu." onClick={pick(onSummon)} />
                 )}
                 {onForcePull && (
                   <MenuItem
                     icon={<MagnetFill size={12} />}
                     label="Tarik Paksa"
+                    detail="Pindahkan orang ini ke lokasimu langsung, tanpa persetujuan."
                     danger
                     onClick={pick(() => { if (window.confirm(`Tarik paksa ${name} ke sini? Tidak perlu persetujuan dia — beda dari "Panggil ke sini".`)) onForcePull(); })}
                   />
                 )}
                 {onSlap && (
-                  <MenuItem icon={<HandIndexThumbFill size={12} />} label="Colek (sadarkan)" onClick={pick(onSlap)} />
+                  <MenuItem icon={<HandIndexThumbFill size={12} />} label="Colek (sadarkan)" detail="Getarkan avatar orang ini sebentar untuk menarik perhatiannya." onClick={pick(onSlap)} />
                 )}
                 {onToggleMute && (
                   <MenuItem
                     icon={isMuted ? <VolumeUpFill size={12} /> : <VolumeMuteFill size={12} />}
                     label={isMuted ? 'Batalkan bisukan' : 'Bisukan'}
+                    detail="Cuma mengubah suara yang KAMU dengar — mic orang ini tetap aktif untuk orang lain."
                     onClick={pick(onToggleMute)}
                   />
                 )}
                 {onMessage && (
-                  <MenuItem icon={<ChatDotsFill size={11} />} label="Kirim pesan" onClick={pick(onMessage)} />
+                  <MenuItem icon={<ChatDotsFill size={11} />} label="Kirim pesan" detail="Buka percakapan DM 1-on-1 dengan orang ini." onClick={pick(onMessage)} />
                 )}
                 {onSpotlight && (
                   <MenuItem
                     icon={<MegaphoneFill size={11} />}
                     label={spotlightActive ? 'Matikan Spotlight' : 'Nyalakan Spotlight'}
+                    detail="Jadikan orang ini tampilan utama di Meeting View semua orang."
                     onClick={pick(onSpotlight)}
                   />
                 )}
                 {onReport && (
-                  <MenuItem icon={<FlagFill size={11} />} label="Laporkan" danger onClick={pick(onReport)} />
+                  <MenuItem icon={<FlagFill size={11} />} label="Laporkan" detail="Laporkan perilaku orang ini ke admin workspace." danger onClick={pick(onReport)} />
                 )}
                 {(onForceMute || onKick) && (
                   <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
@@ -558,6 +570,7 @@ function ParticipantRow({
                   <MenuItem
                     icon={<MicMuteFill size={12} />}
                     label="Matikan Mic (Admin)"
+                    detail="Matikan mic orang ini secara paksa — dia bisa menyalakannya lagi sendiri."
                     danger
                     onClick={pick(() => { if (window.confirm(`Matikan mic ${name}? Dia bisa nyalain lagi sendiri kapan saja.`)) onForceMute(); })}
                   />
@@ -566,6 +579,7 @@ function ParticipantRow({
                   <MenuItem
                     icon={<PersonDashFill size={12} />}
                     label="Keluarkan"
+                    detail="Keluarkan orang ini dari room — dia bisa masuk lagi kapan saja."
                     danger
                     onClick={pick(() => { if (window.confirm(`Keluarkan ${name} dari room ini? Dia bisa masuk lagi kapan saja.`)) onKick(); })}
                   />

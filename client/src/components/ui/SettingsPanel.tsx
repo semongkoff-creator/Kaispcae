@@ -2,6 +2,7 @@ import { ReactNode, useState } from 'react';
 import { XLg, Sliders, BellFill, PersonCircle, BoxArrowRight } from 'react-bootstrap-icons';
 import { UserPreferences } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
+import { Tooltip } from '@/components/ui/Tooltip';
 import {
   getNotificationSettings,
   saveNotificationSettings,
@@ -102,12 +103,14 @@ export function SettingsPanel({ onClose, onUpdatePreferences, onLogout }: Settin
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-purple-100 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800 rounded-t-2xl">
           <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Settings</h2>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
-          >
-            <XLg size={14} />
-          </button>
+          <Tooltip label="Tutup" detail="Tutup Pengaturan.">
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+            >
+              <XLg size={14} />
+            </button>
+          </Tooltip>
         </div>
 
         <div className="p-5 space-y-6">
@@ -119,12 +122,17 @@ export function SettingsPanel({ onClose, onUpdatePreferences, onLogout }: Settin
                   Penjelasan detail saat kursor diarahkan ke tombol-tombol toolbar meeting.
                 </span>
               </span>
-              <input
-                type="checkbox"
-                checked={tooltipsEnabled}
-                onChange={toggleTooltips}
-                className="accent-purple-600 w-4 h-4 cursor-pointer shrink-0"
-              />
+              <Tooltip
+                label="Tampilkan Tooltip"
+                detail="Nyalakan/matikan penjelasan saat hover ke tombol-tombol di seluruh aplikasi."
+              >
+                <input
+                  type="checkbox"
+                  checked={tooltipsEnabled}
+                  onChange={toggleTooltips}
+                  className="accent-purple-600 w-4 h-4 cursor-pointer shrink-0"
+                />
+              </Tooltip>
             </label>
           </SettingsSection>
 
@@ -142,24 +150,28 @@ export function SettingsPanel({ onClose, onUpdatePreferences, onLogout }: Settin
                   ) : (
                     <label className="flex items-center justify-between cursor-pointer">
                       <span className="text-xs text-gray-700 dark:text-gray-300">Aktifkan notifikasi browser</span>
-                      <input
-                        type="checkbox"
-                        checked={browserSettings.browserNotifOn}
-                        onChange={(e) => (e.target.checked ? handleEnable() : handleDisable())}
-                        className="accent-purple-600 w-4 h-4 cursor-pointer shrink-0"
-                      />
+                      <Tooltip label="Notifikasi Browser" detail="Terima notifikasi meski tab KaiSpace tidak aktif.">
+                        <input
+                          type="checkbox"
+                          checked={browserSettings.browserNotifOn}
+                          onChange={(e) => (e.target.checked ? handleEnable() : handleDisable())}
+                          className="accent-purple-600 w-4 h-4 cursor-pointer shrink-0"
+                        />
+                      </Tooltip>
                     </label>
                   )}
 
                   <label className={`flex items-center justify-between ${!browserSettings.browserNotifOn ? 'opacity-40' : 'cursor-pointer'}`}>
                     <span className="text-xs text-gray-700 dark:text-gray-300">Suara notifikasi</span>
-                    <input
-                      type="checkbox"
-                      checked={browserSettings.soundOn}
-                      disabled={!browserSettings.browserNotifOn}
-                      onChange={handleSoundToggle}
-                      className="accent-purple-600 w-4 h-4 cursor-pointer disabled:cursor-not-allowed shrink-0"
-                    />
+                    <Tooltip label="Suara Notifikasi" detail="Nyalakan bunyi saat ada notifikasi baru.">
+                      <input
+                        type="checkbox"
+                        checked={browserSettings.soundOn}
+                        disabled={!browserSettings.browserNotifOn}
+                        onChange={handleSoundToggle}
+                        className="accent-purple-600 w-4 h-4 cursor-pointer disabled:cursor-not-allowed shrink-0"
+                      />
+                    </Tooltip>
                   </label>
                 </>
               )}
@@ -173,12 +185,17 @@ export function SettingsPanel({ onClose, onUpdatePreferences, onLogout }: Settin
                         {opt.label}
                         <span className="block text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">{opt.hint}</span>
                       </span>
-                      <input
-                        type="checkbox"
-                        checked={notifKinds[opt.key] !== false}
-                        onChange={() => toggleKind(opt.key)}
-                        className="accent-purple-600 w-4 h-4 cursor-pointer shrink-0"
-                      />
+                      <Tooltip
+                        label={`Notifikasi ${opt.label}`}
+                        detail="Nyala/matikan notifikasi khusus untuk jenis kejadian ini, terpisah dari yang lain."
+                      >
+                        <input
+                          type="checkbox"
+                          checked={notifKinds[opt.key] !== false}
+                          onChange={() => toggleKind(opt.key)}
+                          className="accent-purple-600 w-4 h-4 cursor-pointer shrink-0"
+                        />
+                      </Tooltip>
                     </label>
                   ))}
                 </div>
@@ -195,27 +212,33 @@ export function SettingsPanel({ onClose, onUpdatePreferences, onLogout }: Settin
               <div className="rounded-lg border border-red-100 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-3">
                 <p className="text-xs text-gray-700 dark:text-gray-200 mb-3">Yakin mau logout?</p>
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => setConfirmingLogout(false)}
-                    className="flex-1 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 text-xs cursor-pointer"
-                  >
-                    Batal
-                  </button>
-                  <button
-                    onClick={() => { setConfirmingLogout(false); onLogout(); }}
-                    className="flex-1 px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs cursor-pointer"
-                  >
-                    Logout
-                  </button>
+                  <Tooltip label="Batal" detail="Batalkan, tetap login." wrapperClassName="flex-1">
+                    <button
+                      onClick={() => setConfirmingLogout(false)}
+                      className="flex-1 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 text-xs cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                  </Tooltip>
+                  <Tooltip label="Ya, Logout" detail="Keluar dari akunmu sekarang." wrapperClassName="flex-1">
+                    <button
+                      onClick={() => { setConfirmingLogout(false); onLogout(); }}
+                      className="flex-1 px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs cursor-pointer"
+                    >
+                      Logout
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
             ) : (
-              <button
-                onClick={() => setConfirmingLogout(true)}
-                className="flex items-center gap-2 text-xs text-red-500 hover:text-red-600 cursor-pointer"
-              >
-                <BoxArrowRight size={14} /> Logout
-              </button>
+              <Tooltip label="Logout" detail="Keluar dari akunmu.">
+                <button
+                  onClick={() => setConfirmingLogout(true)}
+                  className="flex items-center gap-2 text-xs text-red-500 hover:text-red-600 cursor-pointer"
+                >
+                  <BoxArrowRight size={14} /> Logout
+                </button>
+              </Tooltip>
             )}
           </SettingsSection>
         </div>

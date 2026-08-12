@@ -492,52 +492,54 @@ export function ChatPanel({
 
           <div className="flex gap-1 px-3 pt-2 pb-1 overflow-x-auto">
             {channels.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => { setViewingZone(false); setCsTabActive(false); onSelectTarget({ type: 'channel', id: c.id }); }}
-                className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
-                  !viewingZone && activeChatTarget?.type === 'channel' && activeChatTarget.id === c.id
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
-                }`}
-              >
-                #{c.name}
-                {(unreadByTarget[`channel:${c.id}`] ?? 0) > 0 && (
-                  <span className="ml-1 min-w-[14px] h-3.5 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold inline-flex items-center justify-center align-middle">
-                    {unreadByTarget[`channel:${c.id}`]}
-                  </span>
-                )}
-              </button>
+              <Tooltip key={c.id} label={`#${c.name}`} detail="Pindah ke channel ini." wrapperClassName="shrink-0">
+                <button
+                  onClick={() => { setViewingZone(false); setCsTabActive(false); onSelectTarget({ type: 'channel', id: c.id }); }}
+                  className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                    !viewingZone && activeChatTarget?.type === 'channel' && activeChatTarget.id === c.id
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  #{c.name}
+                  {(unreadByTarget[`channel:${c.id}`] ?? 0) > 0 && (
+                    <span className="ml-1 min-w-[14px] h-3.5 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold inline-flex items-center justify-center align-middle">
+                      {unreadByTarget[`channel:${c.id}`]}
+                    </span>
+                  )}
+                </button>
+              </Tooltip>
             ))}
             {dmConversations.map((d) => (
-              <button
-                key={d.id}
-                onClick={() => { setViewingZone(false); setCsTabActive(false); onSelectTarget({ type: 'dm', id: d.id }); }}
-                className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
-                  !viewingZone && activeChatTarget?.type === 'dm' && activeChatTarget.id === d.id
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
-                }`}
-                title={`DM with ${d.otherUser.displayName}`}
-              >
-                @{d.otherUser.displayName}
-                {(unreadByTarget[`dm:${d.id}`] ?? 0) > 0 && (
-                  <span className="ml-1 min-w-[14px] h-3.5 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold inline-flex items-center justify-center align-middle">
-                    {unreadByTarget[`dm:${d.id}`]}
-                  </span>
-                )}
-              </button>
+              <Tooltip key={d.id} label={`Chat dengan ${d.otherUser.displayName}`} detail="Percakapan 1-on-1 dengan orang ini." wrapperClassName="shrink-0">
+                <button
+                  onClick={() => { setViewingZone(false); setCsTabActive(false); onSelectTarget({ type: 'dm', id: d.id }); }}
+                  className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                    !viewingZone && activeChatTarget?.type === 'dm' && activeChatTarget.id === d.id
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  @{d.otherUser.displayName}
+                  {(unreadByTarget[`dm:${d.id}`] ?? 0) > 0 && (
+                    <span className="ml-1 min-w-[14px] h-3.5 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold inline-flex items-center justify-center align-middle">
+                      {unreadByTarget[`dm:${d.id}`]}
+                    </span>
+                  )}
+                </button>
+              </Tooltip>
             ))}
             {currentZone && (
-              <button
-                onClick={() => { setViewingZone(true); setCsTabActive(false); }}
-                className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
-                  viewingZone ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
-                }`}
-                title={`Private to ${currentZone.name}`}
-              >
-                <LockFill size={10} className="inline -mt-0.5 mr-1" /> {currentZone.name}
-              </button>
+              <Tooltip label={`Private to ${currentZone.name}`} detail="Chat yang cuma sampai ke orang di zone ini." wrapperClassName="shrink-0">
+                <button
+                  onClick={() => { setViewingZone(true); setCsTabActive(false); }}
+                  className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                    viewingZone ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  <LockFill size={10} className="inline -mt-0.5 mr-1" /> {currentZone.name}
+                </button>
+              </Tooltip>
             )}
             {/* Customer Service chat — always available, not gated on
                 anything (no isGuest/isAdmin check: guests can't open a
@@ -545,23 +547,25 @@ export function ChatPanel({
                 authenticateToken, but hiding the tab for them isn't the
                 enforcement, just tidiness — matches the CsChatWidget-era
                 scoping). */}
-            <button
-              onClick={() => { setViewingZone(false); setCsTabActive(true); }}
-              className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
-                csTabActive ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
-              }`}
-              title="Customer Service"
-            >
-              <Headset size={10} className="inline -mt-0.5 mr-1" /> CS
-            </button>
-            {isAdmin && (
+            <Tooltip label="Customer Service" detail="Tanya seputar cara pakai KaiSpace, atau hubungi admin." wrapperClassName="shrink-0">
               <button
-                onClick={() => setShowNewChannel((v) => !v)}
-                className="shrink-0 px-2 py-1 rounded-md text-[11px] font-medium bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600 cursor-pointer"
-                title="New channel"
+                onClick={() => { setViewingZone(false); setCsTabActive(true); }}
+                className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                  csTabActive ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
+                }`}
               >
-                <PlusLg size={10} />
+                <Headset size={10} className="inline -mt-0.5 mr-1" /> CS
               </button>
+            </Tooltip>
+            {isAdmin && (
+              <Tooltip label="Channel Baru" detail="Buat channel baru. (Khusus admin.)" wrapperClassName="shrink-0">
+                <button
+                  onClick={() => setShowNewChannel((v) => !v)}
+                  className="shrink-0 px-2 py-1 rounded-md text-[11px] font-medium bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600 cursor-pointer"
+                >
+                  <PlusLg size={10} />
+                </button>
+              </Tooltip>
             )}
           </div>
 
@@ -575,9 +579,11 @@ export function ChatPanel({
                 maxLength={30}
                 className="flex-1 bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500"
               />
-              <button onClick={handleCreateChannel} className="bg-purple-600 hover:bg-purple-700 text-white text-[11px] px-2 py-1 rounded cursor-pointer">
-                Create
-              </button>
+              <Tooltip label="Buat" detail="Buat channel dengan nama ini.">
+                <button onClick={handleCreateChannel} className="bg-purple-600 hover:bg-purple-700 text-white text-[11px] px-2 py-1 rounded cursor-pointer">
+                  Create
+                </button>
+              </Tooltip>
             </div>
           )}
 
@@ -592,32 +598,38 @@ export function ChatPanel({
           {currentPin && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-purple-100 dark:border-gray-700 bg-purple-50/50 dark:bg-gray-800/50">
               <PinAngleFill size={11} className="text-purple-500 shrink-0" />
-              <button
-                onClick={() => scrollToMessage(currentPin.id)}
-                className="flex-1 min-w-0 text-left text-[11px] text-gray-600 dark:text-gray-300 truncate cursor-pointer hover:text-purple-700 dark:hover:text-purple-300"
-                title="Lompat ke pesan ini"
-              >
-                {currentPin.text ? renderWithMentions(currentPin.text, localUserId) : currentPin.attachmentName ? `📎 ${currentPin.attachmentName}` : 'Pesan disematkan'}
-              </button>
+              <Tooltip label="Lompat ke Pesan" detail="Lompat ke pesan yang disematkan ini." wrapperClassName="flex-1 min-w-0">
+                <button
+                  onClick={() => scrollToMessage(currentPin.id)}
+                  className="flex-1 min-w-0 text-left text-[11px] text-gray-600 dark:text-gray-300 truncate cursor-pointer hover:text-purple-700 dark:hover:text-purple-300"
+                >
+                  {currentPin.text ? renderWithMentions(currentPin.text, localUserId) : currentPin.attachmentName ? `📎 ${currentPin.attachmentName}` : 'Pesan disematkan'}
+                </button>
+              </Tooltip>
               {pinnedMessages.length > 1 && (
                 <div className="flex items-center gap-0.5 shrink-0 text-gray-400">
-                  <button onClick={() => setPinCursor((c) => c - 1)} title="Sebelumnya" className="w-4 h-4 inline-flex items-center justify-center hover:text-purple-600 cursor-pointer">
-                    <ChevronLeft size={9} />
-                  </button>
+                  <Tooltip label="Sebelumnya" detail="Lihat pesan sematan sebelumnya.">
+                    <button onClick={() => setPinCursor((c) => c - 1)} className="w-4 h-4 inline-flex items-center justify-center hover:text-purple-600 cursor-pointer">
+                      <ChevronLeft size={9} />
+                    </button>
+                  </Tooltip>
                   <span className="text-[9px]">{pinIndex + 1}/{pinnedMessages.length}</span>
-                  <button onClick={() => setPinCursor((c) => c + 1)} title="Berikutnya" className="w-4 h-4 inline-flex items-center justify-center hover:text-purple-600 cursor-pointer">
-                    <ChevronRight size={9} />
-                  </button>
+                  <Tooltip label="Berikutnya" detail="Lihat pesan sematan berikutnya.">
+                    <button onClick={() => setPinCursor((c) => c + 1)} className="w-4 h-4 inline-flex items-center justify-center hover:text-purple-600 cursor-pointer">
+                      <ChevronRight size={9} />
+                    </button>
+                  </Tooltip>
                 </div>
               )}
               {isAdmin && (
-                <button
-                  onClick={() => onPinMessage?.(currentPin.id, false)}
-                  title="Lepas sematan"
-                  className="w-4 h-4 shrink-0 inline-flex items-center justify-center text-gray-400 hover:text-red-500 cursor-pointer"
-                >
-                  <XLg size={9} />
-                </button>
+                <Tooltip label="Lepas Sematan" detail="Batalkan status sematan pesan ini. (Khusus admin.)">
+                  <button
+                    onClick={() => onPinMessage?.(currentPin.id, false)}
+                    className="w-4 h-4 shrink-0 inline-flex items-center justify-center text-gray-400 hover:text-red-500 cursor-pointer"
+                  >
+                    <XLg size={9} />
+                  </button>
+                </Tooltip>
               )}
             </div>
           )}
@@ -629,13 +641,15 @@ export function ChatPanel({
             className="flex-1 overflow-y-auto p-3 space-y-2 text-xs"
           >
             {!viewingZone && hasMoreOlder && messages.length > 0 && (
-              <button
-                onClick={handleLoadOlder}
-                disabled={loadingOlder}
-                className="w-full text-center text-[10px] text-purple-500 hover:text-purple-700 disabled:opacity-50 cursor-pointer py-1"
-              >
-                {loadingOlder ? 'Loading...' : 'Load older messages'}
-              </button>
+              <Tooltip label="Muat Pesan Lama" detail="Tampilkan pesan-pesan sebelumnya di channel ini." wrapperClassName="w-full">
+                <button
+                  onClick={handleLoadOlder}
+                  disabled={loadingOlder}
+                  className="w-full text-center text-[10px] text-purple-500 hover:text-purple-700 disabled:opacity-50 cursor-pointer py-1"
+                >
+                  {loadingOlder ? 'Loading...' : 'Load older messages'}
+                </button>
+              </Tooltip>
             )}
 
             {viewingZone
@@ -693,30 +707,34 @@ export function ChatPanel({
                         onContextMenu={(e) => { e.preventDefault(); setMsgMenu({ x: e.clientX, y: e.clientY, message: m }); }}
                         actions={
                           <>
-                            <button
-                              onClick={() => toggleThread(m.id)}
-                              className="text-[10px] text-purple-500 hover:text-purple-700 cursor-pointer inline-flex items-center gap-1"
-                            >
-                              <ChatLeftText size={9} />
-                              {m.replyCount ? `${m.replyCount} ${m.replyCount === 1 ? 'reply' : 'replies'}` : 'Reply'}
-                            </button>
-                            {isOwn && onEditMessage && m.text && editingId !== m.id && (
+                            <Tooltip label="Balas" detail="Lihat atau tambahkan balasan pada pesan ini.">
                               <button
-                                onClick={() => beginEdit(m.id, m.text)}
-                                title="Edit message"
-                                className="text-[10px] text-gray-400 hover:text-purple-600 cursor-pointer inline-flex items-center gap-1"
+                                onClick={() => toggleThread(m.id)}
+                                className="text-[10px] text-purple-500 hover:text-purple-700 cursor-pointer inline-flex items-center gap-1"
                               >
-                                <PencilFill size={9} /> Edit
+                                <ChatLeftText size={9} />
+                                {m.replyCount ? `${m.replyCount} ${m.replyCount === 1 ? 'reply' : 'replies'}` : 'Reply'}
                               </button>
+                            </Tooltip>
+                            {isOwn && onEditMessage && m.text && editingId !== m.id && (
+                              <Tooltip label="Edit" detail="Ubah isi pesanmu.">
+                                <button
+                                  onClick={() => beginEdit(m.id, m.text)}
+                                  className="text-[10px] text-gray-400 hover:text-purple-600 cursor-pointer inline-flex items-center gap-1"
+                                >
+                                  <PencilFill size={9} /> Edit
+                                </button>
+                              </Tooltip>
                             )}
                             {isOwn && onDeleteMessage && (
-                              <button
-                                onClick={() => { if (window.confirm('Delete this message?')) onDeleteMessage(m.id); }}
-                                title="Delete message"
-                                className="text-[10px] text-gray-400 hover:text-red-500 cursor-pointer inline-flex items-center gap-1"
-                              >
-                                <TrashFill size={9} /> Delete
-                              </button>
+                              <Tooltip label="Hapus" detail="Hapus pesan ini.">
+                                <button
+                                  onClick={() => { if (window.confirm('Delete this message?')) onDeleteMessage(m.id); }}
+                                  className="text-[10px] text-gray-400 hover:text-red-500 cursor-pointer inline-flex items-center gap-1"
+                                >
+                                  <TrashFill size={9} /> Delete
+                                </button>
+                              </Tooltip>
                             )}
                           </>
                         }
@@ -756,14 +774,15 @@ export function ChatPanel({
                           </span>
                         )}
                         {m.status === 'failed' && (
-                          <button
-                            type="button"
-                            onClick={() => onRetry?.(m)}
-                            title="Coba kirim lagi"
-                            className="mt-0.5 flex items-center gap-1 text-[9px] text-red-300 hover:text-red-100 cursor-pointer"
-                          >
-                            <ExclamationTriangleFill size={9} /> Gagal terkirim — coba lagi <ArrowClockwise size={9} />
-                          </button>
+                          <Tooltip label="Coba Lagi" detail="Pesan gagal terkirim — klik untuk kirim ulang.">
+                            <button
+                              type="button"
+                              onClick={() => onRetry?.(m)}
+                              className="mt-0.5 flex items-center gap-1 text-[9px] text-red-300 hover:text-red-100 cursor-pointer"
+                            >
+                              <ExclamationTriangleFill size={9} /> Gagal terkirim — coba lagi <ArrowClockwise size={9} />
+                            </button>
+                          </Tooltip>
                         )}
                       </MessageBubble>
 
@@ -793,14 +812,18 @@ export function ChatPanel({
                               {r.senderId === localUserId && editingId !== r.id && (
                                 <span className="shrink-0 flex items-center gap-1 opacity-0 group-hover/reply:opacity-100 transition-opacity">
                                   {onEditMessage && (
-                                    <button onClick={() => beginEdit(r.id, r.text)} title="Edit reply" className="text-gray-400 hover:text-purple-600 cursor-pointer">
-                                      <PencilFill size={9} />
-                                    </button>
+                                    <Tooltip label="Edit" detail="Ubah isi balasanmu.">
+                                      <button onClick={() => beginEdit(r.id, r.text)} className="text-gray-400 hover:text-purple-600 cursor-pointer">
+                                        <PencilFill size={9} />
+                                      </button>
+                                    </Tooltip>
                                   )}
                                   {onDeleteMessage && (
-                                    <button onClick={() => { if (window.confirm('Delete this reply?')) onDeleteMessage(r.id); }} title="Delete reply" className="text-gray-400 hover:text-red-500 cursor-pointer">
-                                      <TrashFill size={9} />
-                                    </button>
+                                    <Tooltip label="Hapus" detail="Hapus balasan ini.">
+                                      <button onClick={() => { if (window.confirm('Delete this reply?')) onDeleteMessage(r.id); }} className="text-gray-400 hover:text-red-500 cursor-pointer">
+                                        <TrashFill size={9} />
+                                      </button>
+                                    </Tooltip>
                                   )}
                                 </span>
                               )}
@@ -815,13 +838,15 @@ export function ChatPanel({
                               maxLength={200}
                               className="flex-1 bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-[11px] rounded px-2 py-1 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500"
                             />
-                            <button
-                              onClick={() => handleSendReply(m.id)}
-                              disabled={!replyText.trim()}
-                              className="bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-[11px] px-2 py-1 rounded cursor-pointer"
-                            >
-                              Send
-                            </button>
+                            <Tooltip label="Kirim Balasan" detail="Kirim balasanmu di thread ini.">
+                              <button
+                                onClick={() => handleSendReply(m.id)}
+                                disabled={!replyText.trim()}
+                                className="bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-[11px] px-2 py-1 rounded cursor-pointer"
+                              >
+                                Send
+                              </button>
+                            </Tooltip>
                           </div>
                         </div>
                       )}
@@ -835,12 +860,16 @@ export function ChatPanel({
             )}
           </div>
           {hasNewMessages && (
-            <button
-              onClick={() => scrollToBottom(true)}
-              className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-medium px-2.5 py-1 rounded-full shadow-lg cursor-pointer flex items-center gap-1"
-            >
-              Pesan baru ↓
-            </button>
+            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10">
+              <Tooltip label="Pesan Baru" detail="Ada pesan baru — klik untuk scroll ke bawah.">
+                <button
+                  onClick={() => scrollToBottom(true)}
+                  className="bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-medium px-2.5 py-1 rounded-full shadow-lg cursor-pointer flex items-center gap-1"
+                >
+                  Pesan baru ↓
+                </button>
+              </Tooltip>
+            </div>
           )}
           </div>
 
@@ -882,7 +911,9 @@ export function ChatPanel({
             );
           })()}
           <div className="p-3 border-t border-purple-100 dark:border-gray-700 flex gap-2 items-center">
-            <button onClick={() => setShowEmoji(!showEmoji)} className="text-purple-600 dark:text-purple-400 cursor-pointer"><EmojiSmile size={16} /></button>
+            <Tooltip label="Emoji" detail="Tambahkan emoji ke pesanmu.">
+              <button onClick={() => setShowEmoji(!showEmoji)} className="text-purple-600 dark:text-purple-400 cursor-pointer"><EmojiSmile size={16} /></button>
+            </Tooltip>
             {/* Potongan C3 — file attachments now work for zone (Private)
                 chat too, not just persisted Channel/DM. Still hidden for
                 proximityMode ("Say nearby") — that's a floating speech
@@ -891,7 +922,8 @@ export function ChatPanel({
             {!proximityMode && (
               <AttachmentMenuButton
                 onFile={handleAttachFile}
-                title="Lampirkan"
+                title="Lampirkan File"
+                detail="Kirim gambar, video, atau dokumen."
                 disabled={zoneFileUploading}
                 buttonClassName="text-purple-600 dark:text-purple-400 disabled:opacity-40 cursor-pointer"
               />
@@ -942,13 +974,15 @@ export function ChatPanel({
                 className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 disabled:opacity-60"
               />
             </div>
-            <button
-              onClick={handleSend}
-              disabled={!text.trim()}
-              className="bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-xs px-3 py-1.5 rounded cursor-pointer"
-            >
-              Send
-            </button>
+            <Tooltip label="Kirim" detail="Kirim pesanmu.">
+              <button
+                onClick={handleSend}
+                disabled={!text.trim()}
+                className="bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-xs px-3 py-1.5 rounded cursor-pointer"
+              >
+                Send
+              </button>
+            </Tooltip>
           </div>
           </>
           )}
@@ -979,21 +1013,25 @@ export function ChatPanel({
             className="z-[1001] w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 text-xs"
           >
             {isAdmin && onPinMessage && (
-              <button
-                onClick={() => { onPinMessage(msgMenu.message.id, !msgMenu.message.isPinned); setMsgMenu(null); }}
-                className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
-              >
-                {msgMenu.message.isPinned ? <PinAngleFill size={11} className="text-indigo-500" /> : <PinAngle size={11} />}
-                {msgMenu.message.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
-              </button>
+              <Tooltip label={msgMenu.message.isPinned ? 'Lepas Sematan' : 'Sematkan'} detail="Sematkan pesan ini di channel. (Khusus admin.)" wrapperClassName="w-full">
+                <button
+                  onClick={() => { onPinMessage(msgMenu.message.id, !msgMenu.message.isPinned); setMsgMenu(null); }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
+                >
+                  {msgMenu.message.isPinned ? <PinAngleFill size={11} className="text-indigo-500" /> : <PinAngle size={11} />}
+                  {msgMenu.message.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
+                </button>
+              </Tooltip>
             )}
             {isAdmin && onPinNotice && (
-              <button
-                onClick={() => { onPinNotice(msgMenu.message); setMsgMenu(null); }}
-                className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
-              >
-                <MegaphoneFill size={11} /> Jadikan pengumuman
-              </button>
+              <Tooltip label="Jadikan Pengumuman" detail="Tampilkan pesan ini sebagai banner untuk semua orang. (Khusus admin.)" wrapperClassName="w-full">
+                <button
+                  onClick={() => { onPinNotice(msgMenu.message); setMsgMenu(null); }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
+                >
+                  <MegaphoneFill size={11} /> Jadikan pengumuman
+                </button>
+              </Tooltip>
             )}
             {/* Full "who's read this" list — admin sees it on ANY message;
                 a regular member only on their OWN ("cuma bisa inspek diri
@@ -1118,15 +1156,17 @@ function ImageThumb({ url, fileName, onOpen }: { url: string; fileName?: string;
   return (
     <div className="relative mt-1 w-32 h-24 rounded overflow-hidden bg-purple-100 dark:bg-gray-700">
       {state !== 'failed' && (
-        <button type="button" onClick={onOpen} title={fileName} className="block w-full h-full cursor-pointer">
-          <img
-            src={url}
-            alt={fileName || 'Attachment'}
-            onLoad={() => setState('loaded')}
-            onError={() => setState('failed')}
-            className={`w-full h-full object-cover transition-opacity ${state === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
-          />
-        </button>
+        <Tooltip label={fileName || 'Attachment'} detail="Buka gambar ukuran penuh." wrapperClassName="w-full h-full">
+          <button type="button" onClick={onOpen} className="block w-full h-full cursor-pointer">
+            <img
+              src={url}
+              alt={fileName || 'Attachment'}
+              onLoad={() => setState('loaded')}
+              onError={() => setState('failed')}
+              className={`w-full h-full object-cover transition-opacity ${state === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
+            />
+          </button>
+        </Tooltip>
       )}
       {state === 'loading' && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -1145,15 +1185,18 @@ function ImageThumb({ url, fileName, onOpen }: { url: string; fileName?: string;
         </button>
       )}
       {state === 'loaded' && (
-        <a
-          href={url}
-          download={fileName}
-          onClick={(e) => e.stopPropagation()}
-          title="Unduh"
-          className="absolute bottom-1 right-1 w-5 h-5 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center cursor-pointer"
-        >
-          <Download size={10} />
-        </a>
+        <div className="absolute bottom-1 right-1 w-5 h-5">
+          <Tooltip label="Unduh" detail="Simpan gambar ini." wrapperClassName="w-5 h-5">
+            <a
+              href={url}
+              download={fileName}
+              onClick={(e) => e.stopPropagation()}
+              className="w-5 h-5 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center cursor-pointer"
+            >
+              <Download size={10} />
+            </a>
+          </Tooltip>
+        </div>
       )}
     </div>
   );
@@ -1180,25 +1223,29 @@ function ChatAttachment({ url, fileName, isOwn, onOpen }: { url: string; fileNam
     // Muted, controls-less first frame as a thumbnail with a play badge; the
     // actual player (with controls + autoplay) lives in the lightbox.
     return (
-      <button type="button" onClick={open} className="relative block mt-1 cursor-pointer w-48">
-        <video src={url} muted preload="metadata" className="w-48 rounded bg-black pointer-events-none" />
-        <span className="absolute inset-0 flex items-center justify-center">
-          <PlayCircleFill size={34} className="text-white/90 drop-shadow" />
-        </span>
-      </button>
+      <Tooltip label="Putar Video" detail="Putar video ini.">
+        <button type="button" onClick={open} className="relative block mt-1 cursor-pointer w-48">
+          <video src={url} muted preload="metadata" className="w-48 rounded bg-black pointer-events-none" />
+          <span className="absolute inset-0 flex items-center justify-center">
+            <PlayCircleFill size={34} className="text-white/90 drop-shadow" />
+          </span>
+        </button>
+      </Tooltip>
     );
   }
   return (
-    <button
-      type="button"
-      onClick={open}
-      className={`mt-1 flex items-center gap-1.5 rounded px-2 py-1 text-[11px] w-full text-left cursor-pointer ${
-        isOwn ? 'bg-purple-700/60 text-white hover:bg-purple-700' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'
-      }`}
-    >
-      <FileEarmarkFill size={12} className="shrink-0" />
-      <span className="truncate flex-1">{fileName || 'Open file'}</span>
-      <Download size={11} className="shrink-0" />
-    </button>
+    <Tooltip label="Buka File" detail="Buka atau unduh file ini." wrapperClassName="w-full">
+      <button
+        type="button"
+        onClick={open}
+        className={`mt-1 flex items-center gap-1.5 rounded px-2 py-1 text-[11px] w-full text-left cursor-pointer ${
+          isOwn ? 'bg-purple-700/60 text-white hover:bg-purple-700' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'
+        }`}
+      >
+        <FileEarmarkFill size={12} className="shrink-0" />
+        <span className="truncate flex-1">{fileName || 'Open file'}</span>
+        <Download size={11} className="shrink-0" />
+      </button>
+    </Tooltip>
   );
 }

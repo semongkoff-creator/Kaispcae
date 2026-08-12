@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { SendFill, Whatsapp } from 'react-bootstrap-icons';
 import { api, CsMessage } from '@/services/api';
+import { Tooltip } from '@/components/ui/Tooltip';
 
 // Customer Service chat — bot FAQ (server/src/data/csFaq.ts, sourced from
 // docs/KB-FAQ-KaiSpace.docx) plus a "Hubungi admin" handoff that opens a
@@ -116,25 +117,29 @@ export function CsChatConversation({ active }: CsChatConversationProps) {
         )}
         {offerAdmin && (
           <div className="flex justify-start">
-            <button
-              onClick={requestAdmin}
-              disabled={loading}
-              className="text-xs px-3 py-1.5 rounded-full border border-purple-300 text-purple-600 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer disabled:opacity-50"
-            >
-              Hubungi admin
-            </button>
+            <Tooltip label="Hubungi Admin" detail="Dapatkan link WhatsApp untuk chat langsung dengan tim kami.">
+              <button
+                onClick={requestAdmin}
+                disabled={loading}
+                className="text-xs px-3 py-1.5 rounded-full border border-purple-300 text-purple-600 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer disabled:opacity-50"
+              >
+                Hubungi admin
+              </button>
+            </Tooltip>
           </div>
         )}
         {waLink && (
           <div className="flex justify-start">
-            <a
-              href={waLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-[#25D366] hover:bg-[#20bd5a] text-white font-medium cursor-pointer"
-            >
-              <Whatsapp size={13} /> Chat di WhatsApp
-            </a>
+            <Tooltip label="Chat di WhatsApp" detail="Buka WhatsApp untuk lanjut ngobrol dengan admin.">
+              <a
+                href={waLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-[#25D366] hover:bg-[#20bd5a] text-white font-medium cursor-pointer"
+              >
+                <Whatsapp size={13} /> Chat di WhatsApp
+              </a>
+            </Tooltip>
           </div>
         )}
         {error && <p className="text-[11px] text-red-500 text-center">{error}</p>}
@@ -151,13 +156,15 @@ export function CsChatConversation({ active }: CsChatConversationProps) {
           maxLength={2000}
           className="flex-1 bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 disabled:opacity-60"
         />
-        <button
-          onClick={send}
-          disabled={!input.trim() || !sessionId || loading}
-          className="bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-xs px-3 py-1.5 rounded cursor-pointer inline-flex items-center gap-1 shrink-0"
-        >
-          <SendFill size={11} />
-        </button>
+        <Tooltip label="Kirim" detail="Kirim pertanyaanmu." wrapperClassName="shrink-0">
+          <button
+            onClick={send}
+            disabled={!input.trim() || !sessionId || loading}
+            className="bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-xs px-3 py-1.5 rounded cursor-pointer inline-flex items-center gap-1 shrink-0"
+          >
+            <SendFill size={11} />
+          </button>
+        </Tooltip>
       </div>
     </div>
   );

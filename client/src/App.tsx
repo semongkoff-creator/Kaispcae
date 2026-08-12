@@ -5,6 +5,7 @@ import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
 import { GameCanvas } from './components/canvas/GameCanvas';
 import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
+import { Tooltip } from './components/ui/Tooltip';
 import { MapZoomControl } from './components/ui/MapZoomControl';
 import { MobileControls } from './components/hud/MobileControls';
 import { NameModal } from './components/ui/NameModal';
@@ -1969,19 +1970,23 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {localPlayer.isSitting && sittingItem && (
         <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
           {!sittingItem.assignedToUserId ? (
-            <button
-              onClick={() => emitFurnitureAssign(sittingItem.id, playerName)}
-              className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg cursor-pointer inline-flex items-center gap-1.5"
-            >
-              🪑 Assign as My Seat
-            </button>
+            <Tooltip label="Jadikan Kursi Saya" detail="Tandai kursi ini jadi kursi tetapmu — otomatis kamu duduk di sini tiap masuk room.">
+              <button
+                onClick={() => emitFurnitureAssign(sittingItem.id, playerName)}
+                className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg cursor-pointer inline-flex items-center gap-1.5"
+              >
+                🪑 Assign as My Seat
+              </button>
+            </Tooltip>
           ) : sittingItem.assignedToUserId === localUserId ? (
-            <button
-              onClick={() => emitFurnitureUnassign(sittingItem.id)}
-              className="bg-white hover:bg-gray-50 text-purple-700 text-xs font-semibold px-4 py-2 rounded-full shadow-lg border border-purple-200 cursor-pointer inline-flex items-center gap-1.5"
-            >
-              Unassign My Seat
-            </button>
+            <Tooltip label="Lepas Kursi Saya" detail="Batalkan status kursi tetap ini.">
+              <button
+                onClick={() => emitFurnitureUnassign(sittingItem.id)}
+                className="bg-white hover:bg-gray-50 text-purple-700 text-xs font-semibold px-4 py-2 rounded-full shadow-lg border border-purple-200 cursor-pointer inline-flex items-center gap-1.5"
+              >
+                Unassign My Seat
+              </button>
+            </Tooltip>
           ) : (
             <div className="bg-white/90 backdrop-blur-sm text-gray-500 text-xs font-medium px-4 py-2 rounded-full shadow-sm border border-purple-100 inline-flex items-center gap-1.5">
               🔒 Reserved by {sittingItem.assignedToName || 'someone'}
@@ -2210,9 +2215,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         <div className="absolute bottom-20 right-4 z-50 flex items-center gap-2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 rounded-full px-3 py-1.5 shadow-sm pointer-events-auto text-xs text-gray-700 dark:text-gray-200">
           <span>🎵 {bgm.inAreaName}</span>
           {bgm.needsUnlock ? (
-            <button onClick={bgm.playNow} className="text-purple-600 dark:text-purple-300 font-medium cursor-pointer">🔊 Putar musik</button>
+            <Tooltip label="Putar Musik" detail="Browser sempat memblokir musik otomatis — klik untuk mulai musik area ini.">
+              <button onClick={bgm.playNow} className="text-purple-600 dark:text-purple-300 font-medium cursor-pointer">🔊 Putar musik</button>
+            </Tooltip>
           ) : (
-            <button onClick={() => bgm.setMuted(!bgm.muted)} className="cursor-pointer" title={bgm.muted ? 'Bunyikan' : 'Bisukan'}>{bgm.muted ? '🔇' : '🔉'}</button>
+            <Tooltip label={bgm.muted ? 'Bunyikan' : 'Bisukan'} detail="Nyalakan/matikan musik latar area ini.">
+              <button onClick={() => bgm.setMuted(!bgm.muted)} className="cursor-pointer">{bgm.muted ? '🔇' : '🔉'}</button>
+            </Tooltip>
           )}
         </div>
       )}
@@ -2299,34 +2308,36 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {/* Room name HUD + code */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 pointer-events-auto">
         <p className="text-gray-500 dark:text-gray-400 text-xs font-medium tracking-wider uppercase">MAIN OFFICE</p>
-        <button
-          onClick={async () => {
-            await navigator.clipboard.writeText(roomSlug);
-            setRoomCodeCopied(true);
-            setTimeout(() => setRoomCodeCopied(false), 2000);
-          }}
-          className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
-          title="Copy room code"
-        >
-          <Clipboard size={11} /> {roomSlug.slice(0, 12)}
-        </button>
-        <button
-          onClick={async () => {
-            // ?join=<slug> — read back on load by App()'s own pending-invite
-            // effect below, which auto-joins this exact room once the
-            // clicker is authenticated (logging in first if they weren't).
-            const url = new URL(window.location.href);
-            url.search = '';
-            url.searchParams.set('join', roomSlug);
-            await navigator.clipboard.writeText(url.toString());
-            setInviteLinkCopied(true);
-            setTimeout(() => setInviteLinkCopied(false), 2000);
-          }}
-          className="text-gray-400 hover:text-gray-700 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
-          title="Copy invite link"
-        >
-          <Link45deg size={12} /> Invite
-        </button>
+        <Tooltip label="Salin Kode Room" detail="Salin kode room ini untuk dibagikan.">
+          <button
+            onClick={async () => {
+              await navigator.clipboard.writeText(roomSlug);
+              setRoomCodeCopied(true);
+              setTimeout(() => setRoomCodeCopied(false), 2000);
+            }}
+            className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
+          >
+            <Clipboard size={11} /> {roomSlug.slice(0, 12)}
+          </button>
+        </Tooltip>
+        <Tooltip label="Salin Link Undangan" detail="Salin link undangan ke room ini.">
+          <button
+            onClick={async () => {
+              // ?join=<slug> — read back on load by App()'s own pending-invite
+              // effect below, which auto-joins this exact room once the
+              // clicker is authenticated (logging in first if they weren't).
+              const url = new URL(window.location.href);
+              url.search = '';
+              url.searchParams.set('join', roomSlug);
+              await navigator.clipboard.writeText(url.toString());
+              setInviteLinkCopied(true);
+              setTimeout(() => setInviteLinkCopied(false), 2000);
+            }}
+            className="text-gray-400 hover:text-gray-700 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
+          >
+            <Link45deg size={12} /> Invite
+          </button>
+        </Tooltip>
       </div>
 
       {roomCodeCopied && (

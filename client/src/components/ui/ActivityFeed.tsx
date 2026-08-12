@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ClockHistory, ChevronUp, ChevronDown } from 'react-bootstrap-icons';
 import { useGameStore } from '@/stores/gameStore';
+import { Tooltip } from '@/components/ui/Tooltip';
 
 // Client-only log (see gameStore.ts's activityEvents doc comment) of what's
 // happened recently in this room — who joined/left, media added, notices
@@ -13,13 +14,14 @@ export function ActivityFeed() {
 
   return (
     <div className="relative z-40 pointer-events-auto">
-      <button
-        onClick={() => setOpen(!open)}
-        className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer inline-flex items-center gap-1.5"
-        title="Recent Activity"
-      >
-        <ClockHistory size={13} /> {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-      </button>
+      <Tooltip label="Aktivitas Terbaru" detail="Lihat aktivitas terbaru tim kamu. (Khusus manajer.)">
+        <button
+          onClick={() => setOpen(!open)}
+          className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer inline-flex items-center gap-1.5"
+        >
+          <ClockHistory size={13} /> {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+        </button>
+      </Tooltip>
 
       {open && (
         <div
