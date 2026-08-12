@@ -27,7 +27,6 @@ const auth = Router();
 auth.get('/config', (_req, res) => {
   const c = getConfig();
   res.json({
-    larkEnabled: !!(c.LARK_APP_ID && c.LARK_APP_SECRET),
     googleEnabled: !!googleConfig(),
   });
 });

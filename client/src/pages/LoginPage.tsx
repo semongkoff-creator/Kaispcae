@@ -27,16 +27,6 @@ function GoogleIcon() {
   );
 }
 
-// The real Feishu/Lark bird mark — user-supplied source JPG (solid white
-// background, no alpha) converted to a transparent PNG via a near-white
-// chroma-key threshold (see the conversion this file's history references;
-// small icon size means the soft anti-aliased edge left behind isn't
-// visible in practice) and dropped into public/assets/img next to
-// favico.png, the only other logo asset in this app.
-function LarkIcon() {
-  return <img src="/assets/img/lark-logo.png" alt="" width={16} height={16} className="object-contain" />;
-}
-
 interface LoginPageProps {
   onLogin: (email: string, password: string) => Promise<void>;
   onRegister: (email: string, password: string, displayName: string) => Promise<void>;
@@ -200,10 +190,12 @@ export function LoginPage({ onLogin, onRegister, onCreateOrganization, error, se
           </button>
         </form>
 
-        {/* Lark OAuth — an ADDITIONAL option beside the manual form above,
+        {/* Google OAuth — an ADDITIONAL option beside the manual form above,
             which is untouched. A plain full-page navigation (not fetch): the
-            server issues a 302 to Lark's consent screen. Google sits beside
-            it purely for Figma fidelity — see GOOGLE_LOGIN_ENABLED above. */}
+            server issues a 302 to Google's consent screen. Gated by
+            GOOGLE_LOGIN_ENABLED (see above); when off the button stays
+            visible but inert rather than vanishing, so the layout doesn't
+            shift between deployments. */}
         {mode !== 'createOrg' && (
           <>
             <div className="flex items-center gap-2 my-4">
@@ -211,26 +203,18 @@ export function LoginPage({ onLogin, onRegister, onCreateOrganization, error, se
               <span className="text-gray-400 dark:text-gray-500 text-[11px]">OR</span>
               <span className="flex-1 h-px bg-purple-100 dark:bg-gray-700" />
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <a
-                href={googleEnabled ? '/api/auth/google/login' : undefined}
-                aria-disabled={!googleEnabled}
-                title={googleEnabled ? undefined : 'Segera hadir'}
-                className={`flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] ${
-                  googleEnabled
-                    ? 'hover:bg-purple-50 dark:hover:bg-gray-600 cursor-pointer'
-                    : 'opacity-40 cursor-not-allowed pointer-events-none'
-                }`}
-              >
-                <GoogleIcon /> Login with Google
-              </a>
-              <a
-                href="/api/auth/lark/login"
-                className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-600 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] cursor-pointer"
-              >
-                <LarkIcon /> Login with Lark
-              </a>
-            </div>
+            <a
+              href={googleEnabled ? '/api/auth/google/login' : undefined}
+              aria-disabled={!googleEnabled}
+              title={googleEnabled ? undefined : 'Segera hadir'}
+              className={`flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] ${
+                googleEnabled
+                  ? 'hover:bg-purple-50 dark:hover:bg-gray-600 cursor-pointer'
+                  : 'opacity-40 cursor-not-allowed pointer-events-none'
+              }`}
+            >
+              <GoogleIcon /> Login with Google
+            </a>
           </>
         )}
 

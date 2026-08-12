@@ -16,32 +16,12 @@ export function useAuth() {
 
   useEffect(() => {
     (async () => {
-      // Lark OAuth return: the callback bounced back to "/?larkCode=…" (a
+      // Google OAuth return: the callback bounced back to "/?googleCode=…" (a
       // single-use code, never the raw JWT). Swap it for the token and store
       // it under the SAME key manual login uses, then fall through to the
       // normal getMe() path — so nothing downstream knows or cares that this
-      // session came from Lark.
+      // session came from Google.
       const params = new URLSearchParams(window.location.search);
-      const larkCode = params.get('larkCode');
-      const larkError = params.get('larkError');
-      if (larkCode || larkError) {
-        // Strip the query so a refresh doesn't re-run this with a dead code.
-        window.history.replaceState({}, '', window.location.pathname);
-      }
-      if (larkError) {
-        setError('Login Lark gagal. Silakan coba lagi.');
-      } else if (larkCode) {
-        try {
-          const { token } = await api.exchangeLarkCode(larkCode);
-          localStorage.setItem('vm_token', token);
-        } catch {
-          setError('Login Lark gagal menukar kode. Silakan coba lagi.');
-        }
-      }
-
-      // Google OAuth return (Fase 5) — same "/?googleCode=…" single-use-code
-      // shape as Lark above, handled independently since a real redirect
-      // only ever carries one provider's params at a time.
       const googleCode = params.get('googleCode');
       const googleError = params.get('googleError');
       if (googleCode || googleError) {

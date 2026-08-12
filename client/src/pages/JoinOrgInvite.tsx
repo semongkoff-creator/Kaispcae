@@ -1,16 +1,10 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { api } from '@/services/api';
 
-// Same asset LoginPage.tsx's own LarkIcon uses — duplicated locally rather
+// Same mark as LoginPage.tsx's own GoogleIcon — duplicated locally rather
 // than exported/shared, matching this codebase's established "small
 // deliberate duplication for decoupling" precedent (see mediaHandler.ts/
 // followHandler.ts's own doc comments on the same pattern).
-function LarkIcon() {
-  return <img src="/assets/img/lark-logo.png" alt="" width={16} height={16} className="object-contain" />;
-}
-
-// Same mark as LoginPage.tsx's own GoogleIcon, duplicated for the same
-// reason as LarkIcon above.
 function GoogleIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true">
@@ -118,27 +112,24 @@ export function JoinOrgInvite({ inviteToken, onAccept }: JoinOrgInviteProps) {
                 {loading ? 'Memproses…' : 'Gabung'}
               </button>
             </form>
-            <div className="flex items-center gap-2 my-4">
-              <span className="flex-1 h-px bg-purple-100 dark:bg-gray-700" />
-              <span className="text-gray-400 dark:text-gray-500 text-[11px]">OR</span>
-              <span className="flex-1 h-px bg-purple-100 dark:bg-gray-700" />
-            </div>
-            <div className={googleEnabled ? 'grid grid-cols-2 gap-2' : ''}>
-              {googleEnabled && (
+            {/* Google is the only alternative to the form above now, so the
+                whole "OR" block hides when it's disabled — otherwise the
+                divider would introduce a choice that isn't there. */}
+            {googleEnabled && (
+              <>
+                <div className="flex items-center gap-2 my-4">
+                  <span className="flex-1 h-px bg-purple-100 dark:bg-gray-700" />
+                  <span className="text-gray-400 dark:text-gray-500 text-[11px]">OR</span>
+                  <span className="flex-1 h-px bg-purple-100 dark:bg-gray-700" />
+                </div>
                 <a
                   href={`/api/auth/google/login?orgInvite=${encodeURIComponent(inviteToken)}`}
                   className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-600 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] cursor-pointer"
                 >
                   <GoogleIcon /> Lanjut dengan Google
                 </a>
-              )}
-              <a
-                href={`/api/auth/lark/login?orgInvite=${encodeURIComponent(inviteToken)}`}
-                className="flex items-center justify-center gap-1.5 bg-white dark:bg-gray-700 border border-purple-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-600 font-medium rounded-lg py-2.5 px-1 transition-colors text-[11px] cursor-pointer"
-              >
-                <LarkIcon /> Lanjut dengan Lark
-              </a>
-            </div>
+              </>
+            )}
           </>
         )}
       </div>

@@ -241,20 +241,17 @@ export const api = {
   // server/src/routes/auth.ts and useAuth.ts, which persists it.
   getMe: () => request<{ user: UserProfile; token?: string }>('/auth/me'),
 
-  // Lark OAuth: swap the single-use code the callback put in the URL for the
+  // OAuth: swap the single-use code the callback put in the URL for the
   // real JWT (kept out of the URL on purpose). The token is then stored and
   // used exactly like a manual-login token — see useAuth.
-  exchangeLarkCode: (code: string) =>
-    request<{ token: string }>('/auth/lark/exchange', { method: 'POST', body: JSON.stringify({ code }) }),
-
-  // Google OAuth (Fase 5) — same single-use-code exchange as Lark above.
+  // Google OAuth (Fase 5).
   exchangeGoogleCode: (code: string) =>
     request<{ token: string }>('/auth/google/exchange', { method: 'POST', body: JSON.stringify({ code }) }),
 
   // Public, unauthenticated — read before anyone is logged in (LoginPage,
   // JoinOrgInvite) to decide whether the Google button should even render.
   // Never carries credentials, only booleans.
-  getAuthConfig: () => request<{ larkEnabled: boolean; googleEnabled: boolean }>('/auth/config'),
+  getAuthConfig: () => request<{ googleEnabled: boolean }>('/auth/config'),
 
   // Clears the HttpOnly upload-session cookie server-side — JS can't touch it
   // itself. Not routed through request(): the server answers 204 with no
