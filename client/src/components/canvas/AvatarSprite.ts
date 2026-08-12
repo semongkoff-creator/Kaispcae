@@ -209,11 +209,16 @@ const WALK_ROW = 5;
 // direction silently reusing idle, which was the previous behavior.
 const SIT_ROW = 9;
 const IDLE_FRAME_MS = 400;
-const WALK_FRAME_MS = 110;
+// Both divided by the same 1.2 PLAYER_SPEED/PLAYER_RUN_SPEED were just
+// bumped by (110/1.2, 70/1.2, rounded) — a shorter frame duration cycles the
+// walk animation faster, keeping stride length on-screen the same as before
+// the speed bump instead of the avatar visibly sliding faster than its legs
+// animate.
+const WALK_FRAME_MS = 92;
 // Run reuses the walk row (no dedicated run frames in this asset pack — see
 // PLAYER_RUN_SPEED's doc comment in shared/types/index.ts) at a faster cycle
 // so the legs visibly move quicker in step with the higher actual speed.
-const RUN_FRAME_MS = 70;
+const RUN_FRAME_MS = 58;
 
 const DIRECTION_COLUMN_ORDER: Direction[] = ['right', 'up', 'left', 'down'];
 
