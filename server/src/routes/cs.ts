@@ -41,6 +41,7 @@ const FALLBACK_TEXT = 'Maaf, aku belum punya jawaban untuk itu. Mau coba tanya d
 const HANDOFF_NOT_CONFIGURED_TEXT = 'Fitur hubungi admin belum tersedia saat ini. Coba lagi nanti.';
 const RELAY_FAILED_TEXT = 'Pesanmu gagal diteruskan ke admin. Coba kirim lagi.';
 const WA_LINK_TEXT = 'Klik tombol di bawah untuk chat langsung dengan admin kami di WhatsApp.';
+const BUTTON_HANDOFF_MESSAGE = 'Pengguna meminta bantuan admin lewat tombol "Hubungi admin".';
 
 interface SerializedMessage {
   id: string;
@@ -132,10 +133,13 @@ cs.post('/cs/session', authenticateToken, async (req: AuthRequest, res: Response
 });
 
 // POST /api/cs/session/:id/message — user sends a message.
-// - 'bot' mode: typing exactly "admin" triggers the WhatsApp handoff (same
-//   as the "Hubungi admin" button, see the /handoff route below) — a wa.me
-//   link, not the n8n/WAHA relay (see buildWhatsAppLink's own comment for
-//   why); anything else is matched against the FAQ (matchFaq), with
+// - 'bot' mode: typing exactly "admin" triggers the handoff (same as the
+//   "Hubungi admin" button, see the /handoff route below) — BOTH a wa.me
+//   link (always shown, the guaranteed path) AND a fire-and-forget relay
+//   to n8n (a bonus if that workflow's own WAHA step happens to be working;
+//   its failure is never allowed to block or hide the wa.me link — see
+//   buildWhatsAppLink's comment for why n8n alone isn't trusted as the only
+//   path). Anything else is matched against the FAQ (matchFaq), with
 //   offerAdmin signaling a miss.
 // - 'human' mode: every message is relayed to n8n instead (Tahap 3's
 //   "pesan lanjutan user selama mode human juga diteruskan") — nothing
@@ -165,6 +169,11 @@ cs.post('/cs/session/:id/message', authenticateToken, async (req: AuthRequest, r
     if (session.mode === 'bot' && text.toLowerCase() === 'admin') {
       const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
       const link = buildWhatsAppLink(user?.displayName ?? 'User');
+      // Fire-and-forget — never awaited, never allowed to change what the
+      // user sees below. postToN8n's own try/catch always resolves, so
+      // there's nothing to catch here; a failure is only ever logged
+      // server-side (see postToN8n).
+      void postToN8n({ sessionId: session.id, userName: user?.displayName ?? 'User', userId: req.userId!, message: text });
       if (link) {
         waLink = link;
         botMessage = serialize(await prisma.csMessage.create({ data: { sessionId: session.id, from: 'bot', text: WA_LINK_TEXT } }));
@@ -208,7 +217,8 @@ cs.post('/cs/session/:id/message', authenticateToken, async (req: AuthRequest, r
 
 // POST /api/cs/session/:id/handoff — the "Hubungi admin" button's own
 // trigger, distinct from typing "admin" in the message box above but
-// sharing the exact same buildWhatsAppLink logic (see its own comment).
+// sharing the exact same buildWhatsAppLink + fire-and-forget postToN8n
+// logic (see the /message handler's own comment for why both fire).
 // No free-text body: the button has no message of its own.
 cs.post('/cs/session/:id/handoff', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
@@ -222,6 +232,7 @@ cs.post('/cs/session/:id/handoff', authenticateToken, async (req: AuthRequest, r
 
     const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
     const link = buildWhatsAppLink(user?.displayName ?? 'User');
+    void postToN8n({ sessionId: session.id, userName: user?.displayName ?? 'User', userId: req.userId!, message: BUTTON_HANDOFF_MESSAGE });
     await prisma.csSession.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
 
     if (!link) {
