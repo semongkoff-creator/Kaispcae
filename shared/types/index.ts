@@ -1309,7 +1309,12 @@ export const PROXIMITY_THRESHOLD_PX = PROXIMITY_THRESHOLD * TILE_SIZE;
 // the ring that's supposed to represent it — same "derive so they can't
 // drift apart" fix PROXIMITY_THRESHOLD_PX above already got.
 export const TRANSLUCENT_THRESHOLD = PROXIMITY_THRESHOLD;
-export const DISCONNECT_DEBOUNCE_MS = 500;
+// Was 500 — long enough to absorb a boundary-hugging peer's normal jitter,
+// but shorter than it needs to be to also absorb the position hiccup a
+// server restart can cause (see useWebRTC.ts's resync-glitch guard, which
+// handles that case specifically). 1000ms still reads as prompt for a
+// genuine walk-away.
+export const DISCONNECT_DEBOUNCE_MS = 1000;
 
 // §6 — mirrors the spec's own three-state enum name
 // (full_visible/translucent/not_visible) for computeVisibility's result.
