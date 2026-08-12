@@ -39,6 +39,19 @@ model User {
   // small profile photo; chat attachments/recordings must still go to object
   // storage (R2), never here.
   profilePhoto            String?                   @db.Text
+  // THE signal for "somebody inside this organization vouched for this
+  // account", which is what separates a real colleague from a stranger who
+  // simply hit the public POST /auth/register endpoint. Set at every
+  // account-creation path that is itself gated by someone with authority —
+  // accepting an org invite (routes/orgInvite.ts), Google login (which
+  // refuses outright without a valid invite, see routes/google.ts), founding
+  // a new organization (POST /auth/create-organization), and the very first
+  // account on a fresh deployment (which bootstraps the first admin). Left
+  // null ONLY for self-service registrations nobody has approved yet; those
+  // accounts are clamped to the 'guest' tier until an admin flips this via
+  // PATCH /admin/members/:userId. Read by lib/roles.ts (REST) and
+  // socket/roomHandler.ts (sockets) — the two must always agree.
+  memberVerifiedAt        DateTime?
   // Set for accounts created via "Login with Lark" (OAuth) — the Lark user's
   // open_id. Nullable + unique: existing manual-login users all have null (no
   // clash), and a given Lark identity maps to exactly one local account

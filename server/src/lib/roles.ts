@@ -16,7 +16,7 @@ export async function resolveRoomRole(prisma: PrismaClient, userId: string, room
   if (userId === ownerId) return 'owner';
 
   const [user, member] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { accountRole: true, larkOpenId: true, workspaceRole: true, organizationId: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { accountRole: true, memberVerifiedAt: true, workspaceRole: true, organizationId: true } }),
     prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId } } }),
   ]);
 
@@ -27,14 +27,16 @@ export async function resolveRoomRole(prisma: PrismaClient, userId: string, room
   // company's, with zero RoomMember grant needed.
   if (user?.accountRole === 'admin' && user.organizationId === roomOrganizationId) return 'admin';
   if (member?.role === 'staff') return 'staff';
-  // Self-registered (non-Lark) account nobody has promoted — POST
-  // /auth/register is public, unlike Lark OAuth which requires actually
-  // being in the org's Lark tenant, so a plain manual account is otherwise
-  // indistinguishable from a stranger. Same rule roomHandler.ts's in-memory
-  // getRole() applies socket-side — kept in sync so a REST route and a
-  // socket handler never disagree about the same account's tier. Only the
-  // DEFAULT: an explicit room-level grant (admin/staff, checked above) or
-  // workspace promotion always wins over this.
-  if (!user?.larkOpenId && user?.workspaceRole !== 'admin') return 'guest';
+  // Self-registered account nobody has vouched for — POST /auth/register is
+  // public, so a plain manual account is otherwise indistinguishable from a
+  // stranger who found the URL. Every path where someone WITH authority
+  // approved the account (org invite, invite-gated Google login, founding a
+  // new org, the first-ever bootstrap account) stamps memberVerifiedAt, and
+  // an admin can stamp it later via PATCH /admin/members/:userId. Same rule
+  // roomHandler.ts's in-memory getRole() applies socket-side — kept in sync
+  // so a REST route and a socket handler never disagree about the same
+  // account's tier. Only the DEFAULT: an explicit room-level grant
+  // (admin/staff, checked above) or workspace promotion always wins.
+  if (!user?.memberVerifiedAt && user?.workspaceRole !== 'admin') return 'guest';
   return 'member';
 }

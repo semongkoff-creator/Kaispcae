@@ -7,9 +7,8 @@ import { getConfig } from '../config';
 import { authenticateToken, setUploadSessionCookie, clearUploadSessionCookie, verifyTokenClaims, AuthRequest } from '../middleware/auth';
 import { validate, registerSchema, loginSchema, createOrganizationSchema } from '../middleware/validate';
 import { rateLimit } from '../middleware/rateLimit';
-import { ensureCheckedInToday } from '../lib/larkAttendance';
 import { disconnectUserSockets, disconnectUserSocketsSilently } from '../lib/sessionKick';
-import { DEFAULT_ORG_ID } from '../lib/defaultOrg';
+import { DEFAULT_ORG_ID, ensureDefaultOrg } from '../lib/defaultOrg';
 import { googleConfig } from '../lib/googleConfig';
 import { Prisma, User } from '@prisma/client';
 import { accountFieldsForInviteRole } from '../lib/orgInvite';
@@ -100,6 +99,11 @@ auth.post('/register', authRateLimit, validate(registerSchema), async (req, res:
     // registering in the same instant on a brand-new deployment) could in
     // theory both read count===0, but that's an acceptably rare edge case
     // for a one-time bootstrap, not worth a transaction/lock for.
+    // The org this account is about to reference must actually exist — on a
+    // fresh deployment nothing has created it yet, and User.organizationId is
+    // a required FK. See ensureDefaultOrg's own doc comment.
+    await ensureDefaultOrg(prisma);
+
     const isFirstEverUser = (await prisma.user.count()) === 0;
     const user = await prisma.user.create({
       // The first-ever account also bootstraps the workspace admin. Without
@@ -109,6 +113,13 @@ auth.post('/register', authRateLimit, validate(registerSchema), async (req, res:
         email, password: hashed, displayName,
         accountRole: isFirstEverUser ? 'admin' : 'user',
         workspaceRole: isFirstEverUser ? 'admin' : 'member',
+        // This endpoint is PUBLIC — anyone on the internet can create an
+        // account here, so nobody has vouched for it and it stays unverified
+        // (clamped to the 'guest' tier by lib/roles.ts until an admin
+        // approves it). The sole exception is the bootstrap account above:
+        // it becomes the deployment's first admin, so refusing to trust it
+        // would leave a fresh install with nobody able to verify anyone.
+        memberVerifiedAt: isFirstEverUser ? new Date() : null,
         // Fase 1 — no invite/org-selection flow exists yet (that's a later
         // phase), so every registration still lands in the one default org,
         // same behavior as today having a single implicit workspace.
@@ -166,6 +177,11 @@ auth.post('/create-organization', authRateLimit, validate(createOrganizationSche
               email, password: hashed, displayName,
               accountRole, workspaceRole,
               organizationId: org.id,
+              // Founding admin of a brand-new org — there is no one above
+              // them to be vouched for BY, and they are this tenant's first
+              // authority, so they start verified (same reasoning as the
+              // first-ever-account bootstrap in POST /register).
+              memberVerifiedAt: new Date(),
             },
           });
           return { org, user };
@@ -279,9 +295,6 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
       select: {
         id: true, email: true, displayName: true, avatarConfig: true, preferences: true,
         accountRole: true, workspaceRole: true, timezone: true, active: true,
-        // larkOpenId (a short field, unlike profilePhoto) so we can trigger the
-        // Lark attendance check-in below for Lark accounts only.
-        larkOpenId: true,
         // Bug 1 — needed to preserve / adopt the single-session id below.
         currentSessionId: true,
         // QA #1/#6 — gates the first-run tutorial (App.tsx); null means this
@@ -348,13 +361,6 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
     const currentToken = refreshedToken
       ?? (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
     if (currentToken) setUploadSessionCookie(req, res, currentToken);
-
-    // A2 — trigger Lark Attendance check-in here, NOT at the OAuth callback:
-    // /me is hit on every app load including 30-day auto-login, so this fires
-    // once per work day even when the user never re-does OAuth. Fire-and-forget
-    // + idempotent per WIB day; a failure must never block loading the app.
-    // Lark accounts only (manual users have no larkOpenId).
-    if (user.larkOpenId) void ensureCheckedInToday(user.id);
 
     return res.json({
       user: publicUserWithAvatar(user),

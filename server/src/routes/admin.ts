@@ -43,7 +43,7 @@ admin.get('/admin/members', authenticateToken, requireWorkspace('workspace:manag
       where: { organizationId: req.organizationId },
       select: {
         id: true, email: true, displayName: true, workspaceRole: true, timezone: true,
-        active: true, createdAt: true,
+        active: true, createdAt: true, memberVerifiedAt: true,
         department: { select: { id: true, name: true } },
         manager: { select: { id: true, displayName: true } },
       },
@@ -67,6 +67,7 @@ admin.patch('/admin/members/:userId', authenticateToken, requireWorkspace('works
     // returns null (→ 404) for a cross-org id, same as "doesn't exist".
     const target = await findUserInOrg(prisma, req.params.userId, req.organizationId, {
       id: true, workspaceRole: true, active: true, departmentId: true, managerId: true, displayName: true,
+      memberVerifiedAt: true,
     });
     if (!target) return res.status(404).json({ error: 'Pengguna tidak ditemukan' });
 
@@ -98,6 +99,17 @@ admin.patch('/admin/members/:userId', authenticateToken, requireWorkspace('works
       }
       before.active = target.active; after.active = active;
       data.active = active;
+    }
+    // Approve (or withdraw approval for) a self-service registration. This is
+    // the escape hatch for the only account-creation path that can't vouch
+    // for itself — see User.memberVerifiedAt in schema.prisma. Stored as an
+    // instant rather than a boolean so the audit trail below records WHEN,
+    // and the client sends a plain boolean so it never has to invent a
+    // timestamp the server would overwrite anyway.
+    if (req.body?.memberVerified !== undefined) {
+      const verified = Boolean(req.body.memberVerified);
+      before.memberVerified = !!target.memberVerifiedAt; after.memberVerified = verified;
+      data.memberVerifiedAt = verified ? new Date() : null;
     }
     if (req.body?.departmentId !== undefined) {
       const depId = req.body.departmentId ? String(req.body.departmentId) : null;

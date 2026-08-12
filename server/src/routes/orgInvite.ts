@@ -143,6 +143,10 @@ orgInvite.post('/org-invites/:token/accept', acceptLimit, async (req: Request, r
         email: invite.email, password: hashed, displayName,
         organizationId: invite.organizationId,
         accountRole, workspaceRole,
+        // A workspace admin issued this invite to this exact email address,
+        // so the account arrives already vouched for — unlike a self-service
+        // registration. See User.memberVerifiedAt in schema.prisma.
+        memberVerifiedAt: new Date(),
       },
     });
     await markInviteAccepted(prisma, invite.id);

@@ -124,6 +124,10 @@ google.get('/auth/google/callback', async (req: Request, res: Response) => {
           profilePhoto: picture || null,
           organizationId: invite.organizationId,
           ...accountFieldsForInviteRole(invite.role),
+          // This branch is only reachable behind a still-valid org invite
+          // (the guard above returns 'no-invite' otherwise), so the account
+          // is vouched for on arrival. See User.memberVerifiedAt.
+          memberVerifiedAt: new Date(),
         },
       });
       await markInviteAccepted(prisma, invite.id);

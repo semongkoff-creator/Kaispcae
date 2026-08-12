@@ -149,7 +149,7 @@ export function markSpawnNearUser(roomSlug: string, targetUid: string, nearUid: 
 }
 
 // Same "very few features" cut as isGuestSocket above, extended to
-// self-registered (non-Lark) accounts nobody has promoted — see
+// self-registered, unverified accounts nobody has promoted — see
 // RoomAdminState.restrictedTierUserIds' own doc comment for why a manual
 // account needs the same treatment as a Guest Link visitor by default.
 // Takes `room` explicitly (rather than resolving it internally) since every
@@ -260,7 +260,7 @@ interface RoomAdminState {
   // restart" posture as `locked` above — an emergency mode isn't config that
   // should silently survive a redeploy.
   doorOverride?: boolean;
-  // Self-registered (non-Lark) accounts nobody has promoted — see getRole's
+  // Self-registered, unverified accounts nobody has promoted — see getRole's
   // own doc comment on why these are clamped to 'guest'. Populated per-join
   // (roomHandler's JOIN_ROOM, same "checked fresh each connection, not
   // persisted" posture as the global-admin accountRole check right next to
@@ -303,7 +303,7 @@ function getRole(rs: RoomAdminState, uid: string): Role {
   if (uid === rs.masterAdminUserId) return 'owner';
   if (rs.adminUserIds.has(uid)) return 'admin';
   if (rs.staffUserIds.has(uid)) return 'staff';
-  // Self-registered (non-Lark) account nobody has promoted — see
+  // Self-registered, unverified account nobody has promoted — see
   // restrictedTierUserIds' own doc comment. Checked LAST, after every
   // explicit-privilege check above: creating a room (master admin) or being
   // granted admin/staff already means someone vouched for this account, and
@@ -921,17 +921,20 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // 'guest' regardless of anything this could add to adminUserIds).
     try {
       if (!isGuest) {
-        const account = await getPrisma().user.findUnique({ where: { id: uid }, select: { accountRole: true, larkOpenId: true, workspaceRole: true } });
+        const account = await getPrisma().user.findUnique({ where: { id: uid }, select: { accountRole: true, memberVerifiedAt: true, workspaceRole: true } });
         if (account?.accountRole === 'admin') rs.adminUserIds.add(uid);
-        // Guest-tier for self-registered accounts — POST /auth/register is
-        // public (anyone can hit it), unlike Lark OAuth login which requires
-        // actually being in the org's Lark tenant. A manual account is
-        // otherwise indistinguishable from a real employee, so without this
-        // "buat akun manual" is a free bypass around every guest restriction
-        // this app has. Only clamps the DEFAULT — an admin explicitly
+        // Guest-tier for self-registered accounts nobody has vouched for —
+        // POST /auth/register is public (anyone can hit it), so a manual
+        // account is otherwise indistinguishable from a real colleague, and
+        // without this "buat akun manual" is a free bypass around every
+        // guest restriction this app has. memberVerifiedAt is stamped by
+        // every approved path (org invite, invite-gated Google login, org
+        // founding, first-ever bootstrap) and by an admin via
+        // PATCH /admin/members/:userId — see its doc comment in
+        // schema.prisma. Only clamps the DEFAULT — an admin explicitly
         // promoting the account (workspaceRole/accountRole, or a room-level
         // staff/admin grant, both checked above/below this) always wins.
-        if (account && !account.larkOpenId && account.accountRole !== 'admin' && account.workspaceRole !== 'admin') {
+        if (account && !account.memberVerifiedAt && account.accountRole !== 'admin' && account.workspaceRole !== 'admin') {
           rs.restrictedTierUserIds.add(uid);
         } else {
           rs.restrictedTierUserIds.delete(uid);
