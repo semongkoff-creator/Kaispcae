@@ -244,8 +244,12 @@ model Department {
 // no update/delete route, and there must never be one.
 model AuditLog {
   id           String   @id @default(cuid())
-  actorId      String
-  actor        User     @relation("AuditActor", fields: [actorId], references: [id], onDelete: Cascade)
+  // Nullable + SetNull (not Cascade): this table is append-only by design
+  // (see comment above) — deleting the actor's account must never delete
+  // the evidence of what they did, especially for an incident review after
+  // an abusive account/org has already been removed.
+  actorId      String?
+  actor        User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
   // The workspace action performed — a WorkspaceAction from
   // shared/workspacePermissions.ts, or a module verb like 'base:transfer'.
   action       String
