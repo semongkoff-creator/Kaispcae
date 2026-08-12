@@ -85,6 +85,22 @@ process.on('uncaughtException', (err) => {
 
 const app = express();
 
+// Production sits behind TWO nginx hops (VPS host nginx -> the "nginx"
+// Docker service -> this app) — both are infrastructure this deployment
+// controls, both reachable only via loopback/private-network addresses.
+// Without this, Express computes req.ip from the raw TCP socket peer,
+// which is always the inner nginx container's own address for every
+// request regardless of who the real client is — every IP-keyed
+// rate limiter (middleware/rateLimit.ts's `req.ip`) was therefore a
+// single shared bucket for the whole deployment, not actually per-IP.
+// 'loopback'/'linklocal'/'uniquelocal' trust any hop on a private/
+// loopback address (matches this app's own topology) without needing a
+// brittle hardcoded hop count, and — critically — an external client
+// cannot spoof a "trusted" hop this way: trust is walked backward from
+// the actual TCP peer, so a real internet client's own connection is
+// never itself in a trusted range.
+app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal']);
+
 // 512kb (up from the 100kb default) so profile-photo data-URLs fit — the
 // route itself caps the photo at ~150KB, this is just headroom for the JSON
 // envelope. Large binary uploads still go through multipart (routes/uploads),
