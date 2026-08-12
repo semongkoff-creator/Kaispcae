@@ -40,10 +40,10 @@ export interface MovementState {
 }
 
 function movementForKey(key: string): Pick<MovementState, 'direction' | 'dx' | 'dy'> | null {
-  if (key === 'ArrowUp' || key === 'KeyW' || key === 'w' || key === 'W') return { direction: 'up', dx: 0, dy: -1 };
-  if (key === 'ArrowDown' || key === 'KeyS' || key === 's' || key === 'S') return { direction: 'down', dx: 0, dy: 1 };
-  if (key === 'ArrowLeft' || key === 'KeyA' || key === 'a' || key === 'A') return { direction: 'left', dx: -1, dy: 0 };
-  if (key === 'ArrowRight' || key === 'KeyD' || key === 'd' || key === 'D') return { direction: 'right', dx: 1, dy: 0 };
+  if (key === 'ArrowUp' || key === 'KeyW') return { direction: 'up', dx: 0, dy: -1 };
+  if (key === 'ArrowDown' || key === 'KeyS') return { direction: 'down', dx: 0, dy: 1 };
+  if (key === 'ArrowLeft' || key === 'KeyA') return { direction: 'left', dx: -1, dy: 0 };
+  if (key === 'ArrowRight' || key === 'KeyD') return { direction: 'right', dx: 1, dy: 0 };
   return null;
 }
 
@@ -55,8 +55,8 @@ export function getKeyboardMovementInput(keys: ReadonlySet<string>, fallbackDire
 
   const isMoving = movement !== null;
   const isRunning = isMoving && (
-    keys.has('r') || keys.has('R') || keys.has('KeyR') ||
-    keys.has('Shift') || keys.has('ShiftLeft') || keys.has('ShiftRight')
+    keys.has('KeyR') ||
+    keys.has('ShiftLeft') || keys.has('ShiftRight')
   );
 
   return {
