@@ -1,4 +1,5 @@
 import { User } from '@prisma/client';
+import { isOperatorEmail } from './operator';
 
 // The client-safe projection of a User row — every auth response (register,
 // login, /me, org-invite accept, self-serve org creation) building its own
@@ -20,6 +21,9 @@ export function publicUser(user: PublicUserFields) {
     timezone: user.timezone,
     tutorialCompletedAt: user.tutorialCompletedAt,
     preferences: user.preferences,
+    // Every response shape that flows through this helper picks this up
+    // automatically — see specs/2026-08-12-operator-org-list-design.md.
+    isOperator: isOperatorEmail(user.email),
   };
 }
 

@@ -84,6 +84,11 @@ const envSchema = z
     GOOGLE_CLIENT_SECRET: z.string().optional(),
     GOOGLE_REDIRECT_URI: z.string().optional(),
     GOOGLE_LOGIN_ENABLED: z.string().optional(),
+    // Deployment operator — a read-only cross-org view (server/src/routes/
+    // operator.ts), gated to exactly the emails listed here. Comma-
+    // separated, e.g. "you@example.com,other@example.com". Unset or empty
+    // means nobody has access — see lib/operator.ts's isOperatorEmail().
+    OPERATOR_EMAILS: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     // The default JWT secret is a well-known literal — anyone can forge valid
