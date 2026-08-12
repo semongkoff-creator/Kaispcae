@@ -12,9 +12,6 @@ import { AvatarSetup } from './components/avatar/AvatarSetup';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
 import { MeetingControl } from './components/ui/MeetingControl';
-import { DailyTaskPanel } from './components/ui/DailyTaskPanel';
-import { LeavePanel } from './components/ui/LeavePanel';
-import { LarkSyncPanel } from './components/ui/LarkSyncPanel';
 // QA (Kompat checklist item 7) — same reasoning as RoomEditorPage above:
 // only a workspace admin ever opens this (AdminConsole itself re-gates on
 // workspaceRole, see its own file), so splitting it out means the far more
@@ -30,7 +27,6 @@ const OperatorConsole = lazy(() => import('./operator/OperatorConsole').then((m)
 const MyAnalyticsPanel = lazy(() => import('./admin/MyAnalyticsPanel').then((m) => ({ default: m.MyAnalyticsPanel })));
 import { CalendarApp } from './components/Calendar/CalendarApp';
 import { AttendanceApp } from './components/Attendance/AttendanceApp';
-import { LarkAttendancePanel } from './components/Attendance/LarkAttendancePanel';
 import { toCurrentUser, type CurrentUser } from './hooks/useCurrentUser';
 import { isTypingTarget, shouldIgnoreRoomHotkey } from './utils/hotkeys';
 import { useZoneLock } from './hooks/useZoneLock';
@@ -872,7 +868,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // config" convention as Guest Link above — the server independently
   // re-checks 'broadcast:text' (roomHandler.ts), this is just the trigger.
   const handleBroadcast = useCallback(() => {
-    const text = (window.prompt('Pesan broadcast ke SEMUA orang di room ini (tersinkron ke Lark):') ?? '').trim();
+    const text = (window.prompt('Pesan broadcast ke SEMUA orang di room ini:') ?? '').trim();
     if (!text) return;
     emitBroadcastSend(text);
   }, [emitBroadcastSend]);
@@ -1012,15 +1008,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
   const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
-  const dailyTaskActive = activePanel === 'dailyTask';
-  const leaveActive = activePanel === 'leave';
   const adminViewActive = activePanel === 'adminConsole';
   const operatorConsoleActive = activePanel === 'operatorConsole';
   const myAnalyticsActive = activePanel === 'myAnalytics';
   const calendarViewActive = activePanel === 'calendar';
   const attendanceViewActive = activePanel === 'attendance';
-  const larkAttendanceActive = activePanel === 'larkAttendance';
-  const larkSyncActive = activePanel === 'larkSync';
   const messengerViewActive = activePanel === 'messenger';
   // Join-approval queue (admin). pendingJoinCount only drives the menu badge;
   // the panel refetches from the server when opened, so a stale count can
@@ -1052,7 +1044,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // Messenger is deliberately NOT included any more: it docks as a left
   // sidebar now (see MessengerApp.tsx), not a full-screen takeover, so the
   // map/HUD/movement stay live beside it, Gather-style.
-  const moduleOpen = dailyTaskActive || leaveActive || calendarViewActive || adminViewActive || attendanceViewActive || larkSyncActive || myAnalyticsActive;
+  const moduleOpen = calendarViewActive || adminViewActive || attendanceViewActive || myAnalyticsActive;
 
   // Tab for admin panel. (The old E-for-editor hotkey went with the retired
   // overlay editor — Potong 7; editing now lives on the /?roomEditor= page.)
@@ -1917,17 +1909,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           if (!currentZone) return;
           zoneLock.setLock(currentZone.id, !zoneLock.lockOf(currentZone.id), currentZone.name);
         }}
-        dailyTaskActive={dailyTaskActive}
-        leaveActive={leaveActive}
-        onToggleLeave={() => openPanel('leave')}
         calendarViewActive={calendarViewActive}
         onToggleCalendarView={() => openPanel('calendar')}
         attendanceViewActive={attendanceViewActive}
         onToggleAttendanceView={() => openPanel('attendance')}
-        larkAttendanceActive={larkAttendanceActive}
-        onToggleLarkAttendance={() => openPanel('larkAttendance')}
-        larkSyncActive={larkSyncActive}
-        onToggleLarkSync={() => openPanel('larkSync')}
         messengerViewActive={messengerViewActive}
         onToggleMessengerView={() => openPanel('messenger')}
         joinQueueActive={joinQueueActive}
@@ -1941,7 +1926,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleOperatorConsole={() => openPanel('operatorConsole')}
         myAnalyticsActive={myAnalyticsActive}
         onToggleMyAnalytics={() => openPanel('myAnalytics')}
-        onToggleDailyTask={() => openPanel('dailyTask')}
         miniModeSupported={isMiniModeSupported()}
         miniModeActive={!!miniModeWindow}
         onToggleMiniMode={handleToggleMiniMode}
@@ -1995,11 +1979,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       )}
 
 
-      {/* Lark Base (database) module — full-screen in-room panel, same z-40
-          layer as Meeting View; the room's Sidebar rail (z-50) stays reachable
-          and the launcher offsets itself by pl-14 to clear it. */}
-      {dailyTaskActive && <DailyTaskPanel onClose={closePanel} />}
-      {leaveActive && <LeavePanel onClose={closePanel} />}
       {adminViewActive && (
         <Suspense fallback={null}>
           <AdminConsole currentUser={currentUser} onClose={closePanel} />
@@ -2015,9 +1994,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           <MyAnalyticsPanel onClose={closePanel} />
         </Suspense>
       )}
+      {/* Absensi + Cuti sekaligus — Cuti adalah tab di dalam AttendanceApp. */}
       {attendanceViewActive && <AttendanceApp onClose={closePanel} />}
-      {larkAttendanceActive && <LarkAttendancePanel onClose={closePanel} />}
-      {larkSyncActive && <LarkSyncPanel roomSlug={roomSlug} onClose={closePanel} />}
       {joinQueueActive && isAdmin && (
         <JoinRequestPanel roomSlug={roomSlug} onClose={closePanel} />
       )}

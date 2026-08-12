@@ -44,15 +44,10 @@ import userRoutes, { setUsersIo } from './routes/users';
 import larkRoutes from './routes/lark';
 import googleRoutes from './routes/google';
 import operatorRoutes from './routes/operator';
-import attendanceLarkRoutes from './routes/attendanceLark';
 import meetingRoutes, { setMeetingIo, startRecordingPoller } from './routes/meeting';
-import larkChatMapRoutes from './routes/larkChatMap';
-import taskRoutes from './routes/tasks';
-import leaveRoutes from './routes/leave';
 import analyticsRoutes from './routes/analytics';
 import csRoutes, { setIo as setCsIo } from './routes/cs';
 import { startLarkEventStream } from './lib/larkWs';
-import { subscribeLeaveApproval } from './lib/larkApproval';
 import { startReminderSweep } from './socket/reminderSweep';
 import { startAttendanceSweep } from './socket/attendanceSweep';
 import { startQueueSweep } from './socket/queueSweep';
@@ -268,10 +263,6 @@ app.use('/api', userRoutes);
 app.use('/api', larkRoutes);
 app.use('/api', googleRoutes);
 app.use('/api', operatorRoutes);
-app.use('/api', attendanceLarkRoutes);
-app.use('/api', larkChatMapRoutes);
-app.use('/api', taskRoutes);
-app.use('/api', leaveRoutes);
 app.use('/api', meetingRoutes);
 app.use('/api', adminRoutes);
 app.use('/api', attendanceRoutes);
@@ -345,8 +336,6 @@ async function start() {
     startRecordingPoller();
     // Bagian 4 — open the Lark persistent connection for inbound chat events.
     startLarkEventStream(io);
-    // A9 — subscribe to the Cuti approval's events (once) so status changes flow.
-    void subscribeLeaveApproval();
   });
 }
 

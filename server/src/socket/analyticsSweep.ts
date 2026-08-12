@@ -4,7 +4,6 @@ import { PROXIMITY_THRESHOLD, TILE_SIZE } from '@virtualmeet/shared';
 import { getPrisma } from '../lib/prisma';
 import { getActiveRoomSlugs, pinSystemNotice } from './roomHandler';
 import { getCachedPlayers } from '../store/roomStore';
-import { listTasksInRange } from '../lib/larkTasks';
 import { computeRanking } from '../routes/analytics';
 import { sendGroupText } from '../lib/larkIm';
 import { broadcastAnalyticsActivity } from './analyticsFeed';
@@ -39,7 +38,6 @@ export function startAnalyticsSweep(
   hallOfFameCheckIntervalMs = 5 * 60 * 1000,
 ): void {
   setInterval(() => void sweepProximityOnce(io), proximityIntervalMs);
-  setInterval(() => void syncTaskCompletionsOnce(), taskSyncIntervalMs);
   setInterval(() => void runWeeklyHallOfFameOnce(io), hallOfFameCheckIntervalMs);
 }
 
@@ -96,81 +94,6 @@ async function sweepProximityOnce(io: Server): Promise<void> {
     }
   } catch (e) {
     console.error('[analytics] proximity sweep error:', e);
-  }
-}
-
-// Productivity Analytics — daily snapshot of Lark Base "Daily Task"
-// completions (Bagian B.3.1's "Task selesai" card / B.5's task inputs). Lark
-// Base has no company-wide query today (see larkTasks.ts's listTasksInRange)
-// and isn't cheap enough to hit on every dashboard load, so this runs once a
-// WIB calendar day instead — gated by an in-memory "already did today's
-// date" marker rather than a cron dependency, same interval-based posture as
-// every other sweep in this codebase. Resets on restart, which is harmless:
-// the upsert below is idempotent, so an accidental re-run just re-writes the
-// same numbers.
-let lastTaskSyncDateKey: string | null = null;
-
-async function syncTaskCompletionsOnce(): Promise<void> {
-  try {
-    const now = DateTime.now().setZone('Asia/Jakarta');
-    // Give the day a moment to fully close out before snapshotting it.
-    if (now.hour === 0 && now.minute < 10) return;
-    const yesterday = now.minus({ days: 1 });
-    const dateKey = yesterday.toFormat('yyyy-LL-dd');
-    if (dateKey === lastTaskSyncDateKey) return;
-
-    const prisma = getPrisma();
-    const startMs = yesterday.startOf('day').toMillis();
-    const endMs = yesterday.endOf('day').toMillis();
-    const tasks = await listTasksInRange(startMs, endMs);
-
-    // Migration slice — analyticsTaskDoneStatusValues is a per-org
-    // WorkspacePolicy field now (was the single shared id='singleton' row,
-    // read once and applied to every task regardless of which org its
-    // owner belonged to). Resolved lazily per owner's org, cached for the
-    // rest of this run.
-    const doneValuesByOrg = new Map<string, Set<string>>();
-    async function doneValuesForOrg(organizationId: string): Promise<Set<string>> {
-      const cached = doneValuesByOrg.get(organizationId);
-      if (cached) return cached;
-      const policy = await prisma.workspacePolicy.findUnique({ where: { organizationId } });
-      const values = new Set((policy?.analyticsTaskDoneStatusValues ?? ['Done', 'Selesai', 'Completed']).map((s) => s.toLowerCase()));
-      doneValuesByOrg.set(organizationId, values);
-      return values;
-    }
-
-    const perUser = new Map<string, { due: number; completed: number }>();
-    for (const task of tasks) {
-      for (const openId of task.ownerOpenIds) {
-        const owner = await prisma.user.findFirst({ where: { larkOpenId: openId }, select: { id: true, organizationId: true } });
-        if (!owner) continue;
-        const doneValues = await doneValuesForOrg(owner.organizationId);
-        const isDone = !!task.status && doneValues.has(task.status.toLowerCase());
-        const agg = perUser.get(owner.id) ?? { due: 0, completed: 0 };
-        agg.due += 1;
-        if (isDone) agg.completed += 1;
-        perUser.set(owner.id, agg);
-      }
-    }
-
-    const date = new Date(Date.UTC(yesterday.year, yesterday.month - 1, yesterday.day));
-    for (const [userId, agg] of perUser) {
-      try {
-        // onTimeCount === completedCount — see the field's doc comment in
-        // schema.prisma for why "on time" can't actually be distinguished
-        // from "done" with the fields Lark Base exposes today.
-        await prisma.taskCompletionSnapshot.upsert({
-          where: { userId_date: { userId, date } },
-          create: { userId, date, dueCount: agg.due, completedCount: agg.completed, onTimeCount: agg.completed },
-          update: { dueCount: agg.due, completedCount: agg.completed, onTimeCount: agg.completed },
-        });
-      } catch (e) {
-        console.error(`[analytics] failed to snapshot tasks for user ${userId}:`, e);
-      }
-    }
-    lastTaskSyncDateKey = dateKey;
-  } catch (e) {
-    console.error('[analytics] task snapshot sync error:', e);
   }
 }
 
@@ -262,5 +185,4 @@ async function runWeeklyHallOfFameOnce(io: Server): Promise<void> {
 // directly rather than through this always-run hook.
 export async function runAnalyticsSweepOnce(io: Server): Promise<void> {
   await sweepProximityOnce(io);
-  await syncTaskCompletionsOnce();
 }

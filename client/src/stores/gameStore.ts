@@ -84,8 +84,6 @@ export interface ActivityEvent {
 export type PanelId =
   | 'chat'
   | 'participants'
-  | 'dailyTask'
-  | 'leave'
   | 'teleport'
   | 'addMedia'
   | 'adminPanel'
@@ -93,11 +91,9 @@ export type PanelId =
   | 'calendar'
   | 'adminConsole'
   | 'attendance'
-  | 'larkAttendance'
   | 'messenger'
   | 'joinQueue'
   | 'soundboard'
-  | 'larkSync'
   // Productivity Analytics — Bagian B.1's Individual tier is for EVERY
   // employee ("cermin evaluasi diri"), unlike adminConsole above which is
   // gated to workspaceRole==='admin' and invisible to ordinary members —

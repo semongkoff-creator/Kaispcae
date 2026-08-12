@@ -7,73 +7,6 @@ const API_BASE = '/api';
 // plain network failure (offline, server down), where fetch() itself throws
 // a status-less TypeError instead. useAuth.ts uses this distinction to only
 // show "session expired" for an actual 401/403/404, not a network blip.
-// A12 — today's Lark attendance status for the current user.
-export interface AttendanceStatus {
-  isLarkUser: boolean;
-  checkedIn: boolean;
-  checkInTime: number | null; // epoch seconds
-  checkedOut: boolean;
-  checkOutTime: number | null;
-  totalHours: number | null;
-}
-
-// A5 — a recorded meeting (Lark VC) for the Meeting History panel.
-export interface LarkChatSummary {
-  chatId: string;
-  name: string;
-}
-
-// A7 — Daily Task (backed by a Lark Base table).
-export interface DailyTask {
-  recordId: string;
-  task: string;
-  workstream: string | null;
-  priority: string | null;
-  status: string | null;
-  notes: string | null;
-  dueDate: number | null;
-  project: { recordId: string; name: string } | null;
-}
-
-export interface TaskOptions {
-  workstream: string[];
-  priority: string[];
-  status: string[];
-  projects: { recordId: string; name: string }[];
-}
-
-export interface CreateTaskBody {
-  task: string;
-  workstream?: string;
-  priority?: string;
-  status?: string;
-  notes?: string;
-  dueDate?: number;
-  projectRecordId?: string;
-}
-
-// A9 — leave (Cuti) request via Lark Approval.
-export interface LeaveRecord {
-  instanceCode: string;
-  status: string; // PENDING | APPROVED | REJECTED | CANCELED | ...
-  name: string | null;
-  start: string | null;
-  end: string | null;
-  unit: string | null;
-  reason: string | null;
-  submittedAt: number | null;
-}
-
-export interface CreateLeaveBody {
-  name: string;
-  start: string; // ISO UTC
-  end: string; // ISO UTC
-  unit: string; // DAY | HALF_DAY | HOUR
-  interval: number;
-  reason: string;
-  timezoneOffset: number;
-}
-
 export interface MomRecord {
   id: string;
   roomId: string;
@@ -363,10 +296,6 @@ export const api = {
   // ROSTER_UPDATED) — this REST call alone doesn't know who's online.
   getWorkspacePeople: () => request<{ people: { id: string; displayName: string }[] }>('/workspace/people'),
 
-  // A12 — Lark attendance status (source of truth = Lark) + checkout.
-  getAttendanceStatus: () => request<AttendanceStatus>('/attendance/status'),
-  checkOutAttendance: () => request<AttendanceStatus>('/attendance/checkout', { method: 'POST' }),
-
   // A5 — recorded meetings (Lark VC).
   startMeeting: (roomId: string, zoneId: string) =>
     request<{ momRecordId: string; url: string; meetingNo: string }>('/meeting/start', { method: 'POST', body: JSON.stringify({ roomId, zoneId }) }),
@@ -374,29 +303,6 @@ export const api = {
     request<{ ok: boolean; recordingStatus?: string }>('/meeting/end', { method: 'POST', body: JSON.stringify({ momRecordId }) }),
   getMeetingHistory: (roomId: string) =>
     request<{ meetings: MomRecord[] }>(`/meeting/history?roomId=${encodeURIComponent(roomId)}`),
-
-  // Bagian 4 — Lark ↔ MeetKai chat sync mapping (room admins only).
-  getLarkChatMap: (slug: string) =>
-    request<{ map: { chatId: string; chatName: string | null } | null; chats: LarkChatSummary[] }>(
-      `/rooms/${slug}/lark-map`,
-    ),
-  setLarkChatMap: (slug: string, chatId: string | null, chatName?: string | null) =>
-    request<{ map: { chatId: string; chatName: string | null } | null }>(`/rooms/${slug}/lark-map`, {
-      method: 'PUT',
-      body: JSON.stringify({ chatId, chatName }),
-    }),
-
-  // A9 — Cuti (leave) via Lark Approval.
-  getLeaveOptions: () => request<{ leaveTypes: string[] }>('/leave/options'),
-  getMyLeaves: () => request<{ leaves: LeaveRecord[] }>('/leave/mine'),
-  createLeave: (body: CreateLeaveBody) => request<{ instanceCode: string }>('/leave', { method: 'POST', body: JSON.stringify(body) }),
-
-  // A7 — Daily Task (reads/writes the Lark Base table directly).
-  getTodayTasks: () => request<{ tasks: DailyTask[] }>('/tasks/today'),
-  getTaskOptions: () => request<TaskOptions>('/tasks/options'),
-  createTask: (body: CreateTaskBody) => request<{ task: DailyTask }>('/tasks', { method: 'POST', body: JSON.stringify(body) }),
-  updateTaskStatus: (recordId: string, status: string) =>
-    request<{ ok: boolean }>(`/tasks/${encodeURIComponent(recordId)}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
 
   getRooms: () => request<{ rooms: RoomInfo[] }>('/rooms'),
 

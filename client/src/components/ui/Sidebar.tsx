@@ -1,5 +1,5 @@
 import { ReactNode, useState } from 'react';
-import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, Table as TableIcon, ShieldLock, Buildings, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, Airplane, ArrowLeftRight, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill, GearFill, HourglassSplit } from 'react-bootstrap-icons';
+import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, ShieldLock, Buildings, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill, GearFill, HourglassSplit } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -7,12 +7,6 @@ import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { Theme } from '@/hooks/useTheme';
 import { ManualStatus } from '@/data/presence';
 import { Role } from '@virtualmeet/shared';
-
-// A2 — the MeetKai-native attendance UI is retired in favour of automatic Lark
-// Attendance check-in (see server lib/larkAttendance.ts). Flip to true only to
-// temporarily bring the old manual UI back; the component & historical data
-// were deliberately kept, not deleted.
-const ATTENDANCE_MENU_ENABLED = false;
 
 interface SidebarProps {
   onEditAvatar: () => void;
@@ -94,14 +88,6 @@ interface SidebarProps {
   simplifiedView: boolean;
   onToggleSimplifiedView: () => void;
 
-  // Daily Task widget (Lark Base-backed) — opens as a full-screen in-room panel.
-  dailyTaskActive: boolean;
-  onToggleDailyTask: () => void;
-
-  // A9 — Cuti (leave request via Lark Approval) full-screen in-room panel.
-  leaveActive: boolean;
-  onToggleLeave: () => void;
-
   // Workspace admin console. `isWorkspaceAdmin` is cosmetic only — every
   // /api/admin/* route re-checks the role from the DB (see
   // server/src/lib/workspace.ts). The row is HIDDEN, not disabled, for
@@ -110,19 +96,9 @@ interface SidebarProps {
   calendarViewActive: boolean;
   onToggleCalendarView: () => void;
 
-  // Attendance module.
+  // Attendance module — also hosts Cuti (leave) as a tab inside it.
   attendanceViewActive: boolean;
   onToggleAttendanceView: () => void;
-  // A12 — the new Lark-backed attendance panel (separate from the retired
-  // MeetKai-native one above).
-  larkAttendanceActive: boolean;
-  onToggleLarkAttendance: () => void;
-
-  // Bagian 4 — admin-only picker binding this room's #general channel to a
-  // Lark group (see LarkSyncPanel.tsx). Same isAdmin gate as the join-queue
-  // entry above, not isWorkspaceAdmin — this is a per-room setting.
-  larkSyncActive: boolean;
-  onToggleLarkSync: () => void;
 
   // Messenger — the full-screen chat surface. The floating ChatPanel stays
   // for chatting while walking around; this is the one you sit down in.
@@ -237,18 +213,10 @@ export function Sidebar({
   onToggleZoneLock,
   simplifiedView,
   onToggleSimplifiedView,
-  dailyTaskActive,
-  onToggleDailyTask,
-  leaveActive,
-  onToggleLeave,
   calendarViewActive,
   onToggleCalendarView,
   attendanceViewActive,
   onToggleAttendanceView,
-  larkAttendanceActive,
-  onToggleLarkAttendance,
-  larkSyncActive,
-  onToggleLarkSync,
   messengerViewActive,
   onToggleMessengerView,
   joinQueueActive,
@@ -365,9 +333,6 @@ export function Sidebar({
                 ~30fps cap) for a low-RAM/integrated-GPU device. */}
             <MenuRow icon={<EyeFill size={15} />} label="Simplify" onClick={closeAnd(onToggleSimplifiedView)} title="Sembunyikan panel HUD dan kurangi beban render — cocok untuk perangkat low-spec" />
             {!isGuest && (
-              <MenuRow icon={<TableIcon size={15} />} label={dailyTaskActive ? 'Tutup Daily Task' : 'Daily Task'} active={dailyTaskActive} onClick={closeAnd(onToggleDailyTask)} />
-            )}
-            {!isGuest && (
               <MenuRow icon={<ChatDotsFill size={15} />} label={messengerViewActive ? 'Tutup Chat' : 'Chat'} active={messengerViewActive} onClick={closeAnd(onToggleMessengerView)} />
             )}
             {isAdmin && (
@@ -381,29 +346,18 @@ export function Sidebar({
             {!isGuest && (
               <MenuRow icon={<CalendarEvent size={15} />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
             )}
+            {/* Absensi + Cuti keduanya hidup di AttendanceApp (Cuti adalah tab
+                di dalamnya, lihat components/Attendance/AttendanceApp.tsx), jadi
+                satu baris menu ini membuka dua-duanya — tak ada baris "Cuti"
+                terpisah. */}
             {!isGuest && (
-              <MenuRow icon={<Airplane size={15} />} label={leaveActive ? 'Tutup Cuti' : 'Cuti'} active={leaveActive} onClick={closeAnd(onToggleLeave)} />
-            )}
-            {/* A2 — Absensi kini otomatis lewat Lark Attendance (check-in dipicu
-                di /auth/me). Menu MeetKai lama disembunyikan (flag false) supaya
-                tak ada pencatatan manual baru; komponen AttendanceApp & data
-                historis sengaja TIDAK dihapus — cukup ubah flag utk kembalikan. */}
-            {ATTENDANCE_MENU_ENABLED && (
               <MenuRow icon={<ClockHistory size={15} />} label={attendanceViewActive ? 'Tutup Absensi' : 'Absensi'} active={attendanceViewActive} onClick={closeAnd(onToggleAttendanceView)} />
-            )}
-            {/* A12 — new Lark-backed attendance panel (check-in auto on login,
-                checkout here or in the Lark app). */}
-            {!isGuest && (
-              <MenuRow icon={<ClockHistory size={15} />} label={larkAttendanceActive ? 'Tutup Absensi' : 'Absensi'} active={larkAttendanceActive} onClick={closeAnd(onToggleLarkAttendance)} />
             )}
             {/* Productivity Analytics — every real employee's own "cermin
                 evaluasi diri" (see PanelId's doc comment in gameStore.ts for
                 why this is NOT nested inside the admin-only Konsol Admin). */}
             {!isGuest && (
               <MenuRow icon={<BarChartFill size={15} />} label={myAnalyticsActive ? 'Tutup Analitik Saya' : 'Analitik Saya'} active={myAnalyticsActive} onClick={closeAnd(onToggleMyAnalytics)} />
-            )}
-            {isAdmin && (
-              <MenuRow icon={<ArrowLeftRight size={15} />} label={larkSyncActive ? 'Tutup Lark Sync' : 'Lark Sync'} active={larkSyncActive} onClick={closeAnd(onToggleLarkSync)} />
             )}
             {isWorkspaceAdmin && (
               <MenuRow icon={<ShieldLock size={15} />} label={adminViewActive ? 'Tutup Konsol Admin' : 'Konsol Admin'} active={adminViewActive} onClick={closeAnd(onToggleAdminView)} />
@@ -463,7 +417,7 @@ export function Sidebar({
                 counterpart to Spotlight (voice). One-shot action like Guest
                 Link above — App.tsx's handleBroadcast prompts for the text. */}
             {canBroadcast && (
-              <MenuRow icon={<VolumeUpFill size={15} />} label="Broadcast" onClick={closeAnd(onBroadcast)} title="Kirim pengumuman teks ke semua orang di room ini (tersinkron ke Lark)" />
+              <MenuRow icon={<VolumeUpFill size={15} />} label="Broadcast" onClick={closeAnd(onBroadcast)} title="Kirim pengumuman teks ke semua orang di room ini" />
             )}
             {isAdmin && (
               <MenuRow icon={<Tools size={15} />} label="Edit Room" onClick={closeAnd(onOpenRoomEditor)} />
