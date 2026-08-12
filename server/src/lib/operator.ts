@@ -10,7 +10,7 @@ import { AuthRequest } from '../middleware/auth';
 // normalization convention (see routes/google.ts, routes/orgInvite.ts).
 export function isOperatorEmail(email: string | null | undefined): boolean {
   if (!email) return false;
-  const raw = process.env.OPERATOR_EMAILS;
+  const raw = getConfig().OPERATOR_EMAILS;
   if (!raw) return false;
   const normalized = email.trim().toLowerCase();
   return raw
