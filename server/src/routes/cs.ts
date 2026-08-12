@@ -117,11 +117,16 @@ cs.post('/cs/session', authenticateToken, async (req: AuthRequest, res: Response
 });
 
 // POST /api/cs/session/:id/message — user sends a message.
+// - Every message, in EVERY mode, is mirrored to n8n/WA in real time from
+//   the very first one — not just after an explicit handoff — so an admin
+//   watching the WA side sees the conversation live from message one.
 // - 'bot' mode: typing exactly "admin" triggers the handoff (same as the
 //   "Hubungi admin" button, see the /handoff route below); anything else is
-//   matched against the FAQ (matchFaq), with offerAdmin signaling a miss.
-// - 'human' mode: every message is relayed to n8n instead (Tahap 3's
-//   "pesan lanjutan user selama mode human juga diteruskan").
+//   ALSO matched against the FAQ (matchFaq), with offerAdmin signaling a
+//   miss — the bot still answers instantly regardless of whether the
+//   mirror-relay itself succeeds (see the fire-and-forget call below).
+// - 'human' mode: same relay, awaited this time so a failure can be shown
+//   (Tahap 3's "pesan lanjutan user selama mode human juga diteruskan").
 // Admin replies arriving back (Tahap 4) are a separate path — POST
 // /api/cs/reply, pushed to the client over its own socket, not fetched here.
 cs.post('/cs/session/:id/message', authenticateToken, async (req: AuthRequest, res: Response) => {
@@ -135,6 +140,7 @@ cs.post('/cs/session/:id/message', authenticateToken, async (req: AuthRequest, r
     if (!session || session.userId !== req.userId) return res.status(404).json({ error: 'Sesi CS tidak ditemukan' });
 
     const userMessage = await prisma.csMessage.create({ data: { sessionId: session.id, from: 'user', text } });
+    const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
 
     let botMessage: SerializedMessage | null = null;
     let offerAdmin = false;
@@ -142,8 +148,8 @@ cs.post('/cs/session/:id/message', authenticateToken, async (req: AuthRequest, r
     let relayed: boolean | null = null;
 
     if (session.mode === 'bot' && text.toLowerCase() === 'admin') {
-      const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
       const result = await postToN8n({ sessionId: session.id, userName: user?.displayName ?? 'User', userId: req.userId!, message: text });
+      relayed = result.ok;
       if (result.ok) {
         mode = 'human';
         await prisma.csSession.update({ where: { id: session.id }, data: { mode: 'human' } });
@@ -153,6 +159,14 @@ cs.post('/cs/session/:id/message', authenticateToken, async (req: AuthRequest, r
         offerAdmin = true;
       }
     } else if (session.mode === 'bot') {
+      // Fire-and-forget — awaiting here would make an ordinary FAQ question
+      // wait on n8n's round trip (up to 8s, postToN8n's own timeout) before
+      // the bot could answer at all. postToN8n never throws (its own
+      // try/catch always resolves to {ok, error}), so there's nothing to
+      // catch here; a failed relay is only ever logged server-side, never
+      // shown as a chat error on this path — the bot experience must never
+      // degrade just because n8n is down or misconfigured.
+      void postToN8n({ sessionId: session.id, userName: user?.displayName ?? 'User', userId: req.userId!, message: text });
       const match = matchFaq(text);
       const replyText = match?.answer ?? FALLBACK_TEXT;
       offerAdmin = !match;
@@ -162,7 +176,6 @@ cs.post('/cs/session/:id/message', authenticateToken, async (req: AuthRequest, r
       // client shows one persistent "connected to admin" banner instead of
       // repeating a status line after every message). A failed relay still
       // leaves the message stored above so it isn't lost, just unsent.
-      const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
       const result = await postToN8n({ sessionId: session.id, userName: user?.displayName ?? 'User', userId: req.userId!, message: text });
       relayed = result.ok;
       if (!result.ok) {
