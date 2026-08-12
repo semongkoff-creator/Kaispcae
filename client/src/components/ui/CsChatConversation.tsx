@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { SendFill } from 'react-bootstrap-icons';
+import { SendFill, Whatsapp } from 'react-bootstrap-icons';
 import { api, CsMessage } from '@/services/api';
 import { useCsSocket, CsReplyPayload } from '@/hooks/useCsSocket';
 
@@ -28,6 +28,11 @@ export function CsChatConversation({ active, onUnread }: CsChatConversationProps
   const [messages, setMessages] = useState<CsMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [offerAdmin, setOfferAdmin] = useState(false);
+  // wa.me deep link — set whenever a message/handoff response includes one
+  // (see routes/cs.ts's buildWhatsAppLink), cleared on the next send/handoff
+  // so it only shows right after the trigger that produced it, same
+  // lifecycle as offerAdmin above.
+  const [waLink, setWaLink] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -72,6 +77,7 @@ export function CsChatConversation({ active, onUnread }: CsChatConversationProps
     setLoading(true);
     setError(null);
     setOfferAdmin(false);
+    setWaLink(null);
     const optimisticId = `local-${Date.now()}`;
     setMessages((prev) => [...prev, { id: optimisticId, from: 'user', text, createdAt: new Date().toISOString() }]);
     try {
@@ -82,6 +88,7 @@ export function CsChatConversation({ active, onUnread }: CsChatConversationProps
       });
       setOfferAdmin(res.offerAdmin);
       setMode(res.mode);
+      setWaLink(res.waLink);
     } catch {
       setError('Pesan gagal terkirim. Coba lagi.');
     } finally {
@@ -92,12 +99,14 @@ export function CsChatConversation({ active, onUnread }: CsChatConversationProps
   const requestAdmin = useCallback(async () => {
     if (!sessionId || loading) return;
     setOfferAdmin(false);
+    setWaLink(null);
     setLoading(true);
     setError(null);
     try {
       const res = await api.csHandoff(sessionId);
       setMode(res.mode);
       if (res.botMessage) setMessages((prev) => [...prev, res.botMessage!]);
+      setWaLink(res.waLink);
     } catch {
       setError('Gagal menghubungkan ke admin. Coba lagi.');
     } finally {
@@ -144,6 +153,18 @@ export function CsChatConversation({ active, onUnread }: CsChatConversationProps
             >
               Hubungi admin
             </button>
+          </div>
+        )}
+        {waLink && (
+          <div className="flex justify-start">
+            <a
+              href={waLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-[#25D366] hover:bg-[#20bd5a] text-white font-medium cursor-pointer"
+            >
+              <Whatsapp size={13} /> Chat di WhatsApp
+            </a>
           </div>
         )}
         {error && <p className="text-[11px] text-red-500 text-center">{error}</p>}

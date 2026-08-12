@@ -38,10 +38,9 @@ const MAX_MESSAGE_CHARS = 2000;
 
 const GREETING_TEXT = 'Halo! Ada yang bisa dibantu? Tanya seputar cara pakai KaiSpace, atau ketik "admin" kalau ingin bicara dengan tim kami.';
 const FALLBACK_TEXT = 'Maaf, aku belum punya jawaban untuk itu. Mau coba tanya dengan kata lain, atau langsung hubungi admin?';
-const CONNECTING_TEXT = 'Menghubungkan ke admin... Pesanmu sudah diteruskan, mohon tunggu balasannya di sini.';
 const HANDOFF_NOT_CONFIGURED_TEXT = 'Fitur hubungi admin belum tersedia saat ini. Coba lagi nanti.';
 const RELAY_FAILED_TEXT = 'Pesanmu gagal diteruskan ke admin. Coba kirim lagi.';
-const BUTTON_HANDOFF_MESSAGE = 'Pengguna meminta bantuan admin lewat tombol "Hubungi admin".';
+const WA_LINK_TEXT = 'Klik tombol di bawah untuk chat langsung dengan admin kami di WhatsApp.';
 
 interface SerializedMessage {
   id: string;
@@ -83,6 +82,22 @@ async function postToN8n(payload: { sessionId: string; userName: string; userId:
   }
 }
 
+// "Hubungi admin" — a plain wa.me deep link, not the n8n/WAHA relay above.
+// Opens WhatsApp (app or web) with the admin's number and a pre-filled
+// greeting; the actual conversation then happens directly in WhatsApp,
+// outside MeetKai entirely. Chosen over the n8n/WAHA bridge for reliability
+// — that path depends on an external workflow + WhatsApp session actually
+// being up end-to-end, which repeatedly wasn't. Real-time in-app sync
+// (mirroring the WA conversation back into this chat) is a possible later
+// upgrade, not this — see N8N_CS_WEBHOOK_URL/postToN8n above, left intact
+// for that.
+function buildWhatsAppLink(userName: string): string | null {
+  const cfg = getConfig();
+  if (!cfg.CS_ADMIN_WHATSAPP_NUMBER) return null;
+  const text = `Halo, saya ${userName} butuh bantuan terkait KaiSpace.`;
+  return `https://wa.me/${cfg.CS_ADMIN_WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`;
+}
+
 // POST /api/cs/session — find-or-create this user's CS session. Reuses a
 // recent one (see SESSION_REUSE_WINDOW_MS) so the conversation survives the
 // widget being closed and reopened, rather than minting a fresh row (and
@@ -117,14 +132,16 @@ cs.post('/cs/session', authenticateToken, async (req: AuthRequest, res: Response
 });
 
 // POST /api/cs/session/:id/message — user sends a message.
-// - 'bot' mode: typing exactly "admin" triggers the handoff (same as the
-//   "Hubungi admin" button, see the /handoff route below); anything else is
-//   matched against the FAQ (matchFaq), with offerAdmin signaling a miss.
-//   No relay to n8n/WA on this path — ordinary bot chat stays inside
-//   MeetKai entirely (tried mirroring every bot message once; reverted —
-//   noisy on the WA side for no benefit before a human is actually needed).
+// - 'bot' mode: typing exactly "admin" triggers the WhatsApp handoff (same
+//   as the "Hubungi admin" button, see the /handoff route below) — a wa.me
+//   link, not the n8n/WAHA relay (see buildWhatsAppLink's own comment for
+//   why); anything else is matched against the FAQ (matchFaq), with
+//   offerAdmin signaling a miss.
 // - 'human' mode: every message is relayed to n8n instead (Tahap 3's
-//   "pesan lanjutan user selama mode human juga diteruskan").
+//   "pesan lanjutan user selama mode human juga diteruskan") — nothing
+//   transitions a session into 'human' anymore (see below), so this path
+//   is currently unreachable through normal use; left in place for the
+//   real-time-sync upgrade mentioned in buildWhatsAppLink's comment.
 // Admin replies arriving back (Tahap 4) are a separate path — POST
 // /api/cs/reply, pushed to the client over its own socket, not fetched here.
 cs.post('/cs/session/:id/message', authenticateToken, async (req: AuthRequest, res: Response) => {
@@ -143,17 +160,16 @@ cs.post('/cs/session/:id/message', authenticateToken, async (req: AuthRequest, r
     let offerAdmin = false;
     let mode = session.mode;
     let relayed: boolean | null = null;
+    let waLink: string | null = null;
 
     if (session.mode === 'bot' && text.toLowerCase() === 'admin') {
       const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
-      const result = await postToN8n({ sessionId: session.id, userName: user?.displayName ?? 'User', userId: req.userId!, message: text });
-      relayed = result.ok;
-      if (result.ok) {
-        mode = 'human';
-        await prisma.csSession.update({ where: { id: session.id }, data: { mode: 'human' } });
-        botMessage = serialize(await prisma.csMessage.create({ data: { sessionId: session.id, from: 'bot', text: CONNECTING_TEXT } }));
+      const link = buildWhatsAppLink(user?.displayName ?? 'User');
+      if (link) {
+        waLink = link;
+        botMessage = serialize(await prisma.csMessage.create({ data: { sessionId: session.id, from: 'bot', text: WA_LINK_TEXT } }));
       } else {
-        botMessage = serialize(await prisma.csMessage.create({ data: { sessionId: session.id, from: 'bot', text: result.error! } }));
+        botMessage = serialize(await prisma.csMessage.create({ data: { sessionId: session.id, from: 'bot', text: HANDOFF_NOT_CONFIGURED_TEXT } }));
         offerAdmin = true;
       }
     } else if (session.mode === 'bot') {
@@ -182,6 +198,7 @@ cs.post('/cs/session/:id/message', authenticateToken, async (req: AuthRequest, r
       offerAdmin,
       mode,
       relayed,
+      waLink,
     });
   } catch (e) {
     console.error('[cs] send message error:', e);
@@ -191,10 +208,8 @@ cs.post('/cs/session/:id/message', authenticateToken, async (req: AuthRequest, r
 
 // POST /api/cs/session/:id/handoff — the "Hubungi admin" button's own
 // trigger, distinct from typing "admin" in the message box above but
-// sharing the exact same postToN8n/mode-flip logic. No free-text body: the
-// button has no message of its own, so a fixed, clearly-labeled line is
-// sent instead (n8n/the admin still sees the session's prior messages for
-// context via sessionId).
+// sharing the exact same buildWhatsAppLink logic (see its own comment).
+// No free-text body: the button has no message of its own.
 cs.post('/cs/session/:id/handoff', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const prisma = getPrisma();
@@ -202,21 +217,20 @@ cs.post('/cs/session/:id/handoff', authenticateToken, async (req: AuthRequest, r
     if (!session || session.userId !== req.userId) return res.status(404).json({ error: 'Sesi CS tidak ditemukan' });
 
     if (session.mode === 'human') {
-      return res.json({ mode: 'human', botMessage: null });
+      return res.json({ mode: 'human', botMessage: null, waLink: null });
     }
 
     const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { displayName: true } });
-    const result = await postToN8n({ sessionId: session.id, userName: user?.displayName ?? 'User', userId: req.userId!, message: BUTTON_HANDOFF_MESSAGE });
+    const link = buildWhatsAppLink(user?.displayName ?? 'User');
+    await prisma.csSession.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
 
-    if (!result.ok) {
-      const botMessage = serialize(await prisma.csMessage.create({ data: { sessionId: session.id, from: 'bot', text: result.error! } }));
-      await prisma.csSession.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
-      return res.json({ mode: 'bot', botMessage });
+    if (!link) {
+      const botMessage = serialize(await prisma.csMessage.create({ data: { sessionId: session.id, from: 'bot', text: HANDOFF_NOT_CONFIGURED_TEXT } }));
+      return res.json({ mode: 'bot', botMessage, waLink: null });
     }
 
-    await prisma.csSession.update({ where: { id: session.id }, data: { mode: 'human', updatedAt: new Date() } });
-    const botMessage = serialize(await prisma.csMessage.create({ data: { sessionId: session.id, from: 'bot', text: CONNECTING_TEXT } }));
-    return res.json({ mode: 'human', botMessage });
+    const botMessage = serialize(await prisma.csMessage.create({ data: { sessionId: session.id, from: 'bot', text: WA_LINK_TEXT } }));
+    return res.json({ mode: 'bot', botMessage, waLink: link });
   } catch (e) {
     console.error('[cs] handoff error:', e);
     return res.status(500).json({ error: 'Gagal menghubungkan ke admin' });
