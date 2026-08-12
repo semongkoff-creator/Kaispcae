@@ -2887,7 +2887,7 @@ function MainApp() {
         authUserId=""
         guestToken={guestSession.token}
         isGuest
-        currentUser={{ id: 'guest', name: guestSession.name, workspaceRole: 'member', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }}
+        currentUser={{ id: 'guest', name: guestSession.name, workspaceRole: 'member', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, isOperator: false }}
         theme={theme}
         onToggleTheme={toggleTheme}
       />

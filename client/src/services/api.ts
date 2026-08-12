@@ -259,6 +259,10 @@ export interface UserProfile {
   // completed, so a brand-new (or pre-existing, pre-feature) account still
   // sees it once.
   tutorialCompletedAt?: string | null;
+  // Deployment operator (see specs/2026-08-12-operator-org-list-design.md)
+  // — gates the "Semua Organisasi" panel entry point. Cosmetic on the
+  // client; the server re-checks it on every /api/operator/* request.
+  isOperator?: boolean;
 }
 
 export interface RoomInfo {

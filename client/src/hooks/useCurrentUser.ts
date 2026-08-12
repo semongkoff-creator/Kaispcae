@@ -11,6 +11,7 @@ export interface CurrentUser {
   avatarUrl?: string;
   workspaceRole: WorkspaceRole;
   timezone: string;
+  isOperator: boolean;
 }
 
 export function toCurrentUser(user: UserProfile): CurrentUser {
@@ -21,6 +22,7 @@ export function toCurrentUser(user: UserProfile): CurrentUser {
     // Fall back to the browser's zone if the profile somehow lacks one, so
     // times are never silently rendered in the wrong zone.
     timezone: user.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Jakarta',
+    isOperator: user.isOperator ?? false,
   };
 }
 
