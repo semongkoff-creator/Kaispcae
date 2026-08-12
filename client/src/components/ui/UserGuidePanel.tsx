@@ -55,8 +55,7 @@ const SECTIONS: GuideSection[] = [
       { text: 'Kamera: klik tombol kamera, atau tekan V.', image: { src: '/assets/img/guide/av-langkah-2.png', label: 'Nyala/mati kamera' } },
       { text: 'Suara otomatis mengeras/pelan sesuai jarak avatar (proximity) — tidak perlu klik "join call" seperti Zoom.', image: { src: '/assets/img/guide/av-langkah-3.png', label: 'Proximity audio' } },
       { text: 'Share screen: klik tombol share-screen di toolbar bawah untuk mulai, klik lagi untuk berhenti.', image: { src: '/assets/img/guide/av-langkah-4.png', label: 'Share screen' } },
-      { text: 'Atur volume satu orang saja (tanpa mematikan mic-nya): arahkan kursor ke tile video orang itu, slider muncul di tempat namanya.', image: { src: '/assets/img/guide/av-langkah-5.png', label: 'Volume per orang' } },
-      { text: 'Ganti mic/speaker/kamera yang dipakai: klik ikon titik-tiga (⋮) di toolbar bawah.', image: { src: '/assets/img/guide/av-langkah-6.png', label: 'Pilih device' } },
+      { text: 'Ganti mic/speaker/kamera yang dipakai: klik ikon titik-tiga (⋮) di toolbar bawah.', image: { src: '/assets/img/guide/av-langkah-5.png', label: 'Pilih device' } },
     ],
   },
   {
