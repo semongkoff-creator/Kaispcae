@@ -39,10 +39,10 @@ const SECTIONS: GuideSection[] = [
     title: 'General Operation Method',
     icon: <Joystick size={15} />,
     steps: [
-      { text: 'Gerak pakai tombol panah atau W A S D. Bisa juga klik langsung di peta — karaktermu otomatis jalan ke sana, mencari jalan sendiri tanpa nabrak meja/tembok.', image: { src: '/assets/img/guide/general-langkah-1.png', label: 'Gerak & klik-untuk-jalan' } },
-      { text: 'Tahan Shift atau R sambil jalan untuk lari lebih cepat.', image: { src: '/assets/img/guide/general-langkah-2.png', label: 'Lari (Shift/R)' } },
-      { text: 'Tombol interaksi: Space (duduk di kursi terdekat / lompat), X (buka gambar-video-file di dekatmu), F (pakai teleport/pintu/objek interaktif terdekat), Z (colek orang terdekat).', image: { src: '/assets/img/guide/general-langkah-3.png', label: 'Tombol interaksi' } },
-      { text: 'Masuk room: klik kartu room-nya di Lobby. Keluar: klik ikon rumah di sidebar kiri, atau tombol merah di toolbar bawah — kamu tetap login, cuma balik ke daftar Space.', image: { src: '/assets/img/guide/general-langkah-4.png', label: 'Masuk & keluar room' } },
+      { text: 'Gerak pakai tombol panah atau W A S D. Bisa juga klik langsung di peta — karaktermu otomatis jalan ke sana, mencari jalan sendiri tanpa nabrak meja/tembok.' },
+      { text: 'Tahan Shift atau R sambil jalan untuk lari lebih cepat.' },
+      { text: 'Tombol interaksi: Space (duduk di kursi terdekat / lompat), X (buka gambar-video-file di dekatmu), F (pakai teleport/pintu/objek interaktif terdekat), Z (colek orang terdekat).' },
+      { text: 'Masuk room: klik kartu room-nya di Lobby. Keluar: klik ikon rumah di sidebar kiri, atau tombol merah di toolbar bawah — kamu tetap login, cuma balik ke daftar Space.' },
     ],
   },
   {
@@ -51,11 +51,11 @@ const SECTIONS: GuideSection[] = [
     title: 'Audio/Video Guide',
     icon: <CameraVideoFill size={15} />,
     steps: [
-      { text: 'Mic: klik tombol mikrofon di toolbar bawah, atau tekan M.', image: { src: '/assets/img/guide/av-langkah-1.png', label: 'Mute/unmute mic' } },
-      { text: 'Kamera: klik tombol kamera, atau tekan V.', image: { src: '/assets/img/guide/av-langkah-2.png', label: 'Nyala/mati kamera' } },
-      { text: 'Suara otomatis mengeras/pelan sesuai jarak avatar (proximity) — tidak perlu klik "join call" seperti Zoom.', image: { src: '/assets/img/guide/av-langkah-3.png', label: 'Proximity audio' } },
-      { text: 'Share screen: klik tombol share-screen di toolbar bawah untuk mulai, klik lagi untuk berhenti.', image: { src: '/assets/img/guide/av-langkah-4.png', label: 'Share screen' } },
-      { text: 'Ganti mic/speaker/kamera yang dipakai: klik ikon titik-tiga (⋮) di toolbar bawah.', image: { src: '/assets/img/guide/av-langkah-5.png', label: 'Pilih device' } },
+      { text: 'Mic: klik tombol mikrofon di toolbar bawah, atau tekan M.' },
+      { text: 'Kamera: klik tombol kamera, atau tekan V.' },
+      { text: 'Suara otomatis mengeras/pelan sesuai jarak avatar (proximity) — tidak perlu klik "join call" seperti Zoom.' },
+      { text: 'Share screen: klik tombol share-screen di toolbar bawah untuk mulai, klik lagi untuk berhenti.' },
+      { text: 'Ganti mic/speaker/kamera yang dipakai: klik ikon titik-tiga (⋮) di toolbar bawah.' },
     ],
   },
   {
@@ -161,8 +161,8 @@ const SECTIONS: GuideSection[] = [
     title: 'Problem Solving Checklist',
     icon: <ExclamationTriangleFill size={15} />,
     steps: [
-      { text: 'Mic tidak bunyi → cek izin mikrofon di pengaturan browser, cek device yang aktif lewat menu ⋮ di toolbar, pastikan tombol mic tidak sedang merah (mute).', image: { src: '/assets/img/guide/trouble-mic.png', label: 'Mic tidak bunyi' } },
-      { text: 'Kamera hitam / tidak muncul → cek izin kamera di browser, cek pilihan device lewat menu ⋮.', image: { src: '/assets/img/guide/trouble-camera.png', label: 'Kamera hitam' } },
+      { text: 'Mic tidak bunyi → cek izin mikrofon di pengaturan browser, cek device yang aktif lewat menu ⋮ di toolbar, pastikan tombol mic tidak sedang merah (mute).' },
+      { text: 'Kamera hitam / tidak muncul → cek izin kamera di browser, cek pilihan device lewat menu ⋮.' },
       { text: 'Tidak bisa masuk room → room-nya mungkin perlu persetujuan admin (tunggu approval), atau kamu tamu yang belum di-approve masuk zona tertentu.' },
       { text: 'Tidak dengar / tidak lihat orang lain → cek indikator "Koneksi terputus" di tile-nya dulu; kalau tidak ada, coba dekati lagi (ini aplikasi proximity-based) atau cek slider volume orang itu belum sengaja dikecilkan.' },
     ],
@@ -173,8 +173,8 @@ const SECTIONS: GuideSection[] = [
     title: 'Screenshot',
     icon: <CameraFill size={15} />,
     steps: [
-      { text: 'Buka menu ☰ (Room Features) di sidebar kiri, lalu klik "Add Media".', image: { src: '/assets/img/guide/screenshot-langkah-1.png', label: 'Buka Add Media' } },
-      { text: 'Klik tombol "Screenshot" — otomatis mengunduh gambar peta (tanpa ikut ter-foto UI/chat/sidebar) ke komputermu.', image: { src: '/assets/img/guide/screenshot-langkah-2.png', label: 'Klik tombol Screenshot' } },
+      { text: 'Buka menu ☰ (Room Features) di sidebar kiri, lalu klik "Add Media".' },
+      { text: 'Klik tombol "Screenshot" — otomatis mengunduh gambar peta (tanpa ikut ter-foto UI/chat/sidebar) ke komputermu.' },
     ],
   },
   {
