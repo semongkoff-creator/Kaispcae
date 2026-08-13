@@ -1,4 +1,4 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode } from 'react';
 import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, ShieldLock, Buildings, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill, GearFill, HourglassSplit } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
@@ -10,6 +10,19 @@ import { Role } from '@kaispace/shared';
 import { Tooltip } from '@/components/ui/Tooltip';
 
 interface SidebarProps {
+  // Fix panel numpuk — the "Room Features" dropdown is now one of the
+  // mutually-exclusive panels (activePanel === 'roomFeatures' in
+  // gameStore.ts), not its own independent boolean, so it can never stay
+  // open behind (or on top of) Teleport/Kalender/etc. onCloseRoomFeatures is
+  // guarded (only clears activePanel if this menu is still the one open) —
+  // used after a menu item's own action runs, so closing this menu never
+  // clobbers a panel that action just opened (e.g. clicking "Teleport"
+  // itself opens Teleport via activePanel, and closing this menu afterward
+  // must not immediately null that back out).
+  roomFeaturesActive: boolean;
+  onToggleRoomFeatures: () => void;
+  onCloseRoomFeatures: () => void;
+
   onEditAvatar: () => void;
   // QA #1/#6/#7 — reopens the first-run walkthrough (App.tsx's TutorialModal,
   // shown once automatically on entry) on demand.
@@ -185,6 +198,9 @@ interface SidebarProps {
 // collapsed form below) stays reachable even while Meeting View is active;
 // there'd otherwise be no way to mute/exit without leaving that view first.
 export function Sidebar({
+  roomFeaturesActive,
+  onToggleRoomFeatures,
+  onCloseRoomFeatures,
   onEditAvatar,
   onOpenTutorial,
   onOpenMemberList,
@@ -255,8 +271,6 @@ export function Sidebar({
   theme,
   onToggleTheme,
 }: SidebarProps) {
-  const [showFeaturesMenu, setShowFeaturesMenu] = useState(false);
-
   // Simplified View intentionally still hides everything ELSE (room-meta
   // text, participant list, minimap — see App.tsx), but the rail can no
   // longer disappear along with it now that Simplify's own toggle lives
@@ -276,19 +290,19 @@ export function Sidebar({
 
   const closeAnd = (action: () => void) => () => {
     action();
-    setShowFeaturesMenu(false);
+    onCloseRoomFeatures();
   };
 
   return (
     <div className="absolute left-0 top-0 h-full w-12 z-50 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-r border-purple-100 dark:border-gray-700 shadow-sm flex flex-col items-center py-3 gap-0.5 pointer-events-auto">
       <div className="relative">
         <Tooltip label="Room Features" detail="Buka menu pengaturan & kontrol room." side="right">
-          <SidebarIcon active={showFeaturesMenu} onClick={() => setShowFeaturesMenu((v) => !v)}>
+          <SidebarIcon active={roomFeaturesActive} onClick={onToggleRoomFeatures}>
             <List size={16} />
           </SidebarIcon>
         </Tooltip>
 
-        {showFeaturesMenu && (
+        {roomFeaturesActive && (
           <div
             className="absolute top-0 left-full ml-2 w-64 max-h-[85vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-purple-100 dark:border-gray-700 p-2 z-50"
             onMouseDown={(e) => e.stopPropagation()}
@@ -296,7 +310,7 @@ export function Sidebar({
             <div className="flex items-center justify-between px-2 py-1.5 mb-1">
               <span className="text-gray-900 dark:text-gray-100 text-sm font-semibold">Room Features</span>
               <Tooltip label="Tutup" detail="Tutup panel Room Features." side="right">
-                <button onClick={() => setShowFeaturesMenu(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
+                <button onClick={onCloseRoomFeatures} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
                   <XLg size={14} />
                 </button>
               </Tooltip>

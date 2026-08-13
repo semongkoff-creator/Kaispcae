@@ -84,6 +84,15 @@ export interface ActivityEvent {
 export type PanelId =
   | 'chat'
   | 'participants'
+  // The "Room Features" dropdown menu (Sidebar.tsx) — folded into the same
+  // single-slot mutual exclusion as every panel it links to (Teleport,
+  // Kalender, etc.). It used to be its own local boolean in Sidebar.tsx,
+  // independent of activePanel, so it could stay open behind (and visually
+  // collide with) whichever real panel was open — opening Teleport never
+  // closed it and vice versa. Folding it in here means opening ANY panel
+  // (including this menu itself) now automatically closes whatever else was
+  // open, the same guarantee every other entry in this union already had.
+  | 'roomFeatures'
   | 'teleport'
   | 'addMedia'
   | 'adminPanel'

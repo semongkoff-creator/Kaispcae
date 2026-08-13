@@ -1884,6 +1884,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           "Show UI" exit icon internally when simplified, since that's the
           one thing that must always stay reachable. */}
       <Sidebar
+        roomFeaturesActive={activePanel === 'roomFeatures'}
+        onToggleRoomFeatures={() => openPanel('roomFeatures')}
+        onCloseRoomFeatures={() => { if (useGameStore.getState().activePanel === 'roomFeatures') closePanel(); }}
         onOpenSettings={() => setShowSettings(true)}
         hasActiveBooking={zoneLock.zoneQueueTicket?.mode === 'booking'}
         onReopenBookingNotice={() => setBookingNoticeDismissed(false)}
