@@ -371,15 +371,21 @@ export function MessengerApp({
     // position now instead of inner padding.
     //
     // w-1/2 (not a fixed px width) is what actually makes this "setengah
-    // layar" — App.tsx's bottom toolbar re-centers itself on the remaining
-    // half whenever this panel is open (see messengerViewActive there), and
-    // that guarantee only holds if this panel's width is genuinely half the
-    // viewport rather than a fixed value that drifts out of sync on
-    // different screen sizes. min-w keeps the two-column layout inside from
-    // going unusably narrow; max-w keeps it from looking absurdly wide on an
-    // ultrawide monitor — neither changes the "half screen" contract on any
-    // realistic desktop width.
-    <div className="absolute inset-y-0 left-14 z-40 flex w-1/2 min-w-[560px] max-w-[900px] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 overflow-hidden border-r border-purple-100 dark:border-gray-700 shadow-2xl">
+    // layar". App.tsx's bottom toolbar stays fixed dead-centre regardless of
+    // whether this panel is open — it never re-centres to dodge it (that was
+    // tried and reverted; chat opening must never move anything else on
+    // screen). min-w keeps the two-column layout inside from going unusably
+    // narrow; max-w keeps it from looking absurdly wide on an ultrawide
+    // monitor — neither changes the "half screen" contract on any realistic
+    // desktop width.
+    //
+    // z-[55] — deliberately ABOVE the HUD toolbar's z-50 (see App.tsx's HUD
+    // Controls comment): chat is meant to sit in FRONT of the toolbar where
+    // they overlap, covering it, not the other way around. This used to be
+    // z-40 (toolbar above, staying clickable through the overlap) — flipped
+    // per explicit request, since a half-covered-by-its-own-chat toolbar
+    // read as a layering bug, not a feature.
+    <div className="absolute inset-y-0 left-14 z-[55] flex w-1/2 min-w-[560px] max-w-[900px] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 overflow-hidden border-r border-purple-100 dark:border-gray-700 shadow-2xl">
       {/* ── Kolom daftar percakapan ───────────────────────────────── */}
       <aside className="w-[300px] shrink-0 border-r border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-900">
         <div className="px-4 pt-4 pb-3">
