@@ -317,3 +317,34 @@ export function matchFaq(userText: string): CsFaqEntry | null {
   }
   return bestScore > 0 ? best : null;
 }
+
+// Standalone greetings ("halo", "hi", "assalamualaikum") — checked BEFORE
+// matchFaq so these don't fall through to "belum punya jawaban". Unambiguous
+// even as a single bare word — nobody opens a real question with just "hai".
+const GREETING_WORDS = ['halo', 'hallo', 'hai', 'hi', 'hey', 'hei', 'yo', 'assalamualaikum', "assalamu'alaikum", 'wassalamualaikum'];
+// Time-of-day greetings ("pagi", "siang") are NOT unambiguous as a bare
+// word — "pagi ini saya mau tanya soal absensi" also starts with "pagi".
+// Only counted alone, with a short tail ("pagi min"), or prefixed by
+// "selamat"/"met" — gated by the word-count caps in isGreeting below.
+const TIME_GREETING_WORDS = ['pagi', 'siang', 'sore', 'malam'];
+
+// Strips punctuation (keeping the apostrophe in "assalamu'alaikum") rather
+// than just trimming the ends, so "hai," / "halo!!" / "pagi." still match on
+// their first word — a real question that happens to START with a
+// greeting-shaped word ("hai, gimana cara mute mic") still falls through to
+// matchFaq instead of being swallowed as small talk, via the word-count caps.
+function greetingWords(userText: string): string[] {
+  return userText.toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, ' ').trim().split(/\s+/).filter(Boolean);
+}
+
+export function isGreeting(userText: string): boolean {
+  const words = greetingWords(userText);
+  if (words.length === 0) return false;
+  const [first, second] = words;
+
+  if (GREETING_WORDS.includes(first) && words.length <= 4) return true;
+  if (TIME_GREETING_WORDS.includes(first) && words.length <= 2) return true;
+  if ((first === 'selamat' || first === 'met') && second && TIME_GREETING_WORDS.includes(second) && words.length <= 3) return true;
+
+  return false;
+}

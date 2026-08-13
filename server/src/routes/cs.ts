@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import { getPrisma } from '../lib/prisma';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
 import { getConfig } from '../config';
-import { matchFaq } from '../data/csFaq';
+import { matchFaq, isGreeting } from '../data/csFaq';
 
 const cs = Router();
 
@@ -15,6 +15,12 @@ const SESSION_REUSE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_MESSAGE_CHARS = 2000;
 
 const GREETING_TEXT = 'Halo! 👋 Selamat datang di KaiSpace, senang kamu di sini! Ada yang bisa dibantu? Tanya aja seputar cara pakainya, atau ketik "admin" kalau mau ngobrol langsung sama tim kami.';
+// Reply to a greeting typed mid-conversation ("halo"/"hai"/"pagi") — see
+// isGreeting in data/csFaq.ts. Deliberately shorter than GREETING_TEXT above
+// (no "Selamat datang di KaiSpace") — that welcome only makes sense once,
+// when the session first opens; saying it again because someone said "hai"
+// mid-chat would read as the bot not tracking that they're already here.
+const GREETING_REPLY_TEXT = 'Halo! 👋 Ada yang bisa dibantu? Kamu bisa tanya soal fitur, atau ketik "admin" untuk terhubung ke tim kami.';
 const FALLBACK_TEXT = 'Maaf, aku belum punya jawaban untuk itu. Mau coba tanya dengan kata lain, atau langsung hubungi admin?';
 const HANDOFF_NOT_CONFIGURED_TEXT = 'Fitur hubungi admin belum tersedia saat ini. Coba lagi nanti.';
 const WA_LINK_TEXT = 'Klik tombol di bawah untuk chat langsung dengan admin kami di WhatsApp.';
@@ -110,6 +116,12 @@ cs.post('/cs/session/:id/message', authenticateToken, async (req: AuthRequest, r
         botMessage = serialize(await prisma.csMessage.create({ data: { sessionId: session.id, from: 'bot', text: HANDOFF_NOT_CONFIGURED_TEXT } }));
         offerAdmin = true;
       }
+    } else if (isGreeting(text)) {
+      // Checked before matchFaq — a bare "halo"/"hai"/"pagi" would otherwise
+      // score 0 against every FAQ entry and fall through to
+      // FALLBACK_TEXT ("belum punya jawaban"), which reads as broken for
+      // something as basic as a greeting.
+      botMessage = serialize(await prisma.csMessage.create({ data: { sessionId: session.id, from: 'bot', text: GREETING_REPLY_TEXT } }));
     } else {
       const match = matchFaq(text);
       const replyText = match?.answer ?? FALLBACK_TEXT;
