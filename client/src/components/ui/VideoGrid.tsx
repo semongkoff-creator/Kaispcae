@@ -966,12 +966,21 @@ export const VideoTile = memo(function VideoTile({
           its timestamp). Shared with the in-world emote system, so a reaction
           here also shows above the avatar and vice-versa. */}
       {reaction && !isScreen && (
-        <span
-          key={reaction.ts}
-          className={`absolute left-1/2 -translate-x-1/2 bottom-6 pointer-events-none select-none animate-reaction-float ${large ? 'text-4xl' : 'text-2xl'}`}
-          style={{ textShadow: '0 1px 3px rgba(0,0,0,0.4)' }}
-        >
-          {reaction.emoji}
+        // Centering (translateX) lives on this OUTER span, animation
+        // (translateY/scale, via animate-reaction-float) on the INNER one —
+        // same element would work for the very first frame, but a CSS
+        // `transform` set by @keyframes replaces rather than composes with
+        // a static transform utility already on that element, so the
+        // horizontal centering was getting silently wiped out once the
+        // animation kicked in (same bug, same fix, as EmoteWheel.tsx).
+        // Nesting keeps each transform in its own box, so both apply.
+        <span key={reaction.ts} className="absolute left-1/2 -translate-x-1/2 bottom-6 pointer-events-none select-none">
+          <span
+            className={`block animate-reaction-float ${large ? 'text-4xl' : 'text-2xl'}`}
+            style={{ textShadow: '0 1px 3px rgba(0,0,0,0.4)' }}
+          >
+            {reaction.emoji}
+          </span>
         </span>
       )}
       {/* Raised-hand cue — amber badge, top-left, gently waving so it draws

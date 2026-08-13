@@ -8,8 +8,12 @@
 import { getNotificationSettings } from './browserNotifications';
 import { calcGain } from '@/hooks/useProximity';
 
-const NUDGE_SRC = '/assets/sfx/nudge.wav';
-const NUDGE_STRONG_SRC = '/assets/sfx/nudge-strong.wav';
+// Nudge ("senggol"/"colek", Z key) — same punch-effect clip as Slap below
+// (both are user-facing "colek" in different parts of the UI: this one via
+// the Z hotkey, Slap via the Participants panel's "Colek (sadarkan)" row),
+// requested to sound the same.
+const NUDGE_SRC = '/assets/sfx/slap.mp3';
+const NUDGE_STRONG_SRC = '/assets/sfx/slap.mp3';
 const SLAP_SRC = '/assets/sfx/slap.mp3';
 const HAND_RAISE_SRC = '/assets/sfx/hand-raise.mp3';
 

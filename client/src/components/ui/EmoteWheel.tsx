@@ -54,16 +54,26 @@ export function EmoteWheel({ open, onSelect, onClose }: EmoteWheelProps) {
 
   return (
     // Straight horizontal row anchored above the bottom-center HUD toolbar
-    // (bottom-24 clears the toolbar's own ~64px pill + gap) — was a ring of
+    // (mb-24 clears the toolbar's own ~64px pill + gap) — was a ring of
     // buttons centered on the whole screen (cx/cy/r trig), which visually
     // surrounded the avatar rather than reading as a toolbar menu. Same
     // full-screen click-outside-to-close backdrop as before; z-[60] — above
     // the persistent HUD's z-50, since this is a transient overlay the HUD
     // shouldn't render in front of while it's open (unlike MeetingView,
     // deliberately z-40 so the HUD stays usable during that mode).
-    <div className="absolute inset-0 z-[60]" onClick={onClose}>
+    //
+    // Centered via the OUTER flex container (justify-center), not the usual
+    // left-1/2 -translate-x-1/2 on this row itself — animate-fade-in's own
+    // keyframes set `transform: translateY(...)`, which replaces rather than
+    // combines with a translateX already on the same element, so the row's
+    // LEFT EDGE (not its center) ended up pinned to the viewport's midpoint
+    // once the animation settled. Flexbox centering needs no transform at
+    // all, so it's immune to that clash — confirmed via a live bounding-box
+    // measurement (row was starting exactly at viewport-center-x, not
+    // centered on it) before landing on this fix.
+    <div className="absolute inset-0 z-[60] flex items-end justify-center" onClick={onClose}>
       <div
-        className="absolute bottom-24 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2 pointer-events-auto animate-fade-in"
+        className="mb-24 flex items-center gap-1.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2 pointer-events-auto animate-fade-in"
         onClick={(e) => e.stopPropagation()}
       >
         {EMOTE_LIST.map((emote) => {
