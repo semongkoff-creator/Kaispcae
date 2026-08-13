@@ -45,6 +45,20 @@ const ICE_SERVERS: RTCConfiguration = {
 // "speaking" means.
 const SPEAKING_THRESHOLD = 15;
 
+// Per-peer audio bug diagnosis — a peer stuck in ICE 'disconnected' (as
+// opposed to 'failed') was never retried at all: the only automatic retry
+// lived on the 'failed' branch below, and 'disconnected' has no timeout of
+// its own, no UI signal, nothing. Browsers often self-heal a brief
+// 'disconnected' blip within a second or two without help — this is why the
+// bug was never "every call", just some pairs, some of the time — but when
+// the ICE agent doesn't recover on its own, this app previously had zero
+// path back to audio for that one peer short of a full page reload (a fresh
+// RTCPeerConnection gets a fresh ICE gathering attempt, which is why reload
+// looked like a fix without anything actually being repaired). Long enough
+// that a real transient blip clears on its own first, short enough that
+// someone genuinely stuck isn't silent for too long.
+const ICE_DISCONNECTED_TIMEOUT_MS = 5000;
+
 // Fallback classifier, used only until the presenter's RTC_SCREEN_SHARE
 // announcement is known. A camera is published in the same MediaStream as the
 // microphone; a screen comes from getDisplayMedia in a stream of its own with
@@ -183,6 +197,13 @@ interface PeerConnection {
   retryCount: number;
   remoteDescSet: boolean;
   iceQueue: RTCIceCandidateInit[];
+  // Per-peer audio bug — set while ICE sits in 'disconnected', cleared the
+  // moment it leaves that state for any reason (recovered, failed, or torn
+  // down). Lets oniceconnectionstatechange treat a disconnect that never
+  // clears within ICE_DISCONNECTED_TIMEOUT_MS the same as an outright
+  // 'failed' one, and lets disconnectFromPlayer cancel it so a stale timer
+  // never fires against a peer that's already gone.
+  disconnectedTimer: ReturnType<typeof setTimeout> | null;
   // Guards onnegotiationneeded (see createPeer) — addTrack() during
   // createPeer's initial setup fires it immediately on both sides, but the
   // very first offer/answer is already handled manually below (to preserve
@@ -764,6 +785,7 @@ class WebRTCService {
       videoEligible: includeVideo,
       iceQueue: [],
       initialNegotiationDone: false,
+      disconnectedTimer: null,
     };
 
     if (this.localStream) {
@@ -934,11 +956,63 @@ class WebRTCService {
       }
     };
 
+    // Shared by the 'failed' branch below AND the 'disconnected' timeout —
+    // same one-shot retry, then give up and let a future proximity tick (or
+    // the peer going out of range and back in) pick it up, same as any other
+    // not-yet-connected peer. Named so both call sites stay in lockstep
+    // instead of drifting into two slightly different recovery paths.
+    const handleConnectionBroken = () => {
+      if (peer.retryCount < 1) {
+        peer.retryCount++;
+        console.log('[webrtc] retrying connection to', remoteId);
+        this.disconnectFromPlayer(remoteId);
+        setTimeout(() => this.connectToPlayer(remoteId), 1000);
+      } else {
+        // The one automatic retry above already failed too — this is a
+        // permanent failure, not a transient blip. Nothing left to try on
+        // its own; the next proximity tick (if this player is still
+        // nearby) is what eventually gets a fresh attempt going, via the
+        // normal connectToPlayer() path — same as any other "not yet
+        // connected" peer.
+        console.warn('[webrtc] connection to', remoteId, 'failed permanently after retry');
+        this.onPeerConnectionStatus?.(remoteId, true);
+      }
+    };
+
     pc.oniceconnectionstatechange = () => {
       // [webrtc-diag] §4 — the single most decisive signal. Never reaching
       // 'connected'/'completed' means no media path exists at all, which is a
       // TURN problem, not an audio-code problem.
       diag('ICE state', { peer: remoteId, ice: pc.iceConnectionState, conn: pc.connectionState });
+
+      // Per-peer audio bug — 'disconnected' used to fall through here with no
+      // handling at all: no retry, no UI signal, and (see connectToPlayer's
+      // early-return on `this.peers.has(remoteId)`) no other path in this
+      // app ever revisits an already-created peer while it's still in
+      // proximity range. A pair stuck like this stayed silent for the rest
+      // of the session unless one side reloaded. Give the ICE agent a real
+      // window to self-heal first (very common, usually within a second or
+      // two) — only escalate if 'disconnected' is still true once the timer
+      // actually fires.
+      if (pc.iceConnectionState === 'disconnected') {
+        if (!peer.disconnectedTimer) {
+          peer.disconnectedTimer = setTimeout(() => {
+            peer.disconnectedTimer = null;
+            if (pc.iceConnectionState === 'disconnected') {
+              console.warn('[webrtc] ICE stuck in disconnected for', remoteId, '— treating as failed');
+              handleConnectionBroken();
+            }
+          }, ICE_DISCONNECTED_TIMEOUT_MS);
+        }
+      } else if (peer.disconnectedTimer) {
+        // Left 'disconnected' for any other reason (recovered, moved on to
+        // 'failed' below, or the connection is being torn down) — the
+        // pending timer above no longer applies and must not fire later
+        // against whatever state this peer is in by then.
+        clearTimeout(peer.disconnectedTimer);
+        peer.disconnectedTimer = null;
+      }
+
       // The only honest proof that TURN is doing anything: which candidate
       // pair actually won. 'relay' on either end means media is going through
       // the TURN server; 'host'/'srflx' means it connected directly and TURN
@@ -948,21 +1022,7 @@ class WebRTCService {
         this.onPeerConnectionStatus?.(remoteId, false);
       }
       if (pc.iceConnectionState === 'failed') {
-        if (peer.retryCount < 1) {
-          peer.retryCount++;
-          console.log('[webrtc] retrying connection to', remoteId);
-          this.disconnectFromPlayer(remoteId);
-          setTimeout(() => this.connectToPlayer(remoteId), 1000);
-        } else {
-          // The one automatic retry above already failed too — this is a
-          // permanent failure, not a transient blip. Nothing left to try on
-          // its own; the next proximity tick (if this player is still
-          // nearby) is what eventually gets a fresh attempt going, via the
-          // normal connectToPlayer() path — same as any other "not yet
-          // connected" peer.
-          console.warn('[webrtc] connection to', remoteId, 'failed permanently after retry');
-          this.onPeerConnectionStatus?.(remoteId, true);
-        }
+        handleConnectionBroken();
       }
     };
 
@@ -1133,6 +1193,15 @@ class WebRTCService {
     const peer = this.peers.get(id);
     if (peer) {
       peer.pc.close();
+      // Cancel the pending disconnected->failed escalation (if any) — this
+      // peer is going away for some other reason (walked out of range, the
+      // retry above tearing down before its own reconnect, explicit
+      // cleanup), so that timer must not fire later and call
+      // handleConnectionBroken() against a peer that no longer exists.
+      if (peer.disconnectedTimer) {
+        clearTimeout(peer.disconnectedTimer);
+        peer.disconnectedTimer = null;
+      }
       // Detach before dropping the reference — an <audio> still holding a
       // srcObject keeps the stream (and its decoder) alive after the peer
       // is gone.
