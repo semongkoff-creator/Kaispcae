@@ -2251,22 +2251,18 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             Soundboard/ActivityFeed's own top-left panel spot is untouched,
             see the top-14 left-16 block above. */}
         <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} isGuest={isGuest} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} onReport={(userId, name) => setReportTarget({ userId, name })} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
-        {/* Layout chat (Slack-style) — Messenger docks the LEFT HALF of the
-            screen (see MessengerApp.tsx's `w-1/2 min-w-[560px] max-w-[900px]`
-            panel), so centering this bar on the full viewport would land it
-            visually on top of that panel on anything narrower than a very
-            wide monitor. Re-centering it on the remaining (right) half
-            instead is a structural guarantee independent of screen width,
-            not a z-index coincidence: z-50 already keeps it clickable either
-            way, but this keeps it from ever visually sitting on the panel.
-            The arbitrary `left` value is the exact midpoint between the
-            panel's right edge and the viewport's right edge — i.e. half of
-            `56px + clamp(560px,50vw,900px)` (the panel's own right edge,
-            mirroring its min/max exactly) plus half the viewport — NOT a
-            rough fraction like 75%, so it stays centered in the actual
-            remaining space at every width instead of only "close enough" on
-            common ones. */}
-        <div className={`absolute bottom-6 -translate-x-1/2 z-50 flex items-center gap-2.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2 transition-[left] duration-300 ease-out ${messengerViewActive ? 'left-[calc(28px+clamp(280px,25vw,450px)+50vw)]' : 'left-1/2'}`}>
+        {/* Fixed dead-centre, always — Messenger/Chat (see MessengerApp.tsx)
+            is a pure `position: absolute` overlay docked to the left half of
+            the screen; it never participates in layout flow, so it can't
+            push this bar (or the video tile strip, or the minimap) anywhere
+            by itself. An earlier version deliberately re-centred this bar
+            into the remaining right-hand space while chat was open, to keep
+            it from visually sitting on top of the panel — reverted on
+            request: chat opening should never move anything else on screen,
+            full stop. z-50 (above the panel's z-40) already keeps this bar
+            clickable even where the panel visually overlaps it, same as any
+            other overlay-over-HUD case in this app. */}
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2">
           <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
           <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
           <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
