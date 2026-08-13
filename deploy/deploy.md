@@ -42,7 +42,7 @@ restart saja tidak cukup.
 Yang tidak ikut otomatis dan harus disesuaikan manual:
 
 - **Nginx host VPS** — buat `/etc/nginx/sites-enabled/<domain-anda>` yang
-  `proxy_pass` ke `http://127.0.0.1:8090` (contoh lengkap di bagian Nginx di bawah),
+  `proxy_pass` ke `http://127.0.0.1:8091` (contoh lengkap di bagian Nginx di bawah),
   lalu terbitkan sertifikat TLS untuk domain baru.
 - **Google OAuth** — `GOOGLE_REDIRECT_URI` di `.env` harus jadi
   `https://<domain-anda>/api/auth/google/callback`, **dan** URI yang sama harus
@@ -69,7 +69,7 @@ docker compose build server nginx
 docker compose run --rm server npx prisma migrate deploy --schema=server/prisma/schema.prisma
 docker compose up -d server nginx
 docker compose ps
-curl -fsS http://127.0.0.1:8090/api/health
+curl -fsS http://127.0.0.1:8091/api/health
 ```
 
 Deploy ini rebuild `server` dan `nginx`, jadi perubahan backend Socket.IO, build frontend Vite, dan `nginx/nginx.conf` ikut naik.
@@ -127,7 +127,7 @@ docker compose logs --tail=100 nginx
 Cek health endpoint lokal:
 
 ```bash
-curl -fsS http://127.0.0.1:8090/api/health
+curl -fsS http://127.0.0.1:8091/api/health
 ```
 
 Cek header asset setelah perubahan gzip/cache:
@@ -159,7 +159,7 @@ systemctl reload nginx
 Nginx host saat ini perlu tetap proxy ke container client:
 
 ```nginx
-proxy_pass http://127.0.0.1:8090;
+proxy_pass http://127.0.0.1:8091;
 ```
 
 ## Troubleshooting
@@ -184,8 +184,8 @@ Jika health check gagal:
 ```bash
 docker compose ps
 docker compose logs --tail=100 server nginx
-curl -I http://127.0.0.1:8090
-curl -fsS http://127.0.0.1:8090/api/health
+curl -I http://127.0.0.1:8091
+curl -fsS http://127.0.0.1:8091/api/health
 ```
 
 Jika asset masih belum gzip/cache setelah deploy:

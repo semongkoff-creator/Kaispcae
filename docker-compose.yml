@@ -7,7 +7,7 @@
 # against the other product's data. Pinning the name here makes the isolation
 # a property of the file rather than of whatever the folder happens to be
 # called. Keep it distinct from the other product's project name.
-name: kaispace
+name: office_tenant
 
 services:
   postgres:
@@ -15,7 +15,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: kaispace
+      POSTGRES_DB: office_tenant
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -36,11 +36,11 @@ services:
       dockerfile: server/Dockerfile
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/kaispace
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/office_tenant
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set — see .env.example}
-      CLIENT_URL: ${PUBLIC_URL:-http://localhost:8090}
-      CORS_ORIGIN: ${PUBLIC_URL:-http://localhost:8090}
+      CLIENT_URL: ${PUBLIC_URL:-http://localhost:8091}
+      CORS_ORIGIN: ${PUBLIC_URL:-http://localhost:8091}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -73,12 +73,12 @@ services:
       context: .
       dockerfile: client/Dockerfile
       args:
-        VITE_SERVER_URL: ${PUBLIC_URL:-http://localhost:8090}
+        VITE_SERVER_URL: ${PUBLIC_URL:-http://localhost:8091}
         VITE_TURN_URL: ""
         VITE_TURN_USERNAME: ""
         VITE_TURN_CREDENTIAL: ""
     ports:
-      - '127.0.0.1:8090:80'
+      - '127.0.0.1:8091:80'
     depends_on:
       - server
 

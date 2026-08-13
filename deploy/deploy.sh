@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8090/api/health}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8091/api/health}"
 PULL=1
 BUILD=1
 MIGRATE=1
@@ -26,7 +26,7 @@ Options:
   -h, --help         Show this help
 
 Environment:
-  HEALTH_URL         Default: http://127.0.0.1:8090/api/health
+  HEALTH_URL         Default: http://127.0.0.1:8091/api/health
 USAGE
 }
 

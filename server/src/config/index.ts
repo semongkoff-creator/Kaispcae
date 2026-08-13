@@ -6,7 +6,7 @@ const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'staging', 'production']).default('development'),
     PORT: z.coerce.number().default(3001),
-    // The database name is deliberately 'kaispace', NOT the 'virtualmeet' this
+    // The database name is deliberately 'office_tenant', NOT the 'virtualmeet' this
     // codebase was forked from: that other name belongs to a SEPARATE product
     // whose own deployment still runs against it. This value is a fallback for
     // when DATABASE_URL is unset, so if it named the shared database, a missing
@@ -14,7 +14,7 @@ const envSchema = z
     // data and migrate/drop columns out from under it — a failure that looks
     // like nothing at all until something is already destroyed. Keep these two
     // names distinct.
-    DATABASE_URL: z.string().default('postgresql://postgres:postgres@localhost:5432/kaispace'),
+    DATABASE_URL: z.string().default('postgresql://postgres:postgres@localhost:5432/office_tenant'),
     REDIS_URL: z.string().optional(),
     JWT_SECRET: z.string().default(DEV_JWT_SECRET),
     // 30d, not 7d — this is a "sign in once, stay signed in" app, not a
