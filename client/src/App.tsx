@@ -63,6 +63,7 @@ import { StatusPickModal } from './components/ui/StatusPickModal';
 import { MemberListPanel } from './components/ui/MemberListPanel';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
 import { ReportUserModal } from './components/ui/ReportUserModal';
+import { GlobalModal } from './components/ui/GlobalModal';
 import { SoundboardPanel } from './components/ui/SoundboardPanel';
 import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
 import { AwayReasonModal } from './components/ui/AwayReasonModal';
@@ -87,6 +88,7 @@ import { useTheme, Theme } from './hooks/useTheme';
 import { api, UserPreferences } from './services/api';
 import { createDefaultRoom, isTileBlocked } from './utils/createDefaultRoom';
 import { useGameStore } from './stores/gameStore';
+import { showAlert, showConfirm, showPrompt } from '@/stores/modalStore';
 import { useSocket } from './hooks/useSocket';
 import { useChannelChat } from './hooks/useChannelChat';
 import { useProximity, findZoneAt } from './hooks/useProximity';
@@ -815,14 +817,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // on without a separate "list my links" endpoint, which doesn't exist yet.
   const lastGuestInviteId = useRef<string | null>(null);
   const handleCreateGuestLink = useCallback(async () => {
-    const hoursRaw = window.prompt('Guest link berlaku berapa jam? (kosongkan = tanpa batas waktu)', '24');
+    const hoursRaw = await showPrompt('Guest link berlaku berapa jam? (kosongkan = tanpa batas waktu)', '24');
     if (hoursRaw === null) return;
-    const oneTime = window.confirm('Link ini HANYA BISA DIPAKAI SEKALI?\n\nOK = ya, sekali pakai — otomatis tidak berlaku lagi setelah satu tamu masuk.\nBatal = tidak, bisa dipakai berkali-kali sampai kedaluwarsa.');
+    const oneTime = await showConfirm('Link ini HANYA BISA DIPAKAI SEKALI?\n\nOK = ya, sekali pakai — otomatis tidak berlaku lagi setelah satu tamu masuk.\nBatal = tidak, bisa dipakai berkali-kali sampai kedaluwarsa.');
     // Password is mandatory on every link (server enforces this too — this
     // prompt is just the input, not the source of truth). Empty input means
     // "auto-generate", not "no password" — the server never creates a link
     // without one.
-    const passwordRaw = window.prompt('Password link (kosongkan = dibuatkan otomatis):', '');
+    const passwordRaw = await showPrompt('Password link (kosongkan = dibuatkan otomatis):', '');
     if (passwordRaw === null) return;
     const trimmed = hoursRaw.trim();
     const expiresInHours = trimmed ? Number(trimmed) : undefined;
@@ -835,7 +837,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       // fit in the clipboard alongside the link — this is the ONLY moment
       // the plain password is ever shown, so it has to be read here, not
       // copy-pasted from a second place.
-      window.alert(`Guest link dibuat.\n\nLink (sudah disalin ke clipboard):\n${url}\n\nPassword: ${result.password}\n\nBagikan link DAN password ini ke tamu — keduanya dibutuhkan untuk masuk.`);
+      await showAlert(`Guest link dibuat.\n\nLink (sudah disalin ke clipboard):\n${url}\n\nPassword: ${result.password}\n\nBagikan link DAN password ini ke tamu — keduanya dibutuhkan untuk masuk.`);
       useGameStore.getState().addActivity('🔗 Guest link dibuat.');
     } catch (e) {
       console.error('[guest] create invite failed:', e);
@@ -851,10 +853,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const handleRevokeGuestLink = useCallback(async () => {
     const id = lastGuestInviteId.current;
     if (!id) {
-      window.alert('Belum ada guest link yang dibuat di sesi ini untuk dicabut.');
+      await showAlert('Belum ada guest link yang dibuat di sesi ini untuk dicabut.');
       return;
     }
-    if (!window.confirm('Cabut guest link terakhir yang dibuat?\n\nLink tidak bisa dipakai lagi, dan tamu yang sedang masuk lewat link ini akan langsung dikeluarkan.')) return;
+    if (!(await showConfirm('Cabut guest link terakhir yang dibuat?\n\nLink tidak bisa dipakai lagi, dan tamu yang sedang masuk lewat link ini akan langsung dikeluarkan.'))) return;
     try {
       await api.revokeGuestInvite(roomSlug, id);
       lastGuestInviteId.current = null;
@@ -868,8 +870,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // QA #9/#10 — CEO/admin text broadcast. Same prompt-based "quick admin
   // config" convention as Guest Link above — the server independently
   // re-checks 'broadcast:text' (roomHandler.ts), this is just the trigger.
-  const handleBroadcast = useCallback(() => {
-    const text = (window.prompt('Pesan broadcast ke SEMUA orang di room ini:') ?? '').trim();
+  const handleBroadcast = useCallback(async () => {
+    const text = ((await showPrompt('Pesan broadcast ke SEMUA orang di room ini:')) ?? '').trim();
     if (!text) return;
     emitBroadcastSend(text);
   }, [emitBroadcastSend]);
@@ -1061,13 +1063,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     return () => window.removeEventListener('keydown', handler);
   }, [moduleOpen]);
 
-  const handleTilePaint = useCallback((x: number, y: number, type: TileType) => {
+  const handleTilePaint = useCallback(async (x: number, y: number, type: TileType) => {
     const state = useGameStore.getState();
     const currentTiles = state.tiles.map((row) => row.map((t) => ({ ...t })));
     if (!currentTiles[y]?.[x]) return;
 
     if (type === 'portal') {
-      const target = window.prompt('Target room code to travel to (from the room URL/share code):', '');
+      const target = await showPrompt('Kode room tujuan (dari URL/kode share room):', '');
       if (!target || !target.trim()) return;
       currentTiles[y][x].type = type;
       currentTiles[y][x].portalTarget = target.trim();
@@ -1864,6 +1866,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       </div>
 
       <AwayReasonModal open={awayPromptOpen} onResolve={resolveAwayPrompt} />
+      {/* Global replacement for window.alert/confirm/prompt — see
+          modalStore.ts's showAlert/showConfirm/showPrompt. Mounted once here
+          so every caller anywhere in the tree can just await one of those
+          instead of rendering its own overlay. */}
+      <GlobalModal />
 
       {/* ZEP-style left icon rail — every room-level feature button used to
           be its own absolutely-positioned floating pill scattered around

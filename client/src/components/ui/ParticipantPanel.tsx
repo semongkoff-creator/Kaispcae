@@ -5,6 +5,7 @@ import { roleAtLeast, Role, WorkMode } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { showConfirm } from '@/stores/modalStore';
 
 // One labelled row inside a participant's action menu. Icon plus wording,
 // because five bare icons crowded into a row said nothing until you hovered
@@ -535,7 +536,7 @@ function ParticipantRow({
                     label="Tarik Paksa"
                     detail="Pindahkan orang ini ke lokasimu langsung, tanpa persetujuan."
                     danger
-                    onClick={pick(() => { if (window.confirm(`Tarik paksa ${name} ke sini? Tidak perlu persetujuan dia — beda dari "Panggil ke sini".`)) onForcePull(); })}
+                    onClick={pick(async () => { if (await showConfirm(`Tarik paksa ${name} ke sini? Tidak perlu persetujuan dia — beda dari "Panggil ke sini".`, { danger: true })) onForcePull(); })}
                   />
                 )}
                 {onSlap && (
@@ -572,7 +573,7 @@ function ParticipantRow({
                     label="Matikan Mic (Admin)"
                     detail="Matikan mic orang ini secara paksa — dia bisa menyalakannya lagi sendiri."
                     danger
-                    onClick={pick(() => { if (window.confirm(`Matikan mic ${name}? Dia bisa nyalain lagi sendiri kapan saja.`)) onForceMute(); })}
+                    onClick={pick(async () => { if (await showConfirm(`Matikan mic ${name}? Dia bisa nyalain lagi sendiri kapan saja.`, { danger: true })) onForceMute(); })}
                   />
                 )}
                 {onKick && (
@@ -581,7 +582,7 @@ function ParticipantRow({
                     label="Keluarkan"
                     detail="Keluarkan orang ini dari room — dia bisa masuk lagi kapan saja."
                     danger
-                    onClick={pick(() => { if (window.confirm(`Keluarkan ${name} dari room ini? Dia bisa masuk lagi kapan saja.`)) onKick(); })}
+                    onClick={pick(async () => { if (await showConfirm(`Keluarkan ${name} dari room ini? Dia bisa masuk lagi kapan saja.`, { danger: true })) onKick(); })}
                   />
                 )}
               </div>,

@@ -3,6 +3,7 @@ import { DateTime } from 'luxon';
 import { XLg, Trash, CameraVideo, People, GeoAlt, Bell, ArrowRepeat } from 'react-bootstrap-icons';
 import { EditScope, Rsvp, RSVP_LABELS, describeRule } from '@kaispace/shared';
 import { calendarApi, CalendarEventDto, CalendarSummary, MeetingRoomDto, EventInput, BusyBlock } from './api';
+import { showConfirm } from '@/stores/modalStore';
 
 const RRULE_PRESETS: { label: string; value: string | null }[] = [
   { label: 'Tidak berulang', value: null },
@@ -133,7 +134,7 @@ export function EventPanel({
 
   const remove = async () => {
     if (!event) return;
-    if (!window.confirm('Hapus acara ini?')) return;
+    if (!(await showConfirm('Hapus acara ini?', { danger: true }))) return;
     try {
       await calendarApi.deleteEvent(event.id, event.isRecurring ? scope : 'all', event.recurrenceId);
       onSaved(); onClose();

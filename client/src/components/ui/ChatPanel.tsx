@@ -11,6 +11,7 @@ import { Tooltip } from './Tooltip';
 import { CsChatConversation } from './CsChatConversation';
 import { useProfiles } from '@/hooks/useProfiles';
 import { textMentionsUser, renderWithMentions } from '@/utils/mentions';
+import { showConfirm } from '@/stores/modalStore';
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024; // matches server/src/routes/uploads.ts's multer limit
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
@@ -729,7 +730,7 @@ export function ChatPanel({
                             {isOwn && onDeleteMessage && (
                               <Tooltip label="Hapus" detail="Hapus pesan ini.">
                                 <button
-                                  onClick={() => { if (window.confirm('Delete this message?')) onDeleteMessage(m.id); }}
+                                  onClick={async () => { if (await showConfirm('Hapus pesan ini?', { danger: true })) onDeleteMessage(m.id); }}
                                   className="text-[10px] text-gray-400 hover:text-red-500 cursor-pointer inline-flex items-center gap-1"
                                 >
                                   <TrashFill size={9} /> Delete
@@ -820,7 +821,7 @@ export function ChatPanel({
                                   )}
                                   {onDeleteMessage && (
                                     <Tooltip label="Hapus" detail="Hapus balasan ini.">
-                                      <button onClick={() => { if (window.confirm('Delete this reply?')) onDeleteMessage(r.id); }} className="text-gray-400 hover:text-red-500 cursor-pointer">
+                                      <button onClick={async () => { if (await showConfirm('Hapus balasan ini?', { danger: true })) onDeleteMessage(r.id); }} className="text-gray-400 hover:text-red-500 cursor-pointer">
                                         <TrashFill size={9} />
                                       </button>
                                     </Tooltip>

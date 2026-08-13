@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { DateTime } from 'luxon';
 import { PlusLg, Trash, GeoAlt, PeopleFill } from 'react-bootstrap-icons';
+import { showConfirm, showPrompt } from '@/stores/modalStore';
 
 const API = '/api';
 async function req<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -41,7 +42,7 @@ export function CalendarSettings() {
   };
 
   const remove = async (r: Room) => {
-    if (!window.confirm(`Hapus ruang “${r.name}”? Booking yang ada akan kehilangan ruangnya.`)) return;
+    if (!(await showConfirm(`Hapus ruang “${r.name}”? Booking yang ada akan kehilangan ruangnya.`, { danger: true }))) return;
     try { await req(`/admin/meeting-rooms/${r.id}`, { method: 'DELETE' }); await load(); }
     catch (e) { setError(e instanceof Error ? e.message : 'Gagal'); }
   };
@@ -60,7 +61,7 @@ export function CalendarSettings() {
   };
 
   const cancel = async (b: Booking) => {
-    const reason = window.prompt(`Batalkan booking "${b.title}"? Alasan (opsional):`);
+    const reason = await showPrompt(`Batalkan booking "${b.title}"? Alasan (opsional):`);
     if (reason === null) return;
     try {
       await req(`/admin/bookings/${b.id}`, { method: 'DELETE', body: JSON.stringify({ reason }) });

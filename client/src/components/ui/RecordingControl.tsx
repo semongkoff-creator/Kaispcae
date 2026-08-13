@@ -3,6 +3,7 @@ import { RecordCircleFill, StopCircleFill, Download } from 'react-bootstrap-icon
 import { Recording } from '@kaispace/shared';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { api, ApiError } from '@/services/api';
+import { showPrompt } from '@/stores/modalStore';
 
 interface RecordingTarget {
   userId: string;
@@ -33,8 +34,8 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [error, setError] = useState('');
 
-  const startWithTarget = (targetUserId: string) => {
-    const title = window.prompt('Judul rekaman:', 'Sesi Meeting');
+  const startWithTarget = async (targetUserId: string) => {
+    const title = await showPrompt('Judul rekaman:', 'Sesi Meeting');
     setShowPicker(false);
     if (!title?.trim()) return;
     onStart(targetUserId, title.trim());

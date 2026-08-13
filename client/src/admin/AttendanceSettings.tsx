@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { PlusLg, GeoAlt } from 'react-bootstrap-icons';
 import { adminApi, AdminMember } from './api';
+import { showPrompt } from '@/stores/modalStore';
 
 const API = '/api';
 async function req<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -59,17 +60,17 @@ export function AttendanceSettings() {
   };
 
   const addType = async () => {
-    const name = window.prompt('Nama jenis cuti:');
+    const name = await showPrompt('Nama jenis cuti:');
     if (!name?.trim()) return;
-    const quota = Number(window.prompt('Kuota per tahun (hari):', '12') ?? 12);
+    const quota = Number(await showPrompt('Kuota per tahun (hari):', '12', { inputType: 'number' }) ?? 12);
     try { await req('/admin/attendance/leave-types', { method: 'POST', body: JSON.stringify({ name: name.trim(), quotaPerYear: quota }) }); await load(); }
     catch (e) { setError(e instanceof Error ? e.message : 'Gagal'); }
   };
 
   const addHoliday = async () => {
-    const date = window.prompt('Tanggal libur (YYYY-MM-DD):');
+    const date = await showPrompt('Tanggal libur (YYYY-MM-DD):');
     if (!date) return;
-    const name = window.prompt('Nama libur:', 'Libur nasional') ?? 'Libur';
+    const name = await showPrompt('Nama libur:', 'Libur nasional') ?? 'Libur';
     try { await req('/admin/attendance/holidays', { method: 'POST', body: JSON.stringify({ date, name }) }); flash('Libur ditambahkan.'); }
     catch (e) { setError(e instanceof Error ? e.message : 'Gagal'); }
   };
