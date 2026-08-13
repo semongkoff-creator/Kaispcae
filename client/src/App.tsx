@@ -155,18 +155,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const playerName = useGameStore((s) => s.localPlayer.name);
   const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
-  const [showEditor, setShowEditor] = useState(false);
   // ZEP-style User Guide — Sidebar's "Panduan" row (Room Features menu).
-  // Used to reopen the first-run TutorialModal walkthrough in dismissible
-  // mode; now opens the richer section+screenshot UserGuidePanel instead.
   // Independent of MainApp's own first-run TutorialModal gate (shown before
   // <Game> ever mounts, for new accounts/guests) — that one is untouched,
   // different purpose (a forced onboarding step, not a reference doc).
-  const [showUserGuide, setShowUserGuide] = useState(false);
-  // QA (Presence checklist item #8, "Member list akurat") — workspace-wide
-  // member list, opened from Sidebar's "Member" row. Same plain-overlay-state
-  // pattern as showEditor/showUserGuide above.
-  const [showMemberList, setShowMemberList] = useState(false);
+  //
+  // Fix panel numpuk, round 2 — showEditor/showUserGuide/showMemberList used
+  // to each be their own independent useState here, so e.g. Avatar Setup and
+  // the Member List could both be open at once. Folded into the same
+  // activePanel single-slot store the Sidebar's own Room Features dropdown
+  // and Soundboard already used (round 1) — see the *Active consts below.
 
   // Media state from store — setters only. The VALUES (localSpeaking,
   // speakingPlayers) are deliberately NOT read here any more (tile flicker
@@ -1015,7 +1013,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const [reportTarget, setReportTarget] = useState<{ userId: string; name: string } | null>(null);
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
   const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
@@ -1030,6 +1027,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // never turn into a stale decision.
   const joinQueueActive = activePanel === 'joinQueue';
   const [pendingJoinCount, setPendingJoinCount] = useState(0);
+  const avatarSetupActive = activePanel === 'avatarSetup';
+  const userGuideActive = activePanel === 'userGuide';
+  const memberListActive = activePanel === 'memberList';
+  const settingsActive = activePanel === 'settings';
+  const bookingFormActive = activePanel === 'bookingForm';
 
   // Keep the badge fresh for admins. Polled rather than driven by the
   // JOIN_REQUESTED broadcast the server already sends: wiring a new listener
@@ -1161,7 +1163,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     // the one that actually persists it. Login is mandatory before a room is
     // reachable at all, so there's no logged-out case to gate this behind.
     api.saveAvatar(config).catch(() => {});
-    setShowEditor(false);
+    if (useGameStore.getState().activePanel === 'avatarSetup') closePanel();
   }, [emitAvatarUpdate, localUserId]);
 
   // ─── AFK auto-away (ZEP/Gather-style) ────────────────────────────────
@@ -1229,7 +1231,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // rather than cached, since it's a rare action and always wants the
   // current admin config, not a stale snapshot from page load.
   const [bookingZone, setBookingZone] = useState<{ zoneId: string; name: string } | null>(null);
-  const [showBookingForm, setShowBookingForm] = useState(false);
   const meetingViewActive = activePanel === 'meeting';
   const [miniModeWindow, setMiniModeWindow] = useState<Window | null>(null);
   const [miniModeError, setMiniModeError] = useState<string | null>(null);
@@ -1528,7 +1529,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             return;
           }
           setBookingZone({ zoneId: zone.zoneId, name: zone.name });
-          setShowBookingForm(true);
+          openPanel('bookingForm');
         }).catch(() => {});
       }
     };
@@ -1688,7 +1689,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             {!isGuest && (
               <SoundboardPanel roomSlug={roomSlug} emitSoundboardPlay={emitSoundboardPlay} open={activePanel === 'soundboard'} onToggle={() => openPanel('soundboard')} onClose={closePanel} />
             )}
-            <ActivityFeed />
+            <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
           </div>
           {!isGuest && <MusicPlayerWidget zoneId={currentZone?.id ?? null} />}
         </>
@@ -1893,12 +1894,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         roomFeaturesActive={activePanel === 'roomFeatures'}
         onToggleRoomFeatures={() => openPanel('roomFeatures')}
         onCloseRoomFeatures={() => { if (useGameStore.getState().activePanel === 'roomFeatures') closePanel(); }}
-        onOpenSettings={() => setShowSettings(true)}
+        onOpenSettings={() => openPanel('settings')}
         hasActiveBooking={zoneLock.zoneQueueTicket?.mode === 'booking'}
         onReopenBookingNotice={() => setBookingNoticeDismissed(false)}
-        onEditAvatar={() => setShowEditor(true)}
-        onOpenTutorial={() => setShowUserGuide(true)}
-        onOpenMemberList={() => setShowMemberList(true)}
+        onEditAvatar={() => openPanel('avatarSetup')}
+        onOpenTutorial={() => openPanel('userGuide')}
+        onOpenMemberList={() => openPanel('memberList')}
         localRole={localRole}
         manualStatus={manualStatus}
         onPickPresence={handlePresencePick}
@@ -2158,23 +2159,23 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         />
       )}
 
-      {showEditor && (
+      {avatarSetupActive && (
         <AvatarSetup
           initialConfig={savedConfig}
           onSave={handleAvatarSave}
-          onClose={() => setShowEditor(false)}
+          onClose={closePanel}
           localUserId={localUserId}
         />
       )}
 
-      {showUserGuide && <UserGuidePanel onClose={() => setShowUserGuide(false)} />}
+      {userGuideActive && <UserGuidePanel onClose={closePanel} />}
 
-      {showMemberList && (
+      {memberListActive && (
         <MemberListPanel
           localUserId={authUserId}
           currentRoomSlug={roomSlug}
           emitRosterListRequest={emitRosterListRequest}
-          onClose={() => setShowMemberList(false)}
+          onClose={closePanel}
         />
       )}
 
@@ -2536,20 +2537,20 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onClose={() => setShowEmoteWheel(false)}
       />
 
-      {showBookingForm && bookingZone && (
+      {bookingFormActive && bookingZone && (
         <BookingForm
           zoneName={bookingZone.name}
           busy={zoneLock.zoneQueueBusy}
           error={zoneLock.zoneQueueError}
-          onClose={() => setShowBookingForm(false)}
+          onClose={closePanel}
           onSubmit={async (bookingStart, bookingEnd, topic) => {
             const ok = await zoneLock.bookZoneQueueSlot(bookingZone.zoneId, bookingStart, bookingEnd, topic);
-            if (ok) setShowBookingForm(false);
+            if (ok) closePanel();
           }}
         />
       )}
 
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} onUpdatePreferences={onUpdatePreferences} onLogout={onLogout} />}
+      {settingsActive && <SettingsPanel onClose={closePanel} onUpdatePreferences={onUpdatePreferences} onLogout={onLogout} />}
 
       <Minimap
         players={Object.values(allPlayers)}

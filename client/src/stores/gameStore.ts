@@ -113,7 +113,23 @@ export type PanelId =
   // Operator-only, cross-org organization list (see
   // specs/2026-08-12-operator-org-list-design.md) — gated on
   // currentUser.isOperator, not workspaceRole, unlike adminConsole above.
-  | 'operatorConsole';
+  | 'operatorConsole'
+  // Fix panel numpuk, round 2 — these six used to be independent
+  // useState(false) booleans in App.tsx (or, for activityFeed, entirely
+  // self-contained inside the component itself with no external control at
+  // all), so none of them closed when another panel opened, and none of
+  // the "real" panels closed them either — confirmed live: Soundboard
+  // (already activePanel-gated) and Recent Activity (not gated at all)
+  // stayed open together. Folding all six into this same union is the
+  // exhaustive fix — every future entry added here automatically joins the
+  // same mutual exclusion, so this class of bug can't reopen one panel at
+  // a time again.
+  | 'activityFeed'
+  | 'avatarSetup'
+  | 'userGuide'
+  | 'memberList'
+  | 'settings'
+  | 'bookingForm';
 
 // Keeps the feed skimmable and bounds its memory — old entries just fall
 // off the end rather than needing a separate pruning pass (see

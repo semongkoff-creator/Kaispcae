@@ -1,22 +1,36 @@
-import { useState } from 'react';
 import { ClockHistory, ChevronUp, ChevronDown } from 'react-bootstrap-icons';
 import { useGameStore } from '@/stores/gameStore';
 import { Tooltip } from '@/components/ui/Tooltip';
+
+interface ActivityFeedProps {
+  open: boolean;
+  onToggle: () => void;
+}
 
 // Client-only log (see gameStore.ts's activityEvents doc comment) of what's
 // happened recently in this room — who joined/left, media added, notices
 // pinned, recordings started/ended. Not a durable audit trail: it starts
 // empty on every join and only covers this session, same honesty-about-scope
 // as chat having no server-side history either.
-export function ActivityFeed() {
-  const [open, setOpen] = useState(false);
+//
+// Fix panel numpuk, round 2 — open/onToggle now come from the parent
+// (App.tsx, backed by activePanel==='activityFeed'), same controlled shape
+// as SoundboardPanel right next to it. This used to own an unconditional
+// useState(false) with no way for anything outside the component to close
+// it — confirmed live staying open at the same time as Soundboard, which
+// was already correctly activePanel-gated but had no way to know this
+// sibling existed. No close button needed here: reopening the rail icon
+// (the same activePanel toggle-off-if-already-active openPanel gives every
+// other panel) is this component's only way in or out, matching how it
+// behaved before.
+export function ActivityFeed({ open, onToggle }: ActivityFeedProps) {
   const activityEvents = useGameStore((s) => s.activityEvents);
 
   return (
     <div className="relative z-40 pointer-events-auto">
       <Tooltip label="Aktivitas Terbaru" detail="Lihat aktivitas terbaru tim kamu. (Khusus manajer.)" side="right">
         <button
-          onClick={() => setOpen(!open)}
+          onClick={onToggle}
           className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer inline-flex items-center gap-1.5"
         >
           <ClockHistory size={13} /> {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
