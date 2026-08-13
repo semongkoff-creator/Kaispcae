@@ -133,8 +133,6 @@ interface GameCanvasProps {
   emitJump: () => void;
   emitNudge: (targetId: string) => void;
   proximityData: ProximityPlayer[];
-  localSpeaking: boolean;
-  speakingPlayers: Set<string>;
   micMuted: boolean;
   cameraOn: boolean;
   editorMode: boolean;
@@ -298,7 +296,7 @@ function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: numb
   return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, onDoorAreaPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, onDoorAreaPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -539,10 +537,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   });
 
   const proximityRef = useRef(proximityData); proximityRef.current = proximityData;
-  const localSpeakingRef = useRef(localSpeaking); localSpeakingRef.current = localSpeaking;
   const lowSpecModeRef = useRef(lowSpecMode); lowSpecModeRef.current = lowSpecMode;
   const lastDrawTimeRef = useRef(0);
-  const speakingPlayersRef = useRef(speakingPlayers); speakingPlayersRef.current = speakingPlayers;
   const micMutedRef = useRef(micMuted); micMutedRef.current = micMuted;
   const cameraOnRef = useRef(cameraOn); cameraOnRef.current = cameraOn;
 
@@ -1976,8 +1972,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       // label when no custom text is set. The separate bare emoji badge that
       // used to sit here was removed to avoid two overlapping status cues.)
 
-      const sp = speakingPlayersRef.current;
-      const isSpeaking = isLocal ? localSpeakingRef.current : sp.has(avatar.id);
+      // Tile flicker diagnosis — read straight from the store instead of a
+      // prop-mirrored ref (see App.tsx's own comment). This runs inside the
+      // rAF draw loop, which already repaints every frame regardless, so a
+      // plain getState() read here is exactly as fresh as the old ref and
+      // costs nothing extra — the only thing this removes is App.tsx (the
+      // whole room UI) having to re-render on every speaking edge just to
+      // keep that ref's mirrored value current.
+      const speakingState = useGameStore.getState();
+      const isSpeaking = isLocal ? speakingState.localSpeaking : speakingState.speakingPlayers.has(avatar.id);
       const isMuted = isLocal && micMutedRef.current;
       const inProx = (proximityRef.current.find((p) => p.id === avatar.id)?.visibility ?? 'not_visible') !== 'not_visible';
 

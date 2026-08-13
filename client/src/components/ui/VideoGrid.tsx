@@ -633,8 +633,22 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           axis is anything but 'visible', so leaving x unset here let a
           speaking tile's ring/glow (painted outside its own box, even
           though it doesn't affect layout) trigger a stray horizontal
-          scrollbar. This column is never meant to scroll sideways. */}
-      <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 max-h-[calc(100vh-6rem)] overflow-y-auto overflow-x-hidden pointer-events-auto">
+          scrollbar. This column is never meant to scroll sideways.
+          contain:'paint' (measured — see VideoTile's own comment) fixes the
+          SAME glow-bleed on the axis that's still active (Y): the glow is
+          painted outside each tile's own box on purpose (a soft outer light,
+          not a hard-edged ring), and Chromium counts that ink overflow
+          toward this container's scrollHeight, so the tile strip briefly
+          measured as taller than it actually is and toggled its own
+          scrollbar on/off in sync with the pulse — every ~0.6-1s during
+          continuous speech (measured: 5 overflow events in a 12s speaking
+          window, 0 while silent). contain:paint clips descendant ink
+          overflow (box-shadow, outline, filter bleed) to this element's own
+          box for the purposes of that overflow calculation, without
+          clipping the glow's actual visible bleed onto NEIGHBOURING tiles
+          within this same strip — only at the strip's own outer edge, which
+          was never visible past the edge anyway. */}
+      <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 max-h-[calc(100vh-6rem)] overflow-y-auto overflow-x-hidden pointer-events-auto" style={{ contain: 'paint' }}>
         {/* Meeting View + hide/show, grouped side by side (was hideButton
             alone) rather than stacked in this otherwise-vertical column. */}
         <div className="flex items-center gap-1.5">
@@ -808,17 +822,41 @@ export const VideoTile = memo(function VideoTile({
       // Speaking ring: a coloured border plus a soft outer glow, in the same
       // purple the rest of the HUD uses for "active". Drawn with ring/border
       // colour rather than an extra element so it can't shift the tile's size
-      // and nudge its neighbours every time someone starts talking.
+      // and nudge its neighbours every time someone starts talking. The
+      // pulsing GLOW itself lives on a separate overlay now — see the
+      // .speaking-glow span right below — not this div; see its own comment
+      // for why.
       // h-full flex flex-col on the large path: the tile fills the grid cell
       // it was given, and the video area (flex-1 min-h-0, the only flow
       // child) takes 100% of it — the name tag is an absolute overlay now
       // (see below), not a flow sibling competing for the same space, so
       // nothing shrinks the video to make room for it.
-      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border shadow-lg transition-all duration-300 animate-fade-in group relative ${large ? 'w-full h-full flex flex-col' : 'w-24'} ${
-        speaking ? 'border-purple-500 ring-2 ring-purple-400/60 animate-speaking-glow' : 'border-purple-200'
+      // transition-COLORS, not transition-all — box-shadow (ring) snaps in
+      // instantly rather than being interpolated; only the border color
+      // fades. Narrows what changes when speaking starts, same spirit as
+      // moving the glow out below.
+      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border shadow-lg transition-colors duration-300 animate-fade-in group relative ${large ? 'w-full h-full flex flex-col' : 'w-24'} ${
+        speaking ? 'border-purple-500 ring-2 ring-purple-400/60' : 'border-purple-200'
       }`}
       style={{ opacity: translucent ? 0.5 : 1 }}
     >
+      {/* Speaking glow overlay — measured (tile flicker diagnosis): animating
+          this box-shadow's own blur/spread directly (the previous
+          .animate-speaking-glow keyframe) briefly inflated the ambient
+          strip's scrollHeight every time it started, ~300ms per onset, even
+          with contain:'paint' on that strip — isolated by disabling just
+          this animation with everything else (ring, wave-bar, mount timing)
+          unchanged: 0 overflow events with it off, back with it on. The
+          box-shadow value here is now CONSTANT (see .speaking-glow in
+          index.css) — only THIS element's opacity pulses (.animate-speaking-
+          glow, now an opacity keyframe), which can never change its own
+          geometry, so there's nothing for the ancestor's scroll-overflow
+          calculation to ever recompute. A separate element (not the tile's
+          own div above) so the pulse fades only the glow, never the video/
+          name/tile content sitting behind it. */}
+      {speaking && (
+        <span aria-hidden="true" className="absolute inset-0 rounded-lg pointer-events-none speaking-glow animate-speaking-glow" />
+      )}
       {/* Mirror the LOCAL self-preview only — raising your right hand should
           show on the right side of YOUR OWN preview, same as a real mirror
           (every video call app does this for the self-view). Remote tiles

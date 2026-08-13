@@ -977,8 +977,22 @@ export const useGameStore = create<GameState>((set, get) => ({
     return { mapZoom: clampMapZoom((currentStep + steps) * ZOOM_STEP, s.localRole) };
   }),
   speakingPlayers: new Set<string>(),
+  // Tile flicker diagnosis (measured — see VideoGrid.tsx's own comment on
+  // VideoTile) — this used to build a brand-new Set and call set() on EVERY
+  // invocation, even a redundant one (e.g. speaking===true re-affirmed while
+  // already true). Every non-guest component in the render tree that reads
+  // this state through a *reference* rather than a derived boolean (App.tsx
+  // read the whole Set at its top level, straight into every re-render of
+  // the entire room UI) saw a "changed" Set on every call regardless of
+  // whether membership actually flipped, since a fresh Set is never
+  // reference-equal to the previous one even with identical contents. Bailing
+  // out here when nothing actually changes removes those redundant
+  // notifications at the source, for every subscriber, without each one
+  // needing its own workaround.
   setPlayerSpeaking: (id, speaking) =>
     set((state) => {
+      const already = state.speakingPlayers.has(id);
+      if (already === speaking) return state;
       const next = new Set(state.speakingPlayers);
       if (speaking) next.add(id);
       else next.delete(id);

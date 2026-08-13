@@ -259,8 +259,13 @@ export function MeetingView({
             // 'visible' is forced to 'auto' the moment the other one isn't),
             // letting a speaking tile's ring/glow trigger a stray horizontal
             // scrollbar in a grid that only ever needs to scroll vertically.
+            // contain:'paint' (measured — see VideoGrid.tsx's matching
+            // container) clips the same glow's ink overflow on the axis
+            // that's still active (Y), so it can no longer inflate this
+            // element's own scrollHeight and toggle the vertical scrollbar
+            // on/off in sync with the speaking pulse.
             className="w-full h-full grid gap-3 place-content-center overflow-y-auto overflow-x-hidden py-1"
-            style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${gridRows}, minmax(120px, 1fr))` }}
+            style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${gridRows}, minmax(120px, 1fr))`, contain: 'paint' }}
           >
             {tiles.map((t) => (
               <Tooltip key={t.key} label="Sorot Peserta Ini" detail="Jadikan orang ini tampilan utama, atau kembali ke mode otomatis." wrapperClassName="w-full h-full">
@@ -284,8 +289,11 @@ export function MeetingView({
       {thumbnails.length > 0 && (
         <div className="shrink-0 flex justify-center pl-20 pr-6 pt-3">
           {/* overflow-y-hidden alongside overflow-x-auto, same reasoning as
-              the tiled grid above — this row never scrolls vertically. */}
-          <div className="flex gap-2 overflow-x-auto overflow-y-hidden max-w-full pb-1">
+              the tiled grid above — this row never scrolls vertically.
+              contain:'paint' for the same reason as the tiled grid above —
+              clips the speaking glow's ink overflow so it can't inflate this
+              row's scrollWidth (the axis that's active here). */}
+          <div className="flex gap-2 overflow-x-auto overflow-y-hidden max-w-full pb-1" style={{ contain: 'paint' }}>
             {thumbnails.map((t) => (
               <Tooltip key={t.key} label="Sorot Peserta Ini" detail="Jadikan orang ini tampilan utama, atau kembali ke mode otomatis." wrapperClassName="shrink-0">
                 <button

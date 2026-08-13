@@ -168,10 +168,18 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // pattern as showEditor/showUserGuide above.
   const [showMemberList, setShowMemberList] = useState(false);
 
-  // Media state from store
-  const localSpeaking = useGameStore((s) => s.localSpeaking);
+  // Media state from store — setters only. The VALUES (localSpeaking,
+  // speakingPlayers) are deliberately NOT read here any more (tile flicker
+  // diagnosis — measured 20 re-renders of this entire component, cascading
+  // into every video tile, per 12s of continuous speech): speakingPlayers is
+  // a Set rebuilt on every change, so subscribing to it directly at this top
+  // level re-rendered the WHOLE room UI on every speaking edge, for every
+  // peer. GameCanvas — the only consumer — reads both directly from the
+  // store inside its own animation-frame loop instead (see its own comment),
+  // and VideoTile already has its own isolated per-tile selector. Nothing
+  // else in this component needs the raw values, only the stable setters
+  // below (which don't cause this component to re-render on their own).
   const setLocalSpeaking = useGameStore((s) => s.setLocalSpeaking);
-  const speakingPlayers = useGameStore((s) => s.speakingPlayers);
   const setPlayerSpeaking = useGameStore((s) => s.setPlayerSpeaking);
 
   // WebRTC
@@ -1606,8 +1614,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         emitJump={emitJump}
         emitNudge={emitNudge}
         proximityData={nearby}
-        localSpeaking={localSpeaking}
-        speakingPlayers={speakingPlayers}
         micMuted={isMicMuted}
         cameraOn={isCameraOn}
         editorMode={editorMode}
