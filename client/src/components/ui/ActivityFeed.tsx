@@ -14,7 +14,7 @@ export function ActivityFeed() {
 
   return (
     <div className="relative z-40 pointer-events-auto">
-      <Tooltip label="Aktivitas Terbaru" detail="Lihat aktivitas terbaru tim kamu. (Khusus manajer.)">
+      <Tooltip label="Aktivitas Terbaru" detail="Lihat aktivitas terbaru tim kamu. (Khusus manajer.)" side="right">
         <button
           onClick={() => setOpen(!open)}
           className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer inline-flex items-center gap-1.5"

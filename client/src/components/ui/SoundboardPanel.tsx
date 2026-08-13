@@ -160,7 +160,7 @@ export function SoundboardPanel({ roomSlug, emitSoundboardPlay, open, onToggle, 
 
   return (
     <div className="relative z-40 pointer-events-auto">
-      <Tooltip label="Soundboard" detail="Buka daftar suara singkat yang bisa kamu putar untuk orang di sekitarmu.">
+      <Tooltip label="Soundboard" detail="Buka daftar suara singkat yang bisa kamu putar untuk orang di sekitarmu." side="right">
         <button
           onClick={onToggle}
           className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
