@@ -2,13 +2,27 @@ import { Server, Socket } from 'socket.io';
 import { SocketEvents, RtcSignal } from '@kaispace/shared';
 
 
-// A socket only ever joins one room (the room slug) via socket.join() in
-// roomHandler.ts's JOIN_ROOM — socket.io also auto-joins every socket to a
-// room named after its own id, so filtering that out leaves at most the
-// one real room this socket is in.
+// A socket joins the room slug (roomHandler.ts's JOIN_ROOM) plus several
+// OTHER bookkeeping rooms that are never the game room itself — 'org:<id>'
+// (index.ts, every non-guest socket), 'channel:<id>'/'dm:<id>'
+// (channelChatHandler.ts), 'analytics-feed:<id>' (analyticsFeed.ts) — and
+// socket.io's own room named after the socket's id. Bug: this used to just
+// return the first non-self room, which happened to be the room slug back
+// when that was the only extra room a socket ever joined; once 'org:<id>'
+// started being joined BEFORE the room slug (for every non-guest socket),
+// this returned 'org:<id>' instead — silently dropping every WebRTC signal
+// a real user sent to a guest (guests never join 'org:<id>', so the
+// same-room check below always failed), while guest→real-user signals kept
+// working (a guest's only extra room ever is the slug) and real-user→
+// real-user signals also kept working (both happened to share 'org:<id>'
+// regardless of which actual room each was in). A room slug is always
+// lowercase alphanumeric-plus-hyphen (see rooms.ts's generateSlug) and
+// never contains ':', so filtering out every colon-qualified bookkeeping
+// room reliably leaves just the real room, however many of the former a
+// socket has joined.
 function getSocketRoom(socket: Socket): string | undefined {
   for (const r of socket.rooms) {
-    if (r !== socket.id) return r;
+    if (r !== socket.id && !r.includes(':')) return r;
   }
   return undefined;
 }
@@ -61,20 +75,6 @@ export function registerRtcHandlers(io: Server, socket: Socket) {
     const myRoom = getSocketRoom(socket);
     const targetSocket = io.sockets.sockets.get(signal.toId);
     const ok = !!myRoom && !!targetSocket && targetSocket.rooms.has(myRoom);
-    // [webrtc-diag] TEMPORARY — this relay drops signals silently, so a
-    // mismatch here is invisible from the client: offers simply never
-    // arrive, no error anywhere. Logging both sides' room sets makes a drop
-    // (and WHY) readable straight from the server log. Remove once the
-    // two-way audio cause is confirmed and fixed.
-    console.log('[webrtc-diag]', ok ? 'relay OK' : 'relay DROPPED', {
-      event: event.replace('rtc:', ''),
-      from: socket.id,
-      to: signal.toId,
-      myRoom,
-      myRooms: Array.from(socket.rooms).filter((r) => r !== socket.id),
-      targetFound: !!targetSocket,
-      targetRooms: targetSocket ? Array.from(targetSocket.rooms).filter((r) => r !== targetSocket.id) : null,
-    });
     if (!ok) return;
     io.to(signal.toId).emit(event, { ...signal, fromId: socket.id });
   }
