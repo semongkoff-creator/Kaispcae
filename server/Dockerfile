@@ -1,6 +1,6 @@
 # Build context is the repo root (see docker-compose.yml) — this is an npm
 # workspaces monorepo, so `npm ci` needs the root package-lock.json plus
-# every workspace's package.json to resolve the @virtualmeet/shared link,
+# every workspace's package.json to resolve the @kaispace/shared link,
 # and the server build inlines shared's TS source via esbuild (see
 # server/package.json's "build" script), so nothing from shared/ needs to
 # ship in the final image.
@@ -10,7 +10,7 @@ RUN apk add --no-cache openssl
 COPY . .
 RUN npm ci
 RUN npx prisma generate --schema=server/prisma/schema.prisma
-RUN npm run build --workspace=@virtualmeet/server
+RUN npm run build --workspace=@kaispace/server
 
 FROM node:20-alpine
 WORKDIR /app
