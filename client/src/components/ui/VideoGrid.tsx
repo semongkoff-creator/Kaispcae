@@ -662,14 +662,19 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
         {otherScreens.map((s) => (
           <div key={s.key} className="pointer-events-auto relative group/screen">
             <VideoTile name={s.name} stream={s.stream} isLocal={s.isLocal} isScreen />
-            {/* wrapperClassName carries the absolute positioning — Tooltip's
-                own wrapper div is itself `position: relative`, so leaving
-                `absolute top-0.5 right-0.5` on the button would anchor it to
-                that wrapper (which collapses to 0×0, since an
-                absolutely-positioned child contributes nothing to its
-                auto-sized parent) instead of this tile's `group/screen`
-                container. */}
-            <Tooltip label="Perbesar" detail="Jadikan share layar ini tampilan utama." wrapperClassName="absolute top-0.5 right-0.5">
+            {/* wrapperClassName carries the positioning. `!absolute`
+                (important-modifier), not plain `absolute` — Tooltip's own
+                wrapper div hardcodes `relative` as a base class, and
+                Tailwind resolves a same-element relative/absolute conflict
+                by source order in its generated stylesheet (`.relative`
+                reliably won — confirmed via getComputedStyle, see
+                VideoTile's matching enlarge-button comment below), not by
+                which class appears later in this string. Without `!`, this
+                silently stayed `position: relative` and rendered wherever it
+                fell in normal document flow (below the whole tile, since
+                VideoTile is a block sibling before it) instead of pinned to
+                this `group/screen` container's top-right corner. */}
+            <Tooltip label="Perbesar" detail="Jadikan share layar ini tampilan utama." wrapperClassName="!absolute top-0.5 right-0.5">
               <button
                 onClick={() => setFeaturedKey(s.key)}
                 className="w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover/screen:opacity-100 transition-opacity cursor-pointer"
@@ -927,17 +932,29 @@ export const VideoTile = memo(function VideoTile({
       {/* Enlarge — opens the live camera picture full-size in the same focus
           panel screen shares use. Only while there's an actual picture to
           enlarge (!showAvatar); a placeholder initials tile has nothing
-          bigger to show. Hover-revealed via the tile's own `group`. */}
+          bigger to show. Hover-revealed via the tile's own `group`.
+          Top-right, matching the screen-thumbnail enlarge button above (same
+          corner, same convention everywhere else in this app an "expand"
+          action lives). The mic-status badge below is shifted down
+          (top-7, not top-1) to leave this corner free — the two are
+          independent (hover vs. muted state) and can be visible together on
+          a muted tile that's also being hovered. */}
       {onEnlarge && !showAvatar && !isScreen && (
-        // wrapperClassName carries the absolute positioning (see the
-        // matching comment on the screen-thumbnail enlarge button above) —
-        // otherwise it would anchor to Tooltip's own 0×0 wrapper instead of
-        // this tile's root div.
-        <Tooltip label="Perbesar Video" detail="Lihat video orang ini dalam ukuran penuh." wrapperClassName="absolute bottom-0.5 right-0.5">
+        // wrapperClassName carries the positioning — otherwise it would
+        // anchor to Tooltip's own inline wrapper instead of this tile's root
+        // div. `!absolute` (important-modifier), not plain `absolute`:
+        // Tooltip's own wrapper already hardcodes `relative` as a base
+        // class, and Tailwind resolves a same-element relative/absolute
+        // conflict by SOURCE ORDER in its generated stylesheet, not by which
+        // class appears later in this string — `.relative` reliably won
+        // (confirmed via getComputedStyle: position stayed 'relative'),
+        // silently turning `top-1 right-1` into an offset from the
+        // element's own normal-flow position instead of the tile's corner.
+        // The `!` forces this specific declaration through regardless of
+        // that ordering.
+        <Tooltip label="Perbesar Video" detail="Lihat video orang ini dalam ukuran penuh." wrapperClassName="!absolute top-1 right-1">
           <button
             onClick={onEnlarge}
-            // Moved from top-right to bottom-right — top-right is now the
-            // mic-status glass badge (see below); the two shouldn't stack.
             className="w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
           >
             <ArrowsFullscreen size={9} />
@@ -1048,9 +1065,12 @@ export const VideoTile = memo(function VideoTile({
           View's own tiles, much bigger than the ambient strip's w-24 ones).
           The small-tile icon was bumped from 9px to 13px (padding p-1 ->
           p-1.5 to match) — at 9px it was too easy to miss who was muted at
-          a glance in the ambient strip, the exact case this exists for. */}
+          a glance in the ambient strip, the exact case this exists for.
+          top-7 (not top-1) — the enlarge button now owns the top-right
+          corner itself (see its own comment above); this sits just below it
+          so a muted tile that's also being hovered never overlaps the two. */}
       {(micMuted || (isLocal && cameraOff)) && (
-        <span className={`absolute top-1 right-1 flex gap-1 bg-black/45 backdrop-blur-md rounded-full ${large ? 'p-2' : 'p-1.5'}`}>
+        <span className={`absolute top-7 right-1 flex gap-1 bg-black/45 backdrop-blur-md rounded-full ${large ? 'p-2' : 'p-1.5'}`}>
           {micMuted && <MicMuteFill className="text-red-400" size={large ? 18 : 13} />}
           {isLocal && cameraOff && <CameraVideoOffFill className="text-red-400" size={large ? 18 : 13} />}
         </span>
