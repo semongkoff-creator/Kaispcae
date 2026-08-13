@@ -28,7 +28,7 @@ const COMMON_EMOJIS = ['😀', '😂', '❤️', '👍', '🔥', '🎉', '😢',
 // person's colour stable even if they rename themselves.
 const AVATAR_TINTS = [
   'bg-rose-500', 'bg-orange-500', 'bg-amber-500', 'bg-lime-600',
-  'bg-emerald-500', 'bg-teal-500', 'bg-sky-500', 'bg-indigo-500',
+  'bg-emerald-500', 'bg-teal-500', 'bg-sky-500', 'bg-blue-500',
   'bg-violet-500', 'bg-fuchsia-500',
 ];
 
@@ -369,7 +369,17 @@ export function MessengerApp({
     // left-14 clears the room's Sidebar rail (z-50) — same offset those
     // full-screen modules used via pl-14, just on the container's own
     // position now instead of inner padding.
-    <div className="absolute inset-y-0 left-14 z-40 flex w-[720px] max-w-[75vw] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 overflow-hidden border-r border-purple-100 dark:border-gray-700 shadow-2xl">
+    //
+    // w-1/2 (not a fixed px width) is what actually makes this "setengah
+    // layar" — App.tsx's bottom toolbar re-centers itself on the remaining
+    // half whenever this panel is open (see messengerViewActive there), and
+    // that guarantee only holds if this panel's width is genuinely half the
+    // viewport rather than a fixed value that drifts out of sync on
+    // different screen sizes. min-w keeps the two-column layout inside from
+    // going unusably narrow; max-w keeps it from looking absurdly wide on an
+    // ultrawide monitor — neither changes the "half screen" contract on any
+    // realistic desktop width.
+    <div className="absolute inset-y-0 left-14 z-40 flex w-1/2 min-w-[560px] max-w-[900px] bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 overflow-hidden border-r border-purple-100 dark:border-gray-700 shadow-2xl">
       {/* ── Kolom daftar percakapan ───────────────────────────────── */}
       <aside className="w-[300px] shrink-0 border-r border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-900">
         <div className="px-4 pt-4 pb-3">
@@ -391,7 +401,7 @@ export function MessengerApp({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Cari"
-              className="w-full pl-8 pr-3 py-1.5 rounded-md bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm outline-none focus:border-indigo-400"
+              className="w-full pl-8 pr-3 py-1.5 rounded-md bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm outline-none focus:border-purple-400"
             />
           </div>
           {showNewChannel && isAdmin && (
@@ -402,9 +412,9 @@ export function MessengerApp({
                 onChange={(e) => setNewChannelName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && createChannel()}
                 placeholder="nama-channel"
-                className="flex-1 min-w-0 px-2 py-1.5 rounded-md bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm outline-none focus:border-indigo-400"
+                className="flex-1 min-w-0 px-2 py-1.5 rounded-md bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm outline-none focus:border-purple-400"
               />
-              <button onClick={createChannel} className="px-2.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm">
+              <button onClick={createChannel} className="px-2.5 rounded-md bg-purple-600 hover:bg-purple-700 text-white text-sm">
                 Buat
               </button>
             </div>
@@ -422,7 +432,7 @@ export function MessengerApp({
                 key={r.key}
                 onClick={() => onSelectTarget(r.target)}
                 className={`w-full text-left px-3 py-2.5 flex gap-2.5 items-start transition-colors ${
-                  active ? 'bg-indigo-50 dark:bg-indigo-950/40' : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                  active ? 'bg-purple-50 dark:bg-purple-950/40' : 'hover:bg-gray-100 dark:hover:bg-gray-800'
                 }`}
               >
                 {r.isChannel ? (
@@ -467,7 +477,7 @@ export function MessengerApp({
               <div className="min-w-0">
                 <h2 className="font-semibold text-sm truncate">{activeRow.title}</h2>
                 {typingNames.length > 0 && (
-                  <p className="text-[11px] text-indigo-500 truncate">
+                  <p className="text-[11px] text-purple-500 truncate">
                     {typingNames.slice(0, 2).join(', ')} sedang mengetik…
                   </p>
                 )}
@@ -483,7 +493,7 @@ export function MessengerApp({
                 title="Pesan disematkan"
                 className={`text-xs inline-flex items-center gap-1 px-2 py-1 rounded-md mr-1 ${
                   showPinned
-                    ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300'
+                    ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-300'
                     : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700'
                 }`}
               >
@@ -496,7 +506,7 @@ export function MessengerApp({
                 title="Anggota grup"
                 className={`text-xs inline-flex items-center gap-1 px-2 py-1 rounded-md mr-1 ${
                   showMembers
-                    ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300'
+                    ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-300'
                     : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700'
                 }`}
               >
@@ -525,7 +535,7 @@ export function MessengerApp({
                   <button
                     onClick={loadOlder}
                     disabled={loadingOlder}
-                    className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline disabled:opacity-50"
+                    className="text-xs text-purple-600 dark:text-purple-400 hover:underline disabled:opacity-50"
                   >
                     {loadingOlder ? 'Memuat…' : 'Muat pesan lama'}
                   </button>
@@ -562,7 +572,7 @@ export function MessengerApp({
                         {!grouped && (
                           <span className={`text-[11px] text-gray-400 mb-1 px-1 inline-flex items-center gap-1 ${own ? 'text-right' : ''}`}>
                             {own ? 'Kamu' : senderName} · {new Date(m.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-                            {m.isPinned && <PinAngleFill size={9} className="text-indigo-500" title="Disematkan" />}
+                            {m.isPinned && <PinAngleFill size={9} className="text-purple-500" title="Disematkan" />}
                           </span>
                         )}
                         <div className="group relative">
@@ -580,7 +590,7 @@ export function MessengerApp({
                                   }
                                   if (e.key === 'Escape') setEditingId(null);
                                 }}
-                                className="px-3 py-2 rounded-2xl border border-indigo-300 text-sm outline-none dark:bg-gray-800"
+                                className="px-3 py-2 rounded-2xl border border-purple-300 text-sm outline-none dark:bg-gray-800"
                               />
                               <button onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:underline">
                                 batal
@@ -592,7 +602,7 @@ export function MessengerApp({
                               title="Klik kanan untuk opsi (sematkan, lihat yang sudah baca)"
                               className={`px-3.5 py-2 rounded-2xl text-sm break-words whitespace-pre-wrap cursor-context-menu ${
                                 own
-                                  ? 'bg-indigo-500 text-white rounded-br-md'
+                                  ? 'bg-purple-500 text-white rounded-br-md'
                                   : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-bl-md'
                               }`}
                             >
@@ -631,7 +641,7 @@ export function MessengerApp({
                                   title={m.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
                                   className={`w-6 h-6 rounded inline-flex items-center justify-center ${
                                     m.isPinned
-                                      ? 'text-indigo-500 hover:bg-indigo-100 dark:hover:bg-indigo-900/40'
+                                      ? 'text-purple-500 hover:bg-purple-100 dark:hover:bg-purple-900/40'
                                       : 'text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
                                   }`}
                                 >
@@ -691,7 +701,7 @@ export function MessengerApp({
                   ))}
                 </div>
               )}
-              <div className="flex items-end gap-2 rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2 focus-within:border-indigo-400 bg-white dark:bg-gray-800">
+              <div className="flex items-end gap-2 rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2 focus-within:border-purple-400 bg-white dark:bg-gray-800">
                 <button
                   onClick={() => setShowEmoji((v) => !v)}
                   title="Emoji"
@@ -723,7 +733,7 @@ export function MessengerApp({
                 <button
                   onClick={send}
                   disabled={!text.trim()}
-                  className="w-8 h-8 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 disabled:hover:bg-indigo-500 text-white inline-flex items-center justify-center shrink-0"
+                  className="w-8 h-8 rounded-lg bg-purple-500 hover:bg-purple-600 disabled:opacity-40 disabled:hover:bg-purple-500 text-white inline-flex items-center justify-center shrink-0"
                 >
                   <SendFill size={13} />
                 </button>
@@ -744,7 +754,7 @@ export function MessengerApp({
           <div className="absolute inset-y-0 right-0 w-80 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 flex flex-col z-10">
             <div className="h-14 shrink-0 px-4 flex items-center justify-between border-b border-gray-200 dark:border-gray-700">
               <span className="font-semibold text-sm inline-flex items-center gap-1.5">
-                <PinAngleFill size={13} className="text-indigo-500" /> Pesan Disematkan
+                <PinAngleFill size={13} className="text-purple-500" /> Pesan Disematkan
               </span>
               <button
                 onClick={() => setShowPinned(false)}
@@ -769,7 +779,7 @@ export function MessengerApp({
                     key={m.id}
                     onClick={() => { scrollToMessage(m.id); setShowPinned(false); }}
                     title="Lompat ke pesan ini"
-                    className="group/pin relative p-2.5 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-700 cursor-pointer"
+                    className="group/pin relative p-2.5 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 hover:border-purple-300 dark:hover:border-purple-700 cursor-pointer"
                   >
                     <div className="flex items-center gap-1.5 mb-1">
                       <Avatar name={senderName} seed={m.senderId} size={16} photoUrl={senderProfile?.photo ?? undefined} />
@@ -818,7 +828,7 @@ export function MessengerApp({
                 onClick={() => { onPinMessage?.(msgMenu.message.id, !msgMenu.message.isPinned); setMsgMenu(null); }}
                 className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
               >
-                {msgMenu.message.isPinned ? <PinAngleFill size={11} className="text-indigo-500" /> : <PinAngle size={11} />}
+                {msgMenu.message.isPinned ? <PinAngleFill size={11} className="text-purple-500" /> : <PinAngle size={11} />}
                 {msgMenu.message.isPinned ? 'Lepas sematan' : 'Sematkan pesan'}
               </button>
             )}
@@ -933,7 +943,7 @@ function MessageAttachment({ url, name, own, onOpen }: { url: string; name?: str
       type="button"
       onClick={open}
       className={`flex items-center gap-2 mb-1.5 px-2.5 py-2 rounded-lg w-full text-left cursor-pointer ${
-        own ? 'bg-indigo-400/40' : 'bg-gray-100 dark:bg-gray-700'
+        own ? 'bg-purple-400/40' : 'bg-gray-100 dark:bg-gray-700'
       }`}
     >
       <FileEarmarkFill size={18} className="shrink-0" />
