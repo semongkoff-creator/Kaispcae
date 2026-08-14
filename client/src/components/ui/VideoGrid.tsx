@@ -682,7 +682,17 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           which also skipped the featured panel above. Now hidden's only job
           is to collapse THIS column; the panel keeps rendering regardless. */}
       {!hidden && (
-      <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 max-h-[calc(100vh-6rem)] overflow-y-auto overflow-x-hidden pointer-events-auto" style={{ contain: 'paint' }}>
+      // hide-scrollbar (index.css) — reported: a scrollbar sliver still shows
+      // up here intermittently despite contain:'paint' above (that fix only
+      // covers the speaking-glow's box-shadow bleed; other animated bits in
+      // this strip, e.g. the reaction-float emoji's own translateY, are
+      // plausible same-class culprits and weren't individually chased down
+      // here). This column barely ever has enough tiles to need real
+      // scrolling anyway (max-h is a generous overflow guard, not the normal
+      // case — see the "War Room share massal" comment above) — hiding the
+      // scrollbar itself removes the flicker regardless of which animation
+      // is behind any one occurrence, without touching wheel/touch scrolling.
+      <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 max-h-[calc(100vh-6rem)] overflow-y-auto overflow-x-hidden pointer-events-auto hide-scrollbar" style={{ contain: 'paint' }}>
         {/* Meeting View + hide/show, grouped side by side (was hideButton
             alone) rather than stacked in this otherwise-vertical column. */}
         <div className="flex items-center gap-1.5">

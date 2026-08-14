@@ -38,6 +38,20 @@ canvas {
   image-rendering: pixelated;
 }
 
+/* Scrollable but never SHOWS a scrollbar track/thumb — used on small floating
+   HUD strips (VideoGrid's camera-tile rail) where an occasional native
+   scrollbar reads as a stray UI glitch rather than a real "there's more
+   below" affordance. Wheel/touch scrolling still works; only the visible
+   bar is gone. Three rules for three browser engines — there's no single
+   standard property that covers all of them. */
+.hide-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge/IE */
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Chromium Edge */
+}
+
 /* Soft entrance for transient UI (video tiles, toasts) — the `animate-fade-in`
    utility is referenced in several components (VideoGrid, the nudge toast in
    App.tsx) but was never actually defined, so it was silently a no-op until
