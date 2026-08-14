@@ -6,6 +6,18 @@ import { useProfiles } from '@/hooks/useProfiles';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { ChatAvatar, avatarColor } from './ChatAvatar';
 
+// autoPictureInPicture (part of the Picture-in-Picture spec — tells the
+// browser to auto-float this element into native PiP when the tab/app is
+// hidden while it's playing, no fresh user gesture needed at that moment)
+// isn't in this project's TS DOM lib yet. Same pattern MiniMode.tsx already
+// uses for window.documentPictureInPicture — augment the real DOM type
+// rather than reaching for `as any` at every call site.
+declare global {
+  interface HTMLVideoElement {
+    autoPictureInPicture: boolean;
+  }
+}
+
 // What a tile shows while someone's camera is off — the SAME ChatAvatar used in
 // chat, so it shows the person's profile photo when they have one and otherwise
 // their real-name initials. `name` here must be the REAL name (never a display
@@ -151,6 +163,10 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
     const video = videoRef.current;
     if (!video) return;
     video.srcObject = stream;
+    // Same auto-PiP-on-tab-hide as every tile's own video (see VideoTile's
+    // doc comment) — the featured/big panel is still just a <video>
+    // underneath, so it gets the same treatment.
+    video.autoPictureInPicture = true;
     video.play().catch(() => {});
     return () => { video.srcObject = null; };
   }, [stream]);
@@ -474,6 +490,23 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // Which shared screen is the big one. Null = "whichever is first", so a
   // share that starts while nothing is featured is promoted automatically.
   const [featuredKey, setFeaturedKey] = useState<string | null>(null);
+  // Screen-share keys explicitly closed out of the featured panel (see the
+  // ScreenSharePanel onClose below) — auto-promotion skips these, so
+  // closing stays closed instead of the very next render re-opening the
+  // same share. Pruned in the effect below once a key's share actually
+  // ends, so the SAME presenter starting a genuinely NEW share later (same
+  // key) is never permanently suppressed.
+  //
+  // Real state, not a ref: an auto-featured share never touches featuredKey
+  // (it's derived from screenEntries, see `featured` below), so closing one
+  // was calling setFeaturedKey(null) while featuredKey was ALREADY null —
+  // React bails out of a same-value setState with no re-render, so a ref
+  // mutation right alongside it would sit there correctly updated but never
+  // actually take visual effect until some UNRELATED re-render happened to
+  // come along later. Measured live: the close button dispatched fine, but
+  // the panel stayed on screen. A real setState here guarantees the re-
+  // render actually happens.
+  const [dismissedScreenKeys, setDismissedScreenKeys] = useState<Set<string>>(new Set());
   const now = Date.now();
 
   // Local and remote shares merged into ONE list, because from the viewer's
@@ -508,13 +541,27 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // if that person's camera goes off, their -camera key vanishes from
   // cameraEntries and the panel closes itself right along with it.
   //
-  // No `?? screenEntries[0]` fallback any more. That silently promoted the
-  // first share straight to a full focus panel, so the thumbnail step never
-  // existed for a single presenter — a screen appeared over the map without
-  // anyone asking for it. Now every share starts as a thumbnail in the
-  // column and only becomes the focus panel when its enlarge button is used.
-  const featured = [...screenEntries, ...cameraEntries].find((s) => s.key === featuredKey) ?? null;
+  // Auto-features the first not-yet-dismissed screen share — restored on
+  // request (ZEP-style: a new share should read as "look here", not sit
+  // buried as a thumbnail until someone happens to click enlarge).
+  // dismissedScreenKeys (declared above, pruned in the effect below) keeps
+  // this from re-opening a share the viewer just closed.
+  const featured = [...screenEntries, ...cameraEntries].find((s) => s.key === featuredKey)
+    ?? screenEntries.find((s) => !dismissedScreenKeys.has(s.key))
+    ?? null;
   const otherScreens = screenEntries.filter((s) => s.key !== featured?.key);
+
+  // Un-dismiss a key once its share actually ends — otherwise the SAME
+  // presenter starting a genuinely new share later (same 'local-screen' /
+  // '<id>-screen' key) would stay silently suppressed forever.
+  const screenKeysJoined = screenEntries.map((s) => s.key).join(',');
+  useEffect(() => {
+    const live = new Set(screenKeysJoined ? screenKeysJoined.split(',') : []);
+    setDismissedScreenKeys((prev) => {
+      const next = new Set([...prev].filter((k) => live.has(k)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [screenKeysJoined]);
 
   const totalTiles = (localStream ? 1 : 0) + (localScreenStream ? 1 : 0) + videoTiles.length
     + videoTiles.filter((t) => t.screenStream).length;
@@ -613,7 +660,23 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   return (
     <>
       {featured && (
-        <ScreenSharePanel key={featured.key} name={featured.name} stream={featured.stream} isLocal={featured.isLocal} mirror={featured.mirror} onClose={() => setFeaturedKey(null)} onMaximizedChange={setHidden} />
+        <ScreenSharePanel
+          key={featured.key}
+          name={featured.name}
+          stream={featured.stream}
+          isLocal={featured.isLocal}
+          mirror={featured.mirror}
+          onClose={() => {
+            // Only screen shares auto-reopen (see the `featured` fallback
+            // above) — an enlarged camera was always manual, so closing it
+            // needs no dismissal bookkeeping.
+            if (screenEntries.some((s) => s.key === featured.key)) {
+              setDismissedScreenKeys((prev) => new Set(prev).add(featured.key));
+            }
+            setFeaturedKey(null);
+          }}
+          onMaximizedChange={setHidden}
+        />
       )}
       {/* QA (Load checklist item 3, "War Room share massal") — this column
           previously had no scroll/max-height at all: enough simultaneous
@@ -792,6 +855,18 @@ export const VideoTile = memo(function VideoTile({
     const video = videoRef.current;
     if (!video) return;
     video.srcObject = stream ?? null;
+    // Requested: switching to a different browser tab/app while on a call
+    // should auto-float whatever's most relevant into the browser's own
+    // native Picture-in-Picture, ZEP-style — set on every live tile (the
+    // browser itself picks the one actually worth floating when the tab
+    // hides; only one video is ever in PiP at a time). Safe against the
+    // exact "stale video for someone who already left" failure a MANUAL
+    // per-tile PiP button was removed for (see the removal note further
+    // down): this reuses the SAME stream lifecycle already wired below —
+    // clearing srcObject on unmount/peer-leave stops the source track, and
+    // the browser closes an active PiP window for a video with no track of
+    // its own, rather than leaving it frozen open indefinitely.
+    video.autoPictureInPicture = stream ? true : false;
     if (stream) video.play().catch(() => {});
     return () => {
       video.srcObject = null;
