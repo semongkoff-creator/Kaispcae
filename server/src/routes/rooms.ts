@@ -18,7 +18,7 @@ import { setCachedTiles, setCachedImpassableAreas, setCachedDoorAreaRects, setCa
 function mediaShape(r: { id: string; roomId: string; type: string; x: number; y: number; createdBy: string; createdByName: string; createdAt: Date; expiresAt: Date | null; payload: unknown }) {
   return { id: r.id, roomId: r.roomId, type: r.type, x: r.x, y: r.y, createdBy: r.createdBy, createdByName: r.createdByName, createdAt: r.createdAt.toISOString(), expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null, payload: (r.payload as MediaPayload) ?? {} };
 }
-import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
+import { validate, createRoomSchema, renameRoomSchema, avatarUpdateSchema } from '../middleware/validate';
 import { ensureGroupConversation } from '../lib/conversations';
 
 const rooms = Router();
@@ -170,6 +170,31 @@ rooms.patch('/rooms/:slug/cover', authenticateToken, async (req: AuthRequest, re
   } catch (err) {
     console.error('[rooms] set cover error:', err);
     return res.status(500).json({ error: 'Gagal menyimpan cover' });
+  }
+});
+
+// PATCH /api/rooms/:slug/name — rename a room's display name. Same
+// room:update gate + "..." menu placement as Ganti Cover above (a room's
+// name/cover are both presentation details an admin can change any time,
+// unlike Delete which stays owner-only). The slug itself is untouched —
+// renaming never breaks existing bookmarks/invite links/guest links, which
+// all key off the slug, not the display name.
+rooms.patch('/rooms/:slug/name', authenticateToken, validate(renameRoomSchema), async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
+    if (!hasFeatureAccess(role, 'room:update')) {
+      return res.status(403).json({ error: 'Admin role required to rename this room' });
+    }
+    const name = req.body.name.trim();
+    if (!name) return res.status(400).json({ error: 'Nama room tidak boleh kosong' });
+    await prisma.room.update({ where: { id: room.id }, data: { name } });
+    return res.json({ ok: true, name });
+  } catch (err) {
+    console.error('[rooms] rename error:', err);
+    return res.status(500).json({ error: 'Gagal mengganti nama room' });
   }
 });
 

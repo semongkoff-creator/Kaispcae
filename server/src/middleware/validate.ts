@@ -41,6 +41,12 @@ export const createRoomSchema = z.object({
   template: z.enum(['main-office', 'small-team', 'open-lounge']).optional(),
 });
 
+// Same length cap as createRoomSchema's own `name` — a renamed room is still
+// bound by whatever a freshly-created one would be.
+export const renameRoomSchema = z.object({
+  name: z.string().min(1).max(50),
+});
+
 export const avatarUpdateSchema = z.object({
   bodyShape: z.string().optional(),
   color: z.string().optional(),

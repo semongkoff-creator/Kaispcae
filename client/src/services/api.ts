@@ -520,6 +520,15 @@ export const api = {
       body: JSON.stringify({ coverImage }),
     }),
 
+  // Lobby card "..." menu — rename, same admin gate as setRoomCover above.
+  // Only the display name changes; the slug (and every link/bookmark keyed
+  // off it) stays exactly as-is.
+  renameRoom: (slug: string, name: string) =>
+    request<{ ok: boolean; name: string }>(`/rooms/${slug}/name`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }),
+
   // §4.1 — Teleport (Admin), shared team locations, staff+ only (server
   // re-validates independently, this just decides what to show/offer).
   getTeleportLocations: (slug: string) => request<{ locations: TeleportLocation[] }>(`/rooms/${slug}/teleport-locations`),
