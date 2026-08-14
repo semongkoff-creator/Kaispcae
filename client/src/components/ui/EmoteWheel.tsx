@@ -1,32 +1,6 @@
 import { useCallback, useEffect } from 'react';
 import { isTypingTarget } from '@/utils/hotkeys';
-import {
-  HandIndexThumbFill,
-  HandThumbsUpFill,
-  EmojiLaughingFill,
-  HeartFill,
-  BalloonFill,
-  EmojiNeutralFill,
-  MoonStarsFill,
-  Fire,
-} from 'react-bootstrap-icons';
-import { EMOTE_LIST, EMOTE_LABELS, EmoteType } from '@kaispace/shared';
-
-// Bootstrap Icon for each emote's picker button. The floating bubble that
-// appears above the avatar in the game world is drawn on the <canvas> 2D
-// context (see GameCanvas.tsx), which can only render text/glyphs — not SVG
-// React components — so that bubble keeps using EMOTE_EMOJI (shared/types)
-// unchanged; this map only covers this picker's on-screen DOM buttons.
-const EMOTE_ICONS: Record<EmoteType, typeof HeartFill> = {
-  wave: HandIndexThumbFill,
-  clap: HandThumbsUpFill,
-  laugh: EmojiLaughingFill,
-  heart: HeartFill,
-  party: BalloonFill,
-  think: EmojiNeutralFill,
-  sleep: MoonStarsFill,
-  fire: Fire,
-};
+import { EMOTE_LIST, EMOTE_LABELS, EMOTE_EMOJI, EmoteType } from '@kaispace/shared';
 
 interface EmoteWheelProps {
   open: boolean;
@@ -76,19 +50,23 @@ export function EmoteWheel({ open, onSelect, onClose }: EmoteWheelProps) {
         className="mb-24 flex items-center gap-1.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2 pointer-events-auto animate-fade-in"
         onClick={(e) => e.stopPropagation()}
       >
-        {EMOTE_LIST.map((emote) => {
-          const EmoteIcon = EMOTE_ICONS[emote];
-          return (
-            <button
-              key={emote}
-              onClick={() => onSelect(emote)}
-              className="w-9 h-9 rounded-full flex items-center justify-center text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-gray-700 hover:scale-110 transition-all cursor-pointer"
-              title={EMOTE_LABELS[emote]}
-            >
-              <EmoteIcon size={18} />
-            </button>
-          );
-        })}
+        {EMOTE_LIST.map((emote) => (
+          // Real emoji glyph, not a Bootstrap icon standing in for it — this
+          // used to show a themed-but-different icon per emote (e.g. a
+          // pointing hand for "wave", a balloon for "party"), which didn't
+          // match the actual EMOTE_EMOJI glyph the canvas-drawn bubble shows
+          // above your avatar once picked. Same fix already used by
+          // MeetingView.tsx's own reaction strip — render EMOTE_EMOJI
+          // directly so the picker always shows exactly what you'll get.
+          <button
+            key={emote}
+            onClick={() => onSelect(emote)}
+            className="w-9 h-9 rounded-full flex items-center justify-center text-xl hover:bg-purple-100 dark:hover:bg-gray-700 hover:scale-110 transition-all cursor-pointer"
+            title={EMOTE_LABELS[emote]}
+          >
+            {EMOTE_EMOJI[emote]}
+          </button>
+        ))}
       </div>
     </div>
   );
