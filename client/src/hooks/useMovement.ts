@@ -31,7 +31,7 @@ interface UseMovementOptions {
   getImpassableAreas?: () => ImpassableAreaRect[];
 }
 
-interface MovementState {
+export interface MovementState {
   direction: Direction;
   isMoving: boolean;
   dx: number;
@@ -39,10 +39,40 @@ interface MovementState {
   isRunning: boolean;
 }
 
+function movementForKey(key: string): Pick<MovementState, 'direction' | 'dx' | 'dy'> | null {
+  if (key === 'ArrowUp' || key === 'KeyW') return { direction: 'up', dx: 0, dy: -1 };
+  if (key === 'ArrowDown' || key === 'KeyS') return { direction: 'down', dx: 0, dy: 1 };
+  if (key === 'ArrowLeft' || key === 'KeyA') return { direction: 'left', dx: -1, dy: 0 };
+  if (key === 'ArrowRight' || key === 'KeyD') return { direction: 'right', dx: 1, dy: 0 };
+  return null;
+}
+
+export function getKeyboardMovementInput(keys: ReadonlySet<string>, fallbackDirection: Direction = 'down'): MovementState {
+  let movement: Pick<MovementState, 'direction' | 'dx' | 'dy'> | null = null;
+  for (const key of keys) {
+    movement = movementForKey(key) ?? movement;
+  }
+
+  const isMoving = movement !== null;
+  const isRunning = isMoving && (
+    keys.has('KeyR') ||
+    keys.has('ShiftLeft') || keys.has('ShiftRight')
+  );
+
+  return {
+    direction: movement?.direction ?? fallbackDirection,
+    isMoving,
+    dx: movement?.dx ?? 0,
+    dy: movement?.dy ?? 0,
+    isRunning,
+  };
+}
+
 export function useMovement({ isBlocked, onMove, isFrozen, isDoor, getImpassableAreas }: UseMovementOptions) {
   const keysRef = useRef<Set<string>>(new Set());
   const currentXRef = useRef<number>(0);
   const currentYRef = useRef<number>(0);
+  const lastDirectionRef = useRef<Direction>('down');
 
   // Refs to keep callbacks stable across renders — prevents the dependency
   // chain from cascading up to the rAF loop in GameCanvas.
@@ -68,38 +98,12 @@ export function useMovement({ isBlocked, onMove, isFrozen, isDoor, getImpassable
 
   const getInput = useCallback((): MovementState => {
     const keys = keysRef.current;
-    let dx = 0;
-    let dy = 0;
-    let direction: Direction = 'down';
-
-    if (keys.has('ArrowUp') || keys.has('KeyW') || keys.has('w')) {
-      dy = -1;
-      direction = 'up';
-    }
-    if (keys.has('ArrowDown') || keys.has('KeyS') || keys.has('s')) {
-      dy = 1;
-      direction = 'down';
-    }
-    if (keys.has('ArrowLeft') || keys.has('KeyA') || keys.has('a')) {
-      dx = -1;
-      direction = 'left';
-    }
-    if (keys.has('ArrowRight') || keys.has('KeyD') || keys.has('d')) {
-      dx = 1;
-      direction = 'right';
-    }
-
-    const isMoving = dx !== 0 || dy !== 0;
     // Run/sprint only means anything while actually moving — holding it alone
     // with no direction key does nothing, same as every other game. A4 adds
     // Shift as an alias for R (same PLAYER_RUN_SPEED — one sprint system, not
     // two). This ONLY feeds the speed pick in tryMove; it does not touch the
     // ref/state architecture, so the movement-responsiveness fix is untouched.
-    const isRunning = isMoving && (
-      keys.has('r') || keys.has('R') || keys.has('KeyR') ||
-      keys.has('Shift') || keys.has('ShiftLeft') || keys.has('ShiftRight')
-    );
-    return { direction, isMoving, dx, dy, isRunning };
+    return getKeyboardMovementInput(keys, lastDirectionRef.current);
   }, []);
 
   // Collision check reads isBlocked from ref — never changes identity
@@ -154,9 +158,17 @@ export function useMovement({ isBlocked, onMove, isFrozen, isDoor, getImpassable
   const tryMove = useCallback(
     (dt: number) => {
       const { dx, dy, direction, isMoving, isRunning } = getInput();
-      if (!isMoving || isFrozenRef.current?.()) {
-        return { x: currentXRef.current, y: currentYRef.current, direction, isMoving: false, isRunning: false };
+      const isFrozen = isFrozenRef.current?.() === true;
+      if (!isMoving || isFrozen) {
+        return {
+          x: currentXRef.current,
+          y: currentYRef.current,
+          direction: lastDirectionRef.current,
+          isMoving: false,
+          isRunning: false,
+        };
       }
+      lastDirectionRef.current = direction;
 
       const speed = isRunning ? PLAYER_RUN_SPEED : PLAYER_SPEED;
       const stepX = dx * speed * dt;
@@ -207,7 +219,7 @@ export function useMovement({ isBlocked, onMove, isFrozen, isDoor, getImpassable
       // Close enough — stop, rather than jittering around the target
       // forever as it keeps moving by sub-pixel amounts each frame.
       if (dist < 4) {
-        return { x: curX, y: curY, direction: 'down' as Direction, isMoving: false, isRunning: false };
+        return { x: curX, y: curY, direction: lastDirectionRef.current, isMoving: false, isRunning: false };
       }
 
       const stepDist = Math.min(dist, PLAYER_SPEED * dt);
@@ -216,6 +228,7 @@ export function useMovement({ isBlocked, onMove, isFrozen, isDoor, getImpassable
       const direction: Direction = Math.abs(distX) > Math.abs(distY)
         ? (distX > 0 ? 'right' : 'left')
         : (distY > 0 ? 'down' : 'up');
+      lastDirectionRef.current = direction;
 
       let newX = curX;
       let newY = curY;

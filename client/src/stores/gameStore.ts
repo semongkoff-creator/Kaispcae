@@ -797,16 +797,20 @@ export const useGameStore = create<GameState>((set, get) => ({
     isMoving: false,
   },
   setLocalPlayer: (partial) =>
-    set((state) => ({
-      localPlayer: { ...state.localPlayer, ...partial },
-    })),
+    set((state) => {
+      const localPlayer = { ...state.localPlayer, ...partial };
+      if (localPlayer.isMoving !== true) localPlayer.isRunning = false;
+      return { localPlayer };
+    }),
 
   playerRecords: {},
   setPlayerRecords: (players) => set({ playerRecords: players }),
   upsertPlayer: (player) =>
     set((state) => {
       const records = { ...state.playerRecords };
-      records[player.id] = { ...records[player.id], ...player };
+      const nextPlayer = { ...records[player.id], ...player };
+      if (nextPlayer.isMoving !== true) nextPlayer.isRunning = false;
+      records[player.id] = nextPlayer;
       return { playerRecords: records };
     }),
   removePlayer: (id) =>
