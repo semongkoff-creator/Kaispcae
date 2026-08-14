@@ -488,6 +488,23 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // own onEnlarge) — a screen share simply joins the thumbnail rail like
   // camera tiles do until someone asks to feature it.
   const [featuredKey, setFeaturedKey] = useState<string | null>(null);
+  // Screen-share keys explicitly closed out of the featured panel (see the
+  // ScreenSharePanel onClose below) — auto-promotion skips these, so
+  // closing stays closed instead of the very next render re-opening the
+  // same share. Pruned in the effect below once a key's share actually
+  // ends, so the SAME presenter starting a genuinely NEW share later (same
+  // key) is never permanently suppressed.
+  //
+  // Real state, not a ref: an auto-featured share never touches featuredKey
+  // (it's derived from screenEntries, see `featured` below), so closing one
+  // was calling setFeaturedKey(null) while featuredKey was ALREADY null —
+  // React bails out of a same-value setState with no re-render, so a ref
+  // mutation right alongside it would sit there correctly updated but never
+  // actually take visual effect until some UNRELATED re-render happened to
+  // come along later. Measured live: the close button dispatched fine, but
+  // the panel stayed on screen. A real setState here guarantees the re-
+  // render actually happens.
+  const [dismissedScreenKeys, setDismissedScreenKeys] = useState<Set<string>>(new Set());
   const now = Date.now();
 
   // Local and remote shares merged into ONE list, because from the viewer's
@@ -521,8 +538,28 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // something else forced an update. Same applies to an enlarged camera —
   // if that person's camera goes off, their -camera key vanishes from
   // cameraEntries and the panel closes itself right along with it.
-  const featured = [...screenEntries, ...cameraEntries].find((s) => s.key === featuredKey) ?? null;
+  //
+  // Auto-features the first not-yet-dismissed screen share — restored on
+  // request (ZEP-style: a new share should read as "look here", not sit
+  // buried as a thumbnail until someone happens to click enlarge).
+  // dismissedScreenKeys (declared above, pruned in the effect below) keeps
+  // this from re-opening a share the viewer just closed.
+  const featured = [...screenEntries, ...cameraEntries].find((s) => s.key === featuredKey)
+    ?? screenEntries.find((s) => !dismissedScreenKeys.has(s.key))
+    ?? null;
   const otherScreens = screenEntries.filter((s) => s.key !== featured?.key);
+
+  // Un-dismiss a key once its share actually ends — otherwise the SAME
+  // presenter starting a genuinely new share later (same 'local-screen' /
+  // '<id>-screen' key) would stay silently suppressed forever.
+  const screenKeysJoined = screenEntries.map((s) => s.key).join(',');
+  useEffect(() => {
+    const live = new Set(screenKeysJoined ? screenKeysJoined.split(',') : []);
+    setDismissedScreenKeys((prev) => {
+      const next = new Set([...prev].filter((k) => live.has(k)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [screenKeysJoined]);
 
   const totalTiles = (localStream ? 1 : 0) + (localScreenStream ? 1 : 0) + videoTiles.length
     + videoTiles.filter((t) => t.screenStream).length;
@@ -638,7 +675,15 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           stream={featured.stream}
           isLocal={featured.isLocal}
           mirror={featured.mirror}
-          onClose={() => setFeaturedKey(null)}
+          onClose={() => {
+            // Only screen shares auto-reopen (see the `featured` fallback
+            // above) — an enlarged camera was always manual, so closing it
+            // needs no dismissal bookkeeping.
+            if (screenEntries.some((s) => s.key === featured.key)) {
+              setDismissedScreenKeys((prev) => new Set(prev).add(featured.key));
+            }
+            setFeaturedKey(null);
+          }}
           onMaximizedChange={(v) => { setHidden(v); onScreenShareMaximizedChange?.(v); }}
         />
       )}
