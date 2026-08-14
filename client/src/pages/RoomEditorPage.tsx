@@ -948,7 +948,10 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   // layer is active when the button is clicked (the common case), but stays
   // editable — an admin importing while on the Objects layer may still want
   // it as a Floor texture, etc.
-  const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
+  // Raised from 5MB on request — server's POST /uploads (uploads.ts) caps at
+  // the same 100MB, so this is the real ceiling, not just a friendlier
+  // client-side message.
+  const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
   const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importCategory, setImportCategory] = useState<'floor' | 'wall' | 'object'>('object');
@@ -959,7 +962,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     const f = await pickFile('image/png,image/jpeg');
     if (!f) return;
     if (!['image/png', 'image/jpeg'].includes(f.type)) { await showAlert('Hanya file PNG atau JPG yang diperbolehkan.'); return; }
-    if (f.size > MAX_IMPORT_BYTES) { await showAlert(`Ukuran file maksimal 5MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
+    if (f.size > MAX_IMPORT_BYTES) { await showAlert(`Ukuran file maksimal ${MAX_IMPORT_BYTES / 1024 / 1024}MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
     setImportFile(f);
     setImportLabel(f.name.replace(/\.[^.]+$/, ''));
     setImportCategory(activeLayer === 'floor' ? 'floor' : activeLayer === 'wall' ? 'wall' : 'object');
@@ -1016,7 +1019,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     const f = await pickFile('image/png,image/jpeg');
     if (!f) return;
     if (!['image/png', 'image/jpeg'].includes(f.type)) { await showAlert('Hanya file PNG atau JPG yang diperbolehkan.'); return; }
-    if (f.size > MAX_IMPORT_BYTES) { await showAlert(`Ukuran file maksimal 5MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
+    if (f.size > MAX_IMPORT_BYTES) { await showAlert(`Ukuran file maksimal ${MAX_IMPORT_BYTES / 1024 / 1024}MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
     setRefBusy(true); setRefErr('');
     try {
       const { url } = await api.uploadMedia(f, slug);
