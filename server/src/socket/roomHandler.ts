@@ -1104,14 +1104,20 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // here and falls straight through to the remembered/Starting-Point spawn
     // above, untouched. Wins over `remembered` when both are set — "you were
     // just let in" is a far more recent, specific signal than a possibly
-    // stale saved position (e.g. from a much earlier visit).
+    // stale saved position (e.g. from a much earlier visit). Still consumed
+    // (deleted from the map) even when an assigned seat is present, so it
+    // doesn't linger and fire on some later join — but it no longer
+    // overrides `spawn` in that case: "you have your own desk" is the more
+    // durable signal per the assignedSeatPixel comment above, and is
+    // supposed to hold on every single join, including ones that go through
+    // admin admit/approve.
     const nearPlacementKey = `${room}:${uid}`;
     const nearUid = pendingNearPlacement.get(nearPlacementKey);
     if (nearUid) {
       pendingNearPlacement.delete(nearPlacementKey);
       const roomPlayers = await getPlayers(room);
       const nearPlayer = roomPlayers.find((p) => p.userId === nearUid);
-      if (nearPlayer) {
+      if (nearPlayer && !assignedSeatPixel) {
         const nearTileX = Math.floor(nearPlayer.x / TILE_SIZE);
         const nearTileY = Math.floor(nearPlayer.y / TILE_SIZE);
         // Same helper Summon/My Seat already use — deliberately not
