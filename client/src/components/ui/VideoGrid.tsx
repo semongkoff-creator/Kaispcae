@@ -77,6 +77,12 @@ interface VideoGridProps {
   // is always the "enter" direction; exiting uses MeetingView's own close
   // button.
   onToggleMeetingView: () => void;
+  // "Layar Penuh" is a true edge-to-edge takeover now (see ScreenSharePanel's
+  // own doc comment) — the bottom HUD toolbar lives in App.tsx, outside this
+  // component entirely, so hiding it while maximized needs to bubble all the
+  // way up rather than stopping at this component's own local `hidden`
+  // state (which only ever controlled the camera-tile rail here).
+  onScreenShareMaximizedChange?: (maximized: boolean) => void;
 }
 
 // Shared with MeetingView.tsx (the "Dedicated Meeting View" full-screen
@@ -344,18 +350,17 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
 
   return (
     <div
-      // Pinned top-centre, filling the space between the left nav rail, the
-      // top edge, and the HUD toolbar at the bottom.
+      // Non-maximized: pinned top-centre, filling the space between the left
+      // nav rail, the top edge, and the HUD toolbar at the bottom.
       //
-      // bottom-24 (6rem), not a near-zero inset, in BOTH states — the bottom
-      // HUD toolbar (App.tsx, absolute bottom-6, z-50) sits above this panel
-      // (z-30) and stays clickable regardless, but a panel reaching past it
-      // put the toolbar pill floating on top of the picture instead of
-      // sitting cleanly below it. bottom-20 (the same clearance the BGM area
-      // control reserves for this same toolbar elsewhere in App.tsx) was
-      // tried first but measured 2px short with the toolbar's actual
-      // rendered height — bottom-24 leaves real margin instead of a
-      // knife-edge fit.
+      // bottom-24 (6rem), not a near-zero inset — the bottom HUD toolbar
+      // (App.tsx, absolute bottom-6, z-50) sits above this panel (z-30) and
+      // stays clickable regardless, but a panel reaching past it put the
+      // toolbar pill floating on top of the picture instead of sitting
+      // cleanly below it. bottom-20 (the same clearance the BGM area control
+      // reserves for this same toolbar elsewhere in App.tsx) was tried first
+      // but measured 2px short with the toolbar's actual rendered height —
+      // bottom-24 leaves real margin instead of a knife-edge fit.
       // Centred with left-0 right-0 mx-auto, NOT left-1/2 + -translate-x-1/2.
       // animate-fade-in animates `transform`, and its `both` fill-mode makes
       // the final keyframe stick permanently — an animation beats a normal
@@ -364,20 +369,24 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
       // putting its LEFT EDGE at screen centre and hanging off to the right.
       // Auto margins centre it without touching transform at all, so the two
       // can't fight.
-      // Maximized drops the room reserved for the camera rail (right-1
-      // instead of right-2) and tightens the corners, growing to whatever
-      // the window allows while still clearing the toolbar the same way.
-      // Position and object-contain are identical in both states — only the
-      // ceiling moves — so enlarging can never crop or stretch the picture.
       //
       // left-14, not a symmetric inset: the left nav (Sidebar.tsx) is a
       // w-12 (48px) z-50 rail that sits ON TOP of this z-30 panel, so a
       // flush-left panel had its title and left edge hidden under it and the
       // visible picture pushed off-centre. Clearing 56px on the left puts the
       // panel in the space actually visible beside the rail.
+      //
+      // Maximized: true edge-to-edge (inset-0, no rounded corners) — "bener-
+      // bener full screen kayak nonton YouTube" on request, not just a
+      // bigger panel with the same margins. This only works cleanly because
+      // onMaximizedChange now also hides BOTH the sidebar rail and the HUD
+      // toolbar (see App.tsx's screenShareMaximized) — with either of those
+      // still rendered at their z-50, inset-0 would just put them back to
+      // floating on top of the picture, the exact bug the non-maximized
+      // clearances above exist to avoid.
       className={`absolute z-30 flex flex-col pointer-events-auto overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in ${
         maximized
-          ? 'left-14 right-1 top-1 bottom-24 rounded-md'
+          ? 'inset-0 rounded-none border-0'
           : 'left-14 right-2 top-1 bottom-24 rounded-lg'
       }`}
     >
@@ -443,7 +452,7 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
   );
 }
 
-export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds, onToggleMeetingView }: VideoGridProps) {
+export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds, onToggleMeetingView, onScreenShareMaximizedChange }: VideoGridProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localHandRaised = localPlayer.handRaised;
@@ -630,7 +639,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           isLocal={featured.isLocal}
           mirror={featured.mirror}
           onClose={() => setFeaturedKey(null)}
-          onMaximizedChange={setHidden}
+          onMaximizedChange={(v) => { setHidden(v); onScreenShareMaximizedChange?.(v); }}
         />
       )}
       {/* QA (Load checklist item 3, "War Room share massal") — this column

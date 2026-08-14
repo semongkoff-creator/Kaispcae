@@ -1241,6 +1241,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // sidebar (a fixed corner button) since the sidebar is exactly what gets
   // hidden — there'd be no way back otherwise.
   const [simplifiedView, setSimplifiedView] = useState(false);
+  // "Layar Penuh" on a screen share is now a true edge-to-edge takeover (see
+  // VideoGrid/ScreenSharePanel's own comments) — on request, "bener-bener
+  // full screen kayak nonton YouTube". The sidebar rail and bottom HUD
+  // toolbar both sit at z-50, above the panel's z-30, so leaving them
+  // rendered would just float them on top of the picture instead of the
+  // picture actually filling the screen. VideoGrid reports maximize
+  // start/stop here so both can hide for as long as it lasts.
+  const [screenShareMaximized, setScreenShareMaximized] = useState(false);
 
   const handlePinNotice = useCallback((message: { id: string; text: string; senderName: string }) => {
     emitNoticePin(message.id, message.text, message.senderName);
@@ -1889,7 +1897,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           the rail instead of scattered across the screen. Always rendered
           (not conditional on simplifiedView) — it collapses to just the
           "Show UI" exit icon internally when simplified, since that's the
-          one thing that must always stay reachable. */}
+          one thing that must always stay reachable.
+
+          Hidden while a screen share is truly maximized (screenShareMaximized)
+          — the one exception to "always rendered" above, since a maximized
+          share is a deliberate full-screen takeover of its own, same
+          intent as simplifiedView but triggered from the video panel
+          instead of the corner eye icon. Un-maximizing (its own control, or
+          Escape) brings the rail straight back. */}
+      {!screenShareMaximized && (
       <Sidebar
         roomFeaturesActive={activePanel === 'roomFeatures'}
         onToggleRoomFeatures={() => openPanel('roomFeatures')}
@@ -1977,6 +1993,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         theme={theme}
         onToggleTheme={onToggleTheme}
       />
+      )}
 
       {/* Permanent seat assignment (ZEP-style "this is my desk") — only
           shown while actually sitting, since it acts on the specific chair
@@ -2211,6 +2228,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
             failedPeerIds={failedPeers}
             onToggleMeetingView={() => openPanel('meeting')}
+            onScreenShareMaximizedChange={setScreenShareMaximized}
           />
         </>
       )}
@@ -2242,7 +2260,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           )}
         </div>
       )}
-      {!moduleOpen && (
+      {!moduleOpen && !screenShareMaximized && (
       <>
         {/* ParticipantPanel now positions itself as a full-height drawer
             (left over the map HUD, right over Meeting View — see its own
