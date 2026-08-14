@@ -344,29 +344,18 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
 
   return (
     <div
-      // Pinned top-centre, sized by whichever of three limits bites first.
-      // aspect-video on the video box below turns this one width into the
-      // height too, so the ratio can never distort — the panel just stops
-      // growing.
+      // Pinned top-centre, filling the space between the left nav rail, the
+      // top edge, and the HUD toolbar at the bottom.
       //
-      //   1280px        — an upper bound so it doesn't become absurd on an
-      //                   ultrawide monitor.
-      //   100vw - 14rem — horizontal room. 14rem, not 7rem: the panel is
-      //                   CENTRED, so the leftover space splits evenly across
-      //                   both sides and only half of whatever is reserved
-      //                   actually lands next to the camera rail. The rail
-      //                   itself needs 7rem (a 6rem tile at right-4), so the
-      //                   reservation has to be doubled. The previous value
-      //                   reserved 9rem total — half of that is 4.5rem, less
-      //                   than the rail needs, so on any window under ~864px
-      //                   the panel was already sliding underneath the
-      //                   participant tiles.
-      //   (100vh - 13rem) * 16/9
-      //                 — vertical room, converted to a width through the
-      //                   16:9 ratio. 13rem covers top-16 (4rem), the title
-      //                   bar, and clearance for the HUD toolbar at the
-      //                   bottom. Without this the panel would grow past the
-      //                   bottom edge on short windows.
+      // bottom-24 (6rem), not a near-zero inset, in BOTH states — the bottom
+      // HUD toolbar (App.tsx, absolute bottom-6, z-50) sits above this panel
+      // (z-30) and stays clickable regardless, but a panel reaching past it
+      // put the toolbar pill floating on top of the picture instead of
+      // sitting cleanly below it. bottom-20 (the same clearance the BGM area
+      // control reserves for this same toolbar elsewhere in App.tsx) was
+      // tried first but measured 2px short with the toolbar's actual
+      // rendered height — bottom-24 leaves real margin instead of a
+      // knife-edge fit.
       // Centred with left-0 right-0 mx-auto, NOT left-1/2 + -translate-x-1/2.
       // animate-fade-in animates `transform`, and its `both` fill-mode makes
       // the final keyframe stick permanently — an animation beats a normal
@@ -375,18 +364,11 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
       // putting its LEFT EDGE at screen centre and hanging off to the right.
       // Auto margins centre it without touching transform at all, so the two
       // can't fight.
-      // Enlarged drops the 1280px cap and the room reserved for the camera
-      // rail, growing to whatever the window allows while the same three-way
-      // min() still keeps the 16:9 box inside the viewport. Position, aspect
-      // ratio and object-contain are identical in both states — only the
+      // Maximized drops the room reserved for the camera rail (right-1
+      // instead of right-2) and tightens the corners, growing to whatever
+      // the window allows while still clearing the toolbar the same way.
+      // Position and object-contain are identical in both states — only the
       // ceiling moves — so enlarging can never crop or stretch the picture.
-      // Fills the viewport, leaving only a thin frame — the user chose max
-      // size over map visibility. The 16:9 aspect-lock is deliberately gone:
-      // on a 16:9 monitor an aspect-locked panel can't grow past the height
-      // budget without hiding the map entirely anyway, so the lock capped the
-      // size for no gain. Instead the panel is a flex column filling its box,
-      // the content flexes to fill it, and object-contain letterboxes whatever
-      // ratio the shared screen has — a bigger box that never crops/stretches.
       //
       // left-14, not a symmetric inset: the left nav (Sidebar.tsx) is a
       // w-12 (48px) z-50 rail that sits ON TOP of this z-30 panel, so a
@@ -395,8 +377,8 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
       // panel in the space actually visible beside the rail.
       className={`absolute z-30 flex flex-col pointer-events-auto overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in ${
         maximized
-          ? 'left-14 right-1 top-1 bottom-1 rounded-md'
-          : 'left-14 right-2 top-1 bottom-2 rounded-lg'
+          ? 'left-14 right-1 top-1 bottom-24 rounded-md'
+          : 'left-14 right-2 top-1 bottom-24 rounded-lg'
       }`}
     >
       {/* A label, not a handle — the panel does not move. Only takes its own
@@ -489,24 +471,14 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   const [hidden, setHidden] = useState(false);
   // Which shared screen is the big one. Null = "whichever is first", so a
   // share that starts while nothing is featured is promoted automatically.
+  // Which shared screen (or enlarged camera) is the big one — manual only.
+  // Reverted the brief ZEP-style "auto-feature the first incoming share"
+  // behavior on request: it read as the picture barging over the HUD
+  // toolbar uninvited rather than a helpful "look here". Enlarging is a
+  // deliberate click (the thumbnail's "Perbesar" button below, or a tile's
+  // own onEnlarge) — a screen share simply joins the thumbnail rail like
+  // camera tiles do until someone asks to feature it.
   const [featuredKey, setFeaturedKey] = useState<string | null>(null);
-  // Screen-share keys explicitly closed out of the featured panel (see the
-  // ScreenSharePanel onClose below) — auto-promotion skips these, so
-  // closing stays closed instead of the very next render re-opening the
-  // same share. Pruned in the effect below once a key's share actually
-  // ends, so the SAME presenter starting a genuinely NEW share later (same
-  // key) is never permanently suppressed.
-  //
-  // Real state, not a ref: an auto-featured share never touches featuredKey
-  // (it's derived from screenEntries, see `featured` below), so closing one
-  // was calling setFeaturedKey(null) while featuredKey was ALREADY null —
-  // React bails out of a same-value setState with no re-render, so a ref
-  // mutation right alongside it would sit there correctly updated but never
-  // actually take visual effect until some UNRELATED re-render happened to
-  // come along later. Measured live: the close button dispatched fine, but
-  // the panel stayed on screen. A real setState here guarantees the re-
-  // render actually happens.
-  const [dismissedScreenKeys, setDismissedScreenKeys] = useState<Set<string>>(new Set());
   const now = Date.now();
 
   // Local and remote shares merged into ONE list, because from the viewer's
@@ -540,28 +512,8 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // something else forced an update. Same applies to an enlarged camera —
   // if that person's camera goes off, their -camera key vanishes from
   // cameraEntries and the panel closes itself right along with it.
-  //
-  // Auto-features the first not-yet-dismissed screen share — restored on
-  // request (ZEP-style: a new share should read as "look here", not sit
-  // buried as a thumbnail until someone happens to click enlarge).
-  // dismissedScreenKeys (declared above, pruned in the effect below) keeps
-  // this from re-opening a share the viewer just closed.
-  const featured = [...screenEntries, ...cameraEntries].find((s) => s.key === featuredKey)
-    ?? screenEntries.find((s) => !dismissedScreenKeys.has(s.key))
-    ?? null;
+  const featured = [...screenEntries, ...cameraEntries].find((s) => s.key === featuredKey) ?? null;
   const otherScreens = screenEntries.filter((s) => s.key !== featured?.key);
-
-  // Un-dismiss a key once its share actually ends — otherwise the SAME
-  // presenter starting a genuinely new share later (same 'local-screen' /
-  // '<id>-screen' key) would stay silently suppressed forever.
-  const screenKeysJoined = screenEntries.map((s) => s.key).join(',');
-  useEffect(() => {
-    const live = new Set(screenKeysJoined ? screenKeysJoined.split(',') : []);
-    setDismissedScreenKeys((prev) => {
-      const next = new Set([...prev].filter((k) => live.has(k)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [screenKeysJoined]);
 
   const totalTiles = (localStream ? 1 : 0) + (localScreenStream ? 1 : 0) + videoTiles.length
     + videoTiles.filter((t) => t.screenStream).length;
@@ -570,7 +522,18 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // something that doesn't exist yet" rule the rest of the HUD follows.
   if (totalTiles === 0) return null;
 
-  if (hidden) {
+  // !featured — a bare "hidden" with an active featured panel (screen share
+  // or enlarged camera) must NOT hit this early return: ScreenSharePanel's
+  // own onMaximizedChange sets `hidden` true so the tile rail gets out of
+  // the way while a share fills the screen (see its doc comment) — but this
+  // return used to replace the ENTIRE component output, including the panel
+  // that triggered it, so clicking "Layar Penuh" made the very share you'd
+  // just maximized vanish instead of filling the screen. Measured live: the
+  // panel disappeared the instant maximize was clicked. Gating on `featured`
+  // too means only the plain "hide the tile rail, nothing is featured" case
+  // collapses to this small chip; the tile-rail column itself is what
+  // actually hides below, in the main return.
+  if (hidden && !featured) {
     return (
       <div className="absolute top-16 right-4 z-20 flex items-center gap-1.5 pointer-events-auto">
         {/* Kept reachable even with tiles hidden — otherwise hiding the
@@ -666,15 +629,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           stream={featured.stream}
           isLocal={featured.isLocal}
           mirror={featured.mirror}
-          onClose={() => {
-            // Only screen shares auto-reopen (see the `featured` fallback
-            // above) — an enlarged camera was always manual, so closing it
-            // needs no dismissal bookkeeping.
-            if (screenEntries.some((s) => s.key === featured.key)) {
-              setDismissedScreenKeys((prev) => new Set(prev).add(featured.key));
-            }
-            setFeaturedKey(null);
-          }}
+          onClose={() => setFeaturedKey(null)}
           onMaximizedChange={setHidden}
         />
       )}
@@ -711,6 +666,13 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           clipping the glow's actual visible bleed onto NEIGHBOURING tiles
           within this same strip — only at the strip's own outer edge, which
           was never visible past the edge anyway. */}
+      {/* Gated on !hidden (was unconditional) — this is the column
+          ScreenSharePanel's onMaximizedChange is actually asking to hide (see
+          the hidden-early-return comment above). Previously the early return
+          handled this by skipping this whole component's output instead,
+          which also skipped the featured panel above. Now hidden's only job
+          is to collapse THIS column; the panel keeps rendering regardless. */}
+      {!hidden && (
       <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 max-h-[calc(100vh-6rem)] overflow-y-auto overflow-x-hidden pointer-events-auto" style={{ contain: 'paint' }}>
         {/* Meeting View + hide/show, grouped side by side (was hideButton
             alone) rather than stacked in this otherwise-vertical column. */}
@@ -749,6 +711,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
         ))}
         {cameraTiles}
       </div>
+      )}
     </>
   );
 }
