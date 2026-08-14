@@ -736,6 +736,83 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
   }
 });
 
+// POST /api/rooms/:slug/duplicate — "Salin Room": copy an existing room's
+// current layout (tiles/furniture/zones/layerData/theme, whichever format it
+// actually uses — see convertLegacyRoom's own doc comment on layerData
+// superseding the legacy columns) into a brand-new room the caller now owns.
+// Same accountRole:'admin' gate as POST /rooms itself, deliberately NOT the
+// weaker room:update check the Lobby's "..." menu shows itself behind —
+// duplicating still creates a genuinely new room, so it needs the same
+// account-wide "may create rooms" gate every other creation path requires.
+// Only the MAP is copied; approval/restricted-access settings, membership,
+// chat channels, and teleport locations all start fresh like any new room —
+// "duplicate" means "same layout", not "same governance settings".
+rooms.post('/rooms/:slug/duplicate', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const requester = await prisma.user.findUnique({ where: { id: req.userId! }, select: { accountRole: true, organizationId: true } });
+    if (requester?.accountRole !== 'admin') {
+      return res.status(403).json({ error: 'Only admin accounts can create rooms' });
+    }
+
+    const source = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
+    if (!source) return res.status(404).json({ error: 'Room not found' });
+
+    const nameInput = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const name = (nameInput || `${source.name} (Copy)`).slice(0, 50);
+    if (!name) return res.status(400).json({ error: 'Nama room tidak boleh kosong' });
+    const slug = generateSlug(name);
+
+    const room = await prisma.room.create({
+      data: {
+        name,
+        slug,
+        maxPlayers: source.maxPlayers,
+        isPublic: source.isPublic,
+        theme: source.theme,
+        template: source.template,
+        ownerId: req.userId!,
+        organizationId: requester.organizationId,
+        tilemapData: source.tilemapData as any,
+        furniture: source.furniture as any,
+        zones: source.zones as any,
+        layerData: source.layerData as any,
+        mapFormatVersion: source.mapFormatVersion,
+      },
+    });
+
+    await prisma.roomMember.create({ data: { userId: req.userId!, roomId: room.id, role: 'admin' } });
+
+    // Same "never let a Drive hiccup fail room creation" guarantee as POST /rooms.
+    if (driveEnabled()) {
+      void ensureRoomFolder(room.id).catch((e) => console.error('[rooms] Lark folder create failed:', e));
+    }
+
+    const general = await prisma.channel.create({ data: { roomId: room.id, name: 'general', isDefault: true } });
+    await ensureGroupConversation(prisma, general);
+
+    // Same Team Locations pre-fill as POST /rooms — only meaningful when the
+    // copied room actually has legacy-format zones/tiles to derive an entry
+    // point from; a purely layerData-format source just skips this (no
+    // crash), same as an empty-zones brand-new room would.
+    const zones = (source.zones as unknown as { name: string }[] | null) ?? [];
+    const tiles = (source.tilemapData as unknown as unknown[][] | null) ?? [];
+    if (zones.length > 0 && tiles.length > 0) {
+      await prisma.teleportLocation.createMany({
+        data: zones.map((zone, index) => {
+          const point = findZoneEntryTile(tiles as any, zone as any);
+          return { roomId: room.id, name: zone.name, x: point.x, y: point.y, orderIndex: index, createdBy: req.userId! };
+        }),
+      });
+    }
+
+    return res.status(201).json({ id: room.id, name: room.name, slug: room.slug });
+  } catch (err) {
+    console.error('[rooms] duplicate error:', err);
+    return res.status(500).json({ error: 'Failed to duplicate room' });
+  }
+});
+
 // DELETE /api/rooms/:slug — delete room (owner only)
 rooms.delete('/rooms/:slug', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {

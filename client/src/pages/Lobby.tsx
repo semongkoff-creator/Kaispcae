@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, ChevronDown, ThreeDotsVertical, Search, BoxArrowInRight, Image, GearFill, PencilFill } from 'react-bootstrap-icons';
+import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, ChevronDown, ThreeDotsVertical, Search, BoxArrowInRight, Image, GearFill, PencilFill, XCircleFill, Files } from 'react-bootstrap-icons';
 import { SettingsPanel } from '@/components/ui/SettingsPanel';
 import { io } from 'socket.io-client';
 import { RoomTheme, RoomTemplateId, ROOM_TEMPLATES } from '@kaispace/shared';
 import { api, RoomInfo } from '@/services/api';
 import { UserProfile, UserPreferences } from '@/services/api';
-import { showPrompt } from '@/stores/modalStore';
+import { showPrompt, showConfirm } from '@/stores/modalStore';
 import { CreditsModal } from '@/components/ui/CreditsModal';
 import { GlobalModal } from '@/components/ui/GlobalModal';
 import { Theme } from '@/hooks/useTheme';
@@ -110,6 +110,37 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
       showToast('Nama room diperbarui', 'success');
     } catch {
       showToast('Gagal mengganti nama room', 'error');
+    }
+  };
+
+  const handleRemoveCover = async (slug: string) => {
+    const ok = await showConfirm('Hapus cover room ini? Kembali ke tampilan placeholder default.', {
+      title: 'Hapus Cover', confirmLabel: 'Hapus', danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.setRoomCover(slug, null);
+      setRooms((prev) => prev.map((r) => (r.slug === slug ? { ...r, coverImage: null } : r)));
+      showToast('Cover dihapus', 'success');
+    } catch {
+      showToast('Gagal menghapus cover', 'error');
+    }
+  };
+
+  // "Salin Room" — copies the room's current layout into a new room, stays
+  // on the Lobby (unlike + Create Space, which jumps straight in) so the
+  // admin can see the fresh card land, then decide whether to open it.
+  const handleDuplicate = async (slug: string, currentName: string) => {
+    const next = await showPrompt('Nama untuk room hasil salinan:', `${currentName} (Copy)`, { title: 'Salin Room' });
+    if (next === null) return; // cancelled
+    const trimmed = next.trim();
+    if (!trimmed) return;
+    try {
+      await api.duplicateRoom(slug, trimmed);
+      showToast('Room berhasil disalin', 'success');
+      api.getRooms().then((res) => setRooms(res.rooms));
+    } catch {
+      showToast('Gagal menyalin room', 'error');
     }
   };
 
@@ -550,6 +581,36 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                                     className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
                                   >
                                     <Image size={11} /> Ganti Cover
+                                  </button>
+                                )}
+                                {/* Hapus Cover — only shown when there's
+                                    actually a cover to remove (no point
+                                    offering it against the empty-placeholder
+                                    state). Same isAdmin gate as Ganti Cover,
+                                    since it's the same "change the room's
+                                    presentation" permission, just clearing
+                                    instead of setting (setRoomCover already
+                                    accepts coverImage: null server-side). */}
+                                {isAdmin && room.coverImage && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); handleRemoveCover(room.slug); }}
+                                    className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                                  >
+                                    <XCircleFill size={11} /> Hapus Cover
+                                  </button>
+                                )}
+                                {/* Salin Room — gated on isAdmin specifically
+                                    (not room.ownerId), matching the SERVER's
+                                    accountRole:'admin' check (duplicating
+                                    creates a genuinely new room, same gate as
+                                    "+ Create Space" — a non-admin owner of
+                                    THIS room still can't create a new one). */}
+                                {isAdmin && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); handleDuplicate(room.slug, room.name); }}
+                                    className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                                  >
+                                    <Files size={11} /> Salin Room
                                   </button>
                                 )}
                                 {room.ownerId === user.id && (

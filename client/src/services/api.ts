@@ -529,6 +529,16 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
 
+  // Lobby card "..." menu — "Salin Room". Copies the source room's current
+  // layout into a brand-new room; server-gated on accountRole:'admin' (the
+  // same account-wide "may create rooms" check POST /rooms itself uses, not
+  // just room:update — see routes/rooms.ts's own comment on why).
+  duplicateRoom: (slug: string, name: string) =>
+    request<{ id: string; name: string; slug: string }>(`/rooms/${slug}/duplicate`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+
   // §4.1 — Teleport (Admin), shared team locations, staff+ only (server
   // re-validates independently, this just decides what to show/offer).
   getTeleportLocations: (slug: string) => request<{ locations: TeleportLocation[] }>(`/rooms/${slug}/teleport-locations`),
