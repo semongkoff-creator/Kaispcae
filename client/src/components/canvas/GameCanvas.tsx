@@ -2859,8 +2859,14 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       </div>
 
       {pendingSeatClaim && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-auto">
-          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
+        <div
+          className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-auto"
+          onClick={() => setPendingSeatClaim(null)}
+        >
+          <div
+            className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs"
+            onClick={(e) => e.stopPropagation()}
+          >
             <p className="text-gray-900 dark:text-gray-100 text-sm mb-4">
               {pendingSeatClaim.ownerName
                 ? <>Kursi ini sudah diklaim <span className="font-semibold">{pendingSeatClaim.ownerName}</span>. Tetap ingin menjadikannya kursimu?</>

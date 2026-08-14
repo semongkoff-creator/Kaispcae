@@ -2382,8 +2382,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       )}
 
       {showLogoutConfirm && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center">
+        <div
+          className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => setShowLogoutConfirm(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
             <p className="text-gray-900 dark:text-gray-100 text-sm mb-4">Log out of your account?</p>
             <div className="flex gap-3">
               <button
