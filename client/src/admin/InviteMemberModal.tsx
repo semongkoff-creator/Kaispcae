@@ -87,12 +87,12 @@ export function InviteMemberModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email orang yang diundang"
               autoFocus
-              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm mb-2 focus:outline-none focus:ring-1 focus:ring-purple-400"
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm mb-2 focus:outline-none focus:ring-1 focus:ring-purple-400"
             />
             <select
               value={role}
               onChange={(e) => setRole(e.target.value as 'member' | 'admin')}
-              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm mb-2 cursor-pointer"
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm mb-2 cursor-pointer"
             >
               <option value="member">Anggota</option>
               <option value="admin">Admin</option>
