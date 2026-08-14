@@ -831,7 +831,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // Plain nearest-within-range matches how "senggol" actually gets used.
   const performNudge = useCallback(() => {
     const player = localPlayerRef.current;
-    const NUDGE_RANGE_PX = TILE_SIZE * 1.5;
+    // Matches the visible white "Proximity ring" (PROXIMITY_THRESHOLD_PX,
+    // shared/types/index.ts) instead of its own separate, tighter radius
+    // (was TILE_SIZE * 1.5 = 72px, exactly half the 144px ring) — someone
+    // standing clearly inside the ring everyone can see read as reachable
+    // but was actually out of Z's real range, so it silently no-op'd. Same
+    // "visual circle drifted from the real range" bug PROXIMITY_THRESHOLD_PX
+    // itself was introduced to prevent for the ring's own video/audio
+    // connect distance (see its doc comment) — nudge just wasn't using it.
+    const NUDGE_RANGE_PX = PROXIMITY_THRESHOLD_PX;
 
     let target: Avatar | null = null;
     let bestDist = Infinity;
