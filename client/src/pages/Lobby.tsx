@@ -449,15 +449,24 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
               <div
                 key={room.id}
                 onClick={handleJoinClick}
-                className={`rounded-xl overflow-hidden border shadow-sm transition-all ${
+                className={`rounded-xl border shadow-sm transition-all ${
                   isConfirmingDelete
                     ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 ring-2 ring-red-200 dark:ring-red-800'
                     : 'bg-white dark:bg-gray-800 border-purple-100 dark:border-gray-700 hover:border-purple-300 hover:shadow-md cursor-pointer'
                 }`}
               >
                 {/* A room with no coverImage set yet still shows the Figma
-                    reference's own literal "COVER IMG" placeholder. */}
-                <div className="relative aspect-[16/9] bg-gradient-to-br from-[#3B1E54] to-[#4A1E6D] flex items-center justify-center overflow-hidden">
+                    reference's own literal "COVER IMG" placeholder.
+                    overflow-hidden + rounded-t-xl moved here from the card's
+                    outer div — the "..." menu below opens BELOW the button
+                    (top-full), and the outer div clipping it there cut the
+                    dropdown down to a barely-visible sliver poking out of
+                    the card's bottom edge instead of showing it. This is the
+                    only child that actually needs its own corners clipped
+                    (the cover image/gradient); the outer div's rounded-xl
+                    alone already reads as rounded since nothing else here
+                    has a background that would bleed past it. */}
+                <div className="relative aspect-[16/9] rounded-t-xl bg-gradient-to-br from-[#3B1E54] to-[#4A1E6D] flex items-center justify-center overflow-hidden">
                   {room.coverImage ? (
                     // object-contain, not cover — a cover can be any aspect
                     // ratio (a wide logo wordmark, a photo, etc.); cropping
