@@ -38,6 +38,20 @@ canvas {
   image-rendering: pixelated;
 }
 
+/* Scrollable but never SHOWS a scrollbar track/thumb — used on small floating
+   HUD strips (VideoGrid's camera-tile rail) where an occasional native
+   scrollbar reads as a stray UI glitch rather than a real "there's more
+   below" affordance. Wheel/touch scrolling still works; only the visible
+   bar is gone. Three rules for three browser engines — there's no single
+   standard property that covers all of them. */
+.hide-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge/IE */
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Chromium Edge */
+}
+
 /* Soft entrance for transient UI (video tiles, toasts) — the `animate-fade-in`
    utility is referenced in several components (VideoGrid, the nudge toast in
    App.tsx) but was never actually defined, so it was silently a no-op until
@@ -68,11 +82,26 @@ canvas {
 /* "Ethereal Collaboration" — the speaking indicator's pulsing glow (spec:
    "ring 2px #A855F7 + spread-shadow 8px, efek berdenyut"). The ring itself is
    still a plain Tailwind `ring-2 ring-purple-400/60` on the tile (see
-   VideoGrid.tsx) — this only pulses the outer glow so the ring edge stays
-   crisp instead of blurring in and out with it. */
+   VideoGrid.tsx). This used to animate the box-shadow's own blur/spread
+   directly — measured (tile flicker diagnosis) to briefly inflate an
+   ancestor scroll container's scrollHeight every time it started, even
+   with contain:paint on that ancestor: Chromium's paint-containment
+   apparently doesn't fully catch a box-shadow that's still being
+   interpolated by its own keyframes yet, only a settled/static one — a
+   ~300ms window (isolated by disabling this animation alone, with the ring
+   and everything else unchanged: 0 overflow events; re-enabled: back to ~1
+   per speaking onset). Fix: the box-shadow value itself is now CONSTANT
+   (set once, on .speaking-glow below, never touched by the keyframes) —
+   only this element's OPACITY pulses, which never changes its geometry, so
+   there's nothing for scroll-overflow to ever recompute. Applied via a
+   separate absolutely-positioned overlay (see VideoGrid.tsx), not the tile's
+   own div, so the pulse never fades the video/name/tile content with it. */
 @keyframes speaking-glow-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.45), 0 0 8px 2px rgba(168, 85, 247, 0.35); }
-  50%      { box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.65), 0 0 16px 6px rgba(168, 85, 247, 0.5); }
+  0%, 100% { opacity: 0.65; }
+  50%      { opacity: 1; }
+}
+.speaking-glow {
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.65), 0 0 16px 6px rgba(168, 85, 247, 0.5);
 }
 .animate-speaking-glow {
   animation: speaking-glow-pulse 1.6s ease-in-out infinite;
@@ -92,6 +121,6 @@ canvas {
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in { animation: none; }
   .animate-reaction-float { animation: reaction-float 2.4s linear both; }
-  .animate-speaking-glow { animation: none; box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.55); }
+  .animate-speaking-glow { animation: none; opacity: 1; }
   .animate-wave-bar { animation: none; transform: scaleY(0.75); }
 }

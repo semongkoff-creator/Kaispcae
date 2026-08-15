@@ -3,6 +3,7 @@ import { XLg, PinFill } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteType, EMOTE_LIST, EMOTE_EMOJI, EMOTE_LABELS } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { getVideoTiles, VideoTile, latestReaction } from './VideoGrid';
 
 interface MeetingViewProps {
@@ -47,7 +48,7 @@ interface MTile {
   isBeingRecorded?: boolean;
   micMuted?: boolean;
   cameraOff?: boolean;
-  speaking?: boolean;
+  speakingId?: string; // remote player id to check in the speaking-players store; ignored for isLocal tiles
   reactionSourceId?: string; // player id for latestReaction lookup (cam tiles)
   volumeTargetId?: string;   // remote id whose volume this tile's slider adjusts
   // QA (Akses tamu checklist item 6, "Label Guest") — never set on the
@@ -75,8 +76,12 @@ export function MeetingView({
   const localUserId = useGameStore((s) => s.localUserId);
   const localName = useGameStore((s) => s.localPlayer.name);
   const emoteEvents = useGameStore((s) => s.emoteEvents);
-  const localSpeaking = useGameStore((s) => s.localSpeaking);
-  const speakingPlayers = useGameStore((s) => s.speakingPlayers);
+  // Speaking state is deliberately NOT read here — VideoTile (rendered via
+  // renderTile below) selects its own speakingId/isLocal slice directly
+  // (see VideoTile's doc comment in VideoGrid.tsx). Reading it at this
+  // level used to force the entire `tiles` list to recompute — and every
+  // tile in the grid/thumbnail strip to re-render — every time ANYONE's
+  // speaking status changed, not just the one tile that actually needed to.
   const now = Date.now();
 
   const videoTiles = getVideoTiles(nearby, playerRecords, remoteStreams, remoteScreenStreams, recordedTargetUserId);
@@ -101,11 +106,11 @@ export function MeetingView({
     const out: MTile[] = [];
     if (localScreenStream) out.push({ key: 'local-screen', name: 'Layarmu', stream: localScreenStream, isLocal: true, isScreen: true });
     for (const t of screenTiles) out.push({ key: `${t.id}-screen`, name: `Layar ${t.name}`, stream: t.screenStream, isLocal: false, isScreen: true });
-    if (localStream) out.push({ key: 'local-cam', name: 'You', avatarName: profiles.get(localUserId)?.name || localName, photoUrl: profiles.get(localUserId)?.photo ?? undefined, stream: localStream, isLocal: true, isScreen: false, micMuted, cameraOff, handRaised: localHandRaised, isBeingRecorded: isLocalBeingRecorded, speaking: localSpeaking && !micMuted, reactionSourceId: localPlayerId ?? undefined });
-    for (const t of videoTiles) { const uid = playerRecords[t.id]?.userId; out.push({ key: t.id, name: t.name, avatarName: (uid ? profiles.get(uid)?.name : '') || t.name, photoUrl: uid ? profiles.get(uid)?.photo ?? undefined : undefined, stream: t.stream, isLocal: false, isScreen: false, translucent: t.translucent, handRaised: t.handRaised, isBeingRecorded: t.isBeingRecorded, speaking: speakingPlayers.has(t.id), reactionSourceId: t.id, volumeTargetId: t.id, isGuest: t.isGuest }); }
+    if (localStream) out.push({ key: 'local-cam', name: 'You', avatarName: profiles.get(localUserId)?.name || localName, photoUrl: profiles.get(localUserId)?.photo ?? undefined, stream: localStream, isLocal: true, isScreen: false, micMuted, cameraOff, handRaised: localHandRaised, isBeingRecorded: isLocalBeingRecorded, reactionSourceId: localPlayerId ?? undefined });
+    for (const t of videoTiles) { const uid = playerRecords[t.id]?.userId; out.push({ key: t.id, name: t.name, avatarName: (uid ? profiles.get(uid)?.name : '') || t.name, photoUrl: uid ? profiles.get(uid)?.photo ?? undefined : undefined, stream: t.stream, isLocal: false, isScreen: false, translucent: t.translucent, handRaised: t.handRaised, isBeingRecorded: t.isBeingRecorded, speakingId: t.id, reactionSourceId: t.id, volumeTargetId: t.id, isGuest: t.isGuest }); }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [localStream, localScreenStream, micMuted, cameraOff, localHandRaised, isLocalBeingRecorded, localSpeaking, localPlayerId, localUserId, localName, profileSig,
+  }, [localStream, localScreenStream, micMuted, cameraOff, localHandRaised, isLocalBeingRecorded, localPlayerId, localUserId, localName, profileSig,
       videoTiles.map((t) => `${t.id}:${!!t.stream}:${t.translucent}:${t.handRaised}`).join(','),
       screenTiles.map((t) => t.id).join(',')]);
 
@@ -175,7 +180,7 @@ export function MeetingView({
       translucent={t.translucent}
       handRaised={t.handRaised}
       isBeingRecorded={t.isBeingRecorded}
-      speaking={t.speaking}
+      speakingId={t.speakingId}
       reaction={t.reactionSourceId ? latestReaction(emoteEvents, t.reactionSourceId, now) : null}
       onVolumeChange={t.volumeTargetId ? (v) => onManualVolumeChange(t.volumeTargetId!, v) : undefined}
       connectionFailed={!t.isLocal && !t.isScreen && !!t.reactionSourceId && failedPeerIds?.has(t.reactionSourceId)}
@@ -207,13 +212,14 @@ export function MeetingView({
             has no discrete hang-up/disconnect (you leave by proximity or by
             closing this view), so the spec's "leave merah" is applied here:
             neutral at rest, red on hover/focus to signal what it does. */}
-        <button
-          onClick={onClose}
-          title="Keluar Meeting View"
-          className="w-9 h-9 rounded-full bg-white/10 hover:bg-red-500/80 text-white flex items-center justify-center cursor-pointer transition-colors"
-        >
-          <XLg size={16} />
-        </button>
+        <Tooltip label="Keluar Meeting View" detail="Kembali ke tampilan peta biasa.">
+          <button
+            onClick={onClose}
+            className="w-9 h-9 rounded-full bg-white/10 hover:bg-red-500/80 text-white flex items-center justify-center cursor-pointer transition-colors"
+          >
+            <XLg size={16} />
+          </button>
+        </Tooltip>
       </div>
 
       {/* Featured stage — fills the bulk of the screen. */}
@@ -226,13 +232,19 @@ export function MeetingView({
           <div className="relative h-full aspect-video max-w-full mx-auto">
             {renderTile(featured)}
             {isPinned && (
-              <button
-                onClick={() => setPinnedKey(null)}
-                title="Lepas sorotan (kembali otomatis)"
-                className="absolute top-2 right-2 z-10 inline-flex items-center gap-1 rounded-full bg-black/50 hover:bg-black/70 text-white text-[11px] px-2.5 py-1 backdrop-blur cursor-pointer"
-              >
-                <PinFill size={11} /> Lepas
-              </button>
+              // wrapperClassName carries the absolute positioning — Tooltip's
+              // own wrapper div is `position: relative`, so it would
+              // otherwise anchor `absolute top-2 right-2` to itself (and
+              // collapse to 0×0, since it has no in-flow content) instead of
+              // the featured-stage container.
+              <Tooltip label="Lepas Sorotan" detail="Jadikan orang ini tampilan utama, atau kembali ke mode otomatis." wrapperClassName="absolute top-2 right-2 z-10">
+                <button
+                  onClick={() => setPinnedKey(null)}
+                  className="inline-flex items-center gap-1 rounded-full bg-black/50 hover:bg-black/70 text-white text-[11px] px-2.5 py-1 backdrop-blur cursor-pointer"
+                >
+                  <PinFill size={11} /> Lepas
+                </button>
+              </Tooltip>
             )}
           </div>
         ) : tiles.length > 0 ? (
@@ -242,18 +254,28 @@ export function MeetingView({
           // explicit gridColumns/gridRows above, not CSS auto-fit — see that
           // comment for why. Click any tile to pin it.
           <div
-            className="w-full h-full grid gap-3 place-content-center overflow-y-auto py-1"
-            style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${gridRows}, minmax(120px, 1fr))` }}
+            // overflow-x-hidden alongside overflow-y-auto — otherwise CSS
+            // computes the unset x-axis as 'auto' too (an axis left at
+            // 'visible' is forced to 'auto' the moment the other one isn't),
+            // letting a speaking tile's ring/glow trigger a stray horizontal
+            // scrollbar in a grid that only ever needs to scroll vertically.
+            // contain:'paint' (measured — see VideoGrid.tsx's matching
+            // container) clips the same glow's ink overflow on the axis
+            // that's still active (Y), so it can no longer inflate this
+            // element's own scrollHeight and toggle the vertical scrollbar
+            // on/off in sync with the speaking pulse.
+            className="w-full h-full grid gap-3 place-content-center overflow-y-auto overflow-x-hidden py-1"
+            style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${gridRows}, minmax(120px, 1fr))`, contain: 'paint' }}
           >
             {tiles.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setPinnedKey(t.key)}
-                title={`Sorot ${t.name}`}
-                className="relative rounded-lg overflow-hidden cursor-pointer ring-1 ring-white/10 hover:ring-purple-400/70 transition-all"
-              >
-                {renderTile(t)}
-              </button>
+              <Tooltip key={t.key} label="Sorot Peserta Ini" detail="Jadikan orang ini tampilan utama, atau kembali ke mode otomatis." wrapperClassName="w-full h-full">
+                <button
+                  onClick={() => setPinnedKey(t.key)}
+                  className="relative rounded-lg overflow-hidden cursor-pointer ring-1 ring-white/10 hover:ring-purple-400/70 transition-all w-full h-full"
+                >
+                  {renderTile(t)}
+                </button>
+              </Tooltip>
             ))}
           </div>
         ) : (
@@ -266,16 +288,21 @@ export function MeetingView({
           covers "nobody's featured". */}
       {thumbnails.length > 0 && (
         <div className="shrink-0 flex justify-center pl-20 pr-6 pt-3">
-          <div className="flex gap-2 overflow-x-auto max-w-full pb-1">
+          {/* overflow-y-hidden alongside overflow-x-auto, same reasoning as
+              the tiled grid above — this row never scrolls vertically.
+              contain:'paint' for the same reason as the tiled grid above —
+              clips the speaking glow's ink overflow so it can't inflate this
+              row's scrollWidth (the axis that's active here). */}
+          <div className="flex gap-2 overflow-x-auto overflow-y-hidden max-w-full pb-1" style={{ contain: 'paint' }}>
             {thumbnails.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setPinnedKey(t.key)}
-                title={`Sorot ${t.name}`}
-                className="shrink-0 w-40 h-24 rounded-lg overflow-hidden cursor-pointer ring-1 ring-white/10 hover:ring-purple-400/70 transition-all"
-              >
-                {renderTile(t)}
-              </button>
+              <Tooltip key={t.key} label="Sorot Peserta Ini" detail="Jadikan orang ini tampilan utama, atau kembali ke mode otomatis." wrapperClassName="shrink-0">
+                <button
+                  onClick={() => setPinnedKey(t.key)}
+                  className="shrink-0 w-40 h-24 rounded-lg overflow-hidden cursor-pointer ring-1 ring-white/10 hover:ring-purple-400/70 transition-all"
+                >
+                  {renderTile(t)}
+                </button>
+              </Tooltip>
             ))}
           </div>
         </div>
@@ -293,14 +320,14 @@ export function MeetingView({
         <div className="shrink-0 flex justify-center pt-2 animate-fade-in">
           <div className="flex items-center gap-1 bg-white/10 border border-white/15 rounded-full px-2 py-1.5 backdrop-blur-sm pointer-events-auto">
             {EMOTE_LIST.map((emote) => (
-              <button
-                key={emote}
-                onClick={() => onEmote(emote)}
-                title={EMOTE_LABELS[emote]}
-                className="w-9 h-9 rounded-full flex items-center justify-center text-xl hover:bg-white/20 hover:scale-110 active:scale-95 transition-all cursor-pointer"
-              >
-                {EMOTE_EMOJI[emote]}
-              </button>
+              <Tooltip key={emote} label="Kirim Reaksi" detail="Kirim reaksi emoji cepat, kelihatan oleh semua orang di meeting.">
+                <button
+                  onClick={() => onEmote(emote)}
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-xl hover:bg-white/20 hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                >
+                  {EMOTE_EMOJI[emote]}
+                </button>
+              </Tooltip>
             ))}
           </div>
         </div>

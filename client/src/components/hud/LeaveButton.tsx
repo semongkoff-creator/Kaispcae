@@ -19,9 +19,9 @@ export function LeaveButton({ onLeave }: LeaveButtonProps) {
     >
       <button
         onClick={onLeave}
-        className="relative flex items-center justify-center w-11 h-11 rounded-full bg-red-500 hover:bg-red-600 backdrop-blur-xl border border-red-400 shadow-lg shadow-red-500/30 transition-all hover:scale-105 cursor-pointer"
+        className="relative flex items-center justify-center w-10 h-10 rounded-full bg-red-500 hover:bg-red-600 backdrop-blur-xl border border-red-400 shadow-lg shadow-red-500/30 transition-all hover:scale-105 cursor-pointer"
       >
-        <TelephoneXFill className="text-white" size={18} />
+        <TelephoneXFill className="text-white" size={16} />
       </button>
     </Tooltip>
   );

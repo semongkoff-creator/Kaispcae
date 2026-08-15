@@ -482,23 +482,25 @@ export const api = {
       body: JSON.stringify(patch),
     }),
 
-  // Customer Service chat.
+  // Customer Service chat — bot FAQ (server/src/data/csFaq.ts) plus a
+  // "Hubungi admin" wa.me handoff. waLink is a wa.me deep link when
+  // CS_ADMIN_WHATSAPP_NUMBER is configured server-side — see
+  // routes/cs.ts's buildWhatsAppLink.
   csOpenSession: () =>
-    request<{ sessionId: string; mode: 'bot' | 'human'; messages: CsMessage[] }>('/cs/session', {
+    request<{ sessionId: string; messages: CsMessage[] }>('/cs/session', {
       method: 'POST',
     }),
 
   csSendMessage: (sessionId: string, text: string) =>
-    request<{ userMessage: CsMessage; botMessage: CsMessage | null; offerAdmin: boolean; mode: 'bot' | 'human'; relayed: boolean | null }>(`/cs/session/${sessionId}/message`, {
+    request<{ userMessage: CsMessage; botMessage: CsMessage | null; offerAdmin: boolean; waLink: string | null }>(`/cs/session/${sessionId}/message`, {
       method: 'POST',
       body: JSON.stringify({ text }),
     }),
 
-  // Tahap 3 — the "Hubungi admin" button's own trigger (distinct from
-  // typing "admin" as a message, which csSendMessage above already handles
-  // server-side).
+  // The "Hubungi admin" button's own trigger (distinct from typing "admin"
+  // as a message, which csSendMessage above already handles server-side).
   csHandoff: (sessionId: string) =>
-    request<{ mode: 'bot' | 'human'; botMessage: CsMessage | null }>(`/cs/session/${sessionId}/handoff`, {
+    request<{ botMessage: CsMessage | null; waLink: string | null }>(`/cs/session/${sessionId}/handoff`, {
       method: 'POST',
     }),
 
@@ -516,6 +518,25 @@ export const api = {
     request<{ ok: boolean; coverImage: string | null }>(`/rooms/${slug}/cover`, {
       method: 'PATCH',
       body: JSON.stringify({ coverImage }),
+    }),
+
+  // Lobby card "..." menu — rename, same admin gate as setRoomCover above.
+  // Only the display name changes; the slug (and every link/bookmark keyed
+  // off it) stays exactly as-is.
+  renameRoom: (slug: string, name: string) =>
+    request<{ ok: boolean; name: string }>(`/rooms/${slug}/name`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }),
+
+  // Lobby card "..." menu — "Salin Room". Copies the source room's current
+  // layout into a brand-new room; server-gated on accountRole:'admin' (the
+  // same account-wide "may create rooms" check POST /rooms itself uses, not
+  // just room:update — see routes/rooms.ts's own comment on why).
+  duplicateRoom: (slug: string, name: string) =>
+    request<{ id: string; name: string; slug: string }>(`/rooms/${slug}/duplicate`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
     }),
 
   // §4.1 — Teleport (Admin), shared team locations, staff+ only (server

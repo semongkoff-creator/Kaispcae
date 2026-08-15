@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import { Tooltip } from '@/components/ui/Tooltip';
 
 interface PendingRequestToastProps {
   icon: ReactNode;
@@ -35,18 +36,22 @@ export function PendingRequestToast({ icon, message, onAccept, onDecline }: Pend
           8px apart, two irreversible and opposite actions were a mis-tap
           away from each other. */}
       <div className="flex items-center justify-end gap-2.5 mt-3">
-        <button
-          onClick={onDecline}
-          className="px-3.5 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 text-xs font-medium cursor-pointer transition-colors"
-        >
-          Tolak
-        </button>
-        <button
-          onClick={onAccept}
-          className="px-3.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium cursor-pointer transition-colors"
-        >
-          Terima
-        </button>
+        <Tooltip label="Tolak" detail="Tolak permintaan ini.">
+          <button
+            onClick={onDecline}
+            className="px-3.5 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 text-xs font-medium cursor-pointer transition-colors"
+          >
+            Tolak
+          </button>
+        </Tooltip>
+        <Tooltip label="Terima" detail="Terima dan izinkan masuk.">
+          <button
+            onClick={onAccept}
+            className="px-3.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium cursor-pointer transition-colors"
+          >
+            Terima
+          </button>
+        </Tooltip>
       </div>
     </div>
   );

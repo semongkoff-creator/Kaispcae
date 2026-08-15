@@ -1,4 +1,4 @@
-// Walks through MeetKai/VirtualMeet's UI and saves one screenshot per
+// Walks through KaiSpace's UI and saves one screenshot per
 // screen/panel/feature, so they can be handed to Claude (or pasted into
 // Google Stitch) as a visual inventory for a redesign pass.
 //

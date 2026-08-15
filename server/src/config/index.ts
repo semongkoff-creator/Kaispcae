@@ -32,12 +32,12 @@ const envSchema = z
     // instead of crashing (see lib/youtubeService.ts). See
     // server/.env.example for how to obtain a key.
     YOUTUBE_API_KEY: z.string().optional(),
-    // Customer Service chat handoff (Tahap 3/4 — see routes/cs.ts). Both
-    // optional so bot-only mode (Tahap 2) works with nothing configured;
-    // the handoff endpoints guard on these being set and no-op/error
-    // clearly otherwise rather than crashing. Never sent to the client.
-    N8N_CS_WEBHOOK_URL: z.string().optional(),
-    CS_N8N_TOKEN: z.string().optional(),
+    // Customer Service "Hubungi admin" — a plain wa.me deep link (see
+    // routes/cs.ts's buildWhatsAppLink). Digits only, international format,
+    // no leading + or 0 (e.g. "6281234567890"). Optional so bot-only mode
+    // works with nothing configured — leave blank -> "Hubungi admin" replies
+    // "belum tersedia", not crash. Never sent to the client.
+    CS_ADMIN_WHATSAPP_NUMBER: z.string().optional(),
     // Google OAuth (Cloud Console) — Basic login only (email + profile),
     // see routes/google.ts. GOOGLE_LOGIN_ENABLED is a SEPARATE explicit
     // gate from the credentials themselves (checked as the literal string

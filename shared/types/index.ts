@@ -948,28 +948,11 @@ export enum SocketEvents {
   ROSTER_LIST_REQUEST = 'roster:list_request',
   ROSTER_SNAPSHOT = 'roster:snapshot',
   ROSTER_UPDATED = 'roster:updated',
-
-  // Customer Service chat, Tahap 4 — n8n -> MeetKai admin reply arriving
-  // back (see server/src/routes/cs.ts's POST /api/cs/reply and
-  // server/src/socket/csHandler.ts's pushCsReply). Sent only to the
-  // session's owning user, on every live socket they currently have open
-  // (see csHandler.ts — a user's CsChatWidget connection today, but also
-  // any other authenticated socket of theirs, e.g. a room socket, since
-  // there's nothing room-specific about this event).
-  CS_REPLY = 'cs:reply',
 }
 
 // Sent only to the removed player's own socket — see PLAYER_KICKED above.
 export interface PlayerKickedPayload {
   byName: string;
-}
-
-// See CS_REPLY above.
-export interface CsReplyPayload {
-  sessionId: string;
-  from: 'admin';
-  text: string;
-  createdAt: string;
 }
 
 // My own follow relationship (I am the follower) — sent only to me, never
@@ -1242,7 +1225,14 @@ export const SOURCE_TILE_SIZE = 32;
 // reception strip spanning the bottom.
 export const MAP_WIDTH = 50;
 export const MAP_HEIGHT = 36;
-export const PLAYER_SPEED = 230; // pixels per second — was 200, nudged up again per feedback (ZEP-like brisker pace)
+// Both bumped +20% per feedback (230->276, 345->414) — walk and
+// click-to-move pathfinding share this same PLAYER_SPEED constant
+// (useMovement.ts's tryMoveToward uses it too), so they stay in lockstep
+// automatically; no separate pathfinding speed to keep in sync. Animation
+// cadence scaled to match — see AvatarSprite.ts's WALK_FRAME_MS/
+// RUN_FRAME_MS, also divided by 1.2 — so the walk cycle doesn't fall out of
+// step with the now-faster stride (feet sliding instead of stepping).
+export const PLAYER_SPEED = 276; // pixels per second — was 230, nudged up again per feedback (ZEP-like brisker pace)
 // Run (hold R while moving) — no dedicated run animation frames exist in
 // the LimeZu Character Generator pack (only idle/walk rows), so running is
 // the walk animation cycled faster (see AvatarSprite.ts's RUN_FRAME_MS)
@@ -1250,7 +1240,7 @@ export const PLAYER_SPEED = 230; // pixels per second — was 200, nudged up aga
 // validate beyond what it already does for normal movement (bounds +
 // tile-collision — see movementHandler.ts's doc comment on why per-tick
 // max-distance was never enforced even before Run existed).
-export const PLAYER_RUN_SPEED = 345; // pixels per second — was 300, keeps the same ~1.5x ratio over PLAYER_SPEED
+export const PLAYER_RUN_SPEED = 414; // pixels per second — was 345, keeps the same ~1.5x ratio over PLAYER_SPEED
 
 // Jump (Space, when not sitting/near a chair) — cosmetic one-shot vertical
 // hop, rendered client-side only (see AvatarSprite.ts/GameCanvas.tsx);
@@ -1319,7 +1309,12 @@ export const PROXIMITY_THRESHOLD_PX = PROXIMITY_THRESHOLD * TILE_SIZE;
 // the ring that's supposed to represent it — same "derive so they can't
 // drift apart" fix PROXIMITY_THRESHOLD_PX above already got.
 export const TRANSLUCENT_THRESHOLD = PROXIMITY_THRESHOLD;
-export const DISCONNECT_DEBOUNCE_MS = 500;
+// Was 500 — long enough to absorb a boundary-hugging peer's normal jitter,
+// but shorter than it needs to be to also absorb the position hiccup a
+// server restart can cause (see useWebRTC.ts's resync-glitch guard, which
+// handles that case specifically). 1000ms still reads as prompt for a
+// genuine walk-away.
+export const DISCONNECT_DEBOUNCE_MS = 1000;
 
 // §6 — mirrors the spec's own three-state enum name
 // (full_visible/translucent/not_visible) for computeVisibility's result.

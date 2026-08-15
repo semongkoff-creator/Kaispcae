@@ -18,6 +18,36 @@ export interface WorldPoint {
   y: number;
 }
 
+export type CardinalDirection = 'up' | 'down' | 'left' | 'right';
+
+export interface RouteState {
+  targetTile: TileNode | null;
+  waypoints: WorldPoint[] | null;
+  failedStartTile?: TileNode | null;
+  failedAtMs?: number | null;
+}
+
+export interface FollowRouteTargetInput {
+  currentX: number;
+  currentY: number;
+  targetX: number;
+  targetY: number;
+  targetDirection: CardinalDirection;
+  blocked: (tx: number, ty: number) => boolean;
+  cols: number;
+  rows: number;
+  tileSize: number;
+  route: RouteState;
+  epsilonPx?: number;
+  nowMs?: number;
+  failedRetryMs?: number;
+}
+
+export interface FollowRouteTargetResult {
+  axisTarget: WorldPoint | null;
+  route: RouteState;
+}
+
 // Packs (x,y) into one number for a fast Map/Set key — tile coordinates on
 // any real map are a few hundred at most, nowhere near overflowing this.
 const KEY_SHIFT = 100000;
@@ -27,6 +57,12 @@ const CARDINAL_NEIGHBORS: TileNode[] = [
   { x: 1, y: 0 },
   { x: 0, y: 1 },
 ];
+const FOLLOW_TRAILING_OFFSETS: Record<CardinalDirection, TileNode> = {
+  up: { x: 0, y: 1 },
+  down: { x: 0, y: -1 },
+  left: { x: 1, y: 0 },
+  right: { x: -1, y: 0 },
+};
 
 function key(x: number, y: number): number {
   return x * KEY_SHIFT + y;
@@ -143,13 +179,24 @@ export function simplifyPath(path: TileNode[]): TileNode[] {
   return out;
 }
 
+export function tilePathToWorldWaypoints(path: TileNode[], tileSize: number): WorldPoint[] {
+  return simplifyPath(path).map((n) => ({
+    x: n.x * tileSize + tileSize / 2,
+    y: n.y * tileSize + tileSize / 2,
+  }));
+}
+
+export function isNearWorldPoint(currentX: number, currentY: number, point: WorldPoint, epsilonPx = 4): boolean {
+  return Math.abs(point.x - currentX) <= epsilonPx && Math.abs(point.y - currentY) <= epsilonPx;
+}
+
 export function getCardinalWaypointTarget(currentX: number, currentY: number, waypoint: WorldPoint, epsilonPx = 4): WorldPoint {
   const dx = waypoint.x - currentX;
   const dy = waypoint.y - currentY;
   const absX = Math.abs(dx);
   const absY = Math.abs(dy);
 
-  if (absX <= epsilonPx && absY <= epsilonPx) return waypoint;
+  if (isNearWorldPoint(currentX, currentY, waypoint, epsilonPx)) return { x: currentX, y: currentY };
 
   if (absX >= absY) {
     return absX > epsilonPx
@@ -160,4 +207,88 @@ export function getCardinalWaypointTarget(currentX: number, currentY: number, wa
   return absY > epsilonPx
     ? { x: currentX, y: waypoint.y }
     : { x: waypoint.x, y: currentY };
+}
+
+export function getTrailingTile(targetTileX: number, targetTileY: number, direction: CardinalDirection): TileNode {
+  const offset = FOLLOW_TRAILING_OFFSETS[direction] ?? FOLLOW_TRAILING_OFFSETS.down;
+  return { x: targetTileX + offset.x, y: targetTileY + offset.y };
+}
+
+export function findFollowRouteTarget(input: FollowRouteTargetInput): FollowRouteTargetResult {
+  const targetTile = getTrailingTile(
+    Math.floor(input.targetX / input.tileSize),
+    Math.floor(input.targetY / input.tileSize),
+    input.targetDirection,
+  );
+  const targetChanged =
+    input.route.targetTile?.x !== targetTile.x ||
+    input.route.targetTile?.y !== targetTile.y;
+
+  const startTileX = Math.floor(input.currentX / input.tileSize);
+  const startTileY = Math.floor(input.currentY / input.tileSize);
+  const failedStartMatches =
+    input.route.failedStartTile?.x === startTileX &&
+    input.route.failedStartTile?.y === startTileY;
+  const failedAtMs = input.route.failedAtMs;
+  const nowMs = input.nowMs;
+  const failedRetryMs = input.failedRetryMs ?? 500;
+  if (
+    !targetChanged &&
+    !input.route.waypoints &&
+    failedStartMatches &&
+    nowMs !== undefined &&
+    failedAtMs !== undefined &&
+    failedAtMs !== null &&
+    nowMs - failedAtMs < failedRetryMs
+  ) {
+    return { axisTarget: null, route: input.route };
+  }
+
+  let waypoints = targetChanged ? null : input.route.waypoints;
+  if (!waypoints) {
+    if (
+      targetTile.x < 0 ||
+      targetTile.y < 0 ||
+      targetTile.x >= input.cols ||
+      targetTile.y >= input.rows ||
+      input.blocked(targetTile.x, targetTile.y)
+    ) {
+      return {
+        axisTarget: null,
+        route: {
+          targetTile,
+          waypoints: null,
+          failedStartTile: { x: startTileX, y: startTileY },
+          failedAtMs: nowMs ?? null,
+        },
+      };
+    }
+
+    if (startTileX === targetTile.x && startTileY === targetTile.y) {
+      waypoints = [{
+        x: targetTile.x * input.tileSize + input.tileSize / 2,
+        y: targetTile.y * input.tileSize + input.tileSize / 2,
+      }];
+    } else {
+      const tilePath = findTilePath(startTileX, startTileY, targetTile.x, targetTile.y, input.blocked, input.cols, input.rows);
+      waypoints = tilePath ? tilePathToWorldWaypoints(tilePath, input.tileSize) : null;
+    }
+  }
+
+  if (!waypoints || waypoints.length === 0) {
+    return {
+      axisTarget: null,
+      route: {
+        targetTile,
+        waypoints: null,
+        failedStartTile: { x: startTileX, y: startTileY },
+        failedAtMs: nowMs ?? null,
+      },
+    };
+  }
+
+  return {
+    axisTarget: getCardinalWaypointTarget(input.currentX, input.currentY, waypoints[0], input.epsilonPx),
+    route: { targetTile, waypoints, failedStartTile: null, failedAtMs: null },
+  };
 }

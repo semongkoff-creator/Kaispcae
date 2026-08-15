@@ -32,13 +32,13 @@ export function CameraButton({ enabled, onToggle }: CameraButtonProps) {
         onClick={onToggle}
         // Same active-state convention as MicButton: camera on = solid purple
         // (the capability is actively broadcasting), off = glass + red icon.
-        className={`flex items-center justify-center w-11 h-11 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
+        className={`flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
           enabled
             ? 'bg-purple-600 border-purple-500 shadow-purple-500/30'
             : 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
         }`}
       >
-        {enabled ? <CameraVideoFill className="text-white" size={18} /> : <CameraVideoOffFill className="text-red-500" size={18} />}
+        {enabled ? <CameraVideoFill className="text-white" size={16} /> : <CameraVideoOffFill className="text-red-500" size={16} />}
       </button>
     </Tooltip>
   );

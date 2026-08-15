@@ -27,11 +27,11 @@ function humanSize(bytes: number): string {
 export function AttachmentLightbox({ target, onClose }: { target: LightboxTarget; onClose: () => void }) {
   const { url } = target;
   const name = target.fileName || decodeURIComponent(url.split('/').pop()?.split('?')[0] || 'file');
-  // Bug 17 — detect by the ORIGINAL FILENAME first, not the URL. Drive-backed
-  // attachments are served from an opaque, extension-less proxy URL
-  // (/api/files/<token>), so testing the URL alone made every Drive image/video
-  // read as "not previewable". The filename (attachmentName) keeps its real
-  // extension, so it's the reliable signal; the URL is only a fallback.
+  // Bug 17 — detect by the ORIGINAL FILENAME first, not the URL. An
+  // attachment URL is not guaranteed to carry a file extension, and testing
+  // the URL alone made every such image/video read as "not previewable". The
+  // filename (attachmentName) keeps its real extension, so it's the reliable
+  // signal; the URL is only a fallback.
   const matchExt = (re: RegExp) => re.test(name) || re.test(url);
   const isImage = matchExt(IMAGE_RE);
   const isVideo = matchExt(VIDEO_RE);

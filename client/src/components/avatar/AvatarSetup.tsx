@@ -218,8 +218,14 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: Ava
     // MeetingView (intentionally z-40, so the HUD stays reachable during
     // that full-screen mode), this is a transient, closable dialog — it
     // should fully cover the HUD while open, not compete with it.
-    <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700">
+    <div
+      className="absolute inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      onClick={onClose ? handleClose : undefined}
+    >
+      <div
+        className="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-gray-900 dark:text-gray-100 text-xl font-bold">Customize Avatar</h2>
           {onClose && (

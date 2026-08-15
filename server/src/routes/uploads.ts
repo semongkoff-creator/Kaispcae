@@ -63,7 +63,7 @@ export const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB — raised from 10MB so short video clips fit
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB — raised from 50MB for Room Editor's Import Image feature
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     cb(null, allowedMimeTypes.has(file.mimetype) || allowedExtensions.has(ext));

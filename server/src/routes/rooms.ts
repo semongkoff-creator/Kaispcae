@@ -18,7 +18,7 @@ import { setCachedTiles, setCachedImpassableAreas, setCachedDoorAreaRects, setCa
 function mediaShape(r: { id: string; roomId: string; type: string; x: number; y: number; createdBy: string; createdByName: string; createdAt: Date; expiresAt: Date | null; payload: unknown }) {
   return { id: r.id, roomId: r.roomId, type: r.type, x: r.x, y: r.y, createdBy: r.createdBy, createdByName: r.createdByName, createdAt: r.createdAt.toISOString(), expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null, payload: (r.payload as MediaPayload) ?? {} };
 }
-import { validate, createRoomSchema, avatarUpdateSchema } from '../middleware/validate';
+import { validate, createRoomSchema, renameRoomSchema, avatarUpdateSchema } from '../middleware/validate';
 import { ensureGroupConversation } from '../lib/conversations';
 
 const rooms = Router();
@@ -170,6 +170,31 @@ rooms.patch('/rooms/:slug/cover', authenticateToken, async (req: AuthRequest, re
   } catch (err) {
     console.error('[rooms] set cover error:', err);
     return res.status(500).json({ error: 'Gagal menyimpan cover' });
+  }
+});
+
+// PATCH /api/rooms/:slug/name — rename a room's display name. Same
+// room:update gate + "..." menu placement as Ganti Cover above (a room's
+// name/cover are both presentation details an admin can change any time,
+// unlike Delete which stays owner-only). The slug itself is untouched —
+// renaming never breaks existing bookmarks/invite links/guest links, which
+// all key off the slug, not the display name.
+rooms.patch('/rooms/:slug/name', authenticateToken, validate(renameRoomSchema), async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
+    if (!hasFeatureAccess(role, 'room:update')) {
+      return res.status(403).json({ error: 'Admin role required to rename this room' });
+    }
+    const name = req.body.name.trim();
+    if (!name) return res.status(400).json({ error: 'Nama room tidak boleh kosong' });
+    await prisma.room.update({ where: { id: room.id }, data: { name } });
+    return res.json({ ok: true, name });
+  } catch (err) {
+    console.error('[rooms] rename error:', err);
+    return res.status(500).json({ error: 'Gagal mengganti nama room' });
   }
 });
 
@@ -708,6 +733,78 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
   } catch (err) {
     console.error('[rooms] create error:', err);
     return res.status(500).json({ error: 'Failed to create room' });
+  }
+});
+
+// POST /api/rooms/:slug/duplicate — "Salin Room": copy an existing room's
+// current layout (tiles/furniture/zones/layerData/theme, whichever format it
+// actually uses — see convertLegacyRoom's own doc comment on layerData
+// superseding the legacy columns) into a brand-new room the caller now owns.
+// Same accountRole:'admin' gate as POST /rooms itself, deliberately NOT the
+// weaker room:update check the Lobby's "..." menu shows itself behind —
+// duplicating still creates a genuinely new room, so it needs the same
+// account-wide "may create rooms" gate every other creation path requires.
+// Only the MAP is copied; approval/restricted-access settings, membership,
+// chat channels, and teleport locations all start fresh like any new room —
+// "duplicate" means "same layout", not "same governance settings".
+rooms.post('/rooms/:slug/duplicate', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const requester = await prisma.user.findUnique({ where: { id: req.userId! }, select: { accountRole: true, organizationId: true } });
+    if (requester?.accountRole !== 'admin') {
+      return res.status(403).json({ error: 'Only admin accounts can create rooms' });
+    }
+
+    const source = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
+    if (!source) return res.status(404).json({ error: 'Room not found' });
+
+    const nameInput = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const name = (nameInput || `${source.name} (Copy)`).slice(0, 50);
+    if (!name) return res.status(400).json({ error: 'Nama room tidak boleh kosong' });
+    const slug = generateSlug(name);
+
+    const room = await prisma.room.create({
+      data: {
+        name,
+        slug,
+        maxPlayers: source.maxPlayers,
+        isPublic: source.isPublic,
+        theme: source.theme,
+        template: source.template,
+        ownerId: req.userId!,
+        organizationId: requester.organizationId,
+        tilemapData: source.tilemapData as any,
+        furniture: source.furniture as any,
+        zones: source.zones as any,
+        layerData: source.layerData as any,
+        mapFormatVersion: source.mapFormatVersion,
+      },
+    });
+
+    await prisma.roomMember.create({ data: { userId: req.userId!, roomId: room.id, role: 'admin' } });
+
+    const general = await prisma.channel.create({ data: { roomId: room.id, name: 'general', isDefault: true } });
+    await ensureGroupConversation(prisma, general);
+
+    // Same Team Locations pre-fill as POST /rooms — only meaningful when the
+    // copied room actually has legacy-format zones/tiles to derive an entry
+    // point from; a purely layerData-format source just skips this (no
+    // crash), same as an empty-zones brand-new room would.
+    const zones = (source.zones as unknown as { name: string }[] | null) ?? [];
+    const tiles = (source.tilemapData as unknown as unknown[][] | null) ?? [];
+    if (zones.length > 0 && tiles.length > 0) {
+      await prisma.teleportLocation.createMany({
+        data: zones.map((zone, index) => {
+          const point = findZoneEntryTile(tiles as any, zone as any);
+          return { roomId: room.id, name: zone.name, x: point.x, y: point.y, orderIndex: index, createdBy: req.userId! };
+        }),
+      });
+    }
+
+    return res.status(201).json({ id: room.id, name: room.name, slug: room.slug });
+  } catch (err) {
+    console.error('[rooms] duplicate error:', err);
+    return res.status(500).json({ error: 'Failed to duplicate room' });
   }
 });
 

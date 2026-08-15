@@ -111,6 +111,12 @@ export function notifyNudge(nudgerName: string): void {
   const settings = getNotificationSettings();
   if (!settings.browserNotifOn || !isNotificationSupported() || Notification.permission !== 'granted') return;
 
-  new Notification('Disenggol!', { body: `${nudgerName} menyenggolmu`, tag: 'meetkai-nudge' });
+  const n = new Notification('Disenggol!', { body: `${nudgerName} menyenggolmu`, tag: 'meetkai-nudge' });
+  // Was missing entirely — unlike notifyNewMessage above, clicking the OS
+  // popup did nothing at all, not even bring the tab back to front. A nudge
+  // exists specifically to pull someone back to the app from another
+  // tab/app, so the notification itself doing nothing on click defeated
+  // that purpose the moment they actually clicked it instead of alt-tabbing.
+  n.onclick = () => window.focus();
   if (settings.soundOn) playNotificationSound();
 }

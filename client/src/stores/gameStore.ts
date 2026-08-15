@@ -84,6 +84,15 @@ export interface ActivityEvent {
 export type PanelId =
   | 'chat'
   | 'participants'
+  // The "Room Features" dropdown menu (Sidebar.tsx) — folded into the same
+  // single-slot mutual exclusion as every panel it links to (Teleport,
+  // Kalender, etc.). It used to be its own local boolean in Sidebar.tsx,
+  // independent of activePanel, so it could stay open behind (and visually
+  // collide with) whichever real panel was open — opening Teleport never
+  // closed it and vice versa. Folding it in here means opening ANY panel
+  // (including this menu itself) now automatically closes whatever else was
+  // open, the same guarantee every other entry in this union already had.
+  | 'roomFeatures'
   | 'teleport'
   | 'addMedia'
   | 'adminPanel'
@@ -104,7 +113,23 @@ export type PanelId =
   // Operator-only, cross-org organization list (see
   // specs/2026-08-12-operator-org-list-design.md) — gated on
   // currentUser.isOperator, not workspaceRole, unlike adminConsole above.
-  | 'operatorConsole';
+  | 'operatorConsole'
+  // Fix panel numpuk, round 2 — these six used to be independent
+  // useState(false) booleans in App.tsx (or, for activityFeed, entirely
+  // self-contained inside the component itself with no external control at
+  // all), so none of them closed when another panel opened, and none of
+  // the "real" panels closed them either — confirmed live: Soundboard
+  // (already activePanel-gated) and Recent Activity (not gated at all)
+  // stayed open together. Folding all six into this same union is the
+  // exhaustive fix — every future entry added here automatically joins the
+  // same mutual exclusion, so this class of bug can't reopen one panel at
+  // a time again.
+  | 'activityFeed'
+  | 'avatarSetup'
+  | 'userGuide'
+  | 'memberList'
+  | 'settings'
+  | 'bookingForm';
 
 // Keeps the feed skimmable and bounds its memory — old entries just fall
 // off the end rather than needing a separate pruning pass (see
@@ -968,8 +993,22 @@ export const useGameStore = create<GameState>((set, get) => ({
     return { mapZoom: clampMapZoom((currentStep + steps) * ZOOM_STEP, s.localRole) };
   }),
   speakingPlayers: new Set<string>(),
+  // Tile flicker diagnosis (measured — see VideoGrid.tsx's own comment on
+  // VideoTile) — this used to build a brand-new Set and call set() on EVERY
+  // invocation, even a redundant one (e.g. speaking===true re-affirmed while
+  // already true). Every non-guest component in the render tree that reads
+  // this state through a *reference* rather than a derived boolean (App.tsx
+  // read the whole Set at its top level, straight into every re-render of
+  // the entire room UI) saw a "changed" Set on every call regardless of
+  // whether membership actually flipped, since a fresh Set is never
+  // reference-equal to the previous one even with identical contents. Bailing
+  // out here when nothing actually changes removes those redundant
+  // notifications at the source, for every subscriber, without each one
+  // needing its own workaround.
   setPlayerSpeaking: (id, speaking) =>
     set((state) => {
+      const already = state.speakingPlayers.has(id);
+      if (already === speaking) return state;
       const next = new Set(state.speakingPlayers);
       if (speaking) next.add(id);
       else next.delete(id);

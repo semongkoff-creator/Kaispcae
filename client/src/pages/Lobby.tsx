@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, ChevronDown, ThreeDotsVertical, Search, BoxArrowInRight, Image, GearFill } from 'react-bootstrap-icons';
+import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, ChevronDown, ThreeDotsVertical, Search, BoxArrowInRight, Image, GearFill, PencilFill, XCircleFill, Files } from 'react-bootstrap-icons';
 import { SettingsPanel } from '@/components/ui/SettingsPanel';
 import { io } from 'socket.io-client';
 import { RoomTheme, RoomTemplateId, ROOM_TEMPLATES } from '@kaispace/shared';
 import { api, RoomInfo } from '@/services/api';
 import { UserProfile, UserPreferences } from '@/services/api';
+import { showPrompt, showConfirm } from '@/stores/modalStore';
 import { CreditsModal } from '@/components/ui/CreditsModal';
+import { GlobalModal } from '@/components/ui/GlobalModal';
 import { Theme } from '@/hooks/useTheme';
 import { SERVER_URL } from '@/services/serverUrl';
 import { useProfiles } from '@/hooks/useProfiles';
@@ -95,6 +97,51 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
   const handleCoverButtonClick = (slug: string) => {
     pendingCoverSlugRef.current = slug;
     coverFileInputRef.current?.click();
+  };
+
+  const handleRename = async (slug: string, currentName: string) => {
+    const next = await showPrompt('Nama baru untuk room ini:', currentName, { title: 'Ganti Nama Room' });
+    if (next === null) return; // cancelled
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === currentName) return;
+    try {
+      await api.renameRoom(slug, trimmed);
+      setRooms((prev) => prev.map((r) => (r.slug === slug ? { ...r, name: trimmed } : r)));
+      showToast('Nama room diperbarui', 'success');
+    } catch {
+      showToast('Gagal mengganti nama room', 'error');
+    }
+  };
+
+  const handleRemoveCover = async (slug: string) => {
+    const ok = await showConfirm('Hapus cover room ini? Kembali ke tampilan placeholder default.', {
+      title: 'Hapus Cover', confirmLabel: 'Hapus', danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.setRoomCover(slug, null);
+      setRooms((prev) => prev.map((r) => (r.slug === slug ? { ...r, coverImage: null } : r)));
+      showToast('Cover dihapus', 'success');
+    } catch {
+      showToast('Gagal menghapus cover', 'error');
+    }
+  };
+
+  // "Salin Room" — copies the room's current layout into a new room, stays
+  // on the Lobby (unlike + Create Space, which jumps straight in) so the
+  // admin can see the fresh card land, then decide whether to open it.
+  const handleDuplicate = async (slug: string, currentName: string) => {
+    const next = await showPrompt('Nama untuk room hasil salinan:', `${currentName} (Copy)`, { title: 'Salin Room' });
+    if (next === null) return; // cancelled
+    const trimmed = next.trim();
+    if (!trimmed) return;
+    try {
+      await api.duplicateRoom(slug, trimmed);
+      showToast('Room berhasil disalin', 'success');
+      api.getRooms().then((res) => setRooms(res.rooms));
+    } catch {
+      showToast('Gagal menyalin room', 'error');
+    }
   };
 
   const handleCoverFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -449,15 +496,24 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
               <div
                 key={room.id}
                 onClick={handleJoinClick}
-                className={`rounded-xl overflow-hidden border shadow-sm transition-all ${
+                className={`rounded-xl border shadow-sm transition-all ${
                   isConfirmingDelete
                     ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 ring-2 ring-red-200 dark:ring-red-800'
                     : 'bg-white dark:bg-gray-800 border-purple-100 dark:border-gray-700 hover:border-purple-300 hover:shadow-md cursor-pointer'
                 }`}
               >
                 {/* A room with no coverImage set yet still shows the Figma
-                    reference's own literal "COVER IMG" placeholder. */}
-                <div className="relative aspect-[16/9] bg-gradient-to-br from-[#3B1E54] to-[#4A1E6D] flex items-center justify-center overflow-hidden">
+                    reference's own literal "COVER IMG" placeholder.
+                    overflow-hidden + rounded-t-xl moved here from the card's
+                    outer div — the "..." menu below opens BELOW the button
+                    (top-full), and the outer div clipping it there cut the
+                    dropdown down to a barely-visible sliver poking out of
+                    the card's bottom edge instead of showing it. This is the
+                    only child that actually needs its own corners clipped
+                    (the cover image/gradient); the outer div's rounded-xl
+                    alone already reads as rounded since nothing else here
+                    has a background that would bleed past it. */}
+                <div className="relative aspect-[16/9] rounded-t-xl bg-gradient-to-br from-[#3B1E54] to-[#4A1E6D] flex items-center justify-center overflow-hidden">
                   {room.coverImage ? (
                     // object-contain, not cover — a cover can be any aspect
                     // ratio (a wide logo wordmark, a photo, etc.); cropping
@@ -507,12 +563,54 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                             <>
                               <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); }} />
                               <div className="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 py-1 z-50">
+                                {/* Rename — same gate as the "..." button itself
+                                    (owner OR global admin), matching what the
+                                    server's room:update check actually allows
+                                    (resolveRoomRole grants 'owner' to the
+                                    creator regardless of accountRole — see
+                                    routes/rooms.ts's PATCH /:slug/name). */}
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); handleRename(room.slug, room.name); }}
+                                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                                >
+                                  <PencilFill size={11} /> Rename
+                                </button>
                                 {isAdmin && (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); handleCoverButtonClick(room.slug); }}
                                     className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
                                   >
                                     <Image size={11} /> Ganti Cover
+                                  </button>
+                                )}
+                                {/* Hapus Cover — only shown when there's
+                                    actually a cover to remove (no point
+                                    offering it against the empty-placeholder
+                                    state). Same isAdmin gate as Ganti Cover,
+                                    since it's the same "change the room's
+                                    presentation" permission, just clearing
+                                    instead of setting (setRoomCover already
+                                    accepts coverImage: null server-side). */}
+                                {isAdmin && room.coverImage && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); handleRemoveCover(room.slug); }}
+                                    className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                                  >
+                                    <XCircleFill size={11} /> Hapus Cover
+                                  </button>
+                                )}
+                                {/* Salin Room — gated on isAdmin specifically
+                                    (not room.ownerId), matching the SERVER's
+                                    accountRole:'admin' check (duplicating
+                                    creates a genuinely new room, same gate as
+                                    "+ Create Space" — a non-admin owner of
+                                    THIS room still can't create a new one). */}
+                                {isAdmin && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); handleDuplicate(room.slug, room.name); }}
+                                    className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                                  >
+                                    <Files size={11} /> Salin Room
                                   </button>
                                 )}
                                 {room.ownerId === user.id && (
@@ -558,6 +656,14 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
         className="hidden"
         onChange={handleCoverFileChange}
       />
+      {/* App.tsx mounts its own <GlobalModal /> for the in-room view, but
+          that tree is never reached while on this page (MainApp returns
+          <Lobby /> in its own early-return, before GlobalModal's spot lower
+          down) — so showAlert/showConfirm/showPrompt from here (e.g.
+          handleRename below) pushed into modalStore with nothing ever
+          rendering it, and the returned promise just hung forever with no
+          dialog ever appearing. Lobby needs its own instance. */}
+      <GlobalModal />
     </div>
   );
 }

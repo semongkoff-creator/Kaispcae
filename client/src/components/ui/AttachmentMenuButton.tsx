@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Paperclip, Image, CameraVideoFill, FileEarmarkFill } from 'react-bootstrap-icons';
+import { Tooltip } from './Tooltip';
 
 // Bug 11 — WhatsApp-style attachment picker: the paperclip opens a small menu
 // (Gambar / Video / Dokumen) first, and each choice opens the OS file picker
@@ -15,6 +16,9 @@ interface AttachmentMenuButtonProps {
   buttonClassName?: string;
   iconSize?: number;
   title?: string;
+  // Optional longer copy for the Tooltip popover (see Tooltip.tsx's own
+  // `detail` doc comment) — callers that don't pass one just get the label.
+  detail?: string;
 }
 
 const OPTIONS: { label: string; accept: string; Icon: typeof Image }[] = [
@@ -24,7 +28,7 @@ const OPTIONS: { label: string; accept: string; Icon: typeof Image }[] = [
   { label: 'Dokumen', accept: '', Icon: FileEarmarkFill },
 ];
 
-export function AttachmentMenuButton({ onFile, disabled, buttonClassName, iconSize = 16, title = 'Lampirkan' }: AttachmentMenuButtonProps) {
+export function AttachmentMenuButton({ onFile, disabled, buttonClassName, iconSize = 16, title = 'Lampirkan', detail }: AttachmentMenuButtonProps) {
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -55,15 +59,16 @@ export function AttachmentMenuButton({ onFile, disabled, buttonClassName, iconSi
 
   return (
     <div ref={wrapRef} className="relative shrink-0">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        disabled={disabled}
-        title={title}
-        className={buttonClassName}
-      >
-        <Paperclip size={iconSize} />
-      </button>
+      <Tooltip label={title} detail={detail}>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          disabled={disabled}
+          className={buttonClassName}
+        >
+          <Paperclip size={iconSize} />
+        </button>
+      </Tooltip>
 
       {open && (
         <div className="absolute bottom-full left-0 mb-2 z-50 w-36 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl py-1">

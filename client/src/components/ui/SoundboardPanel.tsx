@@ -16,6 +16,7 @@ import {
 import { SoundboardSoundData, SOUNDBOARD_DEFAULT_SOUNDS, SOUNDBOARD_MAX_DURATION_MS, SOUNDBOARD_MAX_FILE_BYTES, hasFeatureAccess } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { api, ApiError } from '@/services/api';
+import { Tooltip } from '@/components/ui/Tooltip';
 
 // One icon per default sound id — purely decorative, picked to match each
 // clip's name. Custom uploaded sounds (no fixed id) all get the same generic
@@ -159,15 +160,16 @@ export function SoundboardPanel({ roomSlug, emitSoundboardPlay, open, onToggle, 
 
   return (
     <div className="relative z-40 pointer-events-auto">
-      <button
-        onClick={onToggle}
-        title="Soundboard"
-        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
-          open ? 'bg-purple-600 text-white' : 'bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800 border border-purple-100 dark:border-gray-700 shadow-sm'
-        }`}
-      >
-        <SpeakerFill size={14} />
-      </button>
+      <Tooltip label="Soundboard" detail="Buka daftar suara singkat yang bisa kamu putar untuk orang di sekitarmu." side="right">
+        <button
+          onClick={onToggle}
+          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+            open ? 'bg-purple-600 text-white' : 'bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800 border border-purple-100 dark:border-gray-700 shadow-sm'
+          }`}
+        >
+          <SpeakerFill size={14} />
+        </button>
+      </Tooltip>
 
       {open && (
         <div
@@ -193,28 +195,35 @@ export function SoundboardPanel({ roomSlug, emitSoundboardPlay, open, onToggle, 
                 const isDeleting = deletingId === sound.id;
                 return (
                   <div key={sound.id} className="relative group">
-                    <button
-                      onClick={() => play(sound.id)}
-                      disabled={onCooldown || isDeleting}
-                      title={sound.createdByName ? `${sound.name} — diunggah oleh ${sound.createdByName}` : sound.name}
-                      className={`w-full flex flex-col items-center gap-1 rounded-lg border border-purple-100 dark:border-gray-700 py-2 px-1 transition-colors ${
-                        onCooldown || isDeleting
-                          ? 'opacity-40 cursor-not-allowed'
-                          : 'cursor-pointer bg-purple-50/50 dark:bg-gray-800/50 hover:bg-purple-100 dark:hover:bg-gray-700'
-                      }`}
-                    >
-                      <Icon size={18} className="text-purple-600 dark:text-purple-300" />
-                      <span className="text-[10px] text-gray-700 dark:text-gray-300 truncate w-full text-center">{sound.name}</span>
-                    </button>
-                    {isCustom && canUpload && (
+                    <Tooltip label="Putar Suara" detail="Putar clip ini — terdengar oleh orang di sekitarmu." wrapperClassName="w-full">
                       <button
-                        onClick={(e) => { e.stopPropagation(); void handleDelete(sound.id); }}
-                        disabled={isDeleting}
-                        title="Hapus suara ini"
-                        className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-60"
+                        onClick={() => play(sound.id)}
+                        disabled={onCooldown || isDeleting}
+                        className={`w-full flex flex-col items-center gap-1 rounded-lg border border-purple-100 dark:border-gray-700 py-2 px-1 transition-colors ${
+                          onCooldown || isDeleting
+                            ? 'opacity-40 cursor-not-allowed'
+                            : 'cursor-pointer bg-purple-50/50 dark:bg-gray-800/50 hover:bg-purple-100 dark:hover:bg-gray-700'
+                        }`}
                       >
-                        <X size={10} />
+                        <Icon size={18} className="text-purple-600 dark:text-purple-300" />
+                        <span className="text-[10px] text-gray-700 dark:text-gray-300 truncate w-full text-center">{sound.name}</span>
                       </button>
+                    </Tooltip>
+                    {isCustom && canUpload && (
+                      // wrapperClassName carries the absolute positioning —
+                      // Tooltip's own wrapper div is `position: relative`, so
+                      // it would otherwise anchor `absolute -top-1.5
+                      // -right-1.5` to itself (0×0, no in-flow content)
+                      // instead of the sound tile's `group` container.
+                      <Tooltip label="Hapus Suara" detail="Hapus clip ini dari soundboard. (Khusus admin.)" wrapperClassName="absolute -top-1.5 -right-1.5">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); void handleDelete(sound.id); }}
+                          disabled={isDeleting}
+                          className="w-4 h-4 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-60"
+                        >
+                          <X size={10} />
+                        </button>
+                      </Tooltip>
                     )}
                   </div>
                 );
@@ -225,14 +234,16 @@ export function SoundboardPanel({ roomSlug, emitSoundboardPlay, open, onToggle, 
           {canUpload && (
             <div className="p-3 border-t border-purple-100 dark:border-gray-700">
               {error && <p className="text-red-500 text-[11px] mb-2">{error}</p>}
-              <button
-                onClick={() => inputRef.current?.click()}
-                disabled={uploading}
-                className="w-full flex items-center justify-center gap-2 text-xs font-medium text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-gray-800 hover:bg-purple-100 dark:hover:bg-gray-700 rounded-lg py-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                <CloudUploadFill size={13} />
-                {uploading ? 'Mengunggah…' : 'Upload Sound'}
-              </button>
+              <Tooltip label="Tambah Suara" detail="Upload file suara baru ke soundboard." wrapperClassName="w-full">
+                <button
+                  onClick={() => inputRef.current?.click()}
+                  disabled={uploading}
+                  className="w-full flex items-center justify-center gap-2 text-xs font-medium text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-gray-800 hover:bg-purple-100 dark:hover:bg-gray-700 rounded-lg py-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <CloudUploadFill size={13} />
+                  {uploading ? 'Mengunggah…' : 'Upload Sound'}
+                </button>
+              </Tooltip>
               <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-1.5 text-center">mp3/ogg/wav · maks {SOUNDBOARD_MAX_DURATION_MS / 1000} detik</p>
               <input
                 ref={inputRef}

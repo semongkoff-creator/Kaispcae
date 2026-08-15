@@ -3,6 +3,7 @@ import { GeoAltFill, BookmarkFill, ArrowUp, ArrowDown, Trash, PlusCircle } from 
 import { TeleportLocation, OwnerBookmark, TILE_SIZE } from '@kaispace/shared';
 import { api, ApiError } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
+import { showPrompt } from '@/stores/modalStore';
 
 interface TeleportPanelProps {
   roomSlug: string;
@@ -53,7 +54,7 @@ export function TeleportPanel({ roomSlug, isOwner, canManage, onTeleport, onClos
       return;
     }
     const { x, y } = currentTile();
-    const name = window.prompt('Nama lokasi:', `Lokasi ${locations.length + 1}`);
+    const name = await showPrompt('Nama lokasi:', `Lokasi ${locations.length + 1}`);
     if (!name?.trim()) return;
     try {
       await api.addTeleportLocation(roomSlug, name.trim(), x, y);
@@ -65,7 +66,7 @@ export function TeleportPanel({ roomSlug, isOwner, canManage, onTeleport, onClos
 
   const handleAddBookmark = async () => {
     const { x, y } = currentTile();
-    const label = window.prompt('Label bookmark:', `Bookmark ${bookmarks.length + 1}`);
+    const label = await showPrompt('Label bookmark:', `Bookmark ${bookmarks.length + 1}`);
     if (!label?.trim()) return;
     try {
       await api.addBookmark(roomSlug, label.trim(), x, y);

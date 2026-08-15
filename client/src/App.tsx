@@ -5,6 +5,7 @@ import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
 import { GameCanvas } from './components/canvas/GameCanvas';
 import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
+import { Tooltip } from './components/ui/Tooltip';
 import { MapZoomControl } from './components/ui/MapZoomControl';
 import { MobileControls } from './components/hud/MobileControls';
 import { NameModal } from './components/ui/NameModal';
@@ -62,6 +63,7 @@ import { StatusPickModal } from './components/ui/StatusPickModal';
 import { MemberListPanel } from './components/ui/MemberListPanel';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
 import { ReportUserModal } from './components/ui/ReportUserModal';
+import { GlobalModal } from './components/ui/GlobalModal';
 import { SoundboardPanel } from './components/ui/SoundboardPanel';
 import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
 import { AwayReasonModal } from './components/ui/AwayReasonModal';
@@ -86,6 +88,7 @@ import { useTheme, Theme } from './hooks/useTheme';
 import { api, UserPreferences } from './services/api';
 import { createDefaultRoom, isTileBlocked } from './utils/createDefaultRoom';
 import { useGameStore } from './stores/gameStore';
+import { showAlert, showConfirm, showPrompt } from '@/stores/modalStore';
 import { useSocket } from './hooks/useSocket';
 import { useChannelChat } from './hooks/useChannelChat';
 import { useProximity, findZoneAt } from './hooks/useProximity';
@@ -152,23 +155,29 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const playerName = useGameStore((s) => s.localPlayer.name);
   const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
-  const [showEditor, setShowEditor] = useState(false);
   // ZEP-style User Guide — Sidebar's "Panduan" row (Room Features menu).
-  // Used to reopen the first-run TutorialModal walkthrough in dismissible
-  // mode; now opens the richer section+screenshot UserGuidePanel instead.
   // Independent of MainApp's own first-run TutorialModal gate (shown before
   // <Game> ever mounts, for new accounts/guests) — that one is untouched,
   // different purpose (a forced onboarding step, not a reference doc).
-  const [showUserGuide, setShowUserGuide] = useState(false);
-  // QA (Presence checklist item #8, "Member list akurat") — workspace-wide
-  // member list, opened from Sidebar's "Member" row. Same plain-overlay-state
-  // pattern as showEditor/showUserGuide above.
-  const [showMemberList, setShowMemberList] = useState(false);
+  //
+  // Fix panel numpuk, round 2 — showEditor/showUserGuide/showMemberList used
+  // to each be their own independent useState here, so e.g. Avatar Setup and
+  // the Member List could both be open at once. Folded into the same
+  // activePanel single-slot store the Sidebar's own Room Features dropdown
+  // and Soundboard already used (round 1) — see the *Active consts below.
 
-  // Media state from store
-  const localSpeaking = useGameStore((s) => s.localSpeaking);
+  // Media state from store — setters only. The VALUES (localSpeaking,
+  // speakingPlayers) are deliberately NOT read here any more (tile flicker
+  // diagnosis — measured 20 re-renders of this entire component, cascading
+  // into every video tile, per 12s of continuous speech): speakingPlayers is
+  // a Set rebuilt on every change, so subscribing to it directly at this top
+  // level re-rendered the WHOLE room UI on every speaking edge, for every
+  // peer. GameCanvas — the only consumer — reads both directly from the
+  // store inside its own animation-frame loop instead (see its own comment),
+  // and VideoTile already has its own isolated per-tile selector. Nothing
+  // else in this component needs the raw values, only the stable setters
+  // below (which don't cause this component to re-render on their own).
   const setLocalSpeaking = useGameStore((s) => s.setLocalSpeaking);
-  const speakingPlayers = useGameStore((s) => s.speakingPlayers);
   const setPlayerSpeaking = useGameStore((s) => s.setPlayerSpeaking);
 
   // WebRTC
@@ -814,14 +823,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // on without a separate "list my links" endpoint, which doesn't exist yet.
   const lastGuestInviteId = useRef<string | null>(null);
   const handleCreateGuestLink = useCallback(async () => {
-    const hoursRaw = window.prompt('Guest link berlaku berapa jam? (kosongkan = tanpa batas waktu)', '24');
+    const hoursRaw = await showPrompt('Guest link berlaku berapa jam? (kosongkan = tanpa batas waktu)', '24');
     if (hoursRaw === null) return;
-    const oneTime = window.confirm('Link ini HANYA BISA DIPAKAI SEKALI?\n\nOK = ya, sekali pakai — otomatis tidak berlaku lagi setelah satu tamu masuk.\nBatal = tidak, bisa dipakai berkali-kali sampai kedaluwarsa.');
+    const oneTime = await showConfirm('Link ini HANYA BISA DIPAKAI SEKALI?\n\nOK = ya, sekali pakai — otomatis tidak berlaku lagi setelah satu tamu masuk.\nBatal = tidak, bisa dipakai berkali-kali sampai kedaluwarsa.');
     // Password is mandatory on every link (server enforces this too — this
     // prompt is just the input, not the source of truth). Empty input means
     // "auto-generate", not "no password" — the server never creates a link
     // without one.
-    const passwordRaw = window.prompt('Password link (kosongkan = dibuatkan otomatis):', '');
+    const passwordRaw = await showPrompt('Password link (kosongkan = dibuatkan otomatis):', '');
     if (passwordRaw === null) return;
     const trimmed = hoursRaw.trim();
     const expiresInHours = trimmed ? Number(trimmed) : undefined;
@@ -834,7 +843,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       // fit in the clipboard alongside the link — this is the ONLY moment
       // the plain password is ever shown, so it has to be read here, not
       // copy-pasted from a second place.
-      window.alert(`Guest link dibuat.\n\nLink (sudah disalin ke clipboard):\n${url}\n\nPassword: ${result.password}\n\nBagikan link DAN password ini ke tamu — keduanya dibutuhkan untuk masuk.`);
+      await showAlert(`Guest link dibuat.\n\nLink (sudah disalin ke clipboard):\n${url}\n\nPassword: ${result.password}\n\nBagikan link DAN password ini ke tamu — keduanya dibutuhkan untuk masuk.`);
       useGameStore.getState().addActivity('🔗 Guest link dibuat.');
     } catch (e) {
       console.error('[guest] create invite failed:', e);
@@ -850,10 +859,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const handleRevokeGuestLink = useCallback(async () => {
     const id = lastGuestInviteId.current;
     if (!id) {
-      window.alert('Belum ada guest link yang dibuat di sesi ini untuk dicabut.');
+      await showAlert('Belum ada guest link yang dibuat di sesi ini untuk dicabut.');
       return;
     }
-    if (!window.confirm('Cabut guest link terakhir yang dibuat?\n\nLink tidak bisa dipakai lagi, dan tamu yang sedang masuk lewat link ini akan langsung dikeluarkan.')) return;
+    if (!(await showConfirm('Cabut guest link terakhir yang dibuat?\n\nLink tidak bisa dipakai lagi, dan tamu yang sedang masuk lewat link ini akan langsung dikeluarkan.'))) return;
     try {
       await api.revokeGuestInvite(roomSlug, id);
       lastGuestInviteId.current = null;
@@ -867,8 +876,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // QA #9/#10 — CEO/admin text broadcast. Same prompt-based "quick admin
   // config" convention as Guest Link above — the server independently
   // re-checks 'broadcast:text' (roomHandler.ts), this is just the trigger.
-  const handleBroadcast = useCallback(() => {
-    const text = (window.prompt('Pesan broadcast ke SEMUA orang di room ini:') ?? '').trim();
+  const handleBroadcast = useCallback(async () => {
+    const text = ((await showPrompt('Pesan broadcast ke SEMUA orang di room ini:')) ?? '').trim();
     if (!text) return;
     emitBroadcastSend(text);
   }, [emitBroadcastSend]);
@@ -1004,7 +1013,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const [reportTarget, setReportTarget] = useState<{ userId: string; name: string } | null>(null);
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
   const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
@@ -1019,6 +1027,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // never turn into a stale decision.
   const joinQueueActive = activePanel === 'joinQueue';
   const [pendingJoinCount, setPendingJoinCount] = useState(0);
+  const avatarSetupActive = activePanel === 'avatarSetup';
+  const userGuideActive = activePanel === 'userGuide';
+  const memberListActive = activePanel === 'memberList';
+  const settingsActive = activePanel === 'settings';
+  const bookingFormActive = activePanel === 'bookingForm';
 
   // Keep the badge fresh for admins. Polled rather than driven by the
   // JOIN_REQUESTED broadcast the server already sends: wiring a new listener
@@ -1060,13 +1073,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     return () => window.removeEventListener('keydown', handler);
   }, [moduleOpen]);
 
-  const handleTilePaint = useCallback((x: number, y: number, type: TileType) => {
+  const handleTilePaint = useCallback(async (x: number, y: number, type: TileType) => {
     const state = useGameStore.getState();
     const currentTiles = state.tiles.map((row) => row.map((t) => ({ ...t })));
     if (!currentTiles[y]?.[x]) return;
 
     if (type === 'portal') {
-      const target = window.prompt('Target room code to travel to (from the room URL/share code):', '');
+      const target = await showPrompt('Kode room tujuan (dari URL/kode share room):', '');
       if (!target || !target.trim()) return;
       currentTiles[y][x].type = type;
       currentTiles[y][x].portalTarget = target.trim();
@@ -1150,7 +1163,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     // the one that actually persists it. Login is mandatory before a room is
     // reachable at all, so there's no logged-out case to gate this behind.
     api.saveAvatar(config).catch(() => {});
-    setShowEditor(false);
+    if (useGameStore.getState().activePanel === 'avatarSetup') closePanel();
   }, [emitAvatarUpdate, localUserId]);
 
   // ─── AFK auto-away (ZEP/Gather-style) ────────────────────────────────
@@ -1218,7 +1231,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // rather than cached, since it's a rare action and always wants the
   // current admin config, not a stale snapshot from page load.
   const [bookingZone, setBookingZone] = useState<{ zoneId: string; name: string } | null>(null);
-  const [showBookingForm, setShowBookingForm] = useState(false);
   const meetingViewActive = activePanel === 'meeting';
   const [miniModeWindow, setMiniModeWindow] = useState<Window | null>(null);
   const [miniModeError, setMiniModeError] = useState<string | null>(null);
@@ -1229,6 +1241,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // sidebar (a fixed corner button) since the sidebar is exactly what gets
   // hidden — there'd be no way back otherwise.
   const [simplifiedView, setSimplifiedView] = useState(false);
+  // "Layar Penuh" on a screen share is now a true edge-to-edge takeover (see
+  // VideoGrid/ScreenSharePanel's own comments) — on request, "bener-bener
+  // full screen kayak nonton YouTube". The sidebar rail and bottom HUD
+  // toolbar both sit at z-50, above the panel's z-30, so leaving them
+  // rendered would just float them on top of the picture instead of the
+  // picture actually filling the screen. VideoGrid reports maximize
+  // start/stop here so both can hide for as long as it lasts.
+  const [screenShareMaximized, setScreenShareMaximized] = useState(false);
 
   const handlePinNotice = useCallback((message: { id: string; text: string; senderName: string }) => {
     emitNoticePin(message.id, message.text, message.senderName);
@@ -1324,6 +1344,23 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         failureMessage: interactiveDoorAreaPasswordResult.failureMessage,
       }
     : null;
+
+  // A correct door password should just let the player walk through — no
+  // "Password benar" confirmation to dismiss. Movement itself is already
+  // unblocked server-side the instant the check succeeds; this only closes
+  // the now-redundant modal instead of leaving it up until a manual click.
+  useEffect(() => {
+    if (doorPasswordResultAdapted?.correct) {
+      setDoorPasswordTile(null);
+      useGameStore.getState().setInteractiveDoorPasswordResult(null);
+    }
+  }, [doorPasswordResultAdapted?.correct]);
+  useEffect(() => {
+    if (doorAreaPasswordResultAdapted?.correct) {
+      setDoorAreaPasswordAreaId(null);
+      useGameStore.getState().setInteractiveDoorAreaPasswordResult(null);
+    }
+  }, [doorAreaPasswordResultAdapted?.correct]);
 
   // Fitur 15B — 'website'/'website_tab' and 'api_call' have no modal of
   // their own (ZEP's own behavior for both website types is just opening a
@@ -1500,7 +1537,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             return;
           }
           setBookingZone({ zoneId: zone.zoneId, name: zone.name });
-          setShowBookingForm(true);
+          openPanel('bookingForm');
         }).catch(() => {});
       }
     };
@@ -1586,8 +1623,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         emitJump={emitJump}
         emitNudge={emitNudge}
         proximityData={nearby}
-        localSpeaking={localSpeaking}
-        speakingPlayers={speakingPlayers}
         micMuted={isMicMuted}
         cameraOn={isCameraOn}
         editorMode={editorMode}
@@ -1662,7 +1697,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             {!isGuest && (
               <SoundboardPanel roomSlug={roomSlug} emitSoundboardPlay={emitSoundboardPlay} open={activePanel === 'soundboard'} onToggle={() => openPanel('soundboard')} onClose={closePanel} />
             )}
-            <ActivityFeed />
+            <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
           </div>
           {!isGuest && <MusicPlayerWidget zoneId={currentZone?.id ?? null} />}
         </>
@@ -1846,6 +1881,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       </div>
 
       <AwayReasonModal open={awayPromptOpen} onResolve={resolveAwayPrompt} />
+      {/* Global replacement for window.alert/confirm/prompt — see
+          modalStore.ts's showAlert/showConfirm/showPrompt. Mounted once here
+          so every caller anywhere in the tree can just await one of those
+          instead of rendering its own overlay. */}
+      <GlobalModal />
 
       {/* ZEP-style left icon rail — every room-level feature button used to
           be its own absolutely-positioned floating pill scattered around
@@ -1857,14 +1897,25 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           the rail instead of scattered across the screen. Always rendered
           (not conditional on simplifiedView) — it collapses to just the
           "Show UI" exit icon internally when simplified, since that's the
-          one thing that must always stay reachable. */}
+          one thing that must always stay reachable.
+
+          Hidden while a screen share is truly maximized (screenShareMaximized)
+          — the one exception to "always rendered" above, since a maximized
+          share is a deliberate full-screen takeover of its own, same
+          intent as simplifiedView but triggered from the video panel
+          instead of the corner eye icon. Un-maximizing (its own control, or
+          Escape) brings the rail straight back. */}
+      {!screenShareMaximized && (
       <Sidebar
-        onOpenSettings={() => setShowSettings(true)}
+        roomFeaturesActive={activePanel === 'roomFeatures'}
+        onToggleRoomFeatures={() => openPanel('roomFeatures')}
+        onCloseRoomFeatures={() => { if (useGameStore.getState().activePanel === 'roomFeatures') closePanel(); }}
+        onOpenSettings={() => openPanel('settings')}
         hasActiveBooking={zoneLock.zoneQueueTicket?.mode === 'booking'}
         onReopenBookingNotice={() => setBookingNoticeDismissed(false)}
-        onEditAvatar={() => setShowEditor(true)}
-        onOpenTutorial={() => setShowUserGuide(true)}
-        onOpenMemberList={() => setShowMemberList(true)}
+        onEditAvatar={() => openPanel('avatarSetup')}
+        onOpenTutorial={() => openPanel('userGuide')}
+        onOpenMemberList={() => openPanel('memberList')}
         localRole={localRole}
         manualStatus={manualStatus}
         onPickPresence={handlePresencePick}
@@ -1942,6 +1993,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         theme={theme}
         onToggleTheme={onToggleTheme}
       />
+      )}
 
       {/* Permanent seat assignment (ZEP-style "this is my desk") — only
           shown while actually sitting, since it acts on the specific chair
@@ -1952,19 +2004,23 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {localPlayer.isSitting && sittingItem && (
         <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
           {!sittingItem.assignedToUserId ? (
-            <button
-              onClick={() => emitFurnitureAssign(sittingItem.id, playerName)}
-              className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg cursor-pointer inline-flex items-center gap-1.5"
-            >
-              🪑 Assign as My Seat
-            </button>
+            <Tooltip label="Jadikan Kursi Saya" detail="Tandai kursi ini jadi kursi tetapmu — otomatis kamu duduk di sini tiap masuk room.">
+              <button
+                onClick={() => emitFurnitureAssign(sittingItem.id, playerName)}
+                className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg cursor-pointer inline-flex items-center gap-1.5"
+              >
+                🪑 Assign as My Seat
+              </button>
+            </Tooltip>
           ) : sittingItem.assignedToUserId === localUserId ? (
-            <button
-              onClick={() => emitFurnitureUnassign(sittingItem.id)}
-              className="bg-white hover:bg-gray-50 text-purple-700 text-xs font-semibold px-4 py-2 rounded-full shadow-lg border border-purple-200 cursor-pointer inline-flex items-center gap-1.5"
-            >
-              Unassign My Seat
-            </button>
+            <Tooltip label="Lepas Kursi Saya" detail="Batalkan status kursi tetap ini.">
+              <button
+                onClick={() => emitFurnitureUnassign(sittingItem.id)}
+                className="bg-white hover:bg-gray-50 text-purple-700 text-xs font-semibold px-4 py-2 rounded-full shadow-lg border border-purple-200 cursor-pointer inline-flex items-center gap-1.5"
+              >
+                Unassign My Seat
+              </button>
+            </Tooltip>
           ) : (
             <div className="bg-white/90 backdrop-blur-sm text-gray-500 text-xs font-medium px-4 py-2 rounded-full shadow-sm border border-purple-100 inline-flex items-center gap-1.5">
               🔒 Reserved by {sittingItem.assignedToName || 'someone'}
@@ -2120,23 +2176,23 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         />
       )}
 
-      {showEditor && (
+      {avatarSetupActive && (
         <AvatarSetup
           initialConfig={savedConfig}
           onSave={handleAvatarSave}
-          onClose={() => setShowEditor(false)}
+          onClose={closePanel}
           localUserId={localUserId}
         />
       )}
 
-      {showUserGuide && <UserGuidePanel onClose={() => setShowUserGuide(false)} />}
+      {userGuideActive && <UserGuidePanel onClose={closePanel} />}
 
-      {showMemberList && (
+      {memberListActive && (
         <MemberListPanel
           localUserId={authUserId}
           currentRoomSlug={roomSlug}
           emitRosterListRequest={emitRosterListRequest}
-          onClose={() => setShowMemberList(false)}
+          onClose={closePanel}
         />
       )}
 
@@ -2172,6 +2228,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
             failedPeerIds={failedPeers}
             onToggleMeetingView={() => openPanel('meeting')}
+            onScreenShareMaximizedChange={setScreenShareMaximized}
           />
         </>
       )}
@@ -2193,13 +2250,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         <div className="absolute bottom-20 right-4 z-50 flex items-center gap-2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 rounded-full px-3 py-1.5 shadow-sm pointer-events-auto text-xs text-gray-700 dark:text-gray-200">
           <span>🎵 {bgm.inAreaName}</span>
           {bgm.needsUnlock ? (
-            <button onClick={bgm.playNow} className="text-purple-600 dark:text-purple-300 font-medium cursor-pointer">🔊 Putar musik</button>
+            <Tooltip label="Putar Musik" detail="Browser sempat memblokir musik otomatis — klik untuk mulai musik area ini.">
+              <button onClick={bgm.playNow} className="text-purple-600 dark:text-purple-300 font-medium cursor-pointer">🔊 Putar musik</button>
+            </Tooltip>
           ) : (
-            <button onClick={() => bgm.setMuted(!bgm.muted)} className="cursor-pointer" title={bgm.muted ? 'Bunyikan' : 'Bisukan'}>{bgm.muted ? '🔇' : '🔉'}</button>
+            <Tooltip label={bgm.muted ? 'Bunyikan' : 'Bisukan'} detail="Nyalakan/matikan musik latar area ini.">
+              <button onClick={() => bgm.setMuted(!bgm.muted)} className="cursor-pointer">{bgm.muted ? '🔇' : '🔉'}</button>
+            </Tooltip>
           )}
         </div>
       )}
-      {!moduleOpen && (
+      {!moduleOpen && !screenShareMaximized && (
       <>
         {/* ParticipantPanel now positions itself as a full-height drawer
             (left over the map HUD, right over Meeting View — see its own
@@ -2209,6 +2270,19 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             Soundboard/ActivityFeed's own top-left panel spot is untouched,
             see the top-14 left-16 block above. */}
         <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} isGuest={isGuest} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} onReport={(userId, name) => setReportTarget({ userId, name })} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
+        {/* Fixed dead-centre, always — Messenger/Chat (see MessengerApp.tsx)
+            is a pure `position: absolute` overlay docked to the left half of
+            the screen; it never participates in layout flow, so it can't
+            push this bar (or the video tile strip, or the minimap) anywhere
+            by itself. An earlier version deliberately re-centred this bar
+            into the remaining right-hand space while chat was open, to keep
+            it from visually sitting on top of the panel — reverted on
+            request: chat opening should never move anything else on screen,
+            full stop. Where chat's z-[55] panel visually overlaps this z-50
+            bar, chat now wins and covers it (see MessengerApp.tsx's own
+            z-index comment) — flipped from an earlier version where this
+            bar stayed on top and clickable through the overlap; that read
+            as the toolbar barging in front of chat, not a feature. */}
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2">
           <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
           <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
@@ -2282,34 +2356,36 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {/* Room name HUD + code */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 pointer-events-auto">
         <p className="text-gray-500 dark:text-gray-400 text-xs font-medium tracking-wider uppercase">MAIN OFFICE</p>
-        <button
-          onClick={async () => {
-            await navigator.clipboard.writeText(roomSlug);
-            setRoomCodeCopied(true);
-            setTimeout(() => setRoomCodeCopied(false), 2000);
-          }}
-          className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
-          title="Copy room code"
-        >
-          <Clipboard size={11} /> {roomSlug.slice(0, 12)}
-        </button>
-        <button
-          onClick={async () => {
-            // ?join=<slug> — read back on load by App()'s own pending-invite
-            // effect below, which auto-joins this exact room once the
-            // clicker is authenticated (logging in first if they weren't).
-            const url = new URL(window.location.href);
-            url.search = '';
-            url.searchParams.set('join', roomSlug);
-            await navigator.clipboard.writeText(url.toString());
-            setInviteLinkCopied(true);
-            setTimeout(() => setInviteLinkCopied(false), 2000);
-          }}
-          className="text-gray-400 hover:text-gray-700 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
-          title="Copy invite link"
-        >
-          <Link45deg size={12} /> Invite
-        </button>
+        <Tooltip label="Salin Kode Room" detail="Salin kode room ini untuk dibagikan.">
+          <button
+            onClick={async () => {
+              await navigator.clipboard.writeText(roomSlug);
+              setRoomCodeCopied(true);
+              setTimeout(() => setRoomCodeCopied(false), 2000);
+            }}
+            className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
+          >
+            <Clipboard size={11} /> {roomSlug.slice(0, 12)}
+          </button>
+        </Tooltip>
+        <Tooltip label="Salin Link Undangan" detail="Salin link undangan ke room ini.">
+          <button
+            onClick={async () => {
+              // ?join=<slug> — read back on load by App()'s own pending-invite
+              // effect below, which auto-joins this exact room once the
+              // clicker is authenticated (logging in first if they weren't).
+              const url = new URL(window.location.href);
+              url.search = '';
+              url.searchParams.set('join', roomSlug);
+              await navigator.clipboard.writeText(url.toString());
+              setInviteLinkCopied(true);
+              setTimeout(() => setInviteLinkCopied(false), 2000);
+            }}
+            className="text-gray-400 hover:text-gray-700 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
+          >
+            <Link45deg size={12} /> Invite
+          </button>
+        </Tooltip>
       </div>
 
       {roomCodeCopied && (
@@ -2324,8 +2400,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       )}
 
       {showLogoutConfirm && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center">
+        <div
+          className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => setShowLogoutConfirm(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
             <p className="text-gray-900 dark:text-gray-100 text-sm mb-4">Log out of your account?</p>
             <div className="flex gap-3">
               <button
@@ -2481,20 +2563,20 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onClose={() => setShowEmoteWheel(false)}
       />
 
-      {showBookingForm && bookingZone && (
+      {bookingFormActive && bookingZone && (
         <BookingForm
           zoneName={bookingZone.name}
           busy={zoneLock.zoneQueueBusy}
           error={zoneLock.zoneQueueError}
-          onClose={() => setShowBookingForm(false)}
+          onClose={closePanel}
           onSubmit={async (bookingStart, bookingEnd, topic) => {
             const ok = await zoneLock.bookZoneQueueSlot(bookingZone.zoneId, bookingStart, bookingEnd, topic);
-            if (ok) setShowBookingForm(false);
+            if (ok) closePanel();
           }}
         />
       )}
 
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} onUpdatePreferences={onUpdatePreferences} onLogout={onLogout} />}
+      {settingsActive && <SettingsPanel onClose={closePanel} onUpdatePreferences={onUpdatePreferences} onLogout={onLogout} />}
 
       <Minimap
         players={Object.values(allPlayers)}

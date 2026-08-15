@@ -1,4 +1,4 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode } from 'react';
 import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, ShieldLock, Buildings, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill, GearFill, HourglassSplit } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
@@ -7,8 +7,22 @@ import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { Theme } from '@/hooks/useTheme';
 import { ManualStatus } from '@/data/presence';
 import { Role } from '@kaispace/shared';
+import { Tooltip } from '@/components/ui/Tooltip';
 
 interface SidebarProps {
+  // Fix panel numpuk — the "Room Features" dropdown is now one of the
+  // mutually-exclusive panels (activePanel === 'roomFeatures' in
+  // gameStore.ts), not its own independent boolean, so it can never stay
+  // open behind (or on top of) Teleport/Kalender/etc. onCloseRoomFeatures is
+  // guarded (only clears activePanel if this menu is still the one open) —
+  // used after a menu item's own action runs, so closing this menu never
+  // clobbers a panel that action just opened (e.g. clicking "Teleport"
+  // itself opens Teleport via activePanel, and closing this menu afterward
+  // must not immediately null that back out).
+  roomFeaturesActive: boolean;
+  onToggleRoomFeatures: () => void;
+  onCloseRoomFeatures: () => void;
+
   onEditAvatar: () => void;
   // QA #1/#6/#7 — reopens the first-run walkthrough (App.tsx's TutorialModal,
   // shown once automatically on entry) on demand.
@@ -184,6 +198,9 @@ interface SidebarProps {
 // collapsed form below) stays reachable even while Meeting View is active;
 // there'd otherwise be no way to mute/exit without leaving that view first.
 export function Sidebar({
+  roomFeaturesActive,
+  onToggleRoomFeatures,
+  onCloseRoomFeatures,
   onEditAvatar,
   onOpenTutorial,
   onOpenMemberList,
@@ -254,8 +271,6 @@ export function Sidebar({
   theme,
   onToggleTheme,
 }: SidebarProps) {
-  const [showFeaturesMenu, setShowFeaturesMenu] = useState(false);
-
   // Simplified View intentionally still hides everything ELSE (room-meta
   // text, participant list, minimap — see App.tsx), but the rail can no
   // longer disappear along with it now that Simplify's own toggle lives
@@ -264,35 +279,41 @@ export function Sidebar({
   if (simplifiedView) {
     return (
       <div className="absolute left-0 top-0 h-full w-12 z-50 flex flex-col items-center py-3 pointer-events-none">
-        <SidebarIcon title="Show UI" onClick={onToggleSimplifiedView} className="pointer-events-auto bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800 shadow-sm border border-purple-100 dark:border-gray-700">
-          <EyeFill size={14} />
-        </SidebarIcon>
+        <Tooltip label="Tampilkan UI" detail="Munculkan lagi panel HUD yang disembunyikan." side="right">
+          <SidebarIcon onClick={onToggleSimplifiedView} className="pointer-events-auto bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800 shadow-sm border border-purple-100 dark:border-gray-700">
+            <EyeFill size={14} />
+          </SidebarIcon>
+        </Tooltip>
       </div>
     );
   }
 
   const closeAnd = (action: () => void) => () => {
     action();
-    setShowFeaturesMenu(false);
+    onCloseRoomFeatures();
   };
 
   return (
     <div className="absolute left-0 top-0 h-full w-12 z-50 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-r border-purple-100 dark:border-gray-700 shadow-sm flex flex-col items-center py-3 gap-0.5 pointer-events-auto">
       <div className="relative">
-        <SidebarIcon title="Room Features" active={showFeaturesMenu} onClick={() => setShowFeaturesMenu((v) => !v)}>
-          <List size={16} />
-        </SidebarIcon>
+        <Tooltip label="Room Features" detail="Buka menu pengaturan & kontrol room." side="right">
+          <SidebarIcon active={roomFeaturesActive} onClick={onToggleRoomFeatures}>
+            <List size={16} />
+          </SidebarIcon>
+        </Tooltip>
 
-        {showFeaturesMenu && (
+        {roomFeaturesActive && (
           <div
             className="absolute top-0 left-full ml-2 w-64 max-h-[85vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-purple-100 dark:border-gray-700 p-2 z-50"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-2 py-1.5 mb-1">
               <span className="text-gray-900 dark:text-gray-100 text-sm font-semibold">Room Features</span>
-              <button onClick={() => setShowFeaturesMenu(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
-                <XLg size={14} />
-              </button>
+              <Tooltip label="Tutup" detail="Tutup panel Room Features." side="right">
+                <button onClick={onCloseRoomFeatures} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
+                  <XLg size={14} />
+                </button>
+              </Tooltip>
             </div>
 
             {/* Opens the ZEP-style User Guide (App.tsx's UserGuidePanel) —
@@ -302,65 +323,93 @@ export function Sidebar({
                 isGuest/isAdmin gate) — this is the one thing anyone stuck
                 should be able to find without already knowing where
                 anything else is. */}
-            <MenuRow icon={<QuestionCircleFill size={15} />} label="Panduan" onClick={closeAnd(onOpenTutorial)} />
+            <Tooltip label="Panduan" detail="Buka panduan cara pakai KaiSpace." side="right" wrapperClassName="w-full">
+              <MenuRow icon={<QuestionCircleFill size={15} />} label="Panduan" onClick={closeAnd(onOpenTutorial)} />
+            </Tooltip>
             {/* QA (Presence checklist item #8, "Member list akurat") — a
                 guest has no User row (see server/src/routes/guestInvite.ts),
                 so they can't appear in api.getWorkspacePeople() and gain
                 nothing from opening this either. */}
             {!isGuest && (
-              <MenuRow icon={<PeopleFill size={15} />} label="Member" onClick={closeAnd(onOpenMemberList)} />
+              <Tooltip label="Daftar Member" detail="Lihat semua member terdaftar di room ini." side="right" wrapperClassName="w-full">
+                <MenuRow icon={<PeopleFill size={15} />} label="Member" onClick={closeAnd(onOpenMemberList)} />
+              </Tooltip>
             )}
             <MenuDivider />
             {/* Meeting View entry moved to VideoGrid.tsx (next to the
                 hide/show camera-tiles toggle) — no longer listed here. */}
             {!miniModeActive && (
-              <MenuRow
-                icon={<PipFill size={15} />}
+              <Tooltip
                 label="Mini Mode"
-                onClick={closeAnd(onToggleMiniMode)}
-                // Not actually disabled — a truly disabled button gives zero
-                // feedback on click (no error, no window, nothing), which
-                // read exactly like "the feature is broken" rather than
-                // "unsupported here". It stays clickable; onToggleMiniMode
-                // itself checks support and shows a clear message when it
-                // isn't, same code path as any other failure to open.
-                title={miniModeSupported ? undefined : 'May not be supported in this browser — needs Chrome or Edge 116+'}
-              />
+                detail={
+                  miniModeSupported
+                    ? 'Ciutkan KaiSpace jadi jendela kecil mengambang (picture-in-picture).'
+                    : 'Ciutkan KaiSpace jadi jendela kecil mengambang (picture-in-picture). May not be supported in this browser — needs Chrome or Edge 116+.'
+                }
+                side="right"
+                wrapperClassName="w-full"
+              >
+                <MenuRow
+                  icon={<PipFill size={15} />}
+                  label="Mini Mode"
+                  onClick={closeAnd(onToggleMiniMode)}
+                  // Not actually disabled — a truly disabled button gives zero
+                  // feedback on click (no error, no window, nothing), which
+                  // read exactly like "the feature is broken" rather than
+                  // "unsupported here". It stays clickable; onToggleMiniMode
+                  // itself checks support and shows a clear message when it
+                  // isn't, same code path as any other failure to open.
+                />
+              </Tooltip>
             )}
             {/* QA (Kompat checklist item 7, "Low-spec") — used to be purely
                 cosmetic (hide HUD panels only); now also caps rendering
                 cost (GameCanvas.tsx's lowSpecMode: no retina scaling,
                 ~30fps cap) for a low-RAM/integrated-GPU device. */}
-            <MenuRow icon={<EyeFill size={15} />} label="Simplify" onClick={closeAnd(onToggleSimplifiedView)} title="Sembunyikan panel HUD dan kurangi beban render — cocok untuk perangkat low-spec" />
+            <Tooltip label="Simplify" detail="Sembunyikan panel HUD untuk tampilan yang lebih bersih." side="right" wrapperClassName="w-full">
+              <MenuRow icon={<EyeFill size={15} />} label="Simplify" onClick={closeAnd(onToggleSimplifiedView)} />
+            </Tooltip>
             {!isGuest && (
-              <MenuRow icon={<ChatDotsFill size={15} />} label={messengerViewActive ? 'Tutup Chat' : 'Chat'} active={messengerViewActive} onClick={closeAnd(onToggleMessengerView)} />
+              <Tooltip label="Chat" detail="Buka tampilan pesan gaya messenger." side="right" wrapperClassName="w-full">
+                <MenuRow icon={<ChatDotsFill size={15} />} label={messengerViewActive ? 'Tutup Chat' : 'Chat'} active={messengerViewActive} onClick={closeAnd(onToggleMessengerView)} />
+              </Tooltip>
             )}
             {isAdmin && (
-              <MenuRow
-                icon={<PersonCheck size={15} />}
-                label={pendingJoinCount > 0 ? `Permintaan bergabung (${pendingJoinCount})` : 'Permintaan bergabung'}
-                active={joinQueueActive}
-                onClick={closeAnd(onToggleJoinQueue)}
-              />
+              <Tooltip label="Permintaan Bergabung" detail="Lihat & proses permintaan masuk yang menunggu. (Khusus admin.)" side="right" wrapperClassName="w-full">
+                <MenuRow
+                  icon={<PersonCheck size={15} />}
+                  label={pendingJoinCount > 0 ? `Permintaan bergabung (${pendingJoinCount})` : 'Permintaan bergabung'}
+                  active={joinQueueActive}
+                  onClick={closeAnd(onToggleJoinQueue)}
+                />
+              </Tooltip>
             )}
             {!isGuest && (
-              <MenuRow icon={<CalendarEvent size={15} />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
+              <Tooltip label="Kalender" detail="Buka kalender jadwal tim." side="right" wrapperClassName="w-full">
+                <MenuRow icon={<CalendarEvent size={15} />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
+              </Tooltip>
             )}
             {/* Absensi + Cuti keduanya hidup di AttendanceApp (Cuti adalah tab
                 di dalamnya, lihat components/Attendance/AttendanceApp.tsx), jadi
                 satu baris menu ini membuka dua-duanya — tak ada baris "Cuti"
                 terpisah. */}
             {!isGuest && (
-              <MenuRow icon={<ClockHistory size={15} />} label={attendanceViewActive ? 'Tutup Absensi' : 'Absensi'} active={attendanceViewActive} onClick={closeAnd(onToggleAttendanceView)} />
+              <Tooltip label="Absensi" detail="Lihat riwayat & status absensimu, termasuk pengajuan cuti." side="right" wrapperClassName="w-full">
+                <MenuRow icon={<ClockHistory size={15} />} label={attendanceViewActive ? 'Tutup Absensi' : 'Absensi'} active={attendanceViewActive} onClick={closeAnd(onToggleAttendanceView)} />
+              </Tooltip>
             )}
             {/* Productivity Analytics — every real employee's own "cermin
                 evaluasi diri" (see PanelId's doc comment in gameStore.ts for
                 why this is NOT nested inside the admin-only Konsol Admin). */}
             {!isGuest && (
-              <MenuRow icon={<BarChartFill size={15} />} label={myAnalyticsActive ? 'Tutup Analitik Saya' : 'Analitik Saya'} active={myAnalyticsActive} onClick={closeAnd(onToggleMyAnalytics)} />
+              <Tooltip label="Analitik Saya" detail="Lihat ringkasan aktivitas & produktivitasmu." side="right" wrapperClassName="w-full">
+                <MenuRow icon={<BarChartFill size={15} />} label={myAnalyticsActive ? 'Tutup Analitik Saya' : 'Analitik Saya'} active={myAnalyticsActive} onClick={closeAnd(onToggleMyAnalytics)} />
+              </Tooltip>
             )}
             {isWorkspaceAdmin && (
-              <MenuRow icon={<ShieldLock size={15} />} label={adminViewActive ? 'Tutup Konsol Admin' : 'Konsol Admin'} active={adminViewActive} onClick={closeAnd(onToggleAdminView)} />
+              <Tooltip label="Konsol Admin" detail="Buka panel pengelolaan workspace. (Khusus admin.)" side="right" wrapperClassName="w-full">
+                <MenuRow icon={<ShieldLock size={15} />} label={adminViewActive ? 'Tutup Konsol Admin' : 'Konsol Admin'} active={adminViewActive} onClick={closeAnd(onToggleAdminView)} />
+              </Tooltip>
             )}
             {isOperator && (
               <MenuRow icon={<Buildings size={15} />} label={operatorConsoleActive ? 'Tutup Semua Organisasi' : 'Semua Organisasi'} active={operatorConsoleActive} onClick={closeAnd(onToggleOperatorConsole)} />
@@ -374,56 +423,78 @@ export function Sidebar({
                 guest (zoneLock.ts isn't registered for guest sockets),
                 just never hidden. */}
             {currentZoneName && !isGuest && (
-              <MenuRow
-                icon={zoneLocked ? <LockFill size={15} /> : <UnlockFill size={15} />}
+              <Tooltip
                 label={zoneLocked ? `Buka ${currentZoneName}` : `Kunci ${currentZoneName}`}
-                active={zoneLocked}
-                onClick={canToggleZoneLock ? closeAnd(onToggleZoneLock) : () => {}}
-                title={
+                detail={
                   zoneLocked && !canToggleZoneLock
-                    ? `Dikunci ${zoneLockedByName ?? 'orang lain'} — hanya dia yang bisa membuka`
+                    ? `Dikunci ${zoneLockedByName ?? 'orang lain'} — hanya dia yang bisa membuka.`
                     : zoneLocked
-                      ? 'Buka zona ini supaya siapa pun bisa masuk lagi'
-                      : 'Kunci zona ini — orang lain harus ketuk dan kamu yang mengizinkan'
+                      ? 'Buka zona ini supaya siapa pun bisa masuk lagi.'
+                      : 'Kunci area ini supaya orang lain harus mengetuk dulu sebelum masuk.'
                 }
-              />
+                side="right"
+                wrapperClassName="w-full"
+              >
+                <MenuRow
+                  icon={zoneLocked ? <LockFill size={15} /> : <UnlockFill size={15} />}
+                  label={zoneLocked ? `Buka ${currentZoneName}` : `Kunci ${currentZoneName}`}
+                  active={zoneLocked}
+                  onClick={canToggleZoneLock ? closeAnd(onToggleZoneLock) : () => {}}
+                />
+              </Tooltip>
             )}
             {/* Akses & Password Pintu audit item #9 — emergency override:
                 unlocks EVERY password door in the room at once, bypassing
                 doorLock.ts's normal per-socket unlock entirely. */}
             {canDoorOverride && (
-              <MenuRow
-                icon={doorOverride ? <DoorOpenFill size={15} /> : <DoorClosedFill size={15} />}
+              <Tooltip
                 label={doorOverride ? 'Matikan Mode Darurat Pintu' : 'Buka Semua Pintu (Darurat)'}
-                active={doorOverride}
-                onClick={closeAnd(onToggleDoorOverride)}
-                title={doorOverride ? 'Matikan override — pintu berpassword kembali terkunci seperti biasa' : 'Buka semua pintu berpassword di room ini untuk semua orang (keadaan darurat)'}
-              />
+                detail={doorOverride ? 'Matikan override — pintu berpassword kembali terkunci seperti biasa.' : 'Buka paksa semua pintu berpassword di room ini untuk semua orang (keadaan darurat).'}
+                side="right"
+                wrapperClassName="w-full"
+              >
+                <MenuRow
+                  icon={doorOverride ? <DoorOpenFill size={15} /> : <DoorClosedFill size={15} />}
+                  label={doorOverride ? 'Matikan Mode Darurat Pintu' : 'Buka Semua Pintu (Darurat)'}
+                  active={doorOverride}
+                  onClick={closeAnd(onToggleDoorOverride)}
+                />
+              </Tooltip>
             )}
             {/* Guest Link & Ruang Tunggu — admin generates a room-scoped
                 invite link for an external, unauthenticated visitor (see
                 App.tsx's handleCreateGuestLink). No active/current-state
                 indicator — this is a one-shot action, not a toggle. */}
             {canManageGuests && (
-              <MenuRow icon={<Link45deg size={15} />} label="Buat Guest Link" onClick={closeAnd(onCreateGuestLink)} title="Buat link undangan untuk tamu (tanpa akun) masuk ke room ini" />
+              <Tooltip label="Buat Guest Link" detail="Buat link undangan untuk tamu tanpa akun." side="right" wrapperClassName="w-full">
+                <MenuRow icon={<Link45deg size={15} />} label="Buat Guest Link" onClick={closeAnd(onCreateGuestLink)} />
+              </Tooltip>
             )}
             {/* QA (Akses tamu checklist item 7, "Revoke") — cabut link
                 terakhir yang dibuat; server juga langsung mengeluarkan tamu
                 yang sedang masuk lewat link itu (lihat DELETE handler). */}
             {canManageGuests && (
-              <MenuRow icon={<XCircleFill size={15} />} label="Cabut Guest Link Terakhir" onClick={closeAnd(onRevokeLastGuestLink)} title="Cabut guest link terakhir yang dibuat — tamu yang sedang masuk lewat link ini akan langsung dikeluarkan" />
+              <Tooltip label="Cabut Guest Link" detail="Nonaktifkan link tamu yang paling terakhir dibuat." side="right" wrapperClassName="w-full">
+                <MenuRow icon={<XCircleFill size={15} />} label="Cabut Guest Link Terakhir" onClick={closeAnd(onRevokeLastGuestLink)} />
+              </Tooltip>
             )}
             {/* QA #9/#10 — CEO/admin-only text broadcast, the text
                 counterpart to Spotlight (voice). One-shot action like Guest
                 Link above — App.tsx's handleBroadcast prompts for the text. */}
             {canBroadcast && (
-              <MenuRow icon={<VolumeUpFill size={15} />} label="Broadcast" onClick={closeAnd(onBroadcast)} title="Kirim pengumuman teks ke semua orang di room ini" />
+              <Tooltip label="Broadcast" detail="Kirim pengumuman teks ke semua orang di room ini." side="right" wrapperClassName="w-full">
+                <MenuRow icon={<VolumeUpFill size={15} />} label="Broadcast" onClick={closeAnd(onBroadcast)} />
+              </Tooltip>
             )}
             {isAdmin && (
-              <MenuRow icon={<Tools size={15} />} label="Edit Room" onClick={closeAnd(onOpenRoomEditor)} />
+              <Tooltip label="Edit Room" detail="Buka Room Editor untuk mengubah tata letak. (Khusus admin.)" side="right" wrapperClassName="w-full">
+                <MenuRow icon={<Tools size={15} />} label="Edit Room" onClick={closeAnd(onOpenRoomEditor)} />
+              </Tooltip>
             )}
             {canTeleport && (
-              <MenuRow icon={<GeoAltFill size={15} />} label="Teleport" active={showTeleportPanel} onClick={closeAnd(onToggleTeleport)} />
+              <Tooltip label="Teleport" detail="Pindah cepat ke lokasi tersimpan." side="right" wrapperClassName="w-full">
+                <MenuRow icon={<GeoAltFill size={15} />} label="Teleport" active={showTeleportPanel} onClick={closeAnd(onToggleTeleport)} />
+              </Tooltip>
             )}
 
             <MenuDivider />
@@ -431,7 +502,9 @@ export function Sidebar({
                 already a dead end for a guest (mediaHandler.ts/noteHandler.ts
                 aren't registered for guest sockets at all), just never hidden. */}
             {!isGuest && (
-              <MenuRow icon={<ImageFill size={15} />} label="Add Media" active={showAddMediaPanel} onClick={closeAnd(onToggleAddMedia)} />
+              <Tooltip label="Tambah Media" detail="Tempel gambar, video, atau file ke dalam room." side="right" wrapperClassName="w-full">
+                <MenuRow icon={<ImageFill size={15} />} label="Add Media" active={showAddMediaPanel} onClick={closeAnd(onToggleAddMedia)} />
+              </Tooltip>
             )}
 
             {canRecord && (
@@ -474,9 +547,11 @@ export function Sidebar({
       </div>
 
       {hasMySeat && (
-        <SidebarIcon title="Go to My Seat" onClick={onMySeat}>
-          <span className="text-xs leading-none">🪑</span>
-        </SidebarIcon>
+        <Tooltip label="Ke Kursi Saya" detail="Teleport langsung ke kursi tetapmu di room ini." side="right">
+          <SidebarIcon onClick={onMySeat}>
+            <span className="text-xs leading-none">🪑</span>
+          </SidebarIcon>
+        </Tooltip>
       )}
 
       <SidebarDivider />
@@ -494,13 +569,15 @@ export function Sidebar({
           controls. Same handlers/state as before, only the render location
           changed. */}
       {canToggleHidden && (
-        <SidebarIcon
-          title={hiddenActive ? 'Tampilkan diri' : 'Sembunyikan diri'}
-          active={hiddenActive}
-          onClick={onToggleHidden}
+        <Tooltip
+          label={hiddenActive ? 'Tampilkan diri' : 'Sembunyikan diri'}
+          detail="Sembunyikan dirimu dari tampilan orang lain di peta."
+          side="right"
         >
-          {hiddenActive ? <EyeSlashFill size={14} /> : <EyeFill size={14} />}
-        </SidebarIcon>
+          <SidebarIcon active={hiddenActive} onClick={onToggleHidden}>
+            {hiddenActive ? <EyeSlashFill size={14} /> : <EyeFill size={14} />}
+          </SidebarIcon>
+        </Tooltip>
       )}
       {/* QA (Booking popup close button) — persistent "you have a CEO
           booking" indicator + reopen affordance for its ZoneLockBar notice
@@ -508,36 +585,48 @@ export function Sidebar({
           see ZoneLockBar.tsx). Same icon (HourglassSplit) the card itself
           uses, so it reads as "that same booking" rather than a new signal. */}
       {hasActiveBooking && (
-        <SidebarIcon title="Booking CEO aktif — klik untuk lihat" onClick={onReopenBookingNotice}>
-          <HourglassSplit size={14} />
-        </SidebarIcon>
+        <Tooltip label="Booking CEO Aktif" detail={'Buka lagi notifikasi booking "Ngobrol dengan CEO"-mu.'} side="right">
+          <SidebarIcon onClick={onReopenBookingNotice}>
+            <HourglassSplit size={14} />
+          </SidebarIcon>
+        </Tooltip>
       )}
       {/* The notification bell (browser-notif + sound toggles) was removed
           here in Tahap 4 — both toggles, plus new per-kind ones, now live in
           Settings' own "Notifikasi" section (see SettingsPanel.tsx), which
           reuses the exact same browserNotifications.ts functions rather than
           duplicating them. */}
-      <SidebarIcon title="Settings" onClick={onOpenSettings}>
-        <GearFill size={14} />
-      </SidebarIcon>
+      <Tooltip label="Pengaturan" detail="Buka pengaturan akun, notifikasi, dan tampilan." side="right">
+        <SidebarIcon onClick={onOpenSettings}>
+          <GearFill size={14} />
+        </SidebarIcon>
+      </Tooltip>
 
-      <SidebarIcon
-        title="Back to room list"
-        onClick={onLeaveRoom}
-        className="mt-auto text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
+      <Tooltip label="Kembali ke Daftar Room" detail="Keluar dari room ini, kembali ke Lobby." side="right" wrapperClassName="mt-auto">
+        <SidebarIcon
+          onClick={onLeaveRoom}
+          className="text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
+        >
+          <HouseDoorFill size={14} />
+        </SidebarIcon>
+      </Tooltip>
+      <Tooltip
+        label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        detail="Beralih antara tampilan terang dan gelap."
+        side="right"
       >
-        <HouseDoorFill size={14} />
-      </SidebarIcon>
-      <SidebarIcon
-        title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-        onClick={onToggleTheme}
-        className="text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
-      >
-        {theme === 'dark' ? <SunFill size={14} /> : <MoonFill size={14} />}
-      </SidebarIcon>
-      <SidebarIcon title="Logout" onClick={onLogout} className="text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500">
-        <BoxArrowRight size={14} />
-      </SidebarIcon>
+        <SidebarIcon
+          onClick={onToggleTheme}
+          className="text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
+        >
+          {theme === 'dark' ? <SunFill size={14} /> : <MoonFill size={14} />}
+        </SidebarIcon>
+      </Tooltip>
+      <Tooltip label="Logout" detail="Keluar dari akunmu." side="right">
+        <SidebarIcon onClick={onLogout} className="text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500">
+          <BoxArrowRight size={14} />
+        </SidebarIcon>
+      </Tooltip>
     </div>
   );
 }
@@ -602,7 +691,7 @@ export function SidebarIcon({
   children,
   className,
 }: {
-  title: string;
+  title?: string;
   active?: boolean;
   onClick: () => void;
   children: ReactNode;

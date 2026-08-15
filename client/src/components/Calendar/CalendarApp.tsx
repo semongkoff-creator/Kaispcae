@@ -5,6 +5,7 @@ import { calendarApi, CalendarSummary, CalendarEventDto } from './api';
 import { DayView, WeekView, MonthView, AgendaView } from './views';
 import { EventPanel } from './EventPanel';
 import { toIcs } from './ics';
+import { showAlert, showConfirm, showPrompt } from '@/stores/modalStore';
 
 type ViewKind = 'day' | 'week' | 'month' | 'agenda';
 const VIEWS: { id: ViewKind; label: string }[] = [
@@ -65,14 +66,14 @@ export function CalendarApp({ currentUser, onClose, onStartMeeting }: {
       : `${range.from.setLocale('id').toFormat('d LLL')} – ${range.to.setLocale('id').toFormat('d LLL yyyy')}`;
 
   const newCalendar = async () => {
-    const name = window.prompt('Nama kalender baru:');
+    const name = await showPrompt('Nama kalender baru:');
     if (!name?.trim()) return;
     try { await calendarApi.createCalendar(name.trim()); await loadCalendars(); }
     catch (e) { setError(e instanceof Error ? e.message : 'Gagal'); }
   };
 
   const removeCalendar = async (c: CalendarSummary) => {
-    if (!window.confirm(`Hapus kalender “${c.name}” beserta acaranya?`)) return;
+    if (!(await showConfirm(`Hapus kalender “${c.name}” beserta acaranya?`, { danger: true }))) return;
     try { await calendarApi.deleteCalendar(c.id); await loadCalendars(); await loadEvents(); }
     catch (e) { setError(e instanceof Error ? e.message : 'Gagal menghapus'); }
   };
@@ -87,13 +88,13 @@ export function CalendarApp({ currentUser, onClose, onStartMeeting }: {
     URL.revokeObjectURL(url);
   };
 
-  const startMeeting = (e: CalendarEventDto) => {
+  const startMeeting = async (e: CalendarEventDto) => {
     // Room integration, honestly scoped: this opens/creates a room session
     // for the event. There is no transcript/notulen pipeline in this repo, so
     // nothing beyond the room link is claimed.
     const slug = e.meetkaiRoomSlug;
     if (slug && onStartMeeting) { onStartMeeting(slug); return; }
-    window.alert('Belum ada room yang tertaut ke acara ini.');
+    await showAlert('Belum ada room yang tertaut ke acara ini.');
   };
 
   const ViewComp = view === 'day' ? DayView : view === 'week' ? WeekView : view === 'month' ? MonthView : AgendaView;

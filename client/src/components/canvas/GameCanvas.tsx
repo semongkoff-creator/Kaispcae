@@ -27,7 +27,7 @@ import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
 import { PALETTE_BY_ID } from '@/data/themeAssets';
 import { isTileBlocked, isDoorTile } from '@/utils/createDefaultRoom';
-import { findTilePath, getCardinalWaypointTarget, simplifyPath } from '@/utils/pathfinding';
+import { findFollowRouteTarget, findTilePath, getCardinalWaypointTarget, isNearWorldPoint, tilePathToWorldWaypoints, type RouteState } from '@/utils/pathfinding';
 import { avatarColor } from '@/components/ui/ChatAvatar';
 // Bug 16-project (Room Editor) — these map-draw helpers were moved verbatim to
 // mapRender.ts so the editor can render the map identically. GameCanvas's usage
@@ -94,18 +94,6 @@ function drawLiveReferenceImage(ctx: CanvasRenderingContext2D, ref: ReferenceIma
   ctx.restore();
 }
 
-// Follow (§3): where a follower stands relative to their target, based on
-// the target's current facing direction — one tile on the side "behind"
-// them, per spec's example ("target menghadap 'right' -> follower taruh di
-// 'left'-nya"), not directly on top of them (which would just stack the
-// two avatars on the same tile).
-const FOLLOW_OFFSET: Record<Direction, { dx: number; dy: number }> = {
-  up: { dx: 0, dy: 1 },
-  down: { dx: 0, dy: -1 },
-  left: { dx: 1, dy: 0 },
-  right: { dx: -1, dy: 0 },
-};
-
 // ZEP-style spotlight — a "Private Area" drawn in the Room Editor has no
 // `effect` field surviving at runtime (Zone only carries `audioIsolated`,
 // see mapLayers.ts's layerDataToLegacy), so `audioIsolated !== false` is the
@@ -145,8 +133,6 @@ interface GameCanvasProps {
   emitJump: () => void;
   emitNudge: (targetId: string) => void;
   proximityData: ProximityPlayer[];
-  localSpeaking: boolean;
-  speakingPlayers: Set<string>;
   micMuted: boolean;
   cameraOn: boolean;
   editorMode: boolean;
@@ -310,7 +296,7 @@ function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: numb
   return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, localSpeaking, speakingPlayers, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, onDoorAreaPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, onDoorAreaPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -551,10 +537,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   });
 
   const proximityRef = useRef(proximityData); proximityRef.current = proximityData;
-  const localSpeakingRef = useRef(localSpeaking); localSpeakingRef.current = localSpeaking;
   const lowSpecModeRef = useRef(lowSpecMode); lowSpecModeRef.current = lowSpecMode;
   const lastDrawTimeRef = useRef(0);
-  const speakingPlayersRef = useRef(speakingPlayers); speakingPlayersRef.current = speakingPlayers;
   const micMutedRef = useRef(micMuted); micMutedRef.current = micMuted;
   const cameraOnRef = useRef(cameraOn); cameraOnRef.current = cameraOn;
 
@@ -665,27 +649,36 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // route, walked one at a time (front of the array = current sub-target,
   // shifted off on arrival).
   const walkTargetRef = useRef<{ x: number; y: number }[] | null>(null);
+  const followRouteRef = useRef<RouteState>({ targetTile: null, waypoints: null });
+  const cancelActiveFollowForRoute = useCallback(() => {
+    if (!followInfoRef.current) return;
+    followInfoRef.current = null;
+    followRouteRef.current = { targetTile: null, waypoints: null };
+    useGameStore.getState().setFollowInfo(null);
+    emitFollowUnfollowRef.current();
+  }, []);
 
-  // Shared by click-to-move AND Locate (ParticipantPanel's "Temukan"
-  // action, driven by locateRequestRef further down) — both ultimately just
-  // need "a waypoint route from here to this tile", so there's one A* call
-  // site, not two copies that could drift apart on what counts as blocked.
+  // Shared by click-to-move, Locate (ParticipantPanel's "Temukan" action),
+  // and Follow — all ultimately need route planning with the exact same
+  // definition of "blocked", so there is one path walkability predicate.
   // Same walkability real movement collision uses — isBlocked (tile grid +
   // door-password state) PLUS furniture Impassable Area rects, which are
   // sub-tile and never rasterized into the tile grid itself (see
   // wouldCollide's own separate check in useMovement.ts).
-  const computeWalkWaypoints = useCallback((targetTileX: number, targetTileY: number) => {
+  const pathBlocked = useCallback((tx: number, ty: number) => {
+    if (isBlocked(tx, ty)) return true;
     // Locked door areas route around like any other obstacle, same as a
-    // locked per-tile door already does via isBlocked below — click-to-move
-    // must not path straight through a door nobody's unlocked yet.
+    // locked per-tile door already does via isBlocked below — click-to-move,
+    // Locate, and Follow must not path straight through a door nobody's
+    // unlocked yet.
     const areas = [...impassableAreaRectsRef.current, ...getLockedDoorAreas()];
-    const pathBlocked = (tx: number, ty: number) => {
-      if (isBlocked(tx, ty)) return true;
-      if (areas.length === 0) return false;
-      const left = tx * TILE_SIZE;
-      const top = ty * TILE_SIZE;
-      return doesRectOverlapImpassableArea(areas, left, top, left + TILE_SIZE, top + TILE_SIZE);
-    };
+    if (areas.length === 0) return false;
+    const left = tx * TILE_SIZE;
+    const top = ty * TILE_SIZE;
+    return doesRectOverlapImpassableArea(areas, left, top, left + TILE_SIZE, top + TILE_SIZE);
+  }, [isBlocked, getLockedDoorAreas]);
+
+  const computeWalkWaypoints = useCallback((targetTileX: number, targetTileY: number) => {
     const startTileX = Math.floor(localPlayerRef.current.x / TILE_SIZE);
     const startTileY = Math.floor(localPlayerRef.current.y / TILE_SIZE);
     // QA follow-up — MAP_WIDTH/MAP_HEIGHT are only the default grid size; a
@@ -698,12 +691,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const rows = tilesRef.current.length || MAP_HEIGHT;
     const tilePath = findTilePath(startTileX, startTileY, targetTileX, targetTileY, pathBlocked, cols, rows);
     if (!tilePath) return null; // no route exists
-    const waypoints = simplifyPath(tilePath).map((n) => ({
-      x: n.x * TILE_SIZE + TILE_SIZE / 2,
-      y: n.y * TILE_SIZE + TILE_SIZE / 2,
-    }));
+    const waypoints = tilePathToWorldWaypoints(tilePath, TILE_SIZE);
     return waypoints.length > 0 ? waypoints : null;
-  }, [isBlocked, getLockedDoorAreas]);
+  }, [pathBlocked]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -720,11 +710,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const tileY = Math.floor(worldY / TILE_SIZE);
       if (tileX < 0 || tileY < 0) return;
       if (isBlocked(tileX, tileY)) return; // can't walk onto a wall/desk
+      cancelActiveFollowForRoute();
       walkTargetRef.current = computeWalkWaypoints(tileX, tileY);
     };
     canvas.addEventListener('click', onCanvasClick);
     return () => canvas.removeEventListener('click', onCanvasClick);
-  }, [isBlocked, computeWalkWaypoints]);
+  }, [isBlocked, computeWalkWaypoints, cancelActiveFollowForRoute]);
 
   // Mouse wheel / trackpad zoom — same factor-per-notch convention as the
   // Room Editor's own wheel handler. preventDefault stops the page itself
@@ -840,7 +831,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // Plain nearest-within-range matches how "senggol" actually gets used.
   const performNudge = useCallback(() => {
     const player = localPlayerRef.current;
-    const NUDGE_RANGE_PX = TILE_SIZE * 1.5;
+    // Matches the visible white "Proximity ring" (PROXIMITY_THRESHOLD_PX,
+    // shared/types/index.ts) instead of its own separate, tighter radius
+    // (was TILE_SIZE * 1.5 = 72px, exactly half the 144px ring) — someone
+    // standing clearly inside the ring everyone can see read as reachable
+    // but was actually out of Z's real range, so it silently no-op'd. Same
+    // "visual circle drifted from the real range" bug PROXIMITY_THRESHOLD_PX
+    // itself was introduced to prevent for the ring's own video/audio
+    // connect distance (see its doc comment) — nudge just wasn't using it.
+    const NUDGE_RANGE_PX = PROXIMITY_THRESHOLD_PX;
 
     let target: Avatar | null = null;
     let bestDist = Infinity;
@@ -1106,17 +1105,57 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const activeFollow = followInfoRef.current;
     if (activeFollow) {
       if (moveResult.isMoving) {
+        followInfoRef.current = null;
+        followRouteRef.current = { targetTile: null, waypoints: null };
         useGameStore.getState().setFollowInfo(null);
         emitFollowUnfollowRef.current();
       } else if (activeFollow.status === 'active' && !localPlayerRef.current.isSitting) {
+        walkTargetRef.current = null;
         const targetPlayer = Object.values(playerRecordsRef.current).find((p) => p.userId === activeFollow.targetUserId);
         if (targetPlayer) {
-          const offset = FOLLOW_OFFSET[targetPlayer.direction] ?? FOLLOW_OFFSET.down;
-          const desiredX = targetPlayer.x + offset.dx * TILE_SIZE;
-          const desiredY = targetPlayer.y + offset.dy * TILE_SIZE;
-          effectiveMoveResult = updateFollow(desiredX, desiredY, dt);
+          const cols = tilesRef.current[0]?.length || MAP_WIDTH;
+          const rows = tilesRef.current.length || MAP_HEIGHT;
+          const routeTarget = findFollowRouteTarget({
+            currentX: effectiveMoveResult.x,
+            currentY: effectiveMoveResult.y,
+            targetX: targetPlayer.x,
+            targetY: targetPlayer.y,
+            targetDirection: targetPlayer.direction,
+            blocked: pathBlocked,
+            cols,
+            rows,
+            tileSize: TILE_SIZE,
+            route: followRouteRef.current,
+            nowMs: timestamp,
+          });
+          followRouteRef.current = routeTarget.route;
+          if (routeTarget.axisTarget) {
+            const followResult = updateFollow(routeTarget.axisTarget.x, routeTarget.axisTarget.y, dt);
+            const route = followRouteRef.current;
+            const waypoint = route.waypoints?.[0];
+            const reachedWaypoint = waypoint ? isNearWorldPoint(followResult.x, followResult.y, waypoint) : false;
+            if (followResult.isMoving) {
+              effectiveMoveResult = followResult;
+            } else if (route.waypoints && route.waypoints.length > 1 && reachedWaypoint) {
+              followRouteRef.current = { targetTile: route.targetTile, waypoints: route.waypoints.slice(1) };
+            } else if (route.waypoints && !reachedWaypoint) {
+              followRouteRef.current = {
+                targetTile: route.targetTile,
+                waypoints: null,
+                failedStartTile: {
+                  x: Math.floor(followResult.x / TILE_SIZE),
+                  y: Math.floor(followResult.y / TILE_SIZE),
+                },
+                failedAtMs: timestamp,
+              };
+            }
+          }
+        } else {
+          followRouteRef.current = { targetTile: null, waypoints: null };
         }
       }
+    } else {
+      followRouteRef.current = { targetTile: null, waypoints: null };
     }
 
     // Locate ("Temukan") — ParticipantPanel's search-by-name action (see
@@ -1130,6 +1169,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       if (target) {
         const targetTileX = Math.floor(target.x / TILE_SIZE);
         const targetTileY = Math.floor(target.y / TILE_SIZE);
+        cancelActiveFollowForRoute();
         walkTargetRef.current = computeWalkWaypoints(targetTileX, targetTileY);
         locateHighlightRef.current = { playerId: lr.playerId, start: performance.now() };
       }
@@ -1154,7 +1194,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         const walkResult = updateFollow(axisTarget.x, axisTarget.y, dt);
         if (walkResult.isMoving) {
           effectiveMoveResult = walkResult;
-        } else if (path.length > 1 && Math.hypot(wt.x - walkResult.x, wt.y - walkResult.y) < 4) {
+        } else if (path.length > 1 && isNearWorldPoint(walkResult.x, walkResult.y, wt)) {
           // Reached this waypoint (not stuck — see the distance check) with
           // more still queued: advance to the next one. One frame's pause
           // at a route corner is imperceptible at 60fps; next frame picks
@@ -1940,8 +1980,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       // label when no custom text is set. The separate bare emoji badge that
       // used to sit here was removed to avoid two overlapping status cues.)
 
-      const sp = speakingPlayersRef.current;
-      const isSpeaking = isLocal ? localSpeakingRef.current : sp.has(avatar.id);
+      // Tile flicker diagnosis — read straight from the store instead of a
+      // prop-mirrored ref (see App.tsx's own comment). This runs inside the
+      // rAF draw loop, which already repaints every frame regardless, so a
+      // plain getState() read here is exactly as fresh as the old ref and
+      // costs nothing extra — the only thing this removes is App.tsx (the
+      // whole room UI) having to re-render on every speaking edge just to
+      // keep that ref's mirrored value current.
+      const speakingState = useGameStore.getState();
+      const isSpeaking = isLocal ? speakingState.localSpeaking : speakingState.speakingPlayers.has(avatar.id);
       const isMuted = isLocal && micMutedRef.current;
       const inProx = (proximityRef.current.find((p) => p.id === avatar.id)?.visibility ?? 'not_visible') !== 'not_visible';
 
@@ -2820,8 +2867,14 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       </div>
 
       {pendingSeatClaim && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-auto">
-          <div className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs">
+        <div
+          className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-auto"
+          onClick={() => setPendingSeatClaim(null)}
+        >
+          <div
+            className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs"
+            onClick={(e) => e.stopPropagation()}
+          >
             <p className="text-gray-900 dark:text-gray-100 text-sm mb-4">
               {pendingSeatClaim.ownerName
                 ? <>Kursi ini sudah diklaim <span className="font-semibold">{pendingSeatClaim.ownerName}</span>. Tetap ingin menjadikannya kursimu?</>

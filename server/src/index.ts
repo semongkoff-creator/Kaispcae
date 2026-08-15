@@ -5,7 +5,6 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { SocketEvents } from '@kaispace/shared';
 import { registerRoomHandlers, getPlayerName, getPlayerColor } from './socket/roomHandler';
-import { registerCsHandlers } from './socket/csHandler';
 import { registerMovementHandlers } from './socket/movementHandler';
 import { registerRtcHandlers } from './socket/rtcHandler';
 import { registerChatHandlers } from './socket/chatHandler';
@@ -44,7 +43,7 @@ import userRoutes, { setUsersIo } from './routes/users';
 import googleRoutes from './routes/google';
 import operatorRoutes from './routes/operator';
 import analyticsRoutes from './routes/analytics';
-import csRoutes, { setIo as setCsIo } from './routes/cs';
+import csRoutes from './routes/cs';
 import { startReminderSweep } from './socket/reminderSweep';
 import { startAttendanceSweep } from './socket/attendanceSweep';
 import { startQueueSweep } from './socket/queueSweep';
@@ -210,7 +209,6 @@ setAdminIo(io);
 setUsersIo(io);
 setGuestInviteIo(io);
 setCalendarIo(io);
-setCsIo(io);
 
 // ── REST routes ──────────────────────────────────────────────────
 app.get('/api/health', async (_req, res) => {
@@ -296,7 +294,6 @@ async function start() {
     if (!isGuest && connOrgId) socket.join(`org:${connOrgId}`);
 
     registerRoomHandlers(io, socket);
-    registerCsHandlers(io, socket);
     registerMovementHandlers(io, socket);
     registerRtcHandlers(io, socket);
     registerChatHandlers(io, socket, () => getPlayerName(socket.id), () => getPlayerColor(socket.id));
@@ -322,7 +319,7 @@ async function start() {
   startAnalyticsSweep(io);
 
   httpServer.listen(config.PORT, () => {
-    console.log(`[server] VirtualMeet running on http://localhost:${config.PORT}`);
+    console.log(`[server] KaiSpace running on http://localhost:${config.PORT}`);
   });
 }
 

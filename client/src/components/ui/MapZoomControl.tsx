@@ -1,5 +1,6 @@
 import { useGameStore, MIN_MAP_ZOOM, MAX_MAP_ZOOM } from '@/stores/gameStore';
 import { hasFeatureAccess } from '@kaispace/shared';
+import { Tooltip } from '@/components/ui/Tooltip';
 
 // Camera zoom for the main game view (GameCanvas.tsx) — purely a local
 // rendering preference, read/written via gameStore's mapZoom so GameCanvas
@@ -19,29 +20,32 @@ export function MapZoomControl() {
 
   return (
     <div className="flex items-center gap-0.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-100 dark:border-gray-700 shadow-sm rounded-lg px-1.5 py-2">
-      <button
-        onClick={() => stepMapZoom(-1)}
-        disabled={zoom <= effectiveMinZoom}
-        title="Zoom out"
-        className="w-4 h-4 flex items-center justify-center rounded hover:bg-purple-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300 text-xs font-bold leading-none cursor-pointer"
-      >
-        −
-      </button>
-      <button
-        onClick={() => setMapZoom(1)}
-        title="Reset zoom to 100%"
-        className="text-[10px] text-gray-600 dark:text-gray-300 w-8 text-center tabular-nums cursor-pointer hover:underline"
-      >
-        {Math.round(zoom * 100)}%
-      </button>
-      <button
-        onClick={() => stepMapZoom(1)}
-        disabled={zoom >= MAX_MAP_ZOOM}
-        title="Zoom in"
-        className="w-4 h-4 flex items-center justify-center rounded hover:bg-purple-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300 text-xs font-bold leading-none cursor-pointer"
-      >
-        +
-      </button>
+      <Tooltip label="Perkecil Peta" detail="Atur seberapa dekat tampilan peta.">
+        <button
+          onClick={() => stepMapZoom(-1)}
+          disabled={zoom <= effectiveMinZoom}
+          className="w-4 h-4 flex items-center justify-center rounded hover:bg-purple-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300 text-xs font-bold leading-none cursor-pointer"
+        >
+          −
+        </button>
+      </Tooltip>
+      <Tooltip label="Ukuran 100%" detail="Kembalikan tampilan peta ke ukuran normal.">
+        <button
+          onClick={() => setMapZoom(1)}
+          className="text-[10px] text-gray-600 dark:text-gray-300 w-8 text-center tabular-nums cursor-pointer hover:underline"
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+      </Tooltip>
+      <Tooltip label="Perbesar Peta" detail="Atur seberapa dekat tampilan peta.">
+        <button
+          onClick={() => stepMapZoom(1)}
+          disabled={zoom >= MAX_MAP_ZOOM}
+          className="w-4 h-4 flex items-center justify-center rounded hover:bg-purple-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300 text-xs font-bold leading-none cursor-pointer"
+        >
+          +
+        </button>
+      </Tooltip>
     </div>
   );
 }

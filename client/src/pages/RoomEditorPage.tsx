@@ -8,6 +8,7 @@ import {
 import { api, ApiError } from '@/services/api';
 import { adminApi } from '@/admin/api';
 import { useEditorStore, EDITOR_LAYERS, EDITOR_TOOLS, EditorLayer, EditorTool } from '@/stores/editorStore';
+import { showAlert, showConfirm, showPrompt } from '@/stores/modalStore';
 import { drawFloorTile, drawWallTile, drawFurnitureLayer } from '@/components/canvas/mapRender';
 import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
@@ -947,7 +948,10 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   // layer is active when the button is clicked (the common case), but stays
   // editable — an admin importing while on the Objects layer may still want
   // it as a Floor texture, etc.
-  const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
+  // Raised from 5MB on request — server's POST /uploads (uploads.ts) caps at
+  // the same 100MB, so this is the real ceiling, not just a friendlier
+  // client-side message.
+  const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
   const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importCategory, setImportCategory] = useState<'floor' | 'wall' | 'object'>('object');
@@ -957,8 +961,8 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const openImportPicker = async () => {
     const f = await pickFile('image/png,image/jpeg');
     if (!f) return;
-    if (!['image/png', 'image/jpeg'].includes(f.type)) { window.alert('Hanya file PNG atau JPG yang diperbolehkan.'); return; }
-    if (f.size > MAX_IMPORT_BYTES) { window.alert(`Ukuran file maksimal 5MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
+    if (!['image/png', 'image/jpeg'].includes(f.type)) { await showAlert('Hanya file PNG atau JPG yang diperbolehkan.'); return; }
+    if (f.size > MAX_IMPORT_BYTES) { await showAlert(`Ukuran file maksimal ${MAX_IMPORT_BYTES / 1024 / 1024}MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
     setImportFile(f);
     setImportLabel(f.name.replace(/\.[^.]+$/, ''));
     setImportCategory(activeLayer === 'floor' ? 'floor' : activeLayer === 'wall' ? 'wall' : 'object');
@@ -1014,8 +1018,8 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const uploadReferenceImage = async () => {
     const f = await pickFile('image/png,image/jpeg');
     if (!f) return;
-    if (!['image/png', 'image/jpeg'].includes(f.type)) { window.alert('Hanya file PNG atau JPG yang diperbolehkan.'); return; }
-    if (f.size > MAX_IMPORT_BYTES) { window.alert(`Ukuran file maksimal 5MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
+    if (!['image/png', 'image/jpeg'].includes(f.type)) { await showAlert('Hanya file PNG atau JPG yang diperbolehkan.'); return; }
+    if (f.size > MAX_IMPORT_BYTES) { await showAlert(`Ukuran file maksimal ${MAX_IMPORT_BYTES / 1024 / 1024}MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
     setRefBusy(true); setRefErr('');
     try {
       const { url } = await api.uploadMedia(f, slug);
@@ -1419,8 +1423,8 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         if (portalOriginRef.current) {
           const origin = portalOriginRef.current; portalOriginRef.current = null; setPortalHint(false);
           dialogPendingRef.current = true;
-          setTimeout(() => {
-            const label = (window.prompt('Nama portal (opsional):', '') ?? '').trim();
+          setTimeout(async () => {
+            const label = ((await showPrompt('Nama portal (opsional):', '')) ?? '').trim();
             dialogPendingRef.current = false;
             s.addPortal(origin.x, origin.y, { targetX: t.x, targetY: t.y, label: label || undefined });
           }, DIALOG_DEFER_MS);
@@ -1428,13 +1432,13 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         }
         // First click: choose cross-room vs internal.
         dialogPendingRef.current = true;
-        setTimeout(() => {
-          const wantsCrossRoom = window.confirm('Portal ke ROOM LAIN?\n\nOK = pilih room lain · Batal = titik dalam room ini');
+        setTimeout(async () => {
+          const wantsCrossRoom = await showConfirm('Portal ke ROOM LAIN?\n\nOK = pilih room lain · Batal = titik dalam room ini');
           if (wantsCrossRoom) {
-            const target = (window.prompt('Kode room tujuan (slug dari URL/share):', '') ?? '').trim();
+            const target = ((await showPrompt('Kode room tujuan (slug dari URL/share):', '')) ?? '').trim();
             dialogPendingRef.current = false;
             if (!target) return;
-            const label = (window.prompt('Nama portal (opsional):', '') ?? '').trim();
+            const label = ((await showPrompt('Nama portal (opsional):', '')) ?? '').trim();
             s.addPortal(t.x, t.y, { targetSlug: target, label: label || undefined });
           } else {
             dialogPendingRef.current = false;
@@ -1569,16 +1573,16 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       // + guarded the same way.
       if (sel && !dialogPendingRef.current) {
         dialogPendingRef.current = true;
-        setTimeout(() => {
+        setTimeout(async () => {
           if (s.selectedEffect === 'privateArea') {
-            const name = (window.prompt('Nama private area:', 'Private') ?? '').trim();
-            const areaId = (window.prompt('Area ID (samakan untuk menggabung area terpisah jadi satu grup):', '1') ?? '').trim();
+            const name = ((await showPrompt('Nama private area:', 'Private')) ?? '').trim();
+            const areaId = ((await showPrompt('Area ID (samakan untuk menggabung area terpisah jadi satu grup):', '1')) ?? '').trim();
             // Default OK = kedap suara — that's the entire point of a private
             // area — but still adjustable per-area for the rare case of "one
             // grouped audio room split across a boundary that shouldn't also
             // go silent against its own neighbors".
-            const isolate = window.confirm('Area ini KEDAP SUARA?\n\nOK = ya — orang di luar area ini tidak akan saling dengar dengan yang di dalam (perilaku normal Private Area).\nBatal = tidak — cuma jarak biasa yang menentukan siapa dengar siapa.');
-            const capacityRaw = (window.prompt('Kapasitas maksimal orang di area ini (kosongkan = tanpa batas):', '') ?? '').trim();
+            const isolate = await showConfirm('Area ini KEDAP SUARA?\n\nOK = ya — orang di luar area ini tidak akan saling dengar dengan yang di dalam (perilaku normal Private Area).\nBatal = tidak — cuma jarak biasa yang menentukan siapa dengar siapa.');
+            const capacityRaw = ((await showPrompt('Kapasitas maksimal orang di area ini (kosongkan = tanpa batas):', '')) ?? '').trim();
             const capacityNum = capacityRaw ? parseInt(capacityRaw, 10) : NaN;
             const capacity = Number.isInteger(capacityNum) && capacityNum > 0 ? capacityNum : undefined;
             // QA #8 — "ODOO/AI TEAM hanya anggota; terkunci bagi guest." Default
@@ -1586,28 +1590,28 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             // ("no new restriction" is always the safe default for an area
             // authored before this existed, or for an admin who just wants a
             // private room with no guest-gating at all).
-            const memberOnly = window.confirm('Area ini KHUSUS ANGGOTA (tidak untuk guest)?\n\nOK = ya — guest yang coba masuk butuh persetujuan admin dulu.\nBatal = tidak — guest bebas masuk seperti member biasa.');
+            const memberOnly = await showConfirm('Area ini KHUSUS ANGGOTA (tidak untuk guest)?\n\nOK = ya — guest yang coba masuk butuh persetujuan admin dulu.\nBatal = tidak — guest bebas masuk seperti member biasa.');
             s.addArea('privateArea', sel, name || 'Private', areaId || undefined, isolate, capacity, memberOnly);
           } else if (s.selectedEffect === 'mapLocation') {
-            const name = (window.prompt('Nama lokasi:', '') ?? '').trim();
+            const name = ((await showPrompt('Nama lokasi:', '')) ?? '').trim();
             // Default Batal = TIDAK kedap suara — Map Location is just a named
             // pin (e.g. "Team C", "Dev Team"), not a meeting room; before this
             // toggle existed every map location accidentally silenced anyone
             // standing just outside its boundary like a real private room.
-            const isolate = window.confirm('Area ini KEDAP SUARA?\n\nOK = ya — isolasi audio seperti Private Area.\nBatal (disarankan) = tidak — Map Location cuma label nama, jarak biasa yang menentukan siapa dengar siapa.');
+            const isolate = await showConfirm('Area ini KEDAP SUARA?\n\nOK = ya — isolasi audio seperti Private Area.\nBatal (disarankan) = tidak — Map Location cuma label nama, jarak biasa yang menentukan siapa dengar siapa.');
             s.addArea('mapLocation', sel, name || 'Lokasi', undefined, isolate);
           } else if (s.selectedEffect === 'focusArea') {
-            const name = (window.prompt('Nama focus area:', 'Focus') ?? '').trim();
+            const name = ((await showPrompt('Nama focus area:', 'Focus')) ?? '').trim();
             s.addArea('focusArea', sel, name || 'Focus');
           } else if (s.selectedEffect === 'meetingArea') {
-            const name = (window.prompt('Nama meeting area:', 'Meeting') ?? '').trim();
+            const name = ((await showPrompt('Nama meeting area:', 'Meeting')) ?? '').trim();
             // Default OK = kedap suara, same reasoning as Private Area — a
             // meeting in progress shouldn't bleed into/from whatever's
             // happening just outside its walls.
-            const isolate = window.confirm('Area ini KEDAP SUARA?\n\nOK = ya — orang di luar area ini tidak akan saling dengar dengan yang di dalam.\nBatal = tidak — cuma jarak biasa yang menentukan siapa dengar siapa.');
+            const isolate = await showConfirm('Area ini KEDAP SUARA?\n\nOK = ya — orang di luar area ini tidak akan saling dengar dengan yang di dalam.\nBatal = tidak — cuma jarak biasa yang menentukan siapa dengar siapa.');
             s.addArea('meetingArea', sel, name || 'Meeting', undefined, isolate);
           } else if (s.selectedEffect === 'restrictedArea') {
-            const name = (window.prompt('Nama area (mis. "CEO Office"):', 'CEO Office') ?? '').trim();
+            const name = ((await showPrompt('Nama area (mis. "CEO Office"):', 'CEO Office')) ?? '').trim();
             const id = s.addArea('restrictedArea', sel, name || 'Restricted Area');
             // "Ngobrol dengan CEO" queue (see server/src/lib/zoneMembership.ts)
             // — always admin-only with the self-service queue on, matching
@@ -1616,9 +1620,9 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             // to ask at creation time. The restriction itself lives in a
             // separate table (ZoneRestriction), not on this area/zone object,
             // so it needs its own request right after the area is created.
-            adminApi.setZoneRestriction(slug, id, { enabled: true, minRole: 'admin', queueEnabled: true }).catch((err) => {
+            adminApi.setZoneRestriction(slug, id, { enabled: true, minRole: 'admin', queueEnabled: true }).catch(async (err) => {
               console.error('[room-editor] failed to mark area restricted:', err);
-              window.alert('Area berhasil dibuat, tapi gagal menandainya sebagai restricted. Hapus area ini (Eraser) lalu gambar ulang untuk coba lagi.');
+              await showAlert('Area berhasil dibuat, tapi gagal menandainya sebagai restricted. Hapus area ini (Eraser) lalu gambar ulang untuk coba lagi.');
             });
           }
           dialogPendingRef.current = false;
@@ -1647,7 +1651,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   }, []);
 
   const openResize = () => { const d = useEditorStore.getState().doc; if (d) { setResizeW(d.width); setResizeH(d.height); } setResizeOpen(true); };
-  const applyResize = () => {
+  const applyResize = async () => {
     const d = useEditorStore.getState().doc; if (!d) return;
     const w = Math.max(1, Math.min(200, Math.floor(resizeW))), h = Math.max(1, Math.min(200, Math.floor(resizeH)));
     if (w === d.width && h === d.height) { setResizeOpen(false); return; }
@@ -1660,17 +1664,17 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     // Block: can't remove every starting point.
     const sp = d.tileEffects.filter((e) => e.kind === 'startingPoint');
     if (sp.length > 0 && sp.every((e) => e.x >= w || e.y >= h)) {
-      window.alert('Resize diblokir: semua starting point akan terpotong. Pindahkan minimal satu ke dalam batas baru dulu.');
+      await showAlert('Resize diblokir: semua starting point akan terpotong. Pindahkan minimal satu ke dalam batas baru dulu.');
       return;
     }
     // Block: an internal portal's destination would be cut.
     if (d.tileEffects.some((e) => e.kind === 'portal' && e.targetX != null && e.targetY != null && (e.targetX >= w || e.targetY >= h))) {
-      window.alert('Resize diblokir: ada tujuan portal internal yang akan terpotong. Pindahkan/hapus portal itu dulu.');
+      await showAlert('Resize diblokir: ada tujuan portal internal yang akan terpotong. Pindahkan/hapus portal itu dulu.');
       return;
     }
     const shrinking = w < d.width || h < d.height;
     const losses = outObj + outWall + outEff + outAreas;
-    if (shrinking && losses > 0 && !window.confirm(`Mengecilkan map akan MENGHAPUS konten di luar batas baru:\n\n• ${outObj} objek\n• ${outWall} tile wall\n• ${outEff} tile efek\n• ${outAreas} area\n\nLanjutkan?`)) return;
+    if (shrinking && losses > 0 && !(await showConfirm(`Mengecilkan map akan MENGHAPUS konten di luar batas baru:\n\n• ${outObj} objek\n• ${outWall} tile wall\n• ${outEff} tile efek\n• ${outAreas} area\n\nLanjutkan?`))) return;
     useEditorStore.getState().resizeMap(w, h);
     setResizeOpen(false);
   };
@@ -1687,28 +1691,28 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     try {
       if (kind === 'image') {
         const f = await pickFile('image/*'); if (!f) return;
-        if (f.size > 10 * 1024 * 1024) { window.alert('Gambar maksimal 10MB.'); return; }
+        if (f.size > 10 * 1024 * 1024) { await showAlert('Gambar maksimal 10MB.'); return; }
         const { url } = await api.uploadMedia(f, slug);
         await api.addRoomMedia(slug, { type: 'image', x, y, payload: { url } });
       } else if (kind === 'youtube') {
-        const raw = (window.prompt('URL YouTube:', '') ?? '').trim(); if (!raw) return;
-        const id = parseYouTubeId(raw); if (!id) { window.alert('URL YouTube tidak valid.'); return; }
+        const raw = ((await showPrompt('URL YouTube:', '')) ?? '').trim(); if (!raw) return;
+        const id = parseYouTubeId(raw); if (!id) { await showAlert('URL YouTube tidak valid.'); return; }
         await api.addRoomMedia(slug, { type: 'youtube', x, y, payload: { videoId: id } });
       } else if (kind === 'website') {
-        const u = (window.prompt('URL website (harus https://):', 'https://') ?? '').trim();
-        if (!/^https:\/\/\S+/i.test(u)) { window.alert('Hanya URL https:// yang diperbolehkan.'); return; }
+        const u = ((await showPrompt('URL website (harus https://):', 'https://')) ?? '').trim();
+        if (!/^https:\/\/\S+/i.test(u)) { await showAlert('Hanya URL https:// yang diperbolehkan.'); return; }
         await api.addRoomMedia(slug, { type: 'website', x, y, payload: { websiteUrl: u } });
       } else {
         const f = await pickFile('audio/mpeg,audio/ogg,audio/*'); if (!f) return;
-        if (f.size > 10 * 1024 * 1024) { window.alert('Audio maksimal 10MB.'); return; }
-        const name = (window.prompt('Nama area musik:', 'Musik') ?? 'Musik').trim();
-        const w = Math.max(1, parseInt(window.prompt('Lebar area (tile):', '4') || '4', 10) || 4);
-        const h = Math.max(1, parseInt(window.prompt('Tinggi area (tile):', '4') || '4', 10) || 4);
+        if (f.size > 10 * 1024 * 1024) { await showAlert('Audio maksimal 10MB.'); return; }
+        const name = ((await showPrompt('Nama area musik:', 'Musik')) ?? 'Musik').trim();
+        const w = Math.max(1, parseInt((await showPrompt('Lebar area (tile):', '4', { inputType: 'number' })) || '4', 10) || 4);
+        const h = Math.max(1, parseInt((await showPrompt('Tinggi area (tile):', '4', { inputType: 'number' })) || '4', 10) || 4);
         const { url } = await api.uploadMedia(f, slug);
         await api.addRoomMedia(slug, { type: 'bgm', x, y, payload: { audioUrl: url, areaW: w, areaH: h, name, volume: 0.3 } });
       }
       refetchMedia();
-    } catch { window.alert('Gagal menambah media.'); }
+    } catch { await showAlert('Gagal menambah media.'); }
   };
 
   const floorEntries = meta ? PALETTE_BY_THEME[meta.theme].filter((p) => p.category === 'floor') : [];
@@ -1996,13 +2000,13 @@ export function RoomEditorPage({ slug }: { slug: string }) {
                       const { zones, restrictions } = await adminApi.getZoneRestrictions(slug);
                       const restrictedZones = zones.filter((z) => restrictions.some((r) => r.zoneId === z.id));
                       if (restrictedZones.length === 0) {
-                        window.alert('Belum ada Restricted Area di room ini — gambar dulu dengan tool ini, lalu coba lagi.');
+                        await showAlert('Belum ada Restricted Area di room ini — gambar dulu dengan tool ini, lalu coba lagi.');
                         return;
                       }
                       let target = restrictedZones[0];
                       if (restrictedZones.length > 1) {
                         const names = restrictedZones.map((z) => z.name).join(', ');
-                        const picked = (window.prompt(`Ada ${restrictedZones.length} restricted area: ${names}\n\nKetik nama persis salah satu untuk diatur:`, restrictedZones[0].name) ?? '').trim();
+                        const picked = ((await showPrompt(`Ada ${restrictedZones.length} restricted area: ${names}\n\nKetik nama persis salah satu untuk diatur:`, restrictedZones[0].name)) ?? '').trim();
                         const found = restrictedZones.find((z) => z.name === picked);
                         if (!found) return;
                         target = found;
@@ -2012,14 +2016,14 @@ export function RoomEditorPage({ slug }: { slug: string }) {
                       const confirmMsg = nextBookingMode
                         ? `Aktifkan Booking Mode untuk "${target.name}"?\n\nZona ini akan BEBAS keluar-masuk (tidak ada penolakan lagi) — booking (tombol G) & antrean cepat jadi reservasi waktu CEO, bukan syarat fisik masuk.`
                         : `Matikan Booking Mode untuk "${target.name}"?\n\nZona akan kembali terkunci seperti semula (perlu antre untuk masuk).`;
-                      if (!window.confirm(confirmMsg)) return;
+                      if (!(await showConfirm(confirmMsg))) return;
                       await adminApi.setZoneRestriction(slug, target.id, {
                         enabled: true, minRole: current?.minRole ?? 'admin', queueEnabled: current?.queueEnabled ?? true, bookingMode: nextBookingMode,
                       });
-                      window.alert(`Booking Mode untuk "${target.name}" sekarang ${nextBookingMode ? 'AKTIF' : 'nonaktif'}.`);
+                      await showAlert(`Booking Mode untuk "${target.name}" sekarang ${nextBookingMode ? 'AKTIF' : 'nonaktif'}.`);
                     } catch (err) {
                       console.error('[room-editor] failed to toggle booking mode:', err);
-                      window.alert('Gagal mengubah setelan Booking Mode.');
+                      await showAlert('Gagal mengubah setelan Booking Mode.');
                     }
                   }}
                   className="w-full mt-2 py-1.5 rounded bg-purple-600/20 hover:bg-purple-600/30 border border-purple-400/40 text-purple-300 text-xs font-medium cursor-pointer"
@@ -2028,8 +2032,8 @@ export function RoomEditorPage({ slug }: { slug: string }) {
                 </button>
               )}
               <button
-                onClick={() => {
-                  if (window.confirm('Hapus SEMUA tile effect di room ini (impassable, door, sittable, portal, starting point, dll)? Aksi ini bisa di-undo (Ctrl+Z).')) {
+                onClick={async () => {
+                  if (await showConfirm('Hapus SEMUA tile effect di room ini (impassable, door, sittable, portal, starting point, dll)? Aksi ini bisa di-undo (Ctrl+Z).')) {
                     useEditorStore.getState().resetAllTileEffects();
                   }
                 }}

@@ -15,6 +15,11 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   const streamRef = useRef<MediaStream | null>(null);
   const disconnectTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const screenShareErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // See the resync-glitch guard inside updateProximity below — timestamp of
+  // when a mass-stale pattern was FIRST observed, so it can be suppressed
+  // once and then, if it's still happening a bit later (a genuine mass
+  // departure, not a one-off blip), let through rather than blocked forever.
+  const massGlitchSinceRef = useRef<number | null>(null);
 
   // Mic starts muted / camera starts off — matches webrtcService disabling
   // both tracks right after acquiring them, so the UI doesn't show "live"
@@ -176,16 +181,50 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
       webrtcService.setAudioVolume(p.id, p.viaZone ? 1 : calcGain(p.distanceTiles));
     }
 
-    // Debounced disconnect for players out of range
-    for (const id of connectedIds) {
-      if (!inRangeIds.has(id)) {
-        if (!disconnectTimers.current.has(id)) {
-          disconnectTimers.current.set(id, setTimeout(() => {
-            webrtcService.disconnectFromPlayer(id);
-            connectedIds.delete(id);
-            disconnectTimers.current.delete(id);
-          }, DISCONNECT_DEBOUNCE_MS));
-        }
+    // Debounced disconnect for players out of range.
+    //
+    // Resync-glitch guard — a real walk-away drops one or two peers out of
+    // range at a time; a MAJORITY of already-connected peers reading
+    // out-of-range in this exact same tick is instead the signature of a
+    // proximity glitch, not real movement (the diagnosed case: a server
+    // restart clears the in-memory "resume where I left off" position
+    // cache — see roomStore.ts's lastKnownPosition — so on reconnect
+    // everyone's local position can briefly jump to the default spawn
+    // point at once, making a room full of people who were just talking
+    // all look like they scattered in the same instant).
+    //
+    // The FIRST tick this pattern is seen, disconnects are suppressed and
+    // the moment is timestamped (massGlitchSinceRef) instead of acted on —
+    // giving a real position correction (if one is coming) a window to
+    // land before anything gets torn down. If the SAME pattern is still
+    // true past RESYNC_GRACE_MS, this stops treating it as a blip: a
+    // one-off render hiccup does not last that long, so at that point it's
+    // either a genuine mass departure or a wrong position that isn't
+    // self-correcting — either way, disconnecting is the right call, not
+    // something to suppress forever. An isolated single-peer departure (the
+    // normal case) never engages this branch at all, since staleIds.length
+    // stays at 1.
+    const RESYNC_GRACE_MS = 1500;
+    const staleIds = [...connectedIds].filter((id) => !inRangeIds.has(id));
+    const looksLikeResyncGlitch = staleIds.length >= 3 && staleIds.length > connectedIds.size / 2;
+
+    if (looksLikeResyncGlitch) {
+      if (massGlitchSinceRef.current === null) massGlitchSinceRef.current = Date.now();
+      if (Date.now() - massGlitchSinceRef.current < RESYNC_GRACE_MS) {
+        console.warn('[webrtc-diag] proximity resync-glitch guard: suppressing disconnect for', staleIds.length, 'of', connectedIds.size, 'connected peers this tick');
+        return;
+      }
+      console.warn('[webrtc-diag] proximity resync-glitch guard: pattern persisted past', RESYNC_GRACE_MS, 'ms — treating as real, disconnecting normally');
+    }
+    massGlitchSinceRef.current = null;
+
+    for (const id of staleIds) {
+      if (!disconnectTimers.current.has(id)) {
+        disconnectTimers.current.set(id, setTimeout(() => {
+          webrtcService.disconnectFromPlayer(id);
+          connectedIds.delete(id);
+          disconnectTimers.current.delete(id);
+        }, DISCONNECT_DEBOUNCE_MS));
       }
     }
   }, []);
@@ -276,6 +315,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     connectedRef.current.clear();
     initRef.current = false;
     streamRef.current = null;
+    massGlitchSinceRef.current = null;
     setFailedPeers(new Set());
   }, []);
 

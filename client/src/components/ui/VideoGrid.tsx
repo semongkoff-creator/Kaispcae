@@ -1,9 +1,22 @@
-import { useRef, useEffect, useState, useMemo } from 'react';
+import { useRef, useEffect, useState, useMemo, memo } from 'react';
 import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff, Grid3x3GapFill } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { ChatAvatar, avatarColor } from './ChatAvatar';
+
+// autoPictureInPicture (part of the Picture-in-Picture spec — tells the
+// browser to auto-float this element into native PiP when the tab/app is
+// hidden while it's playing, no fresh user gesture needed at that moment)
+// isn't in this project's TS DOM lib yet. Same pattern MiniMode.tsx already
+// uses for window.documentPictureInPicture — augment the real DOM type
+// rather than reaching for `as any` at every call site.
+declare global {
+  interface HTMLVideoElement {
+    autoPictureInPicture: boolean;
+  }
+}
 
 // What a tile shows while someone's camera is off — the SAME ChatAvatar used in
 // chat, so it shows the person's profile photo when they have one and otherwise
@@ -64,6 +77,12 @@ interface VideoGridProps {
   // is always the "enter" direction; exiting uses MeetingView's own close
   // button.
   onToggleMeetingView: () => void;
+  // "Layar Penuh" is a true edge-to-edge takeover now (see ScreenSharePanel's
+  // own doc comment) — the bottom HUD toolbar lives in App.tsx, outside this
+  // component entirely, so hiding it while maximized needs to bubble all the
+  // way up rather than stopping at this component's own local `hidden`
+  // state (which only ever controlled the camera-tile rail here).
+  onScreenShareMaximizedChange?: (maximized: boolean) => void;
 }
 
 // Shared with MeetingView.tsx (the "Dedicated Meeting View" full-screen
@@ -150,6 +169,10 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
     const video = videoRef.current;
     if (!video) return;
     video.srcObject = stream;
+    // Same auto-PiP-on-tab-hide as every tile's own video (see VideoTile's
+    // doc comment) — the featured/big panel is still just a <video>
+    // underneath, so it gets the same treatment.
+    video.autoPictureInPicture = true;
     video.play().catch(() => {});
     return () => { video.srcObject = null; };
   }, [stream]);
@@ -271,80 +294,73 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
             {Math.round(zoom * 100)}%
           </span>
         )}
-        <button
-          onClick={() => applyZoom(zoom / 1.25, 0, 0)}
-          disabled={zoom <= MIN_ZOOM}
-          title="Perkecil isi"
-          className={`shrink-0 cursor-pointer p-0.5 rounded disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent ${dim}`}
-        >
-          <DashLg size={12} />
-        </button>
-        <button
-          onClick={() => applyZoom(zoom * 1.25, 0, 0)}
-          disabled={zoom >= MAX_ZOOM}
-          title="Perbesar isi"
-          className={`shrink-0 cursor-pointer p-0.5 rounded disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent ${dim}`}
-        >
-          <PlusLg size={12} />
-        </button>
-        {zoom > 1 && (
+        <Tooltip label="Perkecil" detail="Perkecil tampilan konten ini.">
           <button
-            onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}
-            title="Kembalikan ke 100%"
-            className={`shrink-0 cursor-pointer p-0.5 rounded ${dim}`}
+            onClick={() => applyZoom(zoom / 1.25, 0, 0)}
+            disabled={zoom <= MIN_ZOOM}
+            className={`shrink-0 cursor-pointer p-0.5 rounded disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent ${dim}`}
           >
-            <ArrowCounterclockwise size={12} />
+            <DashLg size={12} />
           </button>
+        </Tooltip>
+        <Tooltip label="Perbesar" detail="Perbesar tampilan konten ini.">
+          <button
+            onClick={() => applyZoom(zoom * 1.25, 0, 0)}
+            disabled={zoom >= MAX_ZOOM}
+            className={`shrink-0 cursor-pointer p-0.5 rounded disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent ${dim}`}
+          >
+            <PlusLg size={12} />
+          </button>
+        </Tooltip>
+        {zoom > 1 && (
+          <Tooltip label="Ukuran 100%" detail="Kembalikan zoom ke ukuran normal.">
+            <button
+              onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}
+              className={`shrink-0 cursor-pointer p-0.5 rounded ${dim}`}
+            >
+              <ArrowCounterclockwise size={12} />
+            </button>
+          </Tooltip>
         )}
         {/* Named for what it does. It used to say "Perbesar", which collided
             with the enlarge button on the thumbnail — two different actions
             wearing the same word. */}
-        <button
-          onClick={() => setMaximized((v) => !v)}
-          title={maximized ? 'Keluar layar penuh (Esc)' : 'Layar penuh'}
-          className={`shrink-0 cursor-pointer p-0.5 rounded ${dim}`}
-        >
-          {maximized ? <FullscreenExit size={12} /> : <ArrowsFullscreen size={12} />}
-        </button>
+        <Tooltip label="Layar Penuh" detail="Perbesar panel ini agar memenuhi layar, atau kembali ke ukuran biasa.">
+          <button
+            onClick={() => setMaximized((v) => !v)}
+            className={`shrink-0 cursor-pointer p-0.5 rounded ${dim}`}
+          >
+            {maximized ? <FullscreenExit size={12} /> : <ArrowsFullscreen size={12} />}
+          </button>
+        </Tooltip>
         {/* Back to a thumbnail. Without this there is no way out of the focus
             panel short of the presenter stopping — a dead end the spec
             explicitly forbids. */}
-        <button
-          onClick={onClose}
-          title="Kecilkan ke kolom peserta"
-          className={`shrink-0 cursor-pointer p-0.5 rounded ${variant === 'dark' ? 'text-white/70 hover:text-red-300 hover:bg-white/20' : 'text-gray-500 hover:text-red-500 dark:text-gray-300 hover:bg-red-50 dark:hover:bg-gray-600'}`}
-        >
-          <XLg size={11} />
-        </button>
+        <Tooltip label="Tutup" detail="Tutup panel dan kembali ke kolom peserta.">
+          <button
+            onClick={onClose}
+            className={`shrink-0 cursor-pointer p-0.5 rounded ${variant === 'dark' ? 'text-white/70 hover:text-red-300 hover:bg-white/20' : 'text-gray-500 hover:text-red-500 dark:text-gray-300 hover:bg-red-50 dark:hover:bg-gray-600'}`}
+          >
+            <XLg size={11} />
+          </button>
+        </Tooltip>
       </>
     );
   };
 
   return (
     <div
-      // Pinned top-centre, sized by whichever of three limits bites first.
-      // aspect-video on the video box below turns this one width into the
-      // height too, so the ratio can never distort — the panel just stops
-      // growing.
+      // Non-maximized: pinned top-centre, filling the space between the left
+      // nav rail, the top edge, and the HUD toolbar at the bottom.
       //
-      //   1280px        — an upper bound so it doesn't become absurd on an
-      //                   ultrawide monitor.
-      //   100vw - 14rem — horizontal room. 14rem, not 7rem: the panel is
-      //                   CENTRED, so the leftover space splits evenly across
-      //                   both sides and only half of whatever is reserved
-      //                   actually lands next to the camera rail. The rail
-      //                   itself needs 7rem (a 6rem tile at right-4), so the
-      //                   reservation has to be doubled. The previous value
-      //                   reserved 9rem total — half of that is 4.5rem, less
-      //                   than the rail needs, so on any window under ~864px
-      //                   the panel was already sliding underneath the
-      //                   participant tiles.
-      //   (100vh - 13rem) * 16/9
-      //                 — vertical room, converted to a width through the
-      //                   16:9 ratio. 13rem covers top-16 (4rem), the title
-      //                   bar, and clearance for the HUD toolbar at the
-      //                   bottom. Without this the panel would grow past the
-      //                   bottom edge on short windows.
+      // bottom-24 (6rem), not a near-zero inset — the bottom HUD toolbar
+      // (App.tsx, absolute bottom-6, z-50) sits above this panel (z-30) and
+      // stays clickable regardless, but a panel reaching past it put the
+      // toolbar pill floating on top of the picture instead of sitting
+      // cleanly below it. bottom-20 (the same clearance the BGM area control
+      // reserves for this same toolbar elsewhere in App.tsx) was tried first
+      // but measured 2px short with the toolbar's actual rendered height —
+      // bottom-24 leaves real margin instead of a knife-edge fit.
       // Centred with left-0 right-0 mx-auto, NOT left-1/2 + -translate-x-1/2.
       // animate-fade-in animates `transform`, and its `both` fill-mode makes
       // the final keyframe stick permanently — an animation beats a normal
@@ -353,28 +369,25 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
       // putting its LEFT EDGE at screen centre and hanging off to the right.
       // Auto margins centre it without touching transform at all, so the two
       // can't fight.
-      // Enlarged drops the 1280px cap and the room reserved for the camera
-      // rail, growing to whatever the window allows while the same three-way
-      // min() still keeps the 16:9 box inside the viewport. Position, aspect
-      // ratio and object-contain are identical in both states — only the
-      // ceiling moves — so enlarging can never crop or stretch the picture.
-      // Fills the viewport, leaving only a thin frame — the user chose max
-      // size over map visibility. The 16:9 aspect-lock is deliberately gone:
-      // on a 16:9 monitor an aspect-locked panel can't grow past the height
-      // budget without hiding the map entirely anyway, so the lock capped the
-      // size for no gain. Instead the panel is a flex column filling its box,
-      // the content flexes to fill it, and object-contain letterboxes whatever
-      // ratio the shared screen has — a bigger box that never crops/stretches.
       //
       // left-14, not a symmetric inset: the left nav (Sidebar.tsx) is a
       // w-12 (48px) z-50 rail that sits ON TOP of this z-30 panel, so a
       // flush-left panel had its title and left edge hidden under it and the
       // visible picture pushed off-centre. Clearing 56px on the left puts the
       // panel in the space actually visible beside the rail.
+      //
+      // Maximized: true edge-to-edge (inset-0, no rounded corners) — "bener-
+      // bener full screen kayak nonton YouTube" on request, not just a
+      // bigger panel with the same margins. This only works cleanly because
+      // onMaximizedChange now also hides BOTH the sidebar rail and the HUD
+      // toolbar (see App.tsx's screenShareMaximized) — with either of those
+      // still rendered at their z-50, inset-0 would just put them back to
+      // floating on top of the picture, the exact bug the non-maximized
+      // clearances above exist to avoid.
       className={`absolute z-30 flex flex-col pointer-events-auto overflow-hidden border border-purple-200 dark:border-gray-600 shadow-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm animate-fade-in ${
         maximized
-          ? 'left-14 right-1 top-1 bottom-1 rounded-md'
-          : 'left-14 right-2 top-1 bottom-2 rounded-lg'
+          ? 'inset-0 rounded-none border-0'
+          : 'left-14 right-2 top-1 bottom-24 rounded-lg'
       }`}
     >
       {/* A label, not a handle — the panel does not move. Only takes its own
@@ -439,15 +452,15 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
   );
 }
 
-export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds, onToggleMeetingView }: VideoGridProps) {
+export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds, onToggleMeetingView, onScreenShareMaximizedChange }: VideoGridProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localHandRaised = localPlayer.handRaised;
-  // The same two pieces of state the map already uses to ring a speaking
-  // avatar (see GameCanvas) — the tile just renders them differently. No
-  // second source of truth for who is talking.
-  const speakingPlayers = useGameStore((s) => s.speakingPlayers);
-  const localSpeaking = useGameStore((s) => s.localSpeaking);
+  // Speaking state (same source GameCanvas uses to ring an avatar on the
+  // map) is deliberately NOT read here any more — VideoTile now selects its
+  // own speakingId/isLocal slice directly (see its doc comment), so this
+  // component doesn't re-render, and hence doesn't re-render every tile in
+  // the grid, every time anyone's speaking status changes.
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const localUserId = useGameStore((s) => s.localUserId);
   const emoteEvents = useGameStore((s) => s.emoteEvents);
@@ -467,6 +480,13 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   const [hidden, setHidden] = useState(false);
   // Which shared screen is the big one. Null = "whichever is first", so a
   // share that starts while nothing is featured is promoted automatically.
+  // Which shared screen (or enlarged camera) is the big one — manual only.
+  // Reverted the brief ZEP-style "auto-feature the first incoming share"
+  // behavior on request: it read as the picture barging over the HUD
+  // toolbar uninvited rather than a helpful "look here". Enlarging is a
+  // deliberate click (the thumbnail's "Perbesar" button below, or a tile's
+  // own onEnlarge) — a screen share simply joins the thumbnail rail like
+  // camera tiles do until someone asks to feature it.
   const [featuredKey, setFeaturedKey] = useState<string | null>(null);
   const now = Date.now();
 
@@ -501,12 +521,6 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // something else forced an update. Same applies to an enlarged camera —
   // if that person's camera goes off, their -camera key vanishes from
   // cameraEntries and the panel closes itself right along with it.
-  //
-  // No `?? screenEntries[0]` fallback any more. That silently promoted the
-  // first share straight to a full focus panel, so the thumbnail step never
-  // existed for a single presenter — a screen appeared over the map without
-  // anyone asking for it. Now every share starts as a thumbnail in the
-  // column and only becomes the focus panel when its enlarge button is used.
   const featured = [...screenEntries, ...cameraEntries].find((s) => s.key === featuredKey) ?? null;
   const otherScreens = screenEntries.filter((s) => s.key !== featured?.key);
 
@@ -517,37 +531,51 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // something that doesn't exist yet" rule the rest of the HUD follows.
   if (totalTiles === 0) return null;
 
-  if (hidden) {
+  // !featured — a bare "hidden" with an active featured panel (screen share
+  // or enlarged camera) must NOT hit this early return: ScreenSharePanel's
+  // own onMaximizedChange sets `hidden` true so the tile rail gets out of
+  // the way while a share fills the screen (see its doc comment) — but this
+  // return used to replace the ENTIRE component output, including the panel
+  // that triggered it, so clicking "Layar Penuh" made the very share you'd
+  // just maximized vanish instead of filling the screen. Measured live: the
+  // panel disappeared the instant maximize was clicked. Gating on `featured`
+  // too means only the plain "hide the tile rail, nothing is featured" case
+  // collapses to this small chip; the tile-rail column itself is what
+  // actually hides below, in the main return.
+  if (hidden && !featured) {
     return (
       <div className="absolute top-16 right-4 z-20 flex items-center gap-1.5 pointer-events-auto">
         {/* Kept reachable even with tiles hidden — otherwise hiding the
             camera strip would also hide the only way into Meeting View. */}
-        <button
-          onClick={onToggleMeetingView}
-          title="Meeting View"
-          className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
-        >
-          <Grid3x3GapFill size={11} />
-        </button>
-        <button
-          onClick={() => setHidden(false)}
-          title="Show camera tiles"
-          className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm rounded-full px-2.5 py-1.5 flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 cursor-pointer hover:bg-white"
-        >
-          <CameraVideoFill size={12} /> {totalTiles}
-        </button>
+        <Tooltip label="Meeting View" detail="Buka tampilan video-call layar penuh.">
+          <button
+            onClick={onToggleMeetingView}
+            className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+          >
+            <Grid3x3GapFill size={11} />
+          </button>
+        </Tooltip>
+        <Tooltip label="Tampilkan Tile Kamera" detail="Tampilkan lagi strip video yang disembunyikan.">
+          <button
+            onClick={() => setHidden(false)}
+            className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm rounded-full px-2.5 py-1.5 flex items-center gap-1.5 text-xs text-purple-700 dark:text-purple-300 cursor-pointer hover:bg-white"
+          >
+            <CameraVideoFill size={12} /> {totalTiles}
+          </button>
+        </Tooltip>
       </div>
     );
   }
 
   const hideButton = (
-    <button
-      onClick={() => setHidden(true)}
-      title="Hide camera tiles"
-      className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
-    >
-      <EyeSlashFill size={11} />
-    </button>
+    <Tooltip label="Sembunyikan Tile Kamera" detail="Sembunyikan strip video sementara, tanpa mematikan kamera/mic siapa pun.">
+      <button
+        onClick={() => setHidden(true)}
+        className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+      >
+        <EyeSlashFill size={11} />
+      </button>
+    </Tooltip>
   );
 
   // Meeting View entry — moved here from Sidebar's Room Features dropdown,
@@ -555,13 +583,14 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // same size/style as hideButton for a matched pair). Function unchanged —
   // still just calls onToggleMeetingView (openPanel('meeting') in App.tsx).
   const meetingViewButton = (
-    <button
-      onClick={onToggleMeetingView}
-      title="Meeting View"
-      className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
-    >
-      <Grid3x3GapFill size={11} />
-    </button>
+    <Tooltip label="Meeting View" detail="Buka tampilan video-call layar penuh.">
+      <button
+        onClick={onToggleMeetingView}
+        className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+      >
+        <Grid3x3GapFill size={11} />
+      </button>
+    </Tooltip>
   );
 
   // Identical in both layouts — only where they sit changes, never what they
@@ -569,7 +598,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   const cameraTiles = (
     <>
       {localStream && (
-        <VideoTile name="You" avatarName={profiles.get(localUserId)?.name || localPlayer.name} photoUrl={profiles.get(localUserId)?.photo ?? undefined} stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} speaking={localSpeaking && !micMuted} onEnlarge={() => setFeaturedKey('local-camera')} />
+        <VideoTile name="You" avatarName={profiles.get(localUserId)?.name || localPlayer.name} photoUrl={profiles.get(localUserId)?.photo ?? undefined} stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} onEnlarge={() => setFeaturedKey('local-camera')} />
       )}
       {videoTiles.map((tile) => {
         const uid = playerRecords[tile.id]?.userId;
@@ -582,7 +611,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
             stream={tile.stream}
             isLocal={false}
             micMuted={!!playerRecords[tile.id]?.micMuted}
-            speaking={speakingPlayers.has(tile.id)}
+            speakingId={tile.id}
             translucent={tile.translucent}
             onVolumeChange={(v) => onManualVolumeChange(tile.id, v)}
             isBeingRecorded={tile.isBeingRecorded}
@@ -603,7 +632,15 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   return (
     <>
       {featured && (
-        <ScreenSharePanel key={featured.key} name={featured.name} stream={featured.stream} isLocal={featured.isLocal} mirror={featured.mirror} onClose={() => setFeaturedKey(null)} onMaximizedChange={setHidden} />
+        <ScreenSharePanel
+          key={featured.key}
+          name={featured.name}
+          stream={featured.stream}
+          isLocal={featured.isLocal}
+          mirror={featured.mirror}
+          onClose={() => setFeaturedKey(null)}
+          onMaximizedChange={(v) => { setHidden(v); onScreenShareMaximizedChange?.(v); }}
+        />
       )}
       {/* QA (Load checklist item 3, "War Room share massal") — this column
           previously had no scroll/max-height at all: enough simultaneous
@@ -617,8 +654,45 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           pointer-events-none element is excluded from hit-testing
           entirely, including wheel scroll. The column has no real empty
           space of its own beyond its children (flex-col sizes to content),
-          so this doesn't reintroduce a dead click-through zone over the map. */}
-      <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 max-h-[calc(100vh-6rem)] overflow-y-auto pointer-events-auto">
+          so this doesn't reintroduce a dead click-through zone over the map.
+          overflow-x-hidden alongside it — CSS forces an axis left at its
+          default 'visible' to compute as 'auto' too the moment the OTHER
+          axis is anything but 'visible', so leaving x unset here let a
+          speaking tile's ring/glow (painted outside its own box, even
+          though it doesn't affect layout) trigger a stray horizontal
+          scrollbar. This column is never meant to scroll sideways.
+          contain:'paint' (measured — see VideoTile's own comment) fixes the
+          SAME glow-bleed on the axis that's still active (Y): the glow is
+          painted outside each tile's own box on purpose (a soft outer light,
+          not a hard-edged ring), and Chromium counts that ink overflow
+          toward this container's scrollHeight, so the tile strip briefly
+          measured as taller than it actually is and toggled its own
+          scrollbar on/off in sync with the pulse — every ~0.6-1s during
+          continuous speech (measured: 5 overflow events in a 12s speaking
+          window, 0 while silent). contain:paint clips descendant ink
+          overflow (box-shadow, outline, filter bleed) to this element's own
+          box for the purposes of that overflow calculation, without
+          clipping the glow's actual visible bleed onto NEIGHBOURING tiles
+          within this same strip — only at the strip's own outer edge, which
+          was never visible past the edge anyway. */}
+      {/* Gated on !hidden (was unconditional) — this is the column
+          ScreenSharePanel's onMaximizedChange is actually asking to hide (see
+          the hidden-early-return comment above). Previously the early return
+          handled this by skipping this whole component's output instead,
+          which also skipped the featured panel above. Now hidden's only job
+          is to collapse THIS column; the panel keeps rendering regardless. */}
+      {!hidden && (
+      // hide-scrollbar (index.css) — reported: a scrollbar sliver still shows
+      // up here intermittently despite contain:'paint' above (that fix only
+      // covers the speaking-glow's box-shadow bleed; other animated bits in
+      // this strip, e.g. the reaction-float emoji's own translateY, are
+      // plausible same-class culprits and weren't individually chased down
+      // here). This column barely ever has enough tiles to need real
+      // scrolling anyway (max-h is a generous overflow guard, not the normal
+      // case — see the "War Room share massal" comment above) — hiding the
+      // scrollbar itself removes the flicker regardless of which animation
+      // is behind any one occurrence, without touching wheel/touch scrolling.
+      <div className="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 max-h-[calc(100vh-6rem)] overflow-y-auto overflow-x-hidden pointer-events-auto hide-scrollbar" style={{ contain: 'paint' }}>
         {/* Meeting View + hide/show, grouped side by side (was hideButton
             alone) rather than stacked in this otherwise-vertical column. */}
         <div className="flex items-center gap-1.5">
@@ -632,25 +706,39 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
         {otherScreens.map((s) => (
           <div key={s.key} className="pointer-events-auto relative group/screen">
             <VideoTile name={s.name} stream={s.stream} isLocal={s.isLocal} isScreen />
-            <button
-              onClick={() => setFeaturedKey(s.key)}
-              title={`Perbesar ${s.name}`}
-              className="absolute top-0.5 right-0.5 w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover/screen:opacity-100 transition-opacity cursor-pointer"
-            >
-              <ArrowsFullscreen size={9} />
-            </button>
+            {/* wrapperClassName carries the positioning. `!absolute`
+                (important-modifier), not plain `absolute` — Tooltip's own
+                wrapper div hardcodes `relative` as a base class, and
+                Tailwind resolves a same-element relative/absolute conflict
+                by source order in its generated stylesheet (`.relative`
+                reliably won — confirmed via getComputedStyle, see
+                VideoTile's matching enlarge-button comment below), not by
+                which class appears later in this string. Without `!`, this
+                silently stayed `position: relative` and rendered wherever it
+                fell in normal document flow (below the whole tile, since
+                VideoTile is a block sibling before it) instead of pinned to
+                this `group/screen` container's top-right corner. */}
+            <Tooltip label="Perbesar" detail="Jadikan share layar ini tampilan utama." wrapperClassName="!absolute top-0.5 right-0.5">
+              <button
+                onClick={() => setFeaturedKey(s.key)}
+                className="w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover/screen:opacity-100 transition-opacity cursor-pointer"
+              >
+                <ArrowsFullscreen size={9} />
+              </button>
+            </Tooltip>
           </div>
         ))}
         {cameraTiles}
       </div>
+      )}
     </>
   );
 }
 
 // Exported for MeetingView.tsx (the "Dedicated Meeting View" full-screen
 // grid) — same tile, just sized up via `large` instead of a second
-// hand-maintained copy of the mirror/PIP/volume-slider logic.
-export function VideoTile({
+// hand-maintained copy of the mirror/PIP logic.
+export const VideoTile = memo(function VideoTile({
   name,
   avatarName,
   photoUrl,
@@ -665,7 +753,7 @@ export function VideoTile({
   handRaised,
   reaction,
   large,
-  speaking,
+  speakingId,
   onEnlarge,
   connectionFailed,
   isGuest,
@@ -692,7 +780,17 @@ export function VideoTile({
   handRaised?: boolean;
   reaction?: { emoji: string; ts: number } | null;
   large?: boolean;
-  speaking?: boolean;
+  // The id to look up in the speaking-players store — NOT a plain `speaking`
+  // boolean prop any more. Passing a raw boolean meant the parent had to
+  // read the store itself (`speakingPlayers.has(id)`) and re-render on every
+  // change to ANY player's speaking state, which re-rendered every tile in
+  // the grid (VideoGrid/MeetingView both subscribed to the whole Set at
+  // their own top level). Reading it here instead — one Zustand selector
+  // per tile, returning a plain boolean — means THIS tile only re-renders
+  // when ITS OWN speaking value actually flips. Omit entirely for a
+  // non-speaking-eligible tile (screen shares); `isLocal` tiles ignore this
+  // and read `localSpeaking` from the store directly instead (see below).
+  speakingId?: string;
   // Opens this tile's live video full-size in the same focus panel screen
   // shares use (see VideoGrid's featuredKey). Only rendered while there's
   // actually a live picture to enlarge (!showAvatar) — an avatar placeholder
@@ -710,7 +808,24 @@ export function VideoTile({
   // Never set on the local/isScreen tile — see call sites.
   isGuest?: boolean;
 }) {
+  // See speakingId's own doc comment above — this is the fix for the tile
+  // flicker: a per-tile selector, not a boolean computed by the parent from
+  // the whole speakingPlayers Set. isLocal reads localSpeaking directly
+  // (ANDed with !micMuted, same as before — a muted mic never shows the
+  // ring even if the analyser still detects sound) instead of going through
+  // speakingId at all.
+  const speaking = useGameStore((s) => (isLocal ? s.localSpeaking && !micMuted : !!speakingId && s.speakingPlayers.has(speakingId)));
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Per-listener manual volume (§6) — purely local UI state; the peer's
+  // actual manualVolume in webrtcService also starts at 1 (see
+  // PeerConnection's default), so initializing to 1 here can't drift out of
+  // sync with it on mount. A rebuild of the slider that used to live here:
+  // that one flickered and got removed entirely (see commit 1b43b27) — the
+  // real causes turned out to be the speaking ring's missing local-mic
+  // debounce and a stray scrollbar from an unset overflow axis (both fixed
+  // separately, see webrtcService.ts's startSpeakingDetection and the
+  // overflow-x/y additions on this tile's ancestor containers), not this
+  // slider's own markup — so it's safe to bring back unchanged in shape.
   const [volume, setVolume] = useState(1);
   // A remote peer who turns their camera off doesn't remove the track — it
   // stays attached and goes 'muted', which is the only signal we get. No
@@ -722,6 +837,18 @@ export function VideoTile({
     const video = videoRef.current;
     if (!video) return;
     video.srcObject = stream ?? null;
+    // Requested: switching to a different browser tab/app while on a call
+    // should auto-float whatever's most relevant into the browser's own
+    // native Picture-in-Picture, ZEP-style — set on every live tile (the
+    // browser itself picks the one actually worth floating when the tab
+    // hides; only one video is ever in PiP at a time). Safe against the
+    // exact "stale video for someone who already left" failure a MANUAL
+    // per-tile PiP button was removed for (see the removal note further
+    // down): this reuses the SAME stream lifecycle already wired below —
+    // clearing srcObject on unmount/peer-leave stops the source track, and
+    // the browser closes an active PiP window for a video with no track of
+    // its own, rather than leaving it frozen open indefinitely.
+    video.autoPictureInPicture = stream ? true : false;
     if (stream) video.play().catch(() => {});
     return () => {
       video.srcObject = null;
@@ -752,23 +879,46 @@ export function VideoTile({
   // bottom-1 spot and swap on hover rather than stacking (see both below).
   const hasVolumeSlider = !isLocal && !isScreen && !!onVolumeChange;
 
-
   return (
     <div
       // Speaking ring: a coloured border plus a soft outer glow, in the same
       // purple the rest of the HUD uses for "active". Drawn with ring/border
       // colour rather than an extra element so it can't shift the tile's size
-      // and nudge its neighbours every time someone starts talking.
+      // and nudge its neighbours every time someone starts talking. The
+      // pulsing GLOW itself lives on a separate overlay now — see the
+      // .speaking-glow span right below — not this div; see its own comment
+      // for why.
       // h-full flex flex-col on the large path: the tile fills the grid cell
       // it was given, and the video area (flex-1 min-h-0, the only flow
-      // child) takes 100% of it — the name tag and volume slider are both
-      // absolute overlays now (see below), not flow siblings competing for
-      // the same space, so nothing shrinks the video to make room for them.
-      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border shadow-lg transition-all duration-300 animate-fade-in group relative ${large ? 'w-full h-full flex flex-col' : 'w-24'} ${
-        speaking ? 'border-purple-500 ring-2 ring-purple-400/60 animate-speaking-glow' : 'border-purple-200'
+      // child) takes 100% of it — the name tag is an absolute overlay now
+      // (see below), not a flow sibling competing for the same space, so
+      // nothing shrinks the video to make room for it.
+      // transition-COLORS, not transition-all — box-shadow (ring) snaps in
+      // instantly rather than being interpolated; only the border color
+      // fades. Narrows what changes when speaking starts, same spirit as
+      // moving the glow out below.
+      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border shadow-lg transition-colors duration-300 animate-fade-in group relative ${large ? 'w-full h-full flex flex-col' : 'w-24'} ${
+        speaking ? 'border-purple-500 ring-2 ring-purple-400/60' : 'border-purple-200'
       }`}
       style={{ opacity: translucent ? 0.5 : 1 }}
     >
+      {/* Speaking glow overlay — measured (tile flicker diagnosis): animating
+          this box-shadow's own blur/spread directly (the previous
+          .animate-speaking-glow keyframe) briefly inflated the ambient
+          strip's scrollHeight every time it started, ~300ms per onset, even
+          with contain:'paint' on that strip — isolated by disabling just
+          this animation with everything else (ring, wave-bar, mount timing)
+          unchanged: 0 overflow events with it off, back with it on. The
+          box-shadow value here is now CONSTANT (see .speaking-glow in
+          index.css) — only THIS element's opacity pulses (.animate-speaking-
+          glow, now an opacity keyframe), which can never change its own
+          geometry, so there's nothing for the ancestor's scroll-overflow
+          calculation to ever recompute. A separate element (not the tile's
+          own div above) so the pulse fades only the glow, never the video/
+          name/tile content sitting behind it. */}
+      {speaking && (
+        <span aria-hidden="true" className="absolute inset-0 rounded-lg pointer-events-none speaking-glow animate-speaking-glow" />
+      )}
       {/* Mirror the LOCAL self-preview only — raising your right hand should
           show on the right side of YOUR OWN preview, same as a real mirror
           (every video call app does this for the self-view). Remote tiles
@@ -839,30 +989,55 @@ export function VideoTile({
       {/* Enlarge — opens the live camera picture full-size in the same focus
           panel screen shares use. Only while there's an actual picture to
           enlarge (!showAvatar); a placeholder initials tile has nothing
-          bigger to show. Hover-revealed via the tile's own `group`, same
-          convention as the volume slider below. */}
+          bigger to show. Hover-revealed via the tile's own `group`.
+          Top-right, matching the screen-thumbnail enlarge button above (same
+          corner, same convention everywhere else in this app an "expand"
+          action lives). The mic-status badge below is shifted down
+          (top-7, not top-1) to leave this corner free — the two are
+          independent (hover vs. muted state) and can be visible together on
+          a muted tile that's also being hovered. */}
       {onEnlarge && !showAvatar && !isScreen && (
-        <button
-          onClick={onEnlarge}
-          title={`Perbesar video ${isLocal ? 'Anda' : name}`}
-          // Moved from top-right to bottom-right — top-right is now the
-          // mic-status glass badge (see below); the two shouldn't stack.
-          className="absolute bottom-0.5 right-0.5 w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-        >
-          <ArrowsFullscreen size={9} />
-        </button>
+        // wrapperClassName carries the positioning — otherwise it would
+        // anchor to Tooltip's own inline wrapper instead of this tile's root
+        // div. `!absolute` (important-modifier), not plain `absolute`:
+        // Tooltip's own wrapper already hardcodes `relative` as a base
+        // class, and Tailwind resolves a same-element relative/absolute
+        // conflict by SOURCE ORDER in its generated stylesheet, not by which
+        // class appears later in this string — `.relative` reliably won
+        // (confirmed via getComputedStyle: position stayed 'relative'),
+        // silently turning `top-1 right-1` into an offset from the
+        // element's own normal-flow position instead of the tile's corner.
+        // The `!` forces this specific declaration through regardless of
+        // that ordering.
+        <Tooltip label="Perbesar Video" detail="Lihat video orang ini dalam ukuran penuh." wrapperClassName="!absolute top-1 right-1">
+          <button
+            onClick={onEnlarge}
+            className="w-5 h-5 rounded bg-black/60 hover:bg-purple-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+          >
+            <ArrowsFullscreen size={9} />
+          </button>
+        </Tooltip>
       )}
       {/* Quick reaction — a single emoji floating up from the bottom-center
           of the tile, restarting whenever a newer reaction arrives (keyed by
           its timestamp). Shared with the in-world emote system, so a reaction
           here also shows above the avatar and vice-versa. */}
       {reaction && !isScreen && (
-        <span
-          key={reaction.ts}
-          className={`absolute left-1/2 -translate-x-1/2 bottom-6 pointer-events-none select-none animate-reaction-float ${large ? 'text-4xl' : 'text-2xl'}`}
-          style={{ textShadow: '0 1px 3px rgba(0,0,0,0.4)' }}
-        >
-          {reaction.emoji}
+        // Centering (translateX) lives on this OUTER span, animation
+        // (translateY/scale, via animate-reaction-float) on the INNER one —
+        // same element would work for the very first frame, but a CSS
+        // `transform` set by @keyframes replaces rather than composes with
+        // a static transform utility already on that element, so the
+        // horizontal centering was getting silently wiped out once the
+        // animation kicked in (same bug, same fix, as EmoteWheel.tsx).
+        // Nesting keeps each transform in its own box, so both apply.
+        <span key={reaction.ts} className="absolute left-1/2 -translate-x-1/2 bottom-6 pointer-events-none select-none">
+          <span
+            className={`block animate-reaction-float ${large ? 'text-4xl' : 'text-2xl'}`}
+            style={{ textShadow: '0 1px 3px rgba(0,0,0,0.4)' }}
+          >
+            {reaction.emoji}
+          </span>
         </span>
       )}
       {/* Raised-hand cue — amber badge, top-left, gently waving so it draws
@@ -886,12 +1061,11 @@ export function VideoTile({
           below, and the enlarge button's move to bottom-right above so the
           two don't stack). Same `name`/`speaking` props as before — this is
           a repositioning, not a new signal.
-          Bug fix — this used to stay visible while the volume slider below
-          ALSO appeared on hover, so the two collided in the same corner.
-          They now share the exact same spot and swap instead: hovering a
-          tile that has a slider fades this out (group-hover:opacity-0) as
-          the slider fades in, so only one is ever showing. Tiles with no
-          slider (local/screen) are unaffected — hasVolumeSlider gates it. */}
+          Name tag and volume slider below share this exact bottom-1 spot
+          and swap on hover instead of stacking: hovering a tile that has a
+          slider fades this out (group-hover:opacity-0) as the slider fades
+          in, so only one is ever showing. Tiles with no slider (local/
+          screen) are unaffected — hasVolumeSlider gates it. */}
       <span
         className={`absolute left-1 bottom-1 max-w-[80%] flex items-center gap-1 bg-black/45 backdrop-blur-md text-white rounded-full transition-opacity duration-150 ${
           large ? 'px-2.5 py-1 text-xs' : 'px-1.5 py-0.5 text-[9px]'
@@ -915,53 +1089,58 @@ export function VideoTile({
           </span>
         )}
       </span>
-      {/* Mic-muted shown for remote tiles too (broadcast via PLAYER_MIC —
-          see Avatar.micMuted), not just the local preview; camera-off stays
-          local-only since a remote camera-off already shows as the avatar
-          placeholder instead of video. Bumped up on the large path (Meeting
-          View's own tiles, much bigger than the ambient strip's w-24 ones) —
-          the icon was easy to miss at the same 12px used everywhere else. */}
-      {(micMuted || (isLocal && cameraOff)) && (
-        <span className={`absolute top-1 right-1 flex gap-1 bg-black/45 backdrop-blur-md rounded-full ${large ? 'p-2' : 'p-1'}`}>
-          {micMuted && <MicMuteFill className="text-red-400" size={large ? 18 : 9} />}
-          {isLocal && cameraOff && <CameraVideoOffFill className="text-red-400" size={large ? 18 : 9} />}
-        </span>
-      )}
-      {/* §6 — manual per-listener volume, purely client-side (spec's own
-          rule: no server sync needed, it's just my own listening preference).
-          Not shown for screen-share tiles or my own tiles — screen share
+      {/* §6 — manual per-listener volume, purely client-side (my own
+          listening preference; no server sync, no effect on anyone else).
+          Not shown for screen-share tiles or my own tile — screen share
           carries no audio track here, and muting yourself already has the
-          mic button. */}
-      {/* Bug fix — this used to stack above the name tag (or, before that,
-          sit in normal document flow below the video) — both approaches
-          still ended up visually colliding with the name tag in practice.
-          Now it shares the EXACT same bottom-1 spot as the name tag and the
-          two swap on hover (see the name tag's own comment above): only
-          hovering reveals the slider, and only while hovering — no longer
-          kept visible just because volume was turned down, so it's always
-          exactly one or the other, never both, never neither. */}
+          mic button. Shares the name tag's exact spot and swaps with it on
+          hover (see the name tag's own comment above): only hovering
+          reveals the slider, and only while hovering, so it's always
+          exactly one or the other, never both, never neither.
+          step=0.05 (finer than the original 0.1) plus a taller h-1.5 track
+          — both purely to make the handle land where you actually drop it;
+          native <input type="range"> already maps value<->position exactly,
+          so imprecision here was a grab-target/step-size problem, not a
+          rendering bug. */}
       {hasVolumeSlider && (
         <div
-          className={`absolute left-1 right-1 bottom-1 flex items-center gap-1 bg-black/45 backdrop-blur-md rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-150 ${
-            large ? 'px-2 py-1 gap-1.5' : 'px-1.5 py-0.5'
+          className={`absolute left-1 right-1 bottom-1 flex items-center gap-1.5 bg-black/45 backdrop-blur-md rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-150 ${
+            large ? 'px-2 py-1' : 'px-1.5 py-0.5'
           }`}
         >
-          {volume === 0 ? <VolumeMuteFill size={large ? 10 : 8} className="text-white/80 shrink-0" /> : <VolumeUpFill size={large ? 10 : 8} className="text-white/80 shrink-0" />}
+          {volume === 0 ? <VolumeMuteFill size={large ? 11 : 9} className="text-white/80 shrink-0" /> : <VolumeUpFill size={large ? 11 : 9} className="text-white/80 shrink-0" />}
           <input
             type="range"
             min={0}
             max={1}
-            step={0.1}
+            step={0.05}
             value={volume}
             onChange={(e) => {
               const v = Number(e.target.value);
               setVolume(v);
-              onVolumeChange(v);
+              onVolumeChange?.(v);
             }}
-            className="flex-1 accent-purple-600 h-1"
+            className="flex-1 accent-purple-600 h-1.5 cursor-pointer"
           />
         </div>
       )}
+      {/* Mic-muted shown for remote tiles too (broadcast via PLAYER_MIC —
+          see Avatar.micMuted), not just the local preview; camera-off stays
+          local-only since a remote camera-off already shows as the avatar
+          placeholder instead of video. Bumped up on the large path (Meeting
+          View's own tiles, much bigger than the ambient strip's w-24 ones).
+          The small-tile icon was bumped from 9px to 13px (padding p-1 ->
+          p-1.5 to match) — at 9px it was too easy to miss who was muted at
+          a glance in the ambient strip, the exact case this exists for.
+          top-7 (not top-1) — the enlarge button now owns the top-right
+          corner itself (see its own comment above); this sits just below it
+          so a muted tile that's also being hovered never overlaps the two. */}
+      {(micMuted || (isLocal && cameraOff)) && (
+        <span className={`absolute top-7 right-1 flex gap-1 bg-black/45 backdrop-blur-md rounded-full ${large ? 'p-2' : 'p-1.5'}`}>
+          {micMuted && <MicMuteFill className="text-red-400" size={large ? 18 : 13} />}
+          {isLocal && cameraOff && <CameraVideoOffFill className="text-red-400" size={large ? 18 : 13} />}
+        </span>
+      )}
     </div>
   );
-}
+});

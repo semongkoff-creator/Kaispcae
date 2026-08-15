@@ -46,13 +46,12 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
       GOOGLE_LOGIN_ENABLED: ${GOOGLE_LOGIN_ENABLED:-}
-      # These three are documented in .env.example but were never forwarded
-      # here, so under Docker the Operator console and the CS handoff read an
-      # unset value and silently stayed off no matter what the operator put in
-      # .env — the worst kind of misconfiguration, because nothing errors.
+      # Documented in .env.example but was never forwarded here, so under
+      # Docker the Operator console read an unset value and silently stayed
+      # off no matter what the operator put in .env — the worst kind of
+      # misconfiguration, because nothing errors.
       OPERATOR_EMAILS: ${OPERATOR_EMAILS:-}
-      N8N_CS_WEBHOOK_URL: ${N8N_CS_WEBHOOK_URL:-}
-      CS_N8N_TOKEN: ${CS_N8N_TOKEN:-}
+      CS_ADMIN_WHATSAPP_NUMBER: ${CS_ADMIN_WHATSAPP_NUMBER:-}
     volumes:
       # server/src/routes/uploads.ts writes chat attachments and Add-Media
       # files to ./uploads (process.cwd()/uploads = /app/uploads here).
