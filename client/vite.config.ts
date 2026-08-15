@@ -1,8 +1,23 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
-export default defineConfig({
+// ONE setting decides where the dev server sends API/socket traffic, because
+// two of them drifting apart is invisible until login fails with "Invalid
+// email or password" — which is what you get when the proxy still points at a
+// DIFFERENT backend that happens to be running (e.g. a second checkout of
+// this app on the same machine, against its own database, where your account
+// simply doesn't exist). Nothing errors; the request just lands somewhere
+// else.
+//
+// Set VITE_SERVER_URL in client/.env when the backend isn't on the default
+// port — the same variable src/services/serverUrl.ts reads at runtime, so the
+// proxy and the socket can never disagree. Must match server/.env's PORT.
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, path.resolve(__dirname), '');
+  const apiTarget = env.VITE_SERVER_URL || 'http://localhost:3001';
+
+  return {
   plugins: [react()],
   resolve: {
     alias: {
@@ -23,7 +38,7 @@ export default defineConfig({
     allowedHosts: ['.trycloudflare.com'],
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        target: apiTarget,
         changeOrigin: true,
       },
       // Diteruskan supaya frontend dan backend bisa berbagi SATU tunnel:
@@ -36,9 +51,10 @@ export default defineConfig({
       // (server/src/middleware/auth.ts), jadi lewat dua tunnel terpisah
       // cookie-nya tidak akan ikut terkirim dan semua avatar/gambar 401.
       '/socket.io': {
-        target: 'http://localhost:3001',
+        target: apiTarget,
         ws: true,
       },
     },
   },
+  };
 });
