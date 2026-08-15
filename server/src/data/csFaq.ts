@@ -174,7 +174,7 @@ export const CS_FAQ: CsFaqEntry[] = [
   {
     keywords: ['bikin space', 'buat space', 'create space', 'bikin room baru', 'buat room baru'],
     question: 'Siapa yang bisa bikin Space baru?',
-    answer: 'Hanya akun dengan role admin — tombol "+ Create Space" di Lobby cuma muncul untuk admin.\nSaat membuat, admin memilih Nama Room, Layout (Main Office / Small Team / Open Lounge / Kaitech Office), dan Tema (Modern Interiors / Sci-Fi Office).',
+    answer: 'Hanya akun dengan role admin — tombol "+ Create Space" di Lobby cuma muncul untuk admin.\nSaat membuat, admin memilih Nama Room, Layout (Main Office / Small Team / Open Lounge / Kantor Perusahaan), dan Tema (Modern Interiors / Sci-Fi Office).',
   },
   {
     keywords: ['masuk room', 'join room', 'klik kartu room', 'lobby masuk'],

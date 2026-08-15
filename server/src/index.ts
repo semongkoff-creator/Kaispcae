@@ -319,7 +319,7 @@ async function start() {
   startAnalyticsSweep(io);
 
   httpServer.listen(config.PORT, () => {
-    console.log(`[server] VirtualMeet running on http://localhost:${config.PORT}`);
+    console.log(`[server] KaiSpace running on http://localhost:${config.PORT}`);
   });
 }
 

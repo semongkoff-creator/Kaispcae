@@ -397,8 +397,8 @@ admin.get('/admin/audit', authenticateToken, requireWorkspace('workspace:viewAud
 // admin clicks a button in the Admin Console whenever they want a snapshot,
 // downloaded straight to their machine rather than stored on the server
 // (nothing new to secure/rotate/prune server-side). Covers everything that
-// is actually PERSISTED: room notes (DeskNote), Minutes of Meeting
-// (MomRecord), and attendance. "Pengumuman" (room notices) is deliberately
+// is actually PERSISTED: room notes (DeskNote) and attendance.
+// "Pengumuman" (room notices) is deliberately
 // NOT included — see roomHandler.ts's roomNoticeMap doc comment: a pinned
 // notice is in-memory only by design (a live banner, not a historical
 // record), so there is nothing durable to back up there.
