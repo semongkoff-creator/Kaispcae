@@ -783,11 +783,6 @@ rooms.post('/rooms/:slug/duplicate', authenticateToken, async (req: AuthRequest,
 
     await prisma.roomMember.create({ data: { userId: req.userId!, roomId: room.id, role: 'admin' } });
 
-    // Same "never let a Drive hiccup fail room creation" guarantee as POST /rooms.
-    if (driveEnabled()) {
-      void ensureRoomFolder(room.id).catch((e) => console.error('[rooms] Lark folder create failed:', e));
-    }
-
     const general = await prisma.channel.create({ data: { roomId: room.id, name: 'general', isDefault: true } });
     await ensureGroupConversation(prisma, general);
 
