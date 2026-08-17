@@ -158,6 +158,13 @@ interface GameCanvasProps {
   emitClaimSeat: (seatId: string) => void;
   emitReleaseSeat: (seatId: string) => void;
   onMediaOpen: (mediaId: string) => void;
+  // ZEP-style player card — fires instead of the normal walk-to-click when
+  // the click hit-tests against another player's avatar (see onCanvasClick
+  // below). The parent owns the card's own open/closed state and action
+  // wiring; this component only reports WHO was clicked and WHERE on
+  // screen, since it's the one that knows the camera/zoom transform needed
+  // to convert that world position back to a page coordinate.
+  onPlayerClick: (player: Avatar, screenX: number, screenY: number) => void;
   // Fitur 15B — fires when the local player triggers an Interactive Object
   // (Press F in range, or automatic on entering range). The parent looks up
   // the Furniture by id (already has the full furniture list) to read its
@@ -296,7 +303,7 @@ function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: numb
   return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, onDoorAreaPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onPlayerClick, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, onDoorAreaPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -706,6 +713,30 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const zoom = effectiveZoomRef.current;
       const worldX = (e.clientX - rect.left) / zoom + cameraXRef.current;
       const worldY = (e.clientY - rect.top) / zoom + cameraYRef.current;
+
+      // Player-card hit-test, before falling through to walk-to-click.
+      // Same nearest-within-radius shape as performNudge above, but
+      // measured from the CLICK point rather than the local player, and
+      // playerRecordsRef never contains the local player itself (see
+      // gameStore's setRoomState) — so clicking your own avatar can never
+      // match here and always falls through to the normal walk behavior,
+      // same as clicking empty ground. Radius matches the avatar's own
+      // visible circle (AVATAR_RADIUS) plus the same "+6" padding this file
+      // already uses elsewhere for click-friendly rings around it.
+      let clickedPlayer: Avatar | null = null;
+      let bestPlayerDist = Infinity;
+      for (const p of Object.values(playerRecordsRef.current)) {
+        const dist = Math.hypot(p.x - worldX, p.y - worldY);
+        if (dist > AVATAR_RADIUS + 6) continue;
+        if (dist < bestPlayerDist) { bestPlayerDist = dist; clickedPlayer = p; }
+      }
+      if (clickedPlayer) {
+        const screenX = (clickedPlayer.x - cameraXRef.current) * zoom + rect.left;
+        const screenY = (clickedPlayer.y - cameraYRef.current) * zoom + rect.top;
+        onPlayerClick(clickedPlayer, screenX, screenY);
+        return;
+      }
+
       const tileX = Math.floor(worldX / TILE_SIZE);
       const tileY = Math.floor(worldY / TILE_SIZE);
       if (tileX < 0 || tileY < 0) return;
@@ -715,7 +746,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     };
     canvas.addEventListener('click', onCanvasClick);
     return () => canvas.removeEventListener('click', onCanvasClick);
-  }, [isBlocked, computeWalkWaypoints, cancelActiveFollowForRoute]);
+  }, [isBlocked, computeWalkWaypoints, cancelActiveFollowForRoute, onPlayerClick]);
 
   // Mouse wheel / trackpad zoom — same factor-per-notch convention as the
   // Room Editor's own wheel handler. preventDefault stops the page itself

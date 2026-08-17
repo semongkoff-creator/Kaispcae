@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill } from 'react-bootstrap-icons';
-import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents } from '@kaispace/shared';
+import { Avatar, AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents } from '@kaispace/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -62,6 +62,7 @@ import { UserGuidePanel } from './components/ui/UserGuidePanel';
 import { StatusPickModal } from './components/ui/StatusPickModal';
 import { MemberListPanel } from './components/ui/MemberListPanel';
 import { ParticipantPanel } from './components/ui/ParticipantPanel';
+import { PlayerCard } from './components/ui/PlayerCard';
 import { ReportUserModal } from './components/ui/ReportUserModal';
 import { GlobalModal } from './components/ui/GlobalModal';
 import { SoundboardPanel } from './components/ui/SoundboardPanel';
@@ -1011,6 +1012,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // Item 13, "Panic/report user" — who ParticipantPanel's "Laporkan" was
   // clicked for, if anyone; the modal itself does the actual submit.
   const [reportTarget, setReportTarget] = useState<{ userId: string; name: string } | null>(null);
+  // ZEP-style player card — who was clicked on the map, if anyone, and
+  // where on screen to anchor the card (see GameCanvas's onPlayerClick).
+  // The clicked player's own live record is kept whole (not decomposed
+  // into separate id/name/config fields) since PlayerCard needs several of
+  // its fields together and the record is already fully in hand at click
+  // time — no extra store lookup needed.
+  const [playerCardTarget, setPlayerCardTarget] = useState<{ player: Avatar; x: number; y: number } | null>(null);
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
@@ -1220,6 +1228,30 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // opening the editor and saving without touching the name field doesn't
   // broadcast "You" to every other player in the room.
   const savedConfig = { ...loadAvatarConfig(), name: playerName || loadAvatarConfig().name };
+
+  // Player card's "Copy Outfit" — reuses handleAvatarSave verbatim (same
+  // broadcast + persist path as the Avatar Setup panel), just with a
+  // constructed config: every VISUAL field taken from the clicked player,
+  // name/statusTag kept as the local player's own (AvatarConfig mixes
+  // identity into the same object — copying it whole would also steal the
+  // other player's name, see PlayerCard.tsx's own prop comment).
+  const handleCopyOutfit = useCallback((source: AvatarConfig) => {
+    handleAvatarSave({
+      ...savedConfig,
+      bodyShape: source.bodyShape,
+      color: source.color,
+      accessory: source.accessory,
+      expression: source.expression,
+      spriteMode: source.spriteMode,
+      bodyId: source.bodyId,
+      eyesId: source.eyesId,
+      outfitId: source.outfitId,
+      hairId: source.hairId,
+      spriteAccessoryId: source.spriteAccessoryId,
+      premadeId: source.premadeId,
+    });
+    setPlayerCardTarget(null);
+  }, [handleAvatarSave, savedConfig]);
 
   // Chat + emotes + minimap state
   const notice = useGameStore((s) => s.notice);
@@ -1644,6 +1676,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         emitClaimSeat={emitClaimSeat}
         emitReleaseSeat={emitReleaseSeat}
         onMediaOpen={setViewingMediaId}
+        onPlayerClick={(player, x, y) => setPlayerCardTarget({ player, x, y })}
         onInteractiveTrigger={handleInteractiveTrigger}
         onNoteOpen={setNoteEditingId}
         onDoorPasswordTrigger={handleDoorPasswordTrigger}
@@ -1651,6 +1684,34 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         lowSpecMode={simplifiedView}
         restrictedZoneIds={restrictedZoneIds}
       />
+
+      {playerCardTarget && (
+        <PlayerCard
+          name={playerCardTarget.player.name}
+          seed={playerCardTarget.player.userId ?? playerCardTarget.player.id}
+          avatarConfig={playerCardTarget.player.avatarConfig}
+          anchorX={playerCardTarget.x}
+          anchorY={playerCardTarget.y}
+          onSendMessage={
+            playerCardTarget.player.userId && !playerCardTarget.player.isGuest
+              ? () => { channelChat.startDm(playerCardTarget.player.userId!); setPlayerCardTarget(null); }
+              : undefined
+          }
+          isFollowingThem={!!playerCardTarget.player.userId && followInfo?.targetUserId === playerCardTarget.player.userId}
+          onFollow={
+            playerCardTarget.player.userId
+              ? () => { emitFollowRequest(playerCardTarget.player.userId!); setPlayerCardTarget(null); }
+              : undefined
+          }
+          onUnfollow={() => { emitFollowUnfollow(); setPlayerCardTarget(null); }}
+          onCopyOutfit={
+            playerCardTarget.player.avatarConfig
+              ? () => handleCopyOutfit(playerCardTarget.player.avatarConfig!)
+              : undefined
+          }
+          onClose={() => setPlayerCardTarget(null)}
+        />
+      )}
 
       {/* QA (Data A/V checklist item 7, "Rekaman & consent") — persistent
           (not a self-dismissing toast, unlike the notices below) and
