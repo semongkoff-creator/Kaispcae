@@ -2643,49 +2643,65 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           isOverviewReactive branch below for its own, deliberately
           undecorated style. */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {zones.filter((z) => z.label).map((zone) => (
-          <div
-            key={zone.id}
-            ref={(el) => {
-              if (el) zoneBannerRefs.current.set(zone.id, el);
-              else zoneBannerRefs.current.delete(zone.id);
-            }}
-            className="absolute top-0 left-0 will-change-transform origin-top-left"
-          >
-            {isOverviewReactive ? (
-              // Plain text, no colored pill/bar — see the positioning loop's
-              // comment for why (Full Office View can have 50+ named areas
-              // on screen at once; a colored box per zone would bury the
-              // floor plan the rest of Overview mode is going for). Text-
-              // shadow substitutes for the pill's own background contrast,
-              // since the zone's flat color tint (drawMiniZoneBackground)
-              // is faint and varies per zone.
-              <div
-                className="font-bold text-white whitespace-nowrap"
-                style={{ textShadow: '0 1px 2px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.7)' }}
-              >
-                {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
-                {zone.label}
-              </div>
-            ) : zone.type === 'meeting' ? (
-              <div
-                className="px-3 py-1.5 text-center text-white font-bold tracking-wide shadow-md inline-flex items-center gap-1.5"
-                style={{ backgroundColor: zone.color || '#7c3aed' }}
-              >
-                {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
-                {zone.label}
-              </div>
-            ) : (
-              <div
-                className="px-2 py-0.5 rounded-full font-semibold text-white shadow whitespace-nowrap inline-flex items-center gap-1"
-                style={{ backgroundColor: zone.color || '#7c3aed' }}
-              >
-                {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
-                {zone.label}
-              </div>
-            )}
-          </div>
-        ))}
+        {zones.filter((z) => z.label).map((zone) => {
+          // Bug fix — Overview mode's plain-text labels (below) read as
+          // clutter for generic "Private" desk areas specifically: a real
+          // office floor plan has dozens of these (one per desk), so the
+          // label just repeats the same word across the whole screen with
+          // no distinguishing information. Meeting/Focus/Restricted/Map
+          // Location areas have a real, distinct name and stay labeled —
+          // only the generic isolating "Private" case (isPrivateZone minus
+          // Focus, which already opted out of this treatment, and minus
+          // Restricted, checked via the same restrictedZoneIds set the 🔒
+          // badge below uses) goes color-block-only in this one mode. The
+          // normal (non-Overview) pill is untouched either way.
+          const suppressLabelInOverview =
+            isOverviewReactive && isPrivateZone(zone) && zone.type !== 'focus' && !restrictedZoneIds?.has(zone.id);
+          if (suppressLabelInOverview) return null;
+          return (
+            <div
+              key={zone.id}
+              ref={(el) => {
+                if (el) zoneBannerRefs.current.set(zone.id, el);
+                else zoneBannerRefs.current.delete(zone.id);
+              }}
+              className="absolute top-0 left-0 will-change-transform origin-top-left"
+            >
+              {isOverviewReactive ? (
+                // Plain text, no colored pill/bar — see the positioning loop's
+                // comment for why (Full Office View can have 50+ named areas
+                // on screen at once; a colored box per zone would bury the
+                // floor plan the rest of Overview mode is going for). Text-
+                // shadow substitutes for the pill's own background contrast,
+                // since the zone's flat color tint (drawMiniZoneBackground)
+                // is faint and varies per zone.
+                <div
+                  className="font-bold text-white whitespace-nowrap"
+                  style={{ textShadow: '0 1px 2px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.7)' }}
+                >
+                  {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
+                  {zone.label}
+                </div>
+              ) : zone.type === 'meeting' ? (
+                <div
+                  className="px-3 py-1.5 text-center text-white font-bold tracking-wide shadow-md inline-flex items-center gap-1.5"
+                  style={{ backgroundColor: zone.color || '#7c3aed' }}
+                >
+                  {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
+                  {zone.label}
+                </div>
+              ) : (
+                <div
+                  className="px-2 py-0.5 rounded-full font-semibold text-white shadow whitespace-nowrap inline-flex items-center gap-1"
+                  style={{ backgroundColor: zone.color || '#7c3aed' }}
+                >
+                  {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
+                  {zone.label}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
       {/* Banner furniture — decorative signage placed via the Room Editor,
           same imperative-transform pattern as zone banners above. */}
