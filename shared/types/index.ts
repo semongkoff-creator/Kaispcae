@@ -647,6 +647,25 @@ export enum SocketEvents {
   FOLLOW_UPDATED = 'follow:updated',
   FOLLOWER_CHANGED = 'follow:follower_changed',
 
+  // Minta Bantuan Remote (specs/2026-08-17-remote-help-via-rustdesk-design.md)
+  // — KaiSpace only brokers the consent handshake and a one-time credential
+  // relay for an out-of-app RustDesk remote-help session; it never performs
+  // any remote control itself. Same consent shape as Follow/Summon: REQUEST
+  // asks the server to start a request, relayed to the target as INCOMING,
+  // the target's accept/decline comes back as RESPOND, and the requester
+  // (the helper) learns the outcome via RESULT. Once accepted, the target
+  // submits their own RustDesk ID+password once via CREDENTIAL — relayed
+  // straight to the helper's socket only, never stored anywhere. Either
+  // side ends the (KaiSpace-tracked) session at any time via END — this
+  // ends KaiSpace's own bookkeeping/notification only, never the actual
+  // RustDesk connection, which only RustDesk's own client can end.
+  REMOTE_HELP_REQUEST = 'remotehelp:request',
+  REMOTE_HELP_INCOMING = 'remotehelp:incoming',
+  REMOTE_HELP_RESPOND = 'remotehelp:respond',
+  REMOTE_HELP_RESULT = 'remotehelp:result',
+  REMOTE_HELP_CREDENTIAL = 'remotehelp:credential',
+  REMOTE_HELP_END = 'remotehelp:end',
+
   // §5 — Summon. Requires the target's consent before moving them: SUMMON_USER
   // asks the server to start a request rather than teleporting immediately;
   // the server relays it to the target as SUMMON_REQUEST, and the target's
@@ -1113,6 +1132,38 @@ export interface FollowResultPayload {
   targetName: string;
   accepted: boolean;
   reason?: 'declined' | 'timeout' | 'offline';
+}
+
+// Remote-help consent — same shape as Follow's, plus a 'busy' reason (the
+// target already has an active remote-help session with someone else).
+export interface RemoteHelpRequestPayload {
+  requestId: string;
+  actorUserId: string;
+  actorName: string;
+}
+
+export interface RemoteHelpRespondPayload {
+  requestId: string;
+  accept: boolean;
+}
+
+export interface RemoteHelpResultPayload {
+  targetName: string;
+  accepted: boolean;
+  reason?: 'declined' | 'timeout' | 'offline' | 'busy';
+}
+
+// The target's own RustDesk ID+password, relayed once to the helper's
+// socket only — the server never persists this string anywhere (see
+// remoteHelpHandler.ts's REMOTE_HELP_CREDENTIAL handler).
+export interface RemoteHelpCredentialPayload {
+  credential: string;
+}
+
+// Sent to whichever party did NOT click "Selesai" (or disconnected), so
+// their banner can clear with a clear reason instead of just vanishing.
+export interface RemoteHelpEndPayload {
+  endedByName: string;
 }
 
 // §6 — Add Media. One table/type union with `type` as discriminator, per

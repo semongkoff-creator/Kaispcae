@@ -17,6 +17,7 @@ import { registerSeatClaimHandlers } from './socket/seatClaim';
 import { registerFurnitureHandlers } from './socket/furnitureHandler';
 import { registerNoteHandlers } from './socket/noteHandler';
 import { registerFollowHandlers } from './socket/followHandler';
+import { registerRemoteHelpHandlers } from './socket/remoteHelpHandler';
 import { registerMediaHandlers, startMediaExpirySweep } from './socket/mediaHandler';
 import { registerRecordingHandlers } from './socket/recordingHandler';
 import { getRedis } from './store/roomStore';
@@ -307,6 +308,7 @@ async function start() {
       registerFurnitureHandlers(io, socket);
       registerNoteHandlers(io, socket);
       registerFollowHandlers(io, socket);
+      registerRemoteHelpHandlers(io, socket);
       registerMediaHandlers(io, socket);
       registerRecordingHandlers(io, socket);
     }
