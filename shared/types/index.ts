@@ -664,6 +664,15 @@ export enum SocketEvents {
   REMOTE_HELP_RESPOND = 'remotehelp:respond',
   REMOTE_HELP_RESULT = 'remotehelp:result',
   REMOTE_HELP_CREDENTIAL = 'remotehelp:credential',
+  // Final-review Fix 3 — confirms to the SUBMITTER'S OWN socket that the
+  // credential actually reached the helper's socket (the relay above has
+  // several silent early-return paths server-side — no active session,
+  // wrong role, empty string, unroutable helper — and telling someone their
+  // RustDesk password was delivered when it was actually dropped is exactly
+  // the failure this consent-brokering feature must not have). No payload —
+  // a pure signal; the client's existing REMOTE_HELP_END listener already
+  // covers every failure path instead of needing a second cleanup event.
+  REMOTE_HELP_CREDENTIAL_ACK = 'remotehelp:credential_ack',
   REMOTE_HELP_END = 'remotehelp:end',
 
   // §5 — Summon. Requires the target's consent before moving them: SUMMON_USER
@@ -1150,7 +1159,12 @@ export interface RemoteHelpRespondPayload {
 export interface RemoteHelpResultPayload {
   targetName: string;
   accepted: boolean;
-  reason?: 'declined' | 'timeout' | 'offline' | 'busy';
+  // 'helper-busy' (final-review Fix 4) — distinct from 'busy': that one
+  // means the TARGET already has an active session with someone else;
+  // 'helper-busy' means the REQUESTER (the would-be helper) is already
+  // active helping a different target and can't open a second concurrent
+  // session (see remoteHelpHandler.ts's REMOTE_HELP_REQUEST handler).
+  reason?: 'declined' | 'timeout' | 'offline' | 'busy' | 'helper-busy';
 }
 
 // The target's own RustDesk ID+password, relayed once to the helper's

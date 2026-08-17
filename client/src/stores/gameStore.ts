@@ -539,6 +539,13 @@ export interface GameState {
   // Never localStorage/sessionStorage (see design spec's Security section).
   receivedRemoteHelpCredential: string | null;
   setReceivedRemoteHelpCredential: (v: string | null) => void;
+  // Authoritative "your credential actually reached the helper" signal —
+  // set true only by the server's REMOTE_HELP_CREDENTIAL_ACK, reset to
+  // false whenever a fresh session starts (see App.tsx's accept-click
+  // handler). RemoteHelpCredentialForm gates its "Terkirim" confirmation on
+  // this, never on the act of clicking submit (final-review Fix 3).
+  remoteHelpCredentialAcked: boolean;
+  setRemoteHelpCredentialAcked: (v: boolean) => void;
   incomingSummonRequest: SummonRequestPayload | null;
   setIncomingSummonRequest: (req: SummonRequestPayload | null) => void;
   // Item #5 — room-join requests popped up for admins (see
@@ -1300,6 +1307,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   setActiveRemoteHelp: (v) => set({ activeRemoteHelp: v }),
   receivedRemoteHelpCredential: null,
   setReceivedRemoteHelpCredential: (v) => set({ receivedRemoteHelpCredential: v }),
+  remoteHelpCredentialAcked: false,
+  setRemoteHelpCredentialAcked: (v) => set({ remoteHelpCredentialAcked: v }),
   incomingSummonRequest: null,
   setIncomingSummonRequest: (req) => set({ incomingSummonRequest: req }),
   incomingJoinRequests: [],

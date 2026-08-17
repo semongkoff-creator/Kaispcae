@@ -96,11 +96,40 @@ export function registerRemoteHelpHandlers(io: Server, socket: Socket): void {
       return;
     }
 
+    // Final-review Fix 5 — uidToSocket/socketToUid/socketToRoom are
+    // module-global, spanning every room and org at once; the org check
+    // inside JOIN_ROOM above only gates ENTRY into these maps, not lookups
+    // against them. Without this, a helper could push an unsolicited
+    // consent prompt at a target in a completely different room/org, AND
+    // the locked-zone/Focus checks below (which read the HELPER's own
+    // room's player list) would silently no-op for a cross-room target
+    // instead of actually protecting them. Reuses the same generic message
+    // as the offline case above rather than confirming the target exists
+    // elsewhere.
+    if (socketToRoom.get(targetSocketId) !== room) {
+      socket.emit('admin:error', { message: 'User not found or offline' });
+      void writeAudit(getPrisma(), { actorId: helperUid, action: 'remoteHelp:request', targetType: 'remoteHelpSession', targetUserId: targetUid, meta: { rejected: true, reason: 'different-room' } });
+      return;
+    }
+
     // One active remote-help session per target — a second requester is
     // told plainly instead of silently queued or silently dropped.
     if (findActiveByParticipant(targetUid)) {
       socket.emit(SocketEvents.REMOTE_HELP_RESULT, { targetName: getPlayerName(targetSocketId), accepted: false, reason: 'busy' });
       void writeAudit(getPrisma(), { actorId: helperUid, action: 'remoteHelp:request', targetType: 'remoteHelpSession', targetUserId: targetUid, meta: { rejected: true, reason: 'busy' } });
+      return;
+    }
+
+    // Final-review Fix 4 — a HELPER already active with a different target
+    // must not be allowed to open a second concurrent session: the client's
+    // single-slot activeRemoteHelp store field can only ever show one,
+    // "Selesai" server-side would end whichever session findActiveByParticipant
+    // hits first (Map-iteration order, not necessarily the right one), and a
+    // disconnect would only clean up one of the two. Distinct reason from
+    // the target-busy case above so the requester's own toast is accurate.
+    if (findActiveByParticipant(helperUid)) {
+      socket.emit(SocketEvents.REMOTE_HELP_RESULT, { targetName: getPlayerName(targetSocketId), accepted: false, reason: 'helper-busy' });
+      void writeAudit(getPrisma(), { actorId: helperUid, action: 'remoteHelp:request', targetType: 'remoteHelpSession', targetUserId: targetUid, meta: { rejected: true, reason: 'helper-busy' } });
       return;
     }
 
@@ -170,14 +199,29 @@ export function registerRemoteHelpHandlers(io: Server, socket: Socket): void {
   // Target relays their own RustDesk ID+password to the helper — once,
   // straight through, never written anywhere server-side beyond this one
   // emit. See the design spec's Security & privacy section.
+  //
+  // Final-review Fix 3 — every early-return path below now tells the
+  // SUBMITTER'S OWN socket via REMOTE_HELP_END (reusing the client's
+  // existing listener, which already clears activeRemoteHelp/
+  // receivedRemoteHelpCredential) instead of silently dropping the
+  // credential — the client must never claim "Terkirim" for a credential
+  // that was actually dropped. The one success path additionally confirms
+  // delivery via REMOTE_HELP_CREDENTIAL_ACK, the only signal the client is
+  // allowed to treat as "Terkirim".
   socket.on(SocketEvents.REMOTE_HELP_CREDENTIAL, (data: RemoteHelpCredentialPayload) => {
-    const uid = socketToUid.get(socket.id); if (!uid) return;
+    const fail = () => io.to(socket.id).emit(SocketEvents.REMOTE_HELP_END, { endedByName: 'Sistem (sesi sudah tidak aktif)' });
+    const uid = socketToUid.get(socket.id);
+    if (!uid) { fail(); return; }
+    // activeByTarget is keyed by targetUid, so any hit here already means
+    // active.targetUid === uid — no need to re-check that explicitly.
     const active = activeByTarget.get(uid);
-    if (!active || active.targetUid !== uid) return; // only the target may submit credentials
+    if (!active) { fail(); return; }
     const credential = typeof data?.credential === 'string' ? data.credential.slice(0, 500) : '';
-    if (!credential) return;
+    if (!credential) { fail(); return; }
     const helperSocketId = uidToSocket.get(active.helperUid);
-    if (helperSocketId) io.to(helperSocketId).emit(SocketEvents.REMOTE_HELP_CREDENTIAL, { credential });
+    if (!helperSocketId) { fail(); return; }
+    io.to(helperSocketId).emit(SocketEvents.REMOTE_HELP_CREDENTIAL, { credential });
+    io.to(socket.id).emit(SocketEvents.REMOTE_HELP_CREDENTIAL_ACK);
   });
 
   socket.on(SocketEvents.REMOTE_HELP_END, () => {
@@ -224,7 +268,11 @@ export function registerRemoteHelpHandlers(io: Server, socket: Socket): void {
         });
       }
     }
-    if (uid) uidToSocket.delete(uid);
+    // Bundled cheap fix — only clear the uid→socket mapping if it still
+    // points at THIS disconnecting socket. A stale DISCONNECT firing after
+    // the same uid already reconnected on a new socket must not clobber the
+    // newer mapping.
+    if (uid && uidToSocket.get(uid) === socket.id) uidToSocket.delete(uid);
     socketToUid.delete(socket.id);
     socketToRoom.delete(socket.id);
   });

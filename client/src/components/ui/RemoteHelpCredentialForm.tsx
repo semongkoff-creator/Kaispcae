@@ -4,6 +4,13 @@ import { Display } from 'react-bootstrap-icons';
 interface RemoteHelpCredentialFormProps {
   helperName: string;
   onSubmit: (credential: string) => void;
+  // Final-review Fix 3 — authoritative "the server actually relayed this to
+  // the helper" signal (REMOTE_HELP_CREDENTIAL_ACK), NOT a local "I clicked
+  // submit" flag. The server has several silent early-return paths (no
+  // active session, empty credential, unroutable helper) — a "Terkirim"
+  // confirmation that fires on click alone would lie about delivery in
+  // exactly those cases.
+  acked: boolean;
 }
 
 // Shown ONLY to the target, once, right after they approve a remote-help
@@ -13,14 +20,25 @@ interface RemoteHelpCredentialFormProps {
 // component's own local state is the only place it ever lives client-side
 // (never localStorage/sessionStorage — see the design spec's Security
 // section). The field clears itself immediately after submit.
-export function RemoteHelpCredentialForm({ helperName, onSubmit }: RemoteHelpCredentialFormProps) {
+export function RemoteHelpCredentialForm({ helperName, onSubmit, acked }: RemoteHelpCredentialFormProps) {
   const [value, setValue] = useState('');
+  // Purely a local "I already clicked submit" flag for an immediate
+  // "Mengirim…" pending indicator between click and the server's ack — the
+  // real "Terkirim" confirmation below is gated on `acked`, not this.
   const [sent, setSent] = useState(false);
+
+  if (acked) {
+    return (
+      <div className="fixed top-32 right-4 z-50 w-72 bg-white/95 dark:bg-gray-900/95 rounded-xl shadow-lg px-3.5 py-3 text-xs text-gray-600 dark:text-gray-300">
+        Terkirim ke {helperName}.
+      </div>
+    );
+  }
 
   if (sent) {
     return (
       <div className="fixed top-32 right-4 z-50 w-72 bg-white/95 dark:bg-gray-900/95 rounded-xl shadow-lg px-3.5 py-3 text-xs text-gray-600 dark:text-gray-300">
-        Terkirim ke {helperName}.
+        Mengirim…
       </div>
     );
   }

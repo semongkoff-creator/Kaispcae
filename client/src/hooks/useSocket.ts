@@ -144,6 +144,18 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socket.on(SocketEvents.DISCONNECT, (reason) => {
       console.warn('[socket] disconnected — reason:', reason);
       setConnected(false);
+      // Final-review Fix 2 — remoteHelpHandler.ts's own DISCONNECT handler
+      // unconditionally destroys any active/pending remote-help session the
+      // instant EITHER party disconnects, and can only notify the OTHER
+      // party. So whichever side actually disconnected (portal travel calls
+      // socket.disconnect() on every roomSlug change — see this effect's own
+      // cleanup above; a network blip that auto-reconnects hits this too)
+      // must reconcile its own stale remote-help state here, since
+      // gameStore is a module-level singleton that outlives any one socket
+      // connection/reconnect and nothing else would ever clear it.
+      useGameStore.getState().setIncomingRemoteHelpRequest(null);
+      useGameStore.getState().setActiveRemoteHelp(null);
+      useGameStore.getState().setReceivedRemoteHelpCredential(null);
     });
 
     socket.on(SocketEvents.ROOM_STATE, (roomState) => {
@@ -464,6 +476,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     });
     socket.on(SocketEvents.REMOTE_HELP_CREDENTIAL, (data: RemoteHelpCredentialPayload) => {
       useGameStore.getState().setReceivedRemoteHelpCredential(data.credential);
+    });
+    // Final-review Fix 3 — authoritative confirmation the credential
+    // actually reached the helper; the only signal RemoteHelpCredentialForm
+    // is allowed to treat as "Terkirim".
+    socket.on(SocketEvents.REMOTE_HELP_CREDENTIAL_ACK, () => {
+      useGameStore.getState().setRemoteHelpCredentialAcked(true);
     });
     socket.on(SocketEvents.REMOTE_HELP_END, (data: RemoteHelpEndPayload) => {
       // addActivity is the same lightweight one-off notice mechanism this

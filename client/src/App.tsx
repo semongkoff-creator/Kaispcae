@@ -948,6 +948,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     return () => clearTimeout(timer);
   }, [incomingFollowRequest]);
 
+  // Final-review Fix 1 — same auto-clear as incomingSummonRequest/
+  // incomingFollowRequest above: the toast must not outlive a request the
+  // server already auto-declined server-side after CONSENT_REQUEST_TIMEOUT_MS.
+  const incomingRemoteHelpRequest = useGameStore((s) => s.incomingRemoteHelpRequest);
+  useEffect(() => {
+    if (!incomingRemoteHelpRequest) return;
+    const timer = setTimeout(() => useGameStore.getState().setIncomingRemoteHelpRequest(null), CONSENT_REQUEST_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [incomingRemoteHelpRequest]);
+
   // Item #5 — room-join requests popped up for admins. No auto-clear timer
   // like the knock/summon/follow toasts above: those have a matching
   // server-side auto-decline (CONSENT_REQUEST_TIMEOUT_MS), but a join request
@@ -978,10 +988,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     return () => clearTimeout(timer);
   }, [followResult]);
 
-  const incomingRemoteHelpRequest = useGameStore((s) => s.incomingRemoteHelpRequest);
   const remoteHelpResult = useGameStore((s) => s.remoteHelpResult);
   const activeRemoteHelp = useGameStore((s) => s.activeRemoteHelp);
   const receivedRemoteHelpCredential = useGameStore((s) => s.receivedRemoteHelpCredential);
+  const remoteHelpCredentialAcked = useGameStore((s) => s.remoteHelpCredentialAcked);
   useEffect(() => {
     if (!remoteHelpResult) return;
     const timer = setTimeout(() => useGameStore.getState().setRemoteHelpResult(null), 3000);
@@ -1722,7 +1732,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
               : undefined
           }
           onRequestRemoteHelp={
-            playerCardTarget.player.userId
+            playerCardTarget.player.userId && !playerCardTarget.player.isGuest
               ? () => { emitRemoteHelpRequest(playerCardTarget.player.userId!); setPlayerCardTarget(null); }
               : undefined
           }
@@ -1876,6 +1886,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
               emitRemoteHelpRespond(incomingRemoteHelpRequest.requestId, true);
               useGameStore.getState().setIncomingRemoteHelpRequest(null);
               useGameStore.getState().setActiveRemoteHelp({ role: 'target', otherName: incomingRemoteHelpRequest.actorName });
+              // Final-review Fix 3 — each new session starts unacknowledged;
+              // without this a SECOND session in the same tab would inherit
+              // the previous session's acked:true and show "Terkirim"
+              // before the target has submitted anything this time.
+              useGameStore.getState().setRemoteHelpCredentialAcked(false);
             }}
             onDecline={() => {
               emitRemoteHelpRespond(incomingRemoteHelpRequest.requestId, false);
@@ -1967,7 +1982,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
               ? `${remoteHelpResult.targetName} accepted your remote-help request`
               : remoteHelpResult.reason === 'busy'
                 ? `${remoteHelpResult.targetName} is already being helped by someone else`
-                : `${remoteHelpResult.targetName} ${describeConsentDecline(remoteHelpResult.reason)} your remote-help request`}
+                : remoteHelpResult.reason === 'helper-busy'
+                  ? 'Kamu sedang aktif membantu orang lain — selesaikan sesi itu dulu.'
+                  : `${remoteHelpResult.targetName} ${describeConsentDecline(remoteHelpResult.reason)} your remote-help request`}
           </div>
         )}
         {nudgedBy && (
@@ -2011,6 +2028,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         <RemoteHelpCredentialForm
           helperName={activeRemoteHelp.otherName}
           onSubmit={(credential) => emitRemoteHelpCredential(credential)}
+          acked={remoteHelpCredentialAcked}
         />
       )}
       {activeRemoteHelp?.role === 'helper' && receivedRemoteHelpCredential && (
