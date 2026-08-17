@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { XLg, ChatDotsFill, PersonWalking, ArrowRepeat } from 'react-bootstrap-icons';
+import { XLg, ChatDotsFill, PersonWalking, ArrowRepeat, Display } from 'react-bootstrap-icons';
 import { AvatarConfig } from '@virtualmeet/shared';
 import { Avatar } from '@/components/Messenger/chatVisuals';
 
@@ -21,6 +21,7 @@ interface PlayerCardProps {
   onFollow?: () => void;
   onUnfollow?: () => void;
   onCopyOutfit?: () => void;
+  onRequestRemoteHelp?: () => void;
   onClose: () => void;
 }
 
@@ -44,6 +45,7 @@ export function PlayerCard({
   onFollow,
   onUnfollow,
   onCopyOutfit,
+  onRequestRemoteHelp,
   onClose,
 }: PlayerCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -129,6 +131,14 @@ export function PlayerCard({
             className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-800 cursor-pointer"
           >
             <ArrowRepeat size={13} className="text-purple-600 dark:text-purple-400" /> Copy Outfit
+          </button>
+        )}
+        {onRequestRemoteHelp && (
+          <button
+            onClick={onRequestRemoteHelp}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-800 cursor-pointer"
+          >
+            <Display size={13} className="text-purple-600 dark:text-purple-400" /> Minta Bantuan Remote
           </button>
         )}
       </div>

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
-import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill } from 'react-bootstrap-icons';
+import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill, Display } from 'react-bootstrap-icons';
 import { Avatar, AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents } from '@kaispace/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
@@ -70,6 +70,8 @@ import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
 import { AwayReasonModal } from './components/ui/AwayReasonModal';
 import { ActivityFeed } from './components/ui/ActivityFeed';
 import { PendingRequestToast } from './components/ui/PendingRequestToast';
+import { RemoteHelpBanner } from './components/ui/RemoteHelpBanner';
+import { RemoteHelpCredentialForm } from './components/ui/RemoteHelpCredentialForm';
 import { Sidebar } from './components/ui/Sidebar';
 import { MicButton } from './components/hud/MicButton';
 import { HandButton } from './components/hud/HandButton';
@@ -154,7 +156,7 @@ const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', 
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest, onUpdatePreferences }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean; onUpdatePreferences?: (patch: UserPreferences) => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitRemoteHelpRequest, emitRemoteHelpRespond, emitRemoteHelpCredential, emitRemoteHelpEnd, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
   // ZEP-style User Guide — Sidebar's "Panduan" row (Room Features menu).
   // Independent of MainApp's own first-run TutorialModal gate (shown before
@@ -976,6 +978,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     return () => clearTimeout(timer);
   }, [followResult]);
 
+  const incomingRemoteHelpRequest = useGameStore((s) => s.incomingRemoteHelpRequest);
+  const remoteHelpResult = useGameStore((s) => s.remoteHelpResult);
+  const activeRemoteHelp = useGameStore((s) => s.activeRemoteHelp);
+  const receivedRemoteHelpCredential = useGameStore((s) => s.receivedRemoteHelpCredential);
+  useEffect(() => {
+    if (!remoteHelpResult) return;
+    const timer = setTimeout(() => useGameStore.getState().setRemoteHelpResult(null), 3000);
+    return () => clearTimeout(timer);
+  }, [remoteHelpResult]);
+
   // Admin / Editor. editorMode (the old in-map overlay editor) can no longer
   // be switched on — the toggle went with the retired editor (Potong 7) — but
   // the store field and GameCanvas's editor branches remain, permanently off.
@@ -1709,6 +1721,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
               ? () => handleCopyOutfit(playerCardTarget.player.avatarConfig!)
               : undefined
           }
+          onRequestRemoteHelp={
+            playerCardTarget.player.userId
+              ? () => { emitRemoteHelpRequest(playerCardTarget.player.userId!); setPlayerCardTarget(null); }
+              : undefined
+          }
           onClose={() => setPlayerCardTarget(null)}
         />
       )}
@@ -1851,6 +1868,21 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             onDecline={() => { emitFollowRespond(incomingFollowRequest.requestId, false); useGameStore.getState().setIncomingFollowRequest(null); }}
           />
         )}
+        {incomingRemoteHelpRequest && (
+          <PendingRequestToast
+            icon={<Display size={13} className="text-purple-600" />}
+            message={<><span className="font-medium">{incomingRemoteHelpRequest.actorName}</span> minta bantuan remote (RustDesk)</>}
+            onAccept={() => {
+              emitRemoteHelpRespond(incomingRemoteHelpRequest.requestId, true);
+              useGameStore.getState().setIncomingRemoteHelpRequest(null);
+              useGameStore.getState().setActiveRemoteHelp({ role: 'target', otherName: incomingRemoteHelpRequest.actorName });
+            }}
+            onDecline={() => {
+              emitRemoteHelpRespond(incomingRemoteHelpRequest.requestId, false);
+              useGameStore.getState().setIncomingRemoteHelpRequest(null);
+            }}
+          />
+        )}
         {/* Item #5 — stacked join-request popups. Capped at 3 visible cards
             (a "+N lainnya" pill for the rest) so several simultaneous
             requests can't fill the whole screen; isAdmin is defense-in-depth
@@ -1928,6 +1960,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
               : `${followResult.targetName} ${describeConsentDecline(followResult.reason)} your follow request`}
           </div>
         )}
+        {remoteHelpResult && (
+          <div className="bg-purple-600/90 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-1.5">
+            <Display size={13} />
+            {remoteHelpResult.accepted
+              ? `${remoteHelpResult.targetName} accepted your remote-help request`
+              : remoteHelpResult.reason === 'busy'
+                ? `${remoteHelpResult.targetName} is already being helped by someone else`
+                : `${remoteHelpResult.targetName} ${describeConsentDecline(remoteHelpResult.reason)} your remote-help request`}
+          </div>
+        )}
         {nudgedBy && (
           <div className="bg-amber-500/95 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-2 animate-fade-in">
             <HandIndexThumbFill size={14} />
@@ -1957,6 +1999,26 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           </div>
         )}
       </div>
+
+      {activeRemoteHelp && (
+        <RemoteHelpBanner
+          role={activeRemoteHelp.role}
+          otherName={activeRemoteHelp.otherName}
+          onEnd={() => { emitRemoteHelpEnd(); useGameStore.getState().setActiveRemoteHelp(null); useGameStore.getState().setReceivedRemoteHelpCredential(null); }}
+        />
+      )}
+      {activeRemoteHelp?.role === 'target' && !receivedRemoteHelpCredential && (
+        <RemoteHelpCredentialForm
+          helperName={activeRemoteHelp.otherName}
+          onSubmit={(credential) => emitRemoteHelpCredential(credential)}
+        />
+      )}
+      {activeRemoteHelp?.role === 'helper' && receivedRemoteHelpCredential && (
+        <div className="fixed top-32 right-4 z-50 w-72 bg-white/95 dark:bg-gray-900/95 rounded-xl shadow-lg px-3.5 py-3 text-xs text-gray-800 dark:text-gray-100">
+          <div className="font-semibold mb-1">ID+password dari {activeRemoteHelp.otherName}:</div>
+          <div className="font-mono bg-gray-100 dark:bg-gray-800 rounded px-2 py-1.5 select-all">{receivedRemoteHelpCredential}</div>
+        </div>
+      )}
 
       <AwayReasonModal open={awayPromptOpen} onResolve={resolveAwayPrompt} />
       {/* Global replacement for window.alert/confirm/prompt — see

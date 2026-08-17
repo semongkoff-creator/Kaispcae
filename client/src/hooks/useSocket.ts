@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, RoomBroadcast, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveDoorAreaPasswordResultPayload, DoorAreaUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, ZoneQueueSessionClearedPayload, GuestJoinRequest, PlayerMovedPayload, PlayerStoppedPayload, DeskNoteData, RosterEntry, RosterUpdate } from '@kaispace/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, RoomBroadcast, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, RemoteHelpRequestPayload, RemoteHelpResultPayload, RemoteHelpCredentialPayload, RemoteHelpEndPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveDoorAreaPasswordResultPayload, DoorAreaUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, ZoneQueueSessionClearedPayload, GuestJoinRequest, PlayerMovedPayload, PlayerStoppedPayload, DeskNoteData, RosterEntry, RosterUpdate } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
@@ -447,6 +447,33 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
     socket.on(SocketEvents.FOLLOW_RESULT, (data: FollowResultPayload) => {
       useGameStore.getState().setFollowResult(data);
+    });
+
+    // Minta Bantuan Remote — same consent shape as Follow above.
+    socket.on(SocketEvents.REMOTE_HELP_INCOMING, (data: RemoteHelpRequestPayload) => {
+      useGameStore.getState().setIncomingRemoteHelpRequest(data);
+    });
+    socket.on(SocketEvents.REMOTE_HELP_RESULT, (data: RemoteHelpResultPayload) => {
+      useGameStore.getState().setRemoteHelpResult(data);
+      // Accepted means THIS client is the helper — the target's own client
+      // sets its half of activeRemoteHelp optimistically on accept-click
+      // instead (see App.tsx), same "clear pending state on my own action
+      // without waiting for a round trip" convention every other
+      // accept/decline flow in this codebase already uses.
+      if (data.accepted) useGameStore.getState().setActiveRemoteHelp({ role: 'helper', otherName: data.targetName });
+    });
+    socket.on(SocketEvents.REMOTE_HELP_CREDENTIAL, (data: RemoteHelpCredentialPayload) => {
+      useGameStore.getState().setReceivedRemoteHelpCredential(data.credential);
+    });
+    socket.on(SocketEvents.REMOTE_HELP_END, (data: RemoteHelpEndPayload) => {
+      // addActivity is the same lightweight one-off notice mechanism this
+      // file already uses for INTERACTIVE_API_CALL_RESULT/
+      // DOOR_AREA_UNLOCKED_NOTICE — reused here so whoever did NOT click
+      // "Selesai" themselves still learns who ended the session, instead of
+      // the banner just silently vanishing.
+      useGameStore.getState().addActivity(`Sesi bantuan remote diakhiri oleh ${data.endedByName}.`);
+      useGameStore.getState().setActiveRemoteHelp(null);
+      useGameStore.getState().setReceivedRemoteHelpCredential(null);
     });
 
     // §6 — Add Media. MEDIA_LIST arrives once right after ROOM_STATE (this
@@ -1377,6 +1404,22 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.FOLLOW_RESPOND, { requestId, accept });
   }, []);
 
+  const emitRemoteHelpRequest = useCallback((targetUserId: string) => {
+    socketRef.current?.emit(SocketEvents.REMOTE_HELP_REQUEST, { targetUserId });
+  }, []);
+
+  const emitRemoteHelpRespond = useCallback((requestId: string, accept: boolean) => {
+    socketRef.current?.emit(SocketEvents.REMOTE_HELP_RESPOND, { requestId, accept });
+  }, []);
+
+  const emitRemoteHelpCredential = useCallback((credential: string) => {
+    socketRef.current?.emit(SocketEvents.REMOTE_HELP_CREDENTIAL, { credential });
+  }, []);
+
+  const emitRemoteHelpEnd = useCallback(() => {
+    socketRef.current?.emit(SocketEvents.REMOTE_HELP_END);
+  }, []);
+
   const emitFollowUnfollow = useCallback(() => {
     socketRef.current?.emit(SocketEvents.FOLLOW_UNFOLLOW);
   }, []);
@@ -1409,5 +1452,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitRoomDelete, emitKick, emitForceMute, emitDoorOverride, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
+  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitRoomDelete, emitKick, emitForceMute, emitDoorOverride, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitRemoteHelpRequest, emitRemoteHelpRespond, emitRemoteHelpCredential, emitRemoteHelpEnd, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
 }

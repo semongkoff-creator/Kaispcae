@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@kaispace/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, RemoteHelpRequestPayload, RemoteHelpResultPayload, SummonRequestPayload, SummonResultPayload, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@kaispace/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 import { appendMovementSnapshot, MovementSnapshot, sampleMovementSnapshots } from './movementSmoothing';
@@ -523,6 +523,22 @@ export interface GameState {
   setIncomingFollowRequest: (req: FollowRequestPayload | null) => void;
   followResult: FollowResultPayload | null;
   setFollowResult: (result: FollowResultPayload | null) => void;
+  incomingRemoteHelpRequest: RemoteHelpRequestPayload | null;
+  setIncomingRemoteHelpRequest: (req: RemoteHelpRequestPayload | null) => void;
+  remoteHelpResult: RemoteHelpResultPayload | null;
+  setRemoteHelpResult: (result: RemoteHelpResultPayload | null) => void;
+  // Active session, tracked identically on both sides — `role` says whether
+  // THIS client is the one being helped (sees the credential form) or the
+  // one helping (waits for the credential to arrive). null = no active
+  // session. Cleared on REMOTE_HELP_END from either side, or when this
+  // client itself clicks "Selesai".
+  activeRemoteHelp: { role: 'target' | 'helper'; otherName: string } | null;
+  setActiveRemoteHelp: (v: { role: 'target' | 'helper'; otherName: string } | null) => void;
+  // The credential the TARGET typed in, once relayed — read once by the
+  // HELPER's own UI to display it, then the string is not needed again.
+  // Never localStorage/sessionStorage (see design spec's Security section).
+  receivedRemoteHelpCredential: string | null;
+  setReceivedRemoteHelpCredential: (v: string | null) => void;
   incomingSummonRequest: SummonRequestPayload | null;
   setIncomingSummonRequest: (req: SummonRequestPayload | null) => void;
   // Item #5 — room-join requests popped up for admins (see
@@ -1276,6 +1292,14 @@ export const useGameStore = create<GameState>((set, get) => ({
   setIncomingFollowRequest: (req) => set({ incomingFollowRequest: req }),
   followResult: null,
   setFollowResult: (result) => set({ followResult: result }),
+  incomingRemoteHelpRequest: null,
+  setIncomingRemoteHelpRequest: (req) => set({ incomingRemoteHelpRequest: req }),
+  remoteHelpResult: null,
+  setRemoteHelpResult: (result) => set({ remoteHelpResult: result }),
+  activeRemoteHelp: null,
+  setActiveRemoteHelp: (v) => set({ activeRemoteHelp: v }),
+  receivedRemoteHelpCredential: null,
+  setReceivedRemoteHelpCredential: (v) => set({ receivedRemoteHelpCredential: v }),
   incomingSummonRequest: null,
   setIncomingSummonRequest: (req) => set({ incomingSummonRequest: req }),
   incomingJoinRequests: [],
