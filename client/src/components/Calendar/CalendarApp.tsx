@@ -37,8 +37,26 @@ export function CalendarApp({ currentUser, onClose, onStartMeeting }: {
     return { from: cursor.startOf('day'), to: cursor.plus({ days: 30 }).endOf('day') };
   }, [view, cursor]);
 
+  // Bug fix — a brand-new user (or any org where no one has ever clicked
+  // "+ kalender baru" yet) has ZERO calendars, so the "Kalender" dropdown in
+  // EventPanel's New Event form rendered with no options and stayed at ''.
+  // Submitting then hit POST /api/calendars//events (empty :calendarId
+  // segment) — a 404, since that URL never matches the registered route.
+  // Auto-provisioning one default personal calendar the first time this
+  // list comes back empty means the app is always immediately usable,
+  // instead of silently failing until someone discovers the manual "+"
+  // button on their own. EventPanel.tsx's own save() also gets a defensive
+  // guard for this (see its own comment) in case creation ever races/fails.
   const loadCalendars = useCallback(async () => {
-    try { setCalendars((await calendarApi.listCalendars()).calendars); }
+    try {
+      const res = await calendarApi.listCalendars();
+      if (res.calendars.length === 0) {
+        await calendarApi.createCalendar('Personal');
+        setCalendars((await calendarApi.listCalendars()).calendars);
+      } else {
+        setCalendars(res.calendars);
+      }
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'Gagal memuat kalender'); }
   }, []);
   useEffect(() => { void loadCalendars(); }, [loadCalendars]);

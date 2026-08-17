@@ -108,6 +108,14 @@ export function EventPanel({
   const save = async () => {
     setError(null);
     if (!startDt.isValid || !endDt.isValid || endDt <= startDt) { setError('Waktu selesai harus setelah waktu mulai.'); return; }
+    // Bug fix — an empty calendarId (no editable calendar to pick, or the
+    // "Kalender" dropdown just never got a selection) used to be sent
+    // straight through, producing POST /api/calendars//events — a 404 with
+    // no clear reason shown. CalendarApp.tsx now auto-provisions a default
+    // calendar so this dropdown is never actually empty in practice, but
+    // this guard stays as the last line of defense against submitting a
+    // request that can only fail.
+    if (isNew && !calendarId) { setError('Pilih kalender dulu.'); return; }
     setBusy(true);
     const input: EventInput = {
       title: title.trim() || 'Tanpa judul',
