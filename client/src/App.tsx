@@ -1680,16 +1680,33 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         />
       )}
 
-      {!simplifiedView && (
-        <>
-          {/* Controls text ("WASD / Arrows...") and "Playing as" removed from
-              here — the map stayed permanently covered by them. The control
-              list now lives in the existing Panduan (TutorialModal.tsx,
-              Slide 2), reachable any time via Sidebar ☰ → Room Features →
-              Panduan; "Playing as" was dropped entirely (the player's own
-              name is already visible elsewhere — video tile, participant
-              list, etc.). */}
-          <div className="absolute top-14 left-16 flex items-start gap-2 pointer-events-none">
+      {/* Controls text ("WASD / Arrows...") and "Playing as" removed from
+          here — the map stayed permanently covered by them. The control
+          list now lives in the existing Panduan (TutorialModal.tsx,
+          Slide 2), reachable any time via Sidebar ☰ → Room Features →
+          Panduan; "Playing as" was dropped entirely (the player's own
+          name is already visible elsewhere — video tile, participant
+          list, etc.). */}
+      <div className="absolute top-14 left-16 flex items-start gap-2 pointer-events-none">
+        {/* Peserta toggle — moved here from the bottom meeting-control bar
+            (see that bar's own comment) so it sits directly left of
+            Soundboard, matching the same icon-button-that-opens-a-panel
+            convention already used by Soundboard/ActivityFeed. Kept on its
+            own !moduleOpen/!screenShareMaximized gate — identical to its
+            old bottom-bar condition — rather than folding into the
+            !simplifiedView block below: Simplify hides Soundboard/
+            ActivityFeed/MusicPlayer but the meeting-participation controls
+            (mic/camera/.../Peserta) stay reachable during Simplify, exactly
+            as before this move. Wrapped in its own pointer-events-auto div
+            since this row's pointer-events-none only gets overridden by
+            children that opt back in (Tooltip's own wrapper div doesn't). */}
+        {!moduleOpen && !screenShareMaximized && (
+          <div className="pointer-events-auto">
+            <ParticipantsToggleButton open={activePanel === 'participants'} onToggle={() => openPanel('participants')} />
+          </div>
+        )}
+        {!simplifiedView && (
+          <>
             {/* QA (Akses tamu checklist item 2, "Guest terbatas") — Soundboard
                 playback is now also server-rejected for guests
                 (roomHandler.ts's SOUNDBOARD_PLAY), so hiding the panel too
@@ -1698,10 +1715,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
               <SoundboardPanel roomSlug={roomSlug} emitSoundboardPlay={emitSoundboardPlay} open={activePanel === 'soundboard'} onToggle={() => openPanel('soundboard')} onClose={closePanel} />
             )}
             <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
-          </div>
-          {!isGuest && <MusicPlayerWidget zoneId={currentZone?.id ?? null} />}
-        </>
-      )}
+          </>
+        )}
+      </div>
+      {!simplifiedView && !isGuest && <MusicPlayerWidget zoneId={currentZone?.id ?? null} />}
 
       <div className="absolute top-4 right-4 flex items-center gap-2">
         <MapZoomControl />
@@ -2289,13 +2306,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
           {/* QA (Akses tamu checklist item 2, "Guest terbatas") — both
               server-rejected for guests now too (roomHandler.ts's
-              PLAYER_HAND/PLAYER_HIDDEN, emoteHandler.ts). Mic/Camera/Share/
-              Peserta stay — those are the kept-open meeting-participation
-              set. Chat is its own standalone bottom-right button again (see
+              PLAYER_HAND/PLAYER_HIDDEN, emoteHandler.ts). Mic/Camera/Share
+              stay — those are the kept-open meeting-participation set.
+              Peserta moved to the top-left rail beside Soundboard (see that
+              section's own comment) — same !moduleOpen/!screenShareMaximized
+              gate as this bar, just relocated, not removed from the set.
+              Chat is its own standalone bottom-right button again (see
               ChatPanel.tsx), not part of this bar. */}
           {!isGuest && <HandButton raised={!!localPlayer.handRaised} onToggle={handleHandToggle} />}
           {!isGuest && <EmojiButton open={showEmoteWheel} onToggle={() => setShowEmoteWheel((v) => !v)} />}
-          <ParticipantsToggleButton open={activePanel === 'participants'} onToggle={() => openPanel('participants')} />
           {/* Mic/speaker/camera device picker — was two small carets glued
               to Mic and Camera, merged into one ⋮ menu (see DeviceMenu.tsx)
               placed just left of Keluar. */}
