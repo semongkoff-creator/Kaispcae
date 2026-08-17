@@ -9,6 +9,7 @@ import { api, ApiError } from '@/services/api';
 import { adminApi } from '@/admin/api';
 import { useEditorStore, EDITOR_LAYERS, EDITOR_TOOLS, EditorLayer, EditorTool } from '@/stores/editorStore';
 import { showAlert, showConfirm, showPrompt } from '@/stores/modalStore';
+import { GlobalModal } from '@/components/ui/GlobalModal';
 import { drawFloorTile, drawWallTile, drawFurnitureLayer } from '@/components/canvas/mapRender';
 import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
@@ -2240,6 +2241,19 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           )}
         </div>
       )}
+
+      {/* Bug fix — the Room Editor is a SEPARATE top-level render branch
+          (App.tsx's `export default function App()`: `?roomEditor=` on the
+          URL returns ONLY <RoomEditorPage>, never <MainApp>), so the
+          <GlobalModal /> mounted inside MainApp's tree was never present
+          here at all. Every showPrompt/showConfirm/showAlert call in this
+          file (all the tile-effect naming dialogs, Portal, etc.) sets
+          modalStore's state correctly but had nothing anywhere in the
+          mounted tree to ever render it — the awaited promise just hung
+          forever, silently, with no error: exactly "drag/click does
+          nothing" from the outside. Mounting it here, once, fixes every
+          dialog in this file at once. */}
+      <GlobalModal />
     </div>
   );
 }
