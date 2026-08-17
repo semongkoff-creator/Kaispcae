@@ -711,24 +711,20 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const onCanvasClick = (e: MouseEvent) => {
-      if (editorModeRef.current) return; // never move while editing the room
-      const store = useGameStore.getState();
-      if (store.localPlayer.isSitting) return; // stand up first (movement is frozen)
+    // Shared by both handlers below — converts a mouse event to world
+    // coordinates and checks whether it hit another player's avatar. Same
+    // nearest-within-radius shape as performNudge above, but measured from
+    // the CLICK point rather than the local player, and playerRecordsRef
+    // never contains the local player itself (see gameStore's
+    // setRoomState) — so clicking your own avatar can never match here.
+    // Radius matches the avatar's own visible circle (AVATAR_RADIUS) plus
+    // the same "+6" padding this file already uses elsewhere for
+    // click-friendly rings around it.
+    const resolveClick = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
       const zoom = effectiveZoomRef.current;
       const worldX = (e.clientX - rect.left) / zoom + cameraXRef.current;
       const worldY = (e.clientY - rect.top) / zoom + cameraYRef.current;
-
-      // Player-card hit-test, before falling through to walk-to-click.
-      // Same nearest-within-radius shape as performNudge above, but
-      // measured from the CLICK point rather than the local player, and
-      // playerRecordsRef never contains the local player itself (see
-      // gameStore's setRoomState) — so clicking your own avatar can never
-      // match here and always falls through to the normal walk behavior,
-      // same as clicking empty ground. Radius matches the avatar's own
-      // visible circle (AVATAR_RADIUS) plus the same "+6" padding this file
-      // already uses elsewhere for click-friendly rings around it.
       let clickedPlayer: Avatar | null = null;
       let bestPlayerDist = Infinity;
       for (const p of Object.values(playerRecordsRef.current)) {
@@ -736,13 +732,35 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         if (dist > AVATAR_RADIUS + 6) continue;
         if (dist < bestPlayerDist) { bestPlayerDist = dist; clickedPlayer = p; }
       }
-      if (clickedPlayer) {
-        const screenX = (clickedPlayer.x - cameraXRef.current) * zoom + rect.left;
-        const screenY = (clickedPlayer.y - cameraYRef.current) * zoom + rect.top;
-        onPlayerClick(clickedPlayer, screenX, screenY);
-        return;
-      }
+      return { rect, zoom, worldX, worldY, clickedPlayer };
+    };
 
+    // ZEP-style single click — opens the player card when it lands on
+    // another avatar; otherwise does nothing. Movement moved to double
+    // click (below) specifically so a single click is free for select/
+    // other actions (this one included) without also sending the local
+    // player walking.
+    const onCanvasClick = (e: MouseEvent) => {
+      if (editorModeRef.current) return; // never move/act while editing the room
+      if (useGameStore.getState().localPlayer.isSitting) return; // stand up first (movement is frozen)
+      const { rect, zoom, clickedPlayer } = resolveClick(e);
+      if (!clickedPlayer) return;
+      const screenX = (clickedPlayer.x - cameraXRef.current) * zoom + rect.left;
+      const screenY = (clickedPlayer.y - cameraYRef.current) * zoom + rect.top;
+      onPlayerClick(clickedPlayer, screenX, screenY);
+    };
+
+    // ZEP-style double click — walk-to-click (path-finds to the clicked
+    // tile; landing on a sittable tile sits down same as before, since
+    // that's the existing arrival behavior, untouched here). Re-runs the
+    // same player hit-test first so double-clicking directly on someone's
+    // avatar opens their card (via the two single-click events a native
+    // dblclick is preceded by) without ALSO pathfinding onto their tile.
+    const onCanvasDblClick = (e: MouseEvent) => {
+      if (editorModeRef.current) return;
+      if (useGameStore.getState().localPlayer.isSitting) return;
+      const { worldX, worldY, clickedPlayer } = resolveClick(e);
+      if (clickedPlayer) return;
       const tileX = Math.floor(worldX / TILE_SIZE);
       const tileY = Math.floor(worldY / TILE_SIZE);
       if (tileX < 0 || tileY < 0) return;
@@ -750,8 +768,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       cancelActiveFollowForRoute();
       walkTargetRef.current = computeWalkWaypoints(tileX, tileY);
     };
+
     canvas.addEventListener('click', onCanvasClick);
-    return () => canvas.removeEventListener('click', onCanvasClick);
+    canvas.addEventListener('dblclick', onCanvasDblClick);
+    return () => {
+      canvas.removeEventListener('click', onCanvasClick);
+      canvas.removeEventListener('dblclick', onCanvasDblClick);
+    };
   }, [isBlocked, computeWalkWaypoints, cancelActiveFollowForRoute, onPlayerClick]);
 
   // Mouse wheel / trackpad zoom — same factor-per-notch convention as the
