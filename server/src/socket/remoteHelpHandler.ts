@@ -92,6 +92,7 @@ export function registerRemoteHelpHandlers(io: Server, socket: Socket): void {
     const targetSocketId = uidToSocket.get(targetUid);
     if (!targetSocketId) {
       socket.emit('admin:error', { message: 'User not found or offline' });
+      void writeAudit(getPrisma(), { actorId: helperUid, action: 'remoteHelp:request', targetType: 'remoteHelpSession', targetUserId: targetUid, meta: { rejected: true, reason: 'offline' } });
       return;
     }
 
@@ -99,17 +100,20 @@ export function registerRemoteHelpHandlers(io: Server, socket: Socket): void {
     // told plainly instead of silently queued or silently dropped.
     if (findActiveByParticipant(targetUid)) {
       socket.emit(SocketEvents.REMOTE_HELP_RESULT, { targetName: getPlayerName(targetSocketId), accepted: false, reason: 'busy' });
+      void writeAudit(getPrisma(), { actorId: helperUid, action: 'remoteHelp:request', targetType: 'remoteHelpSession', targetUserId: targetUid, meta: { rejected: true, reason: 'busy' } });
       return;
     }
 
     if (isUserInLockedZone(room, targetUid, zoneIdOfSocket(targetSocketId))) {
       socket.emit('admin:error', { message: 'Orang itu sedang di zona terkunci — tidak bisa diminta bantuan sekarang.' });
+      void writeAudit(getPrisma(), { actorId: helperUid, action: 'remoteHelp:request', targetType: 'remoteHelpSession', targetUserId: targetUid, meta: { rejected: true, reason: 'locked-zone' } });
       return;
     }
 
     const players = await getPlayers(room);
     if (players.find((p) => p.id === targetSocketId)?.workMode === 'focus') {
       socket.emit('admin:error', { message: `${getPlayerName(targetSocketId)} sedang dalam mode Focus — tidak bisa diminta bantuan sekarang.` });
+      void writeAudit(getPrisma(), { actorId: helperUid, action: 'remoteHelp:request', targetType: 'remoteHelpSession', targetUserId: targetUid, meta: { rejected: true, reason: 'focus' } });
       return;
     }
 
