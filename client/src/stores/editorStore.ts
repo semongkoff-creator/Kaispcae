@@ -644,13 +644,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
       // for 'impassable' (Item #9, excluded from the zones list entirely).
       const id = crypto.randomUUID();
       const zoneType = effect === 'focusArea' ? 'focus' : effect === 'meetingArea' ? 'meeting' : 'desk';
-      // GameCanvas.tsx's in-game banner falls back to purple (#7c3aed) when
-      // a zone has no color — fine for every other area type (they've always
-      // been purple), but a meeting area gets its own teal, and a restricted
-      // area its own red (matching the 🔒 lock badge GameCanvas.tsx already
-      // draws for it), so both read as visually distinct in-game, not just
-      // in the editor's own overlay.
-      const color = effect === 'meetingArea' ? '#14b8a6' : effect === 'restrictedArea' ? '#dc2626' : undefined;
+      // Matches EFFECTS' own legend colors above (RoomEditorPage.tsx) exactly
+      // — every area type now reads as visually distinct in-game, not just in
+      // the editor's own overlay. All five used to funnel through GameCanvas
+      // .tsx's undefined-color fallback (purple, #7c3aed) except meeting/
+      // restricted, which is why map location/private/focus areas rendered
+      // the wrong color (or didn't render at all — see isPrivateZone's own
+      // comment in GameCanvas.tsx for that separate bug).
+      const color =
+        effect === 'meetingArea' ? '#14b8a6'
+        : effect === 'restrictedArea' ? '#dc2626'
+        : effect === 'mapLocation' ? '#c084fc'
+        : effect === 'privateArea' ? '#60a5fa'
+        : effect === 'focusArea' ? '#f59e0b'
+        : undefined;
       d.areas.push({ id, effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, color, zoneType, areaId, audioIsolated, capacity, memberOnly });
       areasDirty = true; pushHistory(snap); commit();
       return id;

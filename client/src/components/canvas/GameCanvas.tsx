@@ -101,11 +101,14 @@ function drawLiveReferenceImage(ctx: CanvasRenderingContext2D, ref: ReferenceIma
 // actually isolating" — same convention, not a new one. Meeting rooms are
 // excluded even when isolating: they already have their own full-width
 // label bar + video-call UI, and stacking this effect on top of that wasn't
-// asked for. Focus areas DO get this treatment (label hidden, dimming
-// applied) per the room admin — reversed from an earlier "stay visually
-// normal" pass once they saw a room full of repeated "Focus" pills in
-// practice; see the dimming color split below for why it's not identical
-// to Private Area's.
+// asked for. Focus areas DO get dimmed per the room admin — reversed from
+// an earlier "stay visually normal" pass once they saw a room full of
+// repeated "Focus" pills in practice; see the dimming color split below for
+// why it's not identical to Private Area's. Their banner/label, unlike the
+// dimming, is NOT tied to this function — every named zone always shows its
+// label now (bug fix; this used to also suppress the label for anything
+// isPrivateZone caught, which silently hid Private/Focus/Restricted Area's
+// banners too, not just the intended dimming).
 function isPrivateZone(zone: Zone): boolean {
   return zone.audioIsolated !== false && zone.type !== 'meeting';
 }
@@ -1740,12 +1743,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // class on these elements) doing the visual resize, same as the canvas
     // content right underneath it.
     for (const zone of zones) {
-      // ZEP-style spotlight follow-up — Private Area zones (isolating,
-      // non-meeting) never show a name at all now, replaced by the
-      // dim/spotlight effect below instead. Map Location/meeting labels are
-      // untouched — this only affects zones the ROOM ADMIN drew as Private
-      // Area (see isPrivateZone's own comment below for the exact signal).
-      if (!zone.label || isPrivateZone(zone)) continue;
+      // Bug fix — banner visibility used to be gated on isPrivateZone too,
+      // which silently suppressed the label for Private/Focus/Restricted
+      // Area (isPrivateZone defaults to true for anything not explicitly
+      // audioIsolated:false or type:'meeting' — see its own comment below),
+      // not just Private Area as the old comment here claimed. The
+      // dim/spotlight effect (isPrivateZone's other use, elsewhere in this
+      // file) is a separate, deliberate, UNCHANGED behavior — every zone
+      // with a name now always shows its banner regardless of isolation.
+      if (!zone.label) continue;
       const el = zoneBannerRefs.current.get(zone.id);
       if (!el) continue;
       const zx = (zone.x * TILE_SIZE - cameraX) * zoom;
@@ -2576,9 +2582,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       />
       {/* Zone banners — positioned imperatively in the draw() loop above via
           style.transform, not React state, so they track the camera at 60fps
-          without re-rendering. */}
+          without re-rendering. Every named zone gets one regardless of
+          isolation (see the matching comment in that loop) — isPrivateZone
+          is only for the separate dim/spotlight effect now. */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {zones.filter((z) => z.label && !isPrivateZone(z) && !isOverviewReactive).map((zone) => (
+        {zones.filter((z) => z.label && !isOverviewReactive).map((zone) => (
           <div
             key={zone.id}
             ref={(el) => {
