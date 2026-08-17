@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type ReactNode, type MouseEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, type ReactNode, type MouseEvent, type ClipboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, MegaphoneFill, ChevronLeft, ChevronRight, XLg, Headset } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@kaispace/shared';
@@ -399,6 +399,37 @@ export function ChatPanel({
       onSendFile?.(file);
     },
     [onSendFile, viewingZone, currentZone, onSendZone, roomSlug]
+  );
+
+  // Ctrl+V a screenshot straight into the input, Lark/WhatsApp-style —
+  // reuses handleAttachFile verbatim (same size check, same zone-vs-channel
+  // branching, same upload path), so this is zero new upload logic, just a
+  // new entry point into the existing one. Only intercepts when the
+  // clipboard actually carries image data; anything else (plain text,
+  // a copied file that isn't an image) falls through to the browser's
+  // normal paste behavior untouched. Multiple images pasted at once become
+  // multiple separate sends — this data model has no multi-attachment
+  // message (see ChannelMessage.attachmentUrl), same as attaching several
+  // files manually one after another.
+  //
+  // Gated on !proximityMode to match AttachmentMenuButton's own visibility
+  // above ("Say nearby" hides the attach button entirely — handleAttachFile
+  // has no proximity branch, it would silently upload into the persisted
+  // channel/DM instead of the ephemeral nearby bubble). This <input> is
+  // shared across every mode, so the paste handler has to enforce the same
+  // restriction the button's own conditional render already does.
+  const handlePaste = useCallback(
+    (e: ClipboardEvent<HTMLInputElement>) => {
+      if (proximityMode) return;
+      const imageFiles = Array.from(e.clipboardData?.items ?? [])
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter((f): f is File => !!f);
+      if (imageFiles.length === 0) return;
+      e.preventDefault();
+      imageFiles.forEach((file) => handleAttachFile(file));
+    },
+    [handleAttachFile, proximityMode]
   );
 
   const handleLoadOlder = useCallback(async () => {
@@ -970,6 +1001,7 @@ export function ChatPanel({
                   if (e.key === 'Enter') handleSend();
                 }}
                 onBlur={() => setMention(null)}
+                onPaste={handlePaste}
                 placeholder={viewingZone ? `Message ${currentZone?.name}...` : proximityMode ? 'Say nearby...' : 'Type a message...'}
                 maxLength={200}
                 className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 disabled:opacity-60"

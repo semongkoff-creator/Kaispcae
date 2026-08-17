@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, type ClipboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle } from 'react-bootstrap-icons';
 import { ChannelMessage, Channel, DirectConversationSummary } from '@kaispace/shared';
@@ -276,6 +276,25 @@ export function MessengerApp({
       onSendFile?.(file);
     },
     [onSendFile]
+  );
+
+  // Ctrl+V a screenshot straight into the input, Lark/WhatsApp-style —
+  // mirrors ChatPanel.tsx's own handlePaste, reusing handleFile verbatim
+  // (same size check, same upload path) instead of any new upload logic.
+  // Only intercepts when the clipboard actually carries image data; plain
+  // text paste falls through untouched. Multiple pasted images become
+  // multiple separate sends, same as attaching several files manually.
+  const handlePaste = useCallback(
+    (e: ClipboardEvent<HTMLTextAreaElement>) => {
+      const imageFiles = Array.from(e.clipboardData?.items ?? [])
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter((f): f is File => !!f);
+      if (imageFiles.length === 0) return;
+      e.preventDefault();
+      imageFiles.forEach((file) => handleFile(file));
+    },
+    [handleFile]
   );
 
   const loadOlder = useCallback(async () => {
@@ -733,6 +752,7 @@ export function MessengerApp({
                       send();
                     }
                   }}
+                  onPaste={handlePaste}
                   placeholder={activeRow ? `Kirim pesan ke ${activeRow.title}` : 'Pilih percakapan'}
                   className="flex-1 min-w-0 resize-none bg-transparent text-sm outline-none py-1 max-h-32"
                 />
