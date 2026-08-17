@@ -72,6 +72,7 @@ import { ActivityFeed } from './components/ui/ActivityFeed';
 import { PendingRequestToast } from './components/ui/PendingRequestToast';
 import { RemoteHelpBanner } from './components/ui/RemoteHelpBanner';
 import { RemoteHelpCredentialForm } from './components/ui/RemoteHelpCredentialForm';
+import { RustdeskSetupHint } from './components/ui/RustdeskSetupHint';
 import { Sidebar } from './components/ui/Sidebar';
 import { MicButton } from './components/hud/MicButton';
 import { HandButton } from './components/hud/HandButton';
@@ -2055,6 +2056,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             <span className="select-all">{receivedRemoteHelpCredential.password}</span>
             <span className="text-gray-500 dark:text-gray-400 text-[10px] font-sans font-semibold shrink-0">Copy</span>
           </button>
+          <RustdeskSetupHint />
         </div>
       )}
 

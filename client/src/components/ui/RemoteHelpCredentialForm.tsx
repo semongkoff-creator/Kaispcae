@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Display } from 'react-bootstrap-icons';
+import { RustdeskSetupHint } from './RustdeskSetupHint';
 
 interface RemoteHelpCredentialFormProps {
   helperName: string;
@@ -86,6 +87,7 @@ export function RemoteHelpCredentialForm({ helperName, onSubmit, acked }: Remote
           Kirim
         </button>
       </form>
+      <RustdeskSetupHint />
     </div>
   );
 }
