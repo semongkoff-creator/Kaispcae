@@ -1424,25 +1424,36 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           const origin = portalOriginRef.current; portalOriginRef.current = null; setPortalHint(false);
           dialogPendingRef.current = true;
           setTimeout(async () => {
-            const label = ((await showPrompt('Nama portal (opsional):', '')) ?? '').trim();
-            dialogPendingRef.current = false;
-            s.addPortal(origin.x, origin.y, { targetX: t.x, targetY: t.y, label: label || undefined });
+            // try/finally — same stuck-forever fix as the areaRect flow
+            // below: without it, a throw here leaves dialogPendingRef stuck
+            // `true` and silently blocks every future Portal/area dialog.
+            try {
+              const label = ((await showPrompt('Nama portal (opsional):', '')) ?? '').trim();
+              dialogPendingRef.current = false;
+              s.addPortal(origin.x, origin.y, { targetX: t.x, targetY: t.y, label: label || undefined });
+            } finally {
+              dialogPendingRef.current = false;
+            }
           }, DIALOG_DEFER_MS);
           return;
         }
         // First click: choose cross-room vs internal.
         dialogPendingRef.current = true;
         setTimeout(async () => {
-          const wantsCrossRoom = await showConfirm('Portal ke ROOM LAIN?\n\nOK = pilih room lain · Batal = titik dalam room ini');
-          if (wantsCrossRoom) {
-            const target = ((await showPrompt('Kode room tujuan (slug dari URL/share):', '')) ?? '').trim();
+          try {
+            const wantsCrossRoom = await showConfirm('Portal ke ROOM LAIN?\n\nOK = pilih room lain · Batal = titik dalam room ini');
+            if (wantsCrossRoom) {
+              const target = ((await showPrompt('Kode room tujuan (slug dari URL/share):', '')) ?? '').trim();
+              dialogPendingRef.current = false;
+              if (!target) return;
+              const label = ((await showPrompt('Nama portal (opsional):', '')) ?? '').trim();
+              s.addPortal(t.x, t.y, { targetSlug: target, label: label || undefined });
+            } else {
+              dialogPendingRef.current = false;
+              portalOriginRef.current = { x: t.x, y: t.y }; setPortalHint(true);
+            }
+          } finally {
             dialogPendingRef.current = false;
-            if (!target) return;
-            const label = ((await showPrompt('Nama portal (opsional):', '')) ?? '').trim();
-            s.addPortal(t.x, t.y, { targetSlug: target, label: label || undefined });
-          } else {
-            dialogPendingRef.current = false;
-            portalOriginRef.current = { x: t.x, y: t.y }; setPortalHint(true);
           }
         }, DIALOG_DEFER_MS);
       } else if (eff === 'impassableArea' || eff === 'wallArea' || eff === 'doorArea') {
@@ -1574,6 +1585,16 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       if (sel && !dialogPendingRef.current) {
         dialogPendingRef.current = true;
         setTimeout(async () => {
+          // Bug fix — the reset below used to only run on the happy path.
+          // Any throw inside this block (a rejected showPrompt/showConfirm,
+          // adminApi failing synchronously, etc.) skipped past it and left
+          // dialogPendingRef stuck at `true` forever — the guard above then
+          // silently no-ops EVERY subsequent area-creation attempt (Map
+          // Location, Private, Focus, Meeting, Restricted all share this one
+          // ref) for the rest of the session, with no error shown: the
+          // selection box just clears on mouseup and nothing else happens.
+          // try/finally guarantees the reset runs no matter how this ends.
+          try {
           if (s.selectedEffect === 'privateArea') {
             const name = ((await showPrompt('Nama private area:', 'Private')) ?? '').trim();
             const areaId = ((await showPrompt('Area ID (samakan untuk menggabung area terpisah jadi satu grup):', '1')) ?? '').trim();
@@ -1625,7 +1646,9 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               await showAlert('Area berhasil dibuat, tapi gagal menandainya sebagai restricted. Hapus area ini (Eraser) lalu gambar ulang untuk coba lagi.');
             });
           }
-          dialogPendingRef.current = false;
+          } finally {
+            dialogPendingRef.current = false;
+          }
         }, DIALOG_DEFER_MS);
       }
     }
