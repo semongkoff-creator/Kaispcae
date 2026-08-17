@@ -2644,20 +2644,22 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           undecorated style. */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {zones.filter((z) => z.label).map((zone) => {
-          // Bug fix — Overview mode's plain-text labels (below) read as
-          // clutter for generic "Private" desk areas specifically: a real
-          // office floor plan has dozens of these (one per desk), so the
-          // label just repeats the same word across the whole screen with
-          // no distinguishing information. Meeting/Focus/Restricted/Map
+          // Bug fix — the "Private" pill/label reads as clutter for generic
+          // desk areas: a real office floor plan has dozens of these (one
+          // per desk), so the label just repeats the same word across the
+          // whole screen with no distinguishing information, in Overview
+          // mode AND in normal view alike. Meeting/Focus/Restricted/Map
           // Location areas have a real, distinct name and stay labeled —
           // only the generic isolating "Private" case (isPrivateZone minus
           // Focus, which already opted out of this treatment, and minus
           // Restricted, checked via the same restrictedZoneIds set the 🔒
-          // badge below uses) goes color-block-only in this one mode. The
-          // normal (non-Overview) pill is untouched either way.
-          const suppressLabelInOverview =
-            isOverviewReactive && isPrivateZone(zone) && zone.type !== 'focus' && !restrictedZoneIds?.has(zone.id);
-          if (suppressLabelInOverview) return null;
+          // badge below uses) goes color-block-only, regardless of zoom
+          // level. Naming a zone "Map Location" in the Room Editor is what
+          // keeps its own label showing — isPrivateZone returns false for
+          // it (audioIsolated: false), it never hits this suppression.
+          const suppressPrivateLabel =
+            isPrivateZone(zone) && zone.type !== 'focus' && !restrictedZoneIds?.has(zone.id);
+          if (suppressPrivateLabel) return null;
           return (
             <div
               key={zone.id}
