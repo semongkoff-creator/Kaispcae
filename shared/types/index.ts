@@ -1168,10 +1168,16 @@ export interface RemoteHelpResultPayload {
 }
 
 // The target's own RustDesk ID+password, relayed once to the helper's
-// socket only — the server never persists this string anywhere (see
-// remoteHelpHandler.ts's REMOTE_HELP_CREDENTIAL handler).
+// socket only — the server never persists this anywhere (see
+// remoteHelpHandler.ts's REMOTE_HELP_CREDENTIAL handler). Split into two
+// fields (rather than one freeform string) so the helper's client can build
+// a `rustdesk://<id>` deep link from the ID alone — the ID is not a secret
+// (RustDesk shows it plainly on its own home screen), so it's safe to embed
+// in a clickable link; the password never goes into a link/URL of any kind,
+// only a copy-to-clipboard button, so it never lands in browser/OS history.
 export interface RemoteHelpCredentialPayload {
-  credential: string;
+  rustdeskId: string;
+  password: string;
 }
 
 // Sent to whichever party did NOT click "Selesai" (or disconnected), so

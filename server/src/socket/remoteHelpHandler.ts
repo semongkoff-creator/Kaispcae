@@ -216,11 +216,16 @@ export function registerRemoteHelpHandlers(io: Server, socket: Socket): void {
     // active.targetUid === uid — no need to re-check that explicitly.
     const active = activeByTarget.get(uid);
     if (!active) { fail(); return; }
-    const credential = typeof data?.credential === 'string' ? data.credential.slice(0, 500) : '';
-    if (!credential) { fail(); return; }
+    // Split fields (not one freeform string) — see RemoteHelpCredentialPayload's
+    // own doc comment: the ID alone is safe to embed in a rustdesk:// link
+    // client-side, the password never is, so they travel as distinct values
+    // all the way through instead of being parsed back apart downstream.
+    const rustdeskId = typeof data?.rustdeskId === 'string' ? data.rustdeskId.trim().slice(0, 100) : '';
+    const password = typeof data?.password === 'string' ? data.password.slice(0, 200) : '';
+    if (!rustdeskId || !password) { fail(); return; }
     const helperSocketId = uidToSocket.get(active.helperUid);
     if (!helperSocketId) { fail(); return; }
-    io.to(helperSocketId).emit(SocketEvents.REMOTE_HELP_CREDENTIAL, { credential });
+    io.to(helperSocketId).emit(SocketEvents.REMOTE_HELP_CREDENTIAL, { rustdeskId, password });
     io.to(socket.id).emit(SocketEvents.REMOTE_HELP_CREDENTIAL_ACK);
   });
 

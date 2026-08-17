@@ -535,10 +535,13 @@ export interface GameState {
   activeRemoteHelp: { role: 'target' | 'helper'; otherName: string } | null;
   setActiveRemoteHelp: (v: { role: 'target' | 'helper'; otherName: string } | null) => void;
   // The credential the TARGET typed in, once relayed — read once by the
-  // HELPER's own UI to display it, then the string is not needed again.
-  // Never localStorage/sessionStorage (see design spec's Security section).
-  receivedRemoteHelpCredential: string | null;
-  setReceivedRemoteHelpCredential: (v: string | null) => void;
+  // HELPER's own UI to display it, then not needed again. Split fields (not
+  // one string) so the helper's UI can build a rustdesk://<id> deep link
+  // from just the id — see RemoteHelpCredentialPayload's own doc comment
+  // for why the password specifically never travels through a link. Never
+  // localStorage/sessionStorage (see design spec's Security section).
+  receivedRemoteHelpCredential: { rustdeskId: string; password: string } | null;
+  setReceivedRemoteHelpCredential: (v: { rustdeskId: string; password: string } | null) => void;
   // Authoritative "your credential actually reached the helper" signal —
   // set true only by the server's REMOTE_HELP_CREDENTIAL_ACK, reset to
   // false whenever a fresh session starts (see App.tsx's accept-click

@@ -475,7 +475,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       if (data.accepted) useGameStore.getState().setActiveRemoteHelp({ role: 'helper', otherName: data.targetName });
     });
     socket.on(SocketEvents.REMOTE_HELP_CREDENTIAL, (data: RemoteHelpCredentialPayload) => {
-      useGameStore.getState().setReceivedRemoteHelpCredential(data.credential);
+      useGameStore.getState().setReceivedRemoteHelpCredential({ rustdeskId: data.rustdeskId, password: data.password });
     });
     // Final-review Fix 3 — authoritative confirmation the credential
     // actually reached the helper; the only signal RemoteHelpCredentialForm
@@ -1430,8 +1430,8 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.REMOTE_HELP_RESPOND, { requestId, accept });
   }, []);
 
-  const emitRemoteHelpCredential = useCallback((credential: string) => {
-    socketRef.current?.emit(SocketEvents.REMOTE_HELP_CREDENTIAL, { credential });
+  const emitRemoteHelpCredential = useCallback((rustdeskId: string, password: string) => {
+    socketRef.current?.emit(SocketEvents.REMOTE_HELP_CREDENTIAL, { rustdeskId, password });
   }, []);
 
   const emitRemoteHelpEnd = useCallback(() => {

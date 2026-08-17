@@ -3,7 +3,11 @@ import { Display } from 'react-bootstrap-icons';
 
 interface RemoteHelpCredentialFormProps {
   helperName: string;
-  onSubmit: (credential: string) => void;
+  // Split fields, not one freeform string — see RemoteHelpCredentialPayload's
+  // own doc comment: only the ID is safe to turn into a clickable
+  // rustdesk:// link on the helper's side, so the two travel separately all
+  // the way through instead of being typed together and parsed apart later.
+  onSubmit: (rustdeskId: string, password: string) => void;
   // Final-review Fix 3 — authoritative "the server actually relayed this to
   // the helper" signal (REMOTE_HELP_CREDENTIAL_ACK), NOT a local "I clicked
   // submit" flag. The server has several silent early-return paths (no
@@ -19,9 +23,10 @@ interface RemoteHelpCredentialFormProps {
 // own in here, it is relayed to the helper exactly once, and this
 // component's own local state is the only place it ever lives client-side
 // (never localStorage/sessionStorage — see the design spec's Security
-// section). The field clears itself immediately after submit.
+// section). Both fields clear themselves immediately after submit.
 export function RemoteHelpCredentialForm({ helperName, onSubmit, acked }: RemoteHelpCredentialFormProps) {
-  const [value, setValue] = useState('');
+  const [rustdeskId, setRustdeskId] = useState('');
+  const [password, setPassword] = useState('');
   // Purely a local "I already clicked submit" flag for an immediate
   // "Mengirim…" pending indicator between click and the server's ack — the
   // real "Terkirim" confirmation below is gated on `acked`, not this.
@@ -49,24 +54,38 @@ export function RemoteHelpCredentialForm({ helperName, onSubmit, acked }: Remote
         <Display size={14} className="text-purple-600 dark:text-purple-400" />
         Buka RustDesk, kirim ID+password kamu
       </div>
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="mis. 123 456 789  password"
-        className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-800 dark:text-gray-100 outline-none focus:border-purple-400"
-      />
-      <button
-        onClick={() => {
-          if (!value.trim()) return;
-          onSubmit(value.trim());
-          setValue('');
+      <form
+        className="flex flex-col gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const id = rustdeskId.trim(), pw = password.trim();
+          if (!id || !pw) return;
+          onSubmit(id, pw);
+          setRustdeskId(''); setPassword('');
           setSent(true);
         }}
-        className="self-end px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium cursor-pointer transition-colors"
       >
-        Kirim
-      </button>
+        <input
+          type="text"
+          value={rustdeskId}
+          onChange={(e) => setRustdeskId(e.target.value)}
+          placeholder="ID RustDesk, mis. 123456789"
+          className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-800 dark:text-gray-100 outline-none focus:border-purple-400"
+        />
+        <input
+          type="text"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password RustDesk"
+          className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-800 dark:text-gray-100 outline-none focus:border-purple-400"
+        />
+        <button
+          type="submit"
+          className="self-end px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium cursor-pointer transition-colors"
+        >
+          Kirim
+        </button>
+      </form>
     </div>
   );
 }

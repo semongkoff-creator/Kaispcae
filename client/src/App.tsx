@@ -2027,14 +2027,34 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {activeRemoteHelp?.role === 'target' && !receivedRemoteHelpCredential && (
         <RemoteHelpCredentialForm
           helperName={activeRemoteHelp.otherName}
-          onSubmit={(credential) => emitRemoteHelpCredential(credential)}
+          onSubmit={(rustdeskId, password) => emitRemoteHelpCredential(rustdeskId, password)}
           acked={remoteHelpCredentialAcked}
         />
       )}
       {activeRemoteHelp?.role === 'helper' && receivedRemoteHelpCredential && (
-        <div className="fixed top-32 right-4 z-50 w-72 bg-white/95 dark:bg-gray-900/95 rounded-xl shadow-lg px-3.5 py-3 text-xs text-gray-800 dark:text-gray-100">
-          <div className="font-semibold mb-1">ID+password dari {activeRemoteHelp.otherName}:</div>
-          <div className="font-mono bg-gray-100 dark:bg-gray-800 rounded px-2 py-1.5 select-all">{receivedRemoteHelpCredential}</div>
+        <div className="fixed top-32 right-4 z-50 w-72 bg-white/95 dark:bg-gray-900/95 rounded-xl shadow-lg px-3.5 py-3 text-xs text-gray-800 dark:text-gray-100 flex flex-col gap-2">
+          <div className="font-semibold">ID+password dari {activeRemoteHelp.otherName}:</div>
+          {/* ID only — safe to embed in a link, RustDesk shows this plainly
+              on its own home screen too. Password NEVER goes into a link/URL
+              (see RemoteHelpCredentialPayload's doc comment) — copy-button
+              only, so it can't end up in browser/OS history. Real behavior
+              of the rustdesk:// scheme (does it open the app? pre-fill the
+              ID field?) depends on the RustDesk version installed — needs a
+              real test, this is a best-effort convenience, not guaranteed. */}
+          <a
+            href={`rustdesk://${encodeURIComponent(receivedRemoteHelpCredential.rustdeskId)}`}
+            className="flex items-center justify-between gap-2 font-mono bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 rounded px-2 py-1.5 hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors"
+          >
+            <span className="select-all">{receivedRemoteHelpCredential.rustdeskId}</span>
+            <span className="text-purple-600 dark:text-purple-400 text-[10px] font-sans font-semibold shrink-0">Buka RustDesk →</span>
+          </a>
+          <button
+            onClick={() => { navigator.clipboard?.writeText(receivedRemoteHelpCredential.password).catch(() => {}); }}
+            className="flex items-center justify-between gap-2 font-mono bg-gray-100 dark:bg-gray-800 rounded px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-left cursor-pointer"
+          >
+            <span className="select-all">{receivedRemoteHelpCredential.password}</span>
+            <span className="text-gray-500 dark:text-gray-400 text-[10px] font-sans font-semibold shrink-0">Copy</span>
+          </button>
         </div>
       )}
 
