@@ -40,6 +40,9 @@ import { drawMiniTileType, drawMiniZoneBackground, MINI_FURNITURE, MINI_WALL_ARE
 // icon, speech bubble, speaking-pulse ring — stay the same relative distance
 // from the avatar as the sprite itself scales with TILE_SIZE (Fitur 4).
 const AVATAR_RADIUS = TILE_SIZE * (14 / 32);
+// Zone name banners never render smaller than this, regardless of zoom —
+// see the zone-banner positioning loop's own comment for why.
+const MIN_ZONE_LABEL_FONT_PX = 10;
 
 // Shared by both the legacy (approach-direction) and orientation-aware
 // (sitFacing) sit-direction paths in performSit below — one lookup, not two.
@@ -1756,12 +1759,33 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       if (!el) continue;
       const zx = (zone.x * TILE_SIZE - cameraX) * zoom;
       const zy = (zone.y * TILE_SIZE - cameraY) * zoom;
-      const zw = zone.width * TILE_SIZE;
-      if (zone.type === 'meeting') {
-        el.style.transform = `translate(${zx}px, ${zy}px) scale(${zoom})`;
+      const zw = zone.width * TILE_SIZE * zoom;
+      // Readability fix — this used to be a single `scale(zoom)` on the
+      // whole element (font AND box together), so the name shrank in
+      // lock-step with the room and went unreadable well before Overview
+      // mode's fixed 0.3 floor. Font size is now computed explicitly with a
+      // floor (MIN_ZONE_LABEL_FONT_PX) instead of living inside the
+      // transform, so it keeps shrinking proportionally with zoom-out right
+      // up until the floor, then just stops — never below legible. Position
+      // (translate) still uses the real, unclamped zoom so the banner stays
+      // pinned to its actual on-screen corner at any zoom level.
+      const baseFontPx = isOverview ? 11 : zone.type === 'meeting' ? 14 : 10;
+      el.style.fontSize = `${Math.max(MIN_ZONE_LABEL_FONT_PX, baseFontPx * zoom)}px`;
+      if (isOverview) {
+        // Full Office View — every zone gets the SAME plain-text treatment
+        // (no colored pill/bar) regardless of type, matching the flat,
+        // uncluttered floor-plan aesthetic the rest of Overview mode already
+        // uses (see miniRender.ts's own header comment) — a colored pill per
+        // zone reads fine for a handful of rooms in the normal view, but
+        // Kaitech's real room alone has 50+ named areas; that many colored
+        // boxes at once in a whole-office view would bury the map itself.
+        el.style.transform = `translate(${zx + 4 * zoom}px, ${zy + 2 * zoom}px)`;
+        el.style.width = `${zw}px`;
+      } else if (zone.type === 'meeting') {
+        el.style.transform = `translate(${zx}px, ${zy}px)`;
         el.style.width = `${zw}px`;
       } else {
-        el.style.transform = `translate(${zx + 6 * zoom}px, ${zy - 12 * zoom}px) scale(${zoom})`;
+        el.style.transform = `translate(${zx + 6 * zoom}px, ${zy - 12 * zoom}px)`;
         el.style.width = 'auto';
       }
       el.style.opacity = isAvatarUnderLabel(zone.x, zone.y, zone.width) ? '0' : '1';
@@ -2581,12 +2605,16 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         onContextMenu={handleContextMenu}
       />
       {/* Zone banners — positioned imperatively in the draw() loop above via
-          style.transform, not React state, so they track the camera at 60fps
-          without re-rendering. Every named zone gets one regardless of
-          isolation (see the matching comment in that loop) — isPrivateZone
-          is only for the separate dim/spotlight effect now. */}
+          style.transform (including font size, see MIN_ZONE_LABEL_FONT_PX),
+          not React state, so they track the camera at 60fps without
+          re-rendering. Every named zone gets one regardless of isolation
+          (see the matching comment in that loop) — isPrivateZone is only
+          for the separate dim/spotlight effect now. Now rendered in
+          Overview mode too (previously excluded entirely) — see the
+          isOverviewReactive branch below for its own, deliberately
+          undecorated style. */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {zones.filter((z) => z.label && !isOverviewReactive).map((zone) => (
+        {zones.filter((z) => z.label).map((zone) => (
           <div
             key={zone.id}
             ref={(el) => {
@@ -2595,9 +2623,24 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
             }}
             className="absolute top-0 left-0 will-change-transform origin-top-left"
           >
-            {zone.type === 'meeting' ? (
+            {isOverviewReactive ? (
+              // Plain text, no colored pill/bar — see the positioning loop's
+              // comment for why (Full Office View can have 50+ named areas
+              // on screen at once; a colored box per zone would bury the
+              // floor plan the rest of Overview mode is going for). Text-
+              // shadow substitutes for the pill's own background contrast,
+              // since the zone's flat color tint (drawMiniZoneBackground)
+              // is faint and varies per zone.
               <div
-                className="px-3 py-1.5 text-center text-white font-bold text-sm tracking-wide shadow-md inline-flex items-center gap-1.5"
+                className="font-bold text-white whitespace-nowrap"
+                style={{ textShadow: '0 1px 2px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.7)' }}
+              >
+                {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
+                {zone.label}
+              </div>
+            ) : zone.type === 'meeting' ? (
+              <div
+                className="px-3 py-1.5 text-center text-white font-bold tracking-wide shadow-md inline-flex items-center gap-1.5"
                 style={{ backgroundColor: zone.color || '#7c3aed' }}
               >
                 {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
@@ -2605,7 +2648,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
               </div>
             ) : (
               <div
-                className="px-2 py-0.5 rounded-full text-[10px] font-semibold text-white shadow whitespace-nowrap inline-flex items-center gap-1"
+                className="px-2 py-0.5 rounded-full font-semibold text-white shadow whitespace-nowrap inline-flex items-center gap-1"
                 style={{ backgroundColor: zone.color || '#7c3aed' }}
               >
                 {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
