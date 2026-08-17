@@ -2644,21 +2644,20 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           undecorated style. */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {zones.filter((z) => z.label).map((zone) => {
-          // Bug fix — the "Private" pill/label reads as clutter for generic
-          // desk areas: a real office floor plan has dozens of these (one
-          // per desk), so the label just repeats the same word across the
-          // whole screen with no distinguishing information, in Overview
-          // mode AND in normal view alike. Meeting/Focus/Restricted/Map
-          // Location areas have a real, distinct name and stay labeled —
-          // only the generic isolating "Private" case (isPrivateZone minus
-          // Focus, which already opted out of this treatment, and minus
-          // Restricted, checked via the same restrictedZoneIds set the 🔒
-          // badge below uses) goes color-block-only, regardless of zoom
-          // level. Naming a zone "Map Location" in the Room Editor is what
-          // keeps its own label showing — isPrivateZone returns false for
-          // it (audioIsolated: false), it never hits this suppression.
-          const suppressPrivateLabel =
-            isPrivateZone(zone) && zone.type !== 'focus' && !restrictedZoneIds?.has(zone.id);
+          // Bug fix — a repeated generic label ("Private"/"Focus") reads as
+          // clutter, not information: a real office floor plan has dozens
+          // of these (one per desk), left at their default name, so the
+          // label just repeats the same word across the whole screen. Per
+          // the room admin, ONLY Map Location is meant to keep its name
+          // visible on the map — every other isolating area (Private,
+          // Focus) goes color-block-only, regardless of zoom level.
+          // Restricted stays labeled (checked via the same restrictedZoneIds
+          // set the 🔒 badge below uses) since it's typically a real, unique
+          // room name ("CEO Office"), not a repeated default. Naming a zone
+          // "Map Location" in the Room Editor is what keeps its own label
+          // showing — isPrivateZone returns false for it (audioIsolated:
+          // false), it never hits this suppression.
+          const suppressPrivateLabel = isPrivateZone(zone) && !restrictedZoneIds?.has(zone.id);
           if (suppressPrivateLabel) return null;
           return (
             <div
