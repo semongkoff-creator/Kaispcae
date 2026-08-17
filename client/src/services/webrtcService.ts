@@ -138,9 +138,20 @@ const SCREEN_SHARE_MAX_BITRATE_BPS = 2_500_000;
 // Purely observational: added to locate where two-way audio breaks, after
 // two code-reading fixes failed to resolve it. Remove once the real cause is
 // found and fixed — it must not become permanent noise in the console.
+//
+// Buffered in memory (never localStorage/sessionStorage — gone on reload,
+// which is fine for a temporary diagnostic) so a non-technical person on a
+// real call doesn't have to manually scroll/select console output: they run
+// webrtcDiagExport() once (see bottom of file) and get the whole session's
+// log as one copyable block. Capped so a long-running room can't grow this
+// unbounded.
+const diagLog: string[] = [];
+const MAX_DIAG_LOG_LINES = 2000;
 function diag(event: string, data?: unknown): void {
   if (data === undefined) console.log(`[webrtc-diag] ${event}`);
   else console.log(`[webrtc-diag] ${event}`, data);
+  diagLog.push(`${new Date().toISOString()} ${event}${data === undefined ? '' : ' ' + JSON.stringify(data)}`);
+  if (diagLog.length > MAX_DIAG_LOG_LINES) diagLog.shift();
 }
 
 // Whether an SDP actually carries an audio m-line, and which direction it
@@ -671,6 +682,12 @@ class WebRTCService {
     }
   }
 
+  // [webrtc-diag] §7 — cumulative packet counts from the last tick, per peer,
+  // purely so reportStats() below can turn "total packets since the call
+  // started" into "packets in the last ~5s" (see its own comment for why the
+  // cumulative number alone is misleading for a mid-call stall).
+  private lastPacketCounts = new Map<string, { in: number; out: number }>();
+
   // [webrtc-diag] The decisive measurement, and the reason this whole pass
   // exists: whether audio BYTES are actually crossing the wire.
   //   bytesReceived climbing  → transport is fine, the fault is playback.
@@ -678,26 +695,41 @@ class WebRTCService {
   //                              the sending side is at fault.
   // Guessing between those two without measuring is exactly what went wrong
   // in the previous two attempts.
+  //
+  // `verdict` turns the raw numbers below into the one thing this
+  // investigation is actually asking for — which of the 4 failure directions
+  // this peer is in RIGHT NOW — instead of leaving that as manual
+  // cross-referencing across several log lines. Cumulative bytesReceived
+  // staying nonzero forever after an early success would otherwise read as
+  // "fine" even if it has been stalled for the last 10 minutes — inDelta/
+  // outDelta (packets since the LAST tick, ~5s ago) is what actually proves
+  // "flowing right now" vs "flowed once, then stopped".
   async reportStats(): Promise<void> {
     if (!this.peers.size) { diag('stats: no peers connected'); return; }
     for (const [id, peer] of this.peers) {
+      const ice = peer.pc.iceConnectionState;
       const out: Record<string, unknown> = {
-        ice: peer.pc.iceConnectionState,
+        ice,
         conn: peer.pc.connectionState,
-        elVolume: peer.audioEl?.volume,
         elPaused: peer.audioEl?.paused,
+        elMuted: peer.audioEl?.muted,
+        trackMuted: peer.audioEl ? (peer.audioEl.srcObject as MediaStream | null)?.getAudioTracks()[0]?.muted : undefined,
         ctx: this.audioContext?.state,
       };
+      let audioInPackets = 0;
+      let audioOutPackets = 0;
       try {
         const stats = await peer.pc.getStats();
         stats.forEach((r: Record<string, unknown>) => {
           if (r.type === 'inbound-rtp' && r.kind === 'audio') {
             out.audioIn_bytes = r.bytesReceived;
             out.audioIn_packets = r.packetsReceived;
+            audioInPackets = typeof r.packetsReceived === 'number' ? r.packetsReceived : 0;
           }
           if (r.type === 'outbound-rtp' && r.kind === 'audio') {
             out.audioOut_bytes = r.bytesSent;
             out.audioOut_packets = r.packetsSent;
+            audioOutPackets = typeof r.packetsSent === 'number' ? r.packetsSent : 0;
           }
           if (r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated) {
             out.pathLocal = r.localCandidateId;
@@ -706,6 +738,21 @@ class WebRTCService {
           if (r.type === 'local-candidate' && r.id === out.pathLocal) out.localType = r.candidateType;
           if (r.type === 'remote-candidate' && r.id === out.pathRemote) out.remoteType = r.candidateType;
         });
+
+        const prev = this.lastPacketCounts.get(id) ?? { in: 0, out: 0 };
+        const inDelta = audioInPackets - prev.in;
+        const outDelta = audioOutPackets - prev.out;
+        this.lastPacketCounts.set(id, { in: audioInPackets, out: audioOutPackets });
+        out.audioIn_deltaSinceLastTick = inDelta;
+        out.audioOut_deltaSinceLastTick = outDelta;
+
+        const iceOk = ice === 'connected' || ice === 'completed';
+        out.verdict = !peer.audioEl ? 'NO_TRACK (belum pernah terima track audio dari peer ini)'
+          : !iceOk ? `ICE_NOT_CONNECTED (${ice})`
+          : outDelta <= 0 ? 'SENDER_NOT_SENDING (kita tidak kirim audio ke peer ini)'
+          : inDelta <= 0 ? 'RECEIVER_NOT_RECEIVING (audio dari peer ini tidak sampai)'
+          : (peer.audioEl.paused || this.audioContext?.state === 'suspended') ? 'RECEIVING_NOT_PLAYING (sampai tapi tidak diputar)'
+          : 'OK';
       } catch (err) {
         out.statsError = String(err);
       }
@@ -842,6 +889,15 @@ class WebRTCService {
         // this machine's own speakers.
         (el as HTMLAudioElement & { playsInline?: boolean }).playsInline = true;
         peer.audioEl = el;
+        // [webrtc-diag] §6 — ontrack above only logs muted/enabled ONCE, at
+        // the moment the track arrives. A track that goes mute mid-call (the
+        // browser does this on its own when it stops receiving RTP for a
+        // beat, independent of the ICE state above — this is exactly the
+        // "connected but silent, no error" shape the reported bug has) would
+        // otherwise leave zero trace anywhere in this file.
+        event.track.onmute = () => diag('remote audio track MUTED', { from: remoteId, ice: pc.iceConnectionState });
+        event.track.onunmute = () => diag('remote audio track unmuted', { from: remoteId });
+        event.track.onended = () => diag('remote audio track ENDED', { from: remoteId, ice: pc.iceConnectionState });
         // Route to the chosen speaker if one was picked. setSinkId exists only
         // on Chromium (Firefox largely lacks output selection) — optional
         // chaining just no-ops where it's unsupported.
@@ -1231,6 +1287,12 @@ class WebRTCService {
       this.peers.delete(id);
       this.audioDestNodes.get(id)?.disconnect();
       this.audioDestNodes.delete(id);
+      // [webrtc-diag] A reconnect starts a brand-new RTCPeerConnection whose
+      // packet counters reset to 0 — a stale prev value from the old
+      // connection would otherwise produce a nonsensical negative delta (and
+      // a false SENDER_NOT_SENDING/RECEIVER_NOT_RECEIVING verdict) on the
+      // very first tick after reconnecting.
+      this.lastPacketCounts.delete(id);
       // Torn down for ANY reason (proximity left, retry-then-reconnect,
       // explicit cleanup) — a stale "connection lost" badge from an earlier
       // permanent failure must not linger once the peer itself is gone.
@@ -1488,4 +1550,19 @@ if (typeof window !== 'undefined') {
   console.log('[webrtc-diag] TURN configured:', !!(TURN_URL && TURN_USERNAME && TURN_CREDENTIAL), TURN_URL ? `(${TURN_URL})` : '(STUN only)');
   (window as unknown as { webrtcDiag: () => void }).webrtcDiag = () => { void webrtcService.reportStats(); };
   setInterval(() => { void webrtcService.reportStats(); }, 5000);
+  // [webrtc-diag] For someone reproducing the bug who isn't going to
+  // manually scroll/select console output mid-meeting: run
+  // webrtcDiagExport() in the console once, and the whole session's log
+  // (every ICE change, ontrack, play() result, and 5s stats tick, in order)
+  // is copied to the clipboard as one block, ready to paste back. Falls back
+  // to printing it plainly if the Clipboard API is unavailable/blocked
+  // (e.g. no secure context, or the permission prompt was never answered).
+  (window as unknown as { webrtcDiagExport: () => string }).webrtcDiagExport = () => {
+    const text = diagLog.join('\n');
+    navigator.clipboard?.writeText(text).then(
+      () => console.log(`[webrtc-diag] ${diagLog.length} baris disalin ke clipboard — tinggal paste & kirim.`),
+      () => console.log(`[webrtc-diag] gagal salin otomatis (${diagLog.length} baris) — copy manual teks di bawah ini:\n${text}`),
+    );
+    return text;
+  };
 }
