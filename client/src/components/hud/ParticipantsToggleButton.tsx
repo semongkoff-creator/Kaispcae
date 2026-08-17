@@ -6,14 +6,18 @@ interface ParticipantsToggleButtonProps {
   onToggle: () => void;
 }
 
-// Toolbar entry point for ParticipantPanel — previously ParticipantPanel
-// rendered its own top-left trigger button (with an online-count badge
-// computed from its own local playerRecords read); this calls the exact
-// same toggle (openPanel('participants'), see App.tsx) so open/close
-// behaves identically, just from the meeting toolbar instead of a separate
-// corner. The count itself is left inside ParticipantPanel's own header
-// (still shown once the panel is open) rather than duplicated here from a
-// second store read.
+// Toolbar entry point for ParticipantPanel — previously anchored in the
+// bottom meeting-control bar (circular, w-10 h-10, its own separate look),
+// now relocated to the top-left rail beside Soundboard/ActivityFeed (see
+// App.tsx). Restyled to match that rail's own button convention exactly
+// (w-8 h-8 rounded-lg, same open/closed color pair — see
+// SoundboardPanel.tsx's identical button) now that this is its only home,
+// rather than carrying the old bottom-bar circular style into a row where
+// every other icon is a boxy square. Calls the exact same toggle
+// (openPanel('participants'), see App.tsx) so open/close behavior is
+// unchanged, only the look moved. The online-count badge stays inside
+// ParticipantPanel's own header (shown once the panel is open) rather than
+// duplicated here from a second store read.
 export function ParticipantsToggleButton({ open, onToggle }: ParticipantsToggleButtonProps) {
   return (
     <Tooltip
@@ -22,13 +26,13 @@ export function ParticipantsToggleButton({ open, onToggle }: ParticipantsToggleB
     >
       <button
         onClick={onToggle}
-        className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
+        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
           open
-            ? 'bg-purple-600 border-purple-500 shadow-purple-500/30'
-            : 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
+            ? 'bg-purple-600 text-white'
+            : 'bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800 border border-purple-100 dark:border-gray-700 shadow-sm'
         }`}
       >
-        <PeopleFill className={open ? 'text-white' : 'text-purple-700 dark:text-purple-300'} size={16} />
+        <PeopleFill size={14} />
       </button>
     </Tooltip>
   );
