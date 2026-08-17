@@ -42,10 +42,17 @@ interface DrawAvatarOptions {
   queueCountdown?: string;
 }
 
+// Returns the Y position immediately above everything this function drew
+// (name label, statusTag, presence pill — however many of those three are
+// actually present for this avatar right now) — the next free vertical
+// slot, so a caller stacking something else above the head (GameCanvas.tsx's
+// admin crown/soundboard icon) lands there instead of a hardcoded offset
+// that collides whenever a status badge happens to already occupy that
+// exact spot (see GameCanvas.tsx's own call site for the bug this fixed).
 export function drawAvatar(
   ctx: CanvasRenderingContext2D,
   options: DrawAvatarOptions,
-) {
+): number {
   const { avatar, x, y, isLocal, walkAnimOffset, timestamp = 0, scale = 1, queueCountdown } = options;
   const config = avatar.avatarConfig;
   const color = config?.color || avatar.color || DEFAULT_COLOR;
@@ -154,6 +161,13 @@ export function drawAvatar(
   if (queueCountdown) {
     drawQueueCountdownPill(ctx, cx, nextBadgeY, queueCountdown);
   }
+
+  // Hand-raise and the queue countdown intentionally share the same slot
+  // above (both "topmost", see their own comments) rather than stacking on
+  // each other — so this only needs to clear that ONE shared slot once,
+  // not twice, when accounting for whichever (if either) was actually drawn.
+  if (avatar.handRaised || queueCountdown) nextBadgeY -= 20;
+  return nextBadgeY;
 }
 
 // ─── Layered pixel-art sprite ──────────────────────────────────────

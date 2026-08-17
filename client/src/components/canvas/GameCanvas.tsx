@@ -1971,7 +1971,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const nudgeOffset = getNudgeShakeOffset(nudgeStart, now);
       const zoneSession = activeZoneSessionsRef.current.get(avatar.userId ?? avatar.id);
       const queueCountdown = zoneSession ? `⏳ ${formatQueueCountdown(zoneSession.endsAt - Date.now())}` : undefined;
-      drawAvatar(ctx, { avatar, x: sx + nudgeOffset, y: sy, isLocal, timestamp,
+      const topBadgeY = drawAvatar(ctx, { avatar, x: sx + nudgeOffset, y: sy, isLocal, timestamp,
         walkAnimOffset: bobOffset + jumpOffset,
         scale: avatarScaleRef.current,
         queueCountdown,
@@ -2038,11 +2038,17 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         }
       }
 
-      // Crown for admin players
+      // Crown for admin players — positioned at topBadgeY (drawAvatar's
+      // return value: the free slot right above the name/status-tag/
+      // presence-pill stack it just drew, and above hand-raise/queue-
+      // countdown too when either of those is present). Bug fix: this used
+      // to be a hardcoded `sy - AVATAR_RADIUS - 24`, which sat almost
+      // exactly where the presence pill (e.g. "Away") starts, so an admin
+      // with any status badge showing got a crown drawn right on top of it.
       if (avatar.isAdmin) {
         ctx.font = '14px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('👑', sx, sy - AVATAR_RADIUS - 24);
+        ctx.fillText('👑', sx, topBadgeY);
       }
 
       // Soundboard — blinking speaker above whoever's sound is currently
@@ -2055,7 +2061,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         if (Math.floor(now / 300) % 2 === 0) {
           ctx.font = '14px sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('🔊', sx + 16, sy - AVATAR_RADIUS - 24);
+          ctx.fillText('🔊', sx + 16, topBadgeY);
         }
       }
 
