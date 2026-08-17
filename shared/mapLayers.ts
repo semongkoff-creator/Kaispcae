@@ -420,6 +420,11 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     // existed.
     if (a.audioIsolated != null) z.audioIsolated = a.audioIsolated;
     else if (a.effect === 'mapLocation') z.audioIsolated = false;
+    // Bug fix — tracked separately from audioIsolated (see Zone.isMapLocation's
+    // own doc comment): a Map Location created with "kedap suara: YA" still
+    // needs its label to always show, which audioIsolated alone can't express
+    // once this Zone is all GameCanvas.tsx ever sees.
+    if (a.effect === 'mapLocation') z.isMapLocation = true;
     if (a.capacity != null) z.capacity = a.capacity;
     if (a.memberOnly) z.memberOnly = true;
     return z;

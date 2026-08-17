@@ -2653,11 +2653,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           // Focus) goes color-block-only, regardless of zoom level.
           // Restricted stays labeled (checked via the same restrictedZoneIds
           // set the 🔒 badge below uses) since it's typically a real, unique
-          // room name ("CEO Office"), not a repeated default. Naming a zone
-          // "Map Location" in the Room Editor is what keeps its own label
-          // showing — isPrivateZone returns false for it (audioIsolated:
-          // false), it never hits this suppression.
-          const suppressPrivateLabel = isPrivateZone(zone) && !restrictedZoneIds?.has(zone.id);
+          // room name ("CEO Office"), not a repeated default. Map Location
+          // stays labeled via the explicit zone.isMapLocation flag, NOT via
+          // isPrivateZone's audioIsolated check — a Map Location created
+          // with "kedap suara: YA" has audioIsolated:true, which used to
+          // make it byte-identical to a genuine Private Area here and wipe
+          // its name too, even though isolation and "always show this
+          // area's name" are independent settings (see Zone.isMapLocation's
+          // own doc comment for why this needed a real, separate flag).
+          const suppressPrivateLabel = isPrivateZone(zone) && !zone.isMapLocation && !restrictedZoneIds?.has(zone.id);
           if (suppressPrivateLabel) return null;
           return (
             <div

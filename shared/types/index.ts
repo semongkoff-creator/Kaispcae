@@ -1783,6 +1783,17 @@ export interface Zone {
   // and capacity checks above — a zone can be member-only AND separately
   // locked/capacity-limited at the same time.
   memberOnly?: boolean;
+  // Bug fix — a Map Location whose admin answered "kedap suara: YA" when
+  // creating it gets audioIsolated:true, making it byte-for-byte
+  // indistinguishable from a genuine Private Area once converted to a Zone
+  // (audioIsolated was the only signal label-suppression logic had to go
+  // on — see GameCanvas.tsx's own suppressPrivateLabel). Isolation and
+  // "should this area's name always stay visible" are independent
+  // questions (a Map Location can isolate audio AND still be meant as a
+  // named, always-labeled pin), so this is tracked as its own explicit
+  // flag rather than inferred from audioIsolated. Set only for the Room
+  // Editor's 'Map location' tool (mapLayers.ts's layerDataToLegacy).
+  isMapLocation?: boolean;
 }
 
 // Chat. When zoneId is set, the message is private to that zone — the
