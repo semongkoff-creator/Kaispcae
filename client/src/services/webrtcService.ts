@@ -222,6 +222,30 @@ interface PeerConnection {
   // LATER addTrack (screen share) be allowed to trigger an automatic
   // renegotiation offer.
   initialNegotiationDone: boolean;
+  // Bug fix — a real race, not just the glare hypothesis above: if
+  // syncTracksToPeers() (called the instant initLocalMedia() resolves —
+  // e.g. mic permission was slow, or this peer connection was answered via
+  // handleOffer moments before local media became ready) calls addTrack()
+  // WHILE this peer's own initial offer/answer chain is still in flight,
+  // the resulting onnegotiationneeded fires with initialNegotiationDone
+  // still false and used to be silently dropped — with no error, no log,
+  // nothing. The sender technically exists on the RTCPeerConnection
+  // (addTrack succeeded locally) but was never actually announced to the
+  // remote side in any SDP, so their ontrack never fires for it: exactly a
+  // one-directional "I can hear everyone but them" per-pair failure,
+  // because every OTHER peer's connection didn't happen to hit this exact
+  // timing window. Set true only in that one dropped-event case; checked
+  // and cleared right after initialNegotiationDone flips true (both offer
+  // and answer paths below) to fire the renegotiation that was missed.
+  pendingRenegotiation: boolean;
+  // Reference to createPeer's own `renegotiate` closure — set once, right
+  // after that const is defined, purely so connectToPlayer/handleOffer
+  // (outside createPeer's closure, operating on this same peer object) can
+  // fire the exact same logic when consuming a pendingRenegotiation flag.
+  // Optional only because the interface requires initializing the peer
+  // object before this closure exists — always set by the time createPeer
+  // returns.
+  renegotiate?: () => Promise<void>;
   // MAX_VIDEO_PEERS — this peer's rank was within the video cap at
   // connection time. Gates BOTH createPeer's own initial camera addTrack
   // (see includeVideo there) AND enableCamera()'s later per-peer loop
@@ -832,6 +856,7 @@ class WebRTCService {
       videoEligible: includeVideo,
       iceQueue: [],
       initialNegotiationDone: false,
+      pendingRenegotiation: false,
       disconnectedTimer: null,
     };
 
@@ -988,19 +1013,16 @@ class WebRTCService {
       }
     };
 
-    // Fires when addTrack (screen share start) happens after the initial
+    // Fires when addTrack (screen share start, or syncTracksToPeers backfilling
+    // audio once local media becomes ready) happens after the initial
     // offer/answer already completed — creates a fresh offer to renegotiate
-    // the new m-line. Simplification: no full perfect-negotiation/rollback,
-    // since in this app only one side ever renegotiates at a time (the
-    // person toggling their own screen share), not both simultaneously.
-    pc.onnegotiationneeded = async () => {
+    // the new m-line. Extracted to a named function so the pendingRenegotiation
+    // fix below (both initialNegotiationDone = true sites) can call the exact
+    // same logic manually, not just react to the browser's own event.
+    const renegotiate = async () => {
       try {
-        // addTrack() during this same createPeer() call also fires this —
-        // the very first offer/answer is handled manually below instead, so
-        // ignore it until that's done (see initialNegotiationDone's doc comment).
-        if (!peer.initialNegotiationDone) return;
-        // [webrtc-diag] §8 — this comment block's own assumption ("only one
-        // side ever renegotiates at a time, the person toggling screen
+        // [webrtc-diag] §8 — this comment block's original assumption ("only
+        // one side ever renegotiates at a time, the person toggling screen
         // share") is not actually true: enableCamera() below also calls
         // addTrack() the first time a videoEligible peer's camera turns on,
         // which fires this same handler. Two people in a pair turning their
@@ -1026,6 +1048,28 @@ class WebRTCService {
         console.error('[webrtc] renegotiation error:', err);
         diag('renegotiation error', { peer: remoteId, err: String(err) });
       }
+    };
+    peer.renegotiate = renegotiate;
+
+    pc.onnegotiationneeded = async () => {
+      // addTrack() during this same createPeer() call also fires this —
+      // the very first offer/answer is handled manually below instead, so
+      // ignore it until that's done (see initialNegotiationDone's doc comment).
+      //
+      // Bug fix — this used to just `return` here, silently. If addTrack()
+      // was called (by syncTracksToPeers, backfilling audio the instant
+      // local media becomes ready) WHILE the initial offer/answer for this
+      // exact peer is still in flight, the browser fires this event exactly
+      // once — dropping it here meant that track's sender existed locally
+      // but was NEVER announced to the remote side in any SDP, ever. See
+      // pendingRenegotiation's own doc comment for the full mechanics; this
+      // now remembers the miss instead of losing it.
+      if (!peer.initialNegotiationDone) {
+        peer.pendingRenegotiation = true;
+        diag('negotiationneeded deferred (initial negotiation still in flight)', { peer: remoteId });
+        return;
+      }
+      void renegotiate();
     };
 
     // Shared by the 'failed' branch below AND the 'disconnected' timeout —
@@ -1170,6 +1214,15 @@ class WebRTCService {
             payload: peer.pc.localDescription,
           });
           peer.initialNegotiationDone = true;
+          // Bug fix — fire the renegotiation onnegotiationneeded silently
+          // deferred (see pendingRenegotiation's own doc comment) while
+          // this initial offer/answer was still in flight — otherwise a
+          // track added via syncTracksToPeers() in that exact window would
+          // never actually get announced to the remote side.
+          if (peer.pendingRenegotiation) {
+            peer.pendingRenegotiation = false;
+            void peer.renegotiate?.();
+          }
         })
         .catch((err) => { console.error('[webrtc] offer error:', err); diag('offer error', { peer: remoteId, err: String(err) }); });
     }
@@ -1243,6 +1296,13 @@ class WebRTCService {
           payload: pc.localDescription,
         });
         peer!.initialNegotiationDone = true;
+        // Bug fix — same as connectToPlayer's offer path: fire whatever
+        // renegotiation was silently deferred while this initial answer was
+        // still in flight (see pendingRenegotiation's own doc comment).
+        if (peer!.pendingRenegotiation) {
+          peer!.pendingRenegotiation = false;
+          void peer!.renegotiate?.();
+        }
       })
       .catch((err) => { console.error('[webrtc] answer error:', err); diag('answer error', { peer: fromId, err: String(err) }); });
   }
