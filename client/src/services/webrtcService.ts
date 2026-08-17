@@ -999,7 +999,22 @@ class WebRTCService {
         // the very first offer/answer is handled manually below instead, so
         // ignore it until that's done (see initialNegotiationDone's doc comment).
         if (!peer.initialNegotiationDone) return;
-        if (pc.signalingState !== 'stable' || !this.socket) return;
+        // [webrtc-diag] §8 — this comment block's own assumption ("only one
+        // side ever renegotiates at a time, the person toggling screen
+        // share") is not actually true: enableCamera() below also calls
+        // addTrack() the first time a videoEligible peer's camera turns on,
+        // which fires this same handler. Two people in a pair turning their
+        // camera on within the same moment — an ordinary "everyone camera on"
+        // start-of-meeting pattern, not an edge case — means BOTH sides can
+        // hit this handler near-simultaneously: classic SDP glare, no perfect-
+        // negotiation/rollback here to absorb it. Previously this guard
+        // silently dropped the renegotiation with zero trace — if that
+        // silent drop is what's actually happening, this is the log line
+        // that proves it (paired with the signalingState-change hook below).
+        if (pc.signalingState !== 'stable' || !this.socket) {
+          diag('negotiationneeded SKIPPED (not stable)', { peer: remoteId, signalingState: pc.signalingState });
+          return;
+        }
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         this.socket.emit(SocketEvents.RTC_OFFER, {
@@ -1009,6 +1024,7 @@ class WebRTCService {
         });
       } catch (err) {
         console.error('[webrtc] renegotiation error:', err);
+        diag('renegotiation error', { peer: remoteId, err: String(err) });
       }
     };
 
@@ -1033,6 +1049,19 @@ class WebRTCService {
         console.warn('[webrtc] connection to', remoteId, 'failed permanently after retry');
         this.onPeerConnectionStatus?.(remoteId, true);
       }
+    };
+
+    // [webrtc-diag] §8 — the other half of proving/disproving the glare
+    // hypothesis above: a connection whose negotiation desynced (both sides
+    // sent an offer at once) would show signalingState bouncing through an
+    // unexpected sequence (e.g. stuck in 'have-local-offer', or an
+    // out-of-order 'have-remote-offer') instead of the normal
+    // stable -> have-local-offer -> stable / stable -> have-remote-offer ->
+    // stable round trip — independent of what oniceconnectionstatechange
+    // reports, since ICE can stay 'connected' throughout a purely SDP-level
+    // desync.
+    pc.onsignalingstatechange = () => {
+      diag('signaling state', { peer: remoteId, signalingState: pc.signalingState });
     };
 
     pc.oniceconnectionstatechange = () => {
@@ -1142,7 +1171,7 @@ class WebRTCService {
           });
           peer.initialNegotiationDone = true;
         })
-        .catch((err) => console.error('[webrtc] offer error:', err));
+        .catch((err) => { console.error('[webrtc] offer error:', err); diag('offer error', { peer: remoteId, err: String(err) }); });
     }
     return true;
   }
@@ -1215,7 +1244,7 @@ class WebRTCService {
         });
         peer!.initialNegotiationDone = true;
       })
-      .catch((err) => console.error('[webrtc] answer error:', err));
+      .catch((err) => { console.error('[webrtc] answer error:', err); diag('answer error', { peer: fromId, err: String(err) }); });
   }
 
   handleAnswer(fromId: string, sdp: RTCSessionDescriptionInit) {
@@ -1229,7 +1258,7 @@ class WebRTCService {
           }
           peer.iceQueue = [];
         })
-        .catch((err) => console.error('[webrtc] setRemote error:', err));
+        .catch((err) => { console.error('[webrtc] setRemote error:', err); diag('setRemote (answer) error', { peer: fromId, err: String(err) }); });
     }
   }
 
