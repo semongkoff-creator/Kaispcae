@@ -999,14 +999,37 @@ export function createCorporateOfficeLayout(theme: RoomTheme = 'modern-interiors
 // unlike RoomTheme (a reskin applied to whichever layout is already there),
 // a template is a completely different tile/furniture/zone layout — the
 // room's floor plan itself, not just the art drawn over it.
-export type RoomTemplateId = 'main-office' | 'small-team' | 'open-lounge' | 'corporate-office';
+export type RoomTemplateId = 'main-office' | 'small-team' | 'open-lounge' | 'corporate-office' | 'blank';
 
 export const ROOM_TEMPLATES: { id: RoomTemplateId; name: string; description: string }[] = [
   { id: 'main-office', name: 'Main Office', description: '8 zones, 4 team clusters — a full multi-team office' },
   { id: 'small-team', name: 'Small Team', description: 'One meeting room, 2 desk clusters, and a lounge corner' },
   { id: 'open-lounge', name: 'Open Lounge', description: 'Mostly social space, a small desk nook, one meeting room' },
   { id: 'corporate-office', name: 'Kantor Perusahaan', description: 'Denah kantor lengkap — ruang CEO, dua area tim open-plan, 4 ruang konsultasi, lounge, dan ruang meeting breakout' },
+  { id: 'blank', name: 'Blank Space', description: 'Empty floor, no furniture — build it out yourself in the Room Editor' },
 ];
+
+// "Blank Space" — an empty, undecorated room: one open floor bounded by the
+// same outer walls every other template uses (see wallRect above), a single
+// spawn tile near the center so new players have somewhere to land, and
+// otherwise zero furniture/zones. `theme` is accepted (for signature parity
+// with every other template function, and because createRoomLayoutFromTemplate
+// always passes it) but unused — there's no furniture/floor accent here for
+// a theme to reskin.
+export function createBlankLayout(theme: RoomTheme = 'scifi-office'): { tiles: RoomTile[][]; furniture: Furniture[]; zones: Zone[] } {
+  void theme;
+  const tiles: RoomTile[][] = [];
+  for (let y = 0; y < MAP_HEIGHT; y++) {
+    const row: RoomTile[] = [];
+    for (let x = 0; x < MAP_WIDTH; x++) {
+      row.push({ x, y, type: 'floor' });
+    }
+    tiles.push(row);
+  }
+  wallRect(tiles, 0, 0, MAP_WIDTH - 1, MAP_HEIGHT - 1);
+  setTile(tiles, Math.floor(MAP_WIDTH / 2), Math.floor(MAP_HEIGHT / 2), 'spawn');
+  return { tiles, furniture: [], zones: [] };
+}
 
 export function createRoomLayoutFromTemplate(
   templateId: RoomTemplateId | undefined,
@@ -1016,6 +1039,7 @@ export function createRoomLayoutFromTemplate(
     case 'small-team': return createSmallTeamLayout(theme);
     case 'open-lounge': return createLoungeLayout(theme);
     case 'corporate-office': return createCorporateOfficeLayout(theme);
+    case 'blank': return createBlankLayout(theme);
     case 'main-office':
     default: return createDefaultOfficeLayout(theme);
   }

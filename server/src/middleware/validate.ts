@@ -38,7 +38,7 @@ export const createRoomSchema = z.object({
   maxPlayers: z.number().int().min(2).max(100).optional(),
   isPublic: z.boolean().optional(),
   theme: z.enum(['modern-interiors', 'scifi-office']).optional(),
-  template: z.enum(['main-office', 'small-team', 'open-lounge']).optional(),
+  template: z.enum(['main-office', 'small-team', 'open-lounge', 'blank']).optional(),
 });
 
 // Same length cap as createRoomSchema's own `name` — a renamed room is still
