@@ -7,6 +7,7 @@
 // interacted with the page (they clicked to join the room), .play() works.
 import { getNotificationSettings } from './browserNotifications';
 import { calcGain } from '@/hooks/useProximity';
+import { useGameStore } from '@/stores/gameStore';
 
 // Nudge ("senggol"/"colek", Z key) — same punch-effect clip as Slap below
 // (both are user-facing "colek" in different parts of the UI: this one via
@@ -123,9 +124,25 @@ export function playSoundboardClip(fromId: string, src: string): void {
 // range, and un-mutes it again if the listener walks back within range
 // before it finishes, same real-time behavior as a live voice call rather
 // than a one-shot decision made at click time.
+//
+// Bug — `nearby` is a "who's near ME" list computed from playerRecords,
+// which deliberately never carries an entry for the local player's own id
+// (see useSocket.ts's ROOM_STATE handler). So the presser's OWN clip —
+// tracked here under their own localPlayerId, started at full
+// SOUNDBOARD_BASE_VOLUME by playSoundboardClip — could never find itself in
+// `nearby` and fell through to the `gain = 0` branch, silencing it, on the
+// very next proximity recalculation (anyone moving/changing zone nearby)
+// that happened to land while it was still playing. Nothing was wrong with
+// the play() call itself — this was muting audio that had already started
+// correctly. Everyone else's clips size correctly by real distance; only
+// the presser's own is exempted, staying at the fixed base volume for its
+// whole duration, the same way it already sounds during the instant right
+// after it starts.
 export function updateSoundboardVolumes(nearby: { id: string; distanceTiles: number; viaZone?: boolean }[]): void {
   if (activeSoundboardAudio.size === 0) return;
+  const localPlayerId = useGameStore.getState().localPlayerId;
   for (const [fromId, node] of activeSoundboardAudio) {
+    if (fromId === localPlayerId) continue;
     const p = nearby.find((n) => n.id === fromId);
     const gain = p ? (p.viaZone ? 1 : calcGain(p.distanceTiles)) : 0;
     node.volume = Math.max(0, Math.min(1, SOUNDBOARD_BASE_VOLUME * gain));
