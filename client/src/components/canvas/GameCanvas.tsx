@@ -116,6 +116,28 @@ function isPrivateZone(zone: Zone): boolean {
   return zone.audioIsolated !== false && zone.type !== 'meeting';
 }
 
+// Bug fix — a single "word" (no spaces — a long URL, a run-on typo) wider
+// than maxWidth on its own used to become its own line untouched, same as
+// any normal short word: nothing here ever split WITHIN a word, so that one
+// line rendered past the bubble's own drawn width with no visual bound —
+// canvas fillText has no CSS overflow-wrap/word-break equivalent, so that
+// has to happen manually. breakLongWord below does the same greedy-fit walk
+// as the word loop, just character by character instead of word by word,
+// only invoked for the word that actually needs it.
+function breakLongWord(ctx: CanvasRenderingContext2D, word: string, maxWidth: number, lines: string[]): string {
+  let chunk = '';
+  for (const ch of word) {
+    const test = chunk + ch;
+    if (chunk && ctx.measureText(test).width >= maxWidth) {
+      lines.push(chunk);
+      chunk = ch;
+    } else {
+      chunk = test;
+    }
+  }
+  return chunk;
+}
+
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
   const words = text.split(' ');
   const lines: string[] = [];
@@ -124,10 +146,10 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
     const test = current ? `${current} ${word}` : word;
     if (ctx.measureText(test).width < maxWidth) {
       current = test;
-    } else {
-      if (current) lines.push(current);
-      current = word;
+      continue;
     }
+    if (current) lines.push(current);
+    current = ctx.measureText(word).width >= maxWidth ? breakLongWord(ctx, word, maxWidth, lines) : word;
   }
   if (current) lines.push(current);
   return lines.length > 0 ? lines : [text.slice(0, 30)];
@@ -2466,6 +2488,17 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const bsy = p.y - cameraY;
       const alpha = Math.max(0, 1 - (now - bubble.expireAt + 1000) / 1000);
       ctx.save(); ctx.globalAlpha = alpha;
+      // Bug fix — ctx.font used to still be whatever was last set earlier
+      // in this same draw() pass (nametags, zone banners, ...) at the point
+      // wrapText/measureText ran below, then got switched to 10px sans-serif
+      // only afterward, right before the actual fillText calls. Wrapping
+      // and the bubble's own width were measured in the WRONG font, so a
+      // line that fit fine at that stale (often larger) size could still
+      // render wider than the bubble once the real 10px font applied,
+      // spilling text past the drawn background — exactly "kepotong". Set
+      // it first, same order the sibling word_balloon popup right above
+      // already gets right.
+      ctx.font = '10px sans-serif';
       const lines = wrapText(ctx, bubble.text, 100);
       const lineH = 13; const pad = 5;
       const bw = Math.min(110, ctx.measureText(bubble.text).width + pad * 2);
@@ -2483,7 +2516,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - 4);
       ctx.lineTo(bx, by + 4); ctx.quadraticCurveTo(bx, by, bx + 4, by);
       ctx.fill();
-      ctx.fillStyle = '#333'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#333'; ctx.textAlign = 'center';
       for (let li = 0; li < lines.length; li++) {
         ctx.fillText(lines[li], bx + bw / 2, by + pad + lineH * (li + 1) - 2);
       }
