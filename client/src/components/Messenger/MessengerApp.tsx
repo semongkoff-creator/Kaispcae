@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, type ClipboardEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle } from 'react-bootstrap-icons';
+import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, Clipboard } from 'react-bootstrap-icons';
 import { ChannelMessage, Channel, DirectConversationSummary } from '@kaispace/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -859,6 +859,21 @@ export function MessengerApp({
             style={{ position: 'fixed', left: Math.min(msgMenu.x, window.innerWidth - 220), top: Math.min(msgMenu.y, window.innerHeight - 260) }}
             className="z-[1001] w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 text-xs"
           >
+            {/* Right-click → Copy, same as any desktop chat app — text is
+                already Ctrl+C-selectable (select-text above), but this menu
+                itself preventDefault()s the browser's own native "Copy" item,
+                so without this there was no right-click way to copy at all. */}
+            {msgMenu.message.text && (
+              <button
+                onClick={async () => {
+                  try { await navigator.clipboard.writeText(msgMenu.message.text); } catch { /* clipboard permission denied — text stays selectable via Ctrl+C as a fallback */ }
+                  setMsgMenu(null);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
+              >
+                <Clipboard size={11} /> Salin teks
+              </button>
+            )}
             {isAdmin && (
               <button
                 onClick={() => { onPinMessage?.(msgMenu.message.id, !msgMenu.message.isPinned); setMsgMenu(null); }}
