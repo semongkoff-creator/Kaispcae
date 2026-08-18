@@ -587,6 +587,18 @@ export enum SocketEvents {
   RELEASE_SEAT = 'seat:release',
   SEAT_CLAIMS_UPDATED = 'seat:claims_updated',
   SEAT_CLAIM_DENIED = 'seat:claim_denied',
+  // Trying to claim a seat someone else already holds no longer redirects
+  // silently to the nearest free desk — it asks the current OWNER, exactly
+  // the same single-keyholder-decides shape as ZONE_KNOCK/DECIDE above (not
+  // an admin fan-out: nobody but the owner has any say over their own seat).
+  // Falls back to the old silent-redirect behavior only if the owner isn't
+  // currently connected — there's no one to ask.
+  SEAT_CLAIM_REQUEST = 'seat:claim_request',
+  SEAT_CLAIM_REQUESTED = 'seat:claim_requested',
+  SEAT_CLAIM_DECIDE = 'seat:claim_decide',
+  SEAT_CLAIM_DECIDED = 'seat:claim_decided',
+  SEAT_CLAIM_REQUEST_CANCEL = 'seat:claim_request_cancel',
+  SEAT_CLAIM_REQUEST_CANCELLED = 'seat:claim_request_cancelled',
 
   ROOM_UPDATE = 'room:update',
   ROOM_UPDATED = 'room:updated',
@@ -1741,6 +1753,17 @@ export interface ZoneKnockRequest {
   userId: string;
   playerId: string;
   playerName: string;
+}
+
+// A request to take over someone else's already-claimed seat — the OWNER's
+// own card to decide (see SocketEvents.SEAT_CLAIM_REQUESTED). playerId is
+// the requester's live socket id, needed to route SEAT_CLAIM_DECIDED back to
+// them specifically, same role it plays in ZoneKnockRequest above.
+export interface SeatClaimRequest {
+  seatId: string;
+  requesterUserId: string;
+  playerId: string;
+  requesterName: string;
 }
 
 export interface GuestJoinRequest {

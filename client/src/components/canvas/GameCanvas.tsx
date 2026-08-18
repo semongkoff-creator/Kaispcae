@@ -186,6 +186,13 @@ interface GameCanvasProps {
   // (reusing emitTeleportTo above, not a second teleport path).
   emitClaimSeat: (seatId: string) => void;
   emitReleaseSeat: (seatId: string) => void;
+  // Taking over someone ELSE's claimed seat — asks the current owner
+  // instead of the old silent-redirect-to-nearest-free-desk behavior (see
+  // seatClaim.ts's SEAT_CLAIM_REQUEST handler and this file's
+  // pendingSeatClaim confirm dialog below).
+  emitSeatClaimRequest: (seatId: string) => void;
+  emitSeatClaimDecide: (seatId: string, playerId: string, approve: boolean) => void;
+  emitSeatClaimRequestCancel: (seatId: string) => void;
   onMediaOpen: (mediaId: string) => void;
   // ZEP-style player card — fires instead of the normal walk-to-click when
   // the click hit-tests against another player's avatar (see onCanvasClick
@@ -332,7 +339,7 @@ function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: numb
   return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onPlayerClick, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, onDoorAreaPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
+export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, emitSeatClaimRequest, emitSeatClaimDecide, emitSeatClaimRequestCancel, onMediaOpen, onPlayerClick, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, onDoorAreaPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -498,6 +505,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // click-behavior updates the instant someone else claims or releases it.
   const seatClaims = useGameStore((s) => s.seatClaims);
   const localUserId = useGameStore((s) => s.localUserId);
+  // Incoming requests to take over a seat WE own (Izinkan/Tolak cards) and
+  // our own outstanding request on someone else's seat ("menunggu
+  // persetujuan..." card) — see seatClaim.ts's SEAT_CLAIM_REQUEST flow.
+  const seatClaimRequests = useGameStore((s) => s.seatClaimRequests);
+  const removeSeatClaimRequest = useGameStore((s) => s.removeSeatClaimRequest);
+  const pendingSeatClaimRequest = useGameStore((s) => s.pendingSeatClaimRequest);
+  const setPendingSeatClaimRequest = useGameStore((s) => s.setPendingSeatClaimRequest);
   // Floor-plan reference image (see gameStore.ts) — only ever non-null when
   // the admin opted into showInGame; drawn as an overlay, see the draw loop.
   const liveReferenceImage = useGameStore((s) => s.liveReferenceImage);
@@ -3076,7 +3090,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           >
             <p className="text-gray-900 dark:text-gray-100 text-sm mb-4">
               {pendingSeatClaim.ownerName
-                ? <>Kursi ini sudah diklaim <span className="font-semibold">{pendingSeatClaim.ownerName}</span>. Tetap ingin menjadikannya kursimu?</>
+                ? <>Kursi ini sudah diklaim <span className="font-semibold">{pendingSeatClaim.ownerName}</span>. Minta kursi ini ke pemiliknya?</>
                 : 'Klaim kursi ini sebagai milikmu?'}
             </p>
             <div className="flex gap-3 justify-center">
@@ -3087,13 +3101,82 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                 Batal
               </button>
               <button
-                onClick={() => { emitClaimSeat(pendingSeatClaim.seatId); setPendingSeatClaim(null); }}
+                onClick={() => {
+                  // Bug fix — taking over an already-claimed seat used to
+                  // just call emitClaimSeat here, which the server silently
+                  // resolved by bumping the requester to the nearest free
+                  // desk without ever telling the current owner anything
+                  // was asked. Now it's a real request the owner has to
+                  // approve — same shape as ZONE_KNOCK's keyholder-decides
+                  // flow — and only a genuinely free seat still claims
+                  // instantly below.
+                  if (pendingSeatClaim.ownerName) {
+                    emitSeatClaimRequest(pendingSeatClaim.seatId);
+                    setPendingSeatClaimRequest({ seatId: pendingSeatClaim.seatId, ownerName: pendingSeatClaim.ownerName });
+                  } else {
+                    emitClaimSeat(pendingSeatClaim.seatId);
+                  }
+                  setPendingSeatClaim(null);
+                }}
                 className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm cursor-pointer"
               >
-                Konfirmasi
+                {pendingSeatClaim.ownerName ? 'Minta Kursi' : 'Konfirmasi'}
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Incoming seat-claim requests — one card per pending ask on a seat
+          WE own, stacked top-center. Deliberately NOT a full-screen modal
+          like pendingSeatClaim above: unlike claiming your own seat, this
+          can arrive at any moment while the owner is doing something else
+          entirely, so it shouldn't block the rest of the screen while they
+          decide (or ignore it for now — the requester's own card below has
+          a Batal button for exactly that case). */}
+      {seatClaimRequests.length > 0 && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 flex flex-col gap-2 pointer-events-none">
+          {seatClaimRequests.map((req) => (
+            <div
+              key={`${req.seatId}:${req.requesterUserId}`}
+              className="pointer-events-auto bg-white dark:bg-gray-900 rounded-lg px-4 py-2.5 shadow-xl border border-purple-100 dark:border-gray-700 flex items-center gap-3 text-sm"
+            >
+              <span className="text-gray-900 dark:text-gray-100">
+                <span className="font-semibold">{req.requesterName}</span> minta kursi ini.
+              </span>
+              <button
+                onClick={() => { emitSeatClaimDecide(req.seatId, req.playerId, false); removeSeatClaimRequest(req.seatId, req.requesterUserId); }}
+                className="px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 text-xs cursor-pointer"
+              >
+                Tolak
+              </button>
+              <button
+                onClick={() => { emitSeatClaimDecide(req.seatId, req.playerId, true); removeSeatClaimRequest(req.seatId, req.requesterUserId); }}
+                className="px-2.5 py-1 rounded-md bg-purple-600 hover:bg-purple-700 text-white text-xs cursor-pointer"
+              >
+                Izinkan
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Our own outstanding request, waiting on the owner above — mirrors
+          useZoneLock.ts's pendingKnock "Menunggu persetujuan..." card.
+          Resolved (cleared) by SEAT_CLAIM_DECIDED (approved either way) or
+          by the owner disconnecting before deciding — see seatClaim.ts. */}
+      {pendingSeatClaimRequest && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-40 pointer-events-auto bg-white dark:bg-gray-900 rounded-lg px-4 py-2.5 shadow-xl border border-purple-100 dark:border-gray-700 flex items-center gap-3 text-sm">
+          <span className="text-gray-500 dark:text-gray-400 inline-flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
+            Menunggu persetujuan {pendingSeatClaimRequest.ownerName}...
+          </span>
+          <button
+            onClick={() => { emitSeatClaimRequestCancel(pendingSeatClaimRequest.seatId); setPendingSeatClaimRequest(null); }}
+            className="px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 text-xs cursor-pointer"
+          >
+            Batal
+          </button>
         </div>
       )}
     </div>

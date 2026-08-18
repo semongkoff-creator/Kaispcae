@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, RoomBroadcast, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, RemoteHelpRequestPayload, RemoteHelpResultPayload, RemoteHelpCredentialPayload, RemoteHelpEndPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveDoorAreaPasswordResultPayload, DoorAreaUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, ZoneQueueSessionClearedPayload, GuestJoinRequest, PlayerMovedPayload, PlayerStoppedPayload, DeskNoteData, RosterEntry, RosterUpdate } from '@kaispace/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, RoomBroadcast, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, RemoteHelpRequestPayload, RemoteHelpResultPayload, RemoteHelpCredentialPayload, RemoteHelpEndPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveDoorAreaPasswordResultPayload, DoorAreaUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, ZoneQueueSessionClearedPayload, GuestJoinRequest, PlayerMovedPayload, PlayerStoppedPayload, DeskNoteData, RosterEntry, RosterUpdate, SeatClaimRequest } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
@@ -616,6 +616,31 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().setSitNotice(msg);
     });
 
+    // Someone wants to take over a seat WE own — see seatClaim.ts's
+    // SEAT_CLAIM_REQUEST handler. Rendered as an Izinkan/Tolak card
+    // (SeatClaimBar.tsx).
+    socket.on(SocketEvents.SEAT_CLAIM_REQUESTED, (data: SeatClaimRequest) => {
+      useGameStore.getState().addSeatClaimRequest(data);
+    });
+    // The owner decided on OUR request (or disconnected before deciding —
+    // seatClaim.ts's DISCONNECT handler resolves that the same way, as a
+    // denial, so this "menunggu" card never hangs forever).
+    socket.on(SocketEvents.SEAT_CLAIM_DECIDED, (data: { seatId: string; approved: boolean; byName?: string }) => {
+      const state = useGameStore.getState();
+      if (state.pendingSeatClaimRequest?.seatId === data.seatId) state.setPendingSeatClaimRequest(null);
+      state.setSitNotice(data.approved
+        ? `${data.byName ?? 'Pemilik'} mengizinkan kamu memakai kursi ini.`
+        : `${data.byName ?? 'Pemilik'} menolak permintaanmu.`);
+    });
+    // Our own pending request became moot from the OWNER's side of the
+    // card — the requester cancelled, disconnected, or the seat's actual
+    // owner never comes back into play here (this event only ever targets
+    // the OWNER's socket, dropping their card for a request that's no
+    // longer pending).
+    socket.on(SocketEvents.SEAT_CLAIM_REQUEST_CANCELLED, (data: { seatId: string; requesterUserId: string }) => {
+      useGameStore.getState().removeSeatClaimRequest(data.seatId, data.requesterUserId);
+    });
+
     // Zone-private chat only now — the old whole-room broadcast case is
     // superseded by CHANNEL_MESSAGE_NEW/the room's default "general" channel
     // (see chatHandler.ts, which no longer emits this without a zoneId).
@@ -1204,6 +1229,23 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RELEASE_SEAT, { seatId });
   }, []);
 
+  // Asking the current OWNER for a seat instead of letting CLAIM_SEAT
+  // silently redirect to the nearest free desk — see seatClaim.ts's
+  // SEAT_CLAIM_REQUEST handler. GameCanvas.tsx sets pendingSeatClaimRequest
+  // locally right after calling this, same optimistic-local-state
+  // convention as useZoneLock.ts's knock().
+  const emitSeatClaimRequest = useCallback((seatId: string) => {
+    socketRef.current?.emit(SocketEvents.SEAT_CLAIM_REQUEST, { seatId });
+  }, []);
+
+  const emitSeatClaimDecide = useCallback((seatId: string, playerId: string, approve: boolean) => {
+    socketRef.current?.emit(SocketEvents.SEAT_CLAIM_DECIDE, { seatId, playerId, approve });
+  }, []);
+
+  const emitSeatClaimRequestCancel = useCallback((seatId: string) => {
+    socketRef.current?.emit(SocketEvents.SEAT_CLAIM_REQUEST_CANCEL, { seatId });
+  }, []);
+
   // Fitur 15B — Password prompt. The attempt travels to the server for
   // comparison; the reply lands via INTERACTIVE_PASSWORD_RESULT below.
   const emitInteractivePasswordCheck = useCallback((furnitureId: string, attempt: string) => {
@@ -1470,5 +1512,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitRoomDelete, emitKick, emitForceMute, emitDoorOverride, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitRemoteHelpRequest, emitRemoteHelpRespond, emitRemoteHelpCredential, emitRemoteHelpEnd, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
+  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, emitSeatClaimRequest, emitSeatClaimDecide, emitSeatClaimRequestCancel, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitRoomDelete, emitKick, emitForceMute, emitDoorOverride, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitRemoteHelpRequest, emitRemoteHelpRespond, emitRemoteHelpCredential, emitRemoteHelpEnd, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
 }

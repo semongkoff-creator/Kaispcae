@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, RemoteHelpRequestPayload, RemoteHelpResultPayload, SummonRequestPayload, SummonResultPayload, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess } from '@kaispace/shared';
+import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, RemoteHelpRequestPayload, RemoteHelpResultPayload, SummonRequestPayload, SummonResultPayload, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess, SeatClaimRequest } from '@kaispace/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
 import { appendMovementSnapshot, MovementSnapshot, sampleMovementSnapshots } from './movementSmoothing';
@@ -266,6 +266,21 @@ export interface GameState {
   // — refreshed wholesale on every SEAT_CLAIMS_UPDATED broadcast.
   seatClaims: Record<string, { userId: string; name: string }>;
   setSeatClaims: (claims: { seatId: string; userId: string; name: string }[]) => void;
+
+  // Someone else asking to take over a seat WE own — one card per pending
+  // ask, shown with Izinkan/Tolak (see SeatClaimBar.tsx). De-duped by
+  // seatId+requesterUserId the same way useZoneLock.ts's knocks/
+  // approvalRequests are.
+  seatClaimRequests: SeatClaimRequest[];
+  addSeatClaimRequest: (req: SeatClaimRequest) => void;
+  removeSeatClaimRequest: (seatId: string, requesterUserId: string) => void;
+
+  // OUR OWN pending ask on someone else's seat — set locally the moment we
+  // ask (not waiting on a server ack, same optimistic convention
+  // useZoneLock.ts's pendingKnock uses), cleared once resolved (decided,
+  // cancelled, or the owner disconnects before deciding).
+  pendingSeatClaimRequest: { seatId: string; ownerName: string } | null;
+  setPendingSeatClaimRequest: (req: { seatId: string; ownerName: string } | null) => void;
 
   // Set when an admin removes us from the room via Kick (see
   // shared/permissions.ts's 'room:kick') — mirrors roomDeletedNotice's
@@ -959,6 +974,18 @@ export const useGameStore = create<GameState>((set, get) => ({
   setSeatClaims: (claims) => set({
     seatClaims: Object.fromEntries(claims.map((c) => [c.seatId, { userId: c.userId, name: c.name }])),
   }),
+
+  seatClaimRequests: [],
+  addSeatClaimRequest: (req) => set((s) => (
+    s.seatClaimRequests.some((r) => r.seatId === req.seatId && r.requesterUserId === req.requesterUserId)
+      ? s
+      : { seatClaimRequests: [...s.seatClaimRequests, req] }
+  )),
+  removeSeatClaimRequest: (seatId, requesterUserId) => set((s) => ({
+    seatClaimRequests: s.seatClaimRequests.filter((r) => !(r.seatId === seatId && r.requesterUserId === requesterUserId)),
+  })),
+  pendingSeatClaimRequest: null,
+  setPendingSeatClaimRequest: (req) => set({ pendingSeatClaimRequest: req }),
 
   kickedNotice: null,
   setKickedNotice: (notice) => set({ kickedNotice: notice }),

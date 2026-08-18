@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, SeatClaimState } from '@kaispace/shared';
+import { SocketEvents, SeatClaimState, SeatClaimRequest } from '@kaispace/shared';
 import { getPlayerName } from './roomHandler';
 import { getCachedTiles } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';
@@ -17,9 +17,10 @@ import { getPrisma } from '../lib/prisma';
 // auto-release on disconnect ("owner disconnects → seat auto-releases"),
 // but that meant a brief wifi drop or even just walking out of the room
 // silently lost someone their claimed desk. The only way to free a seat now
-// is the owner explicitly releasing it (RELEASE_SEAT) — someone else can't
-// bump them out either; CLAIM_SEAT only ever redirects a blocked claimant
-// to the nearest free seat, never displaces the existing owner.
+// is the owner explicitly releasing it (RELEASE_SEAT), or approving someone
+// else's SEAT_CLAIM_REQUEST below — CLAIM_SEAT itself still only ever
+// redirects a blocked claimant to the nearest free seat, never displaces
+// the existing owner on its own.
 interface SeatClaim {
   userId: string;
   name: string;
@@ -32,6 +33,44 @@ function roomClaims(room: string): Map<string, SeatClaim> {
   let m = claims.get(room);
   if (!m) { m = new Map(); claims.set(room, m); }
   return m;
+}
+
+// A request to take over someone else's seat, waiting on that OWNER's own
+// decision — same single-keyholder-decides shape as zoneLock.ts's
+// pendingKnocks, and resolved from the exact same three directions: the
+// owner decides, the requester cancels, or either side disconnects.
+interface PendingSeatRequest {
+  seatId: string;
+  ownerSocketId: string;
+  ownerName: string;
+  requesterUserId: string;
+  requesterName: string;
+}
+
+// room slug → requester's socket id → pending request. Keyed by requester,
+// same "a fresh request replaces whatever they were already waiting on"
+// convention as pendingKnocks — but unlike a zone (one keyholder), nothing
+// stops two DIFFERENT people from requesting the SAME seat at once; the
+// owner just sees a card for each.
+const pendingSeatRequests = new Map<string, Map<string, PendingSeatRequest>>();
+
+function roomSeatRequests(room: string): Map<string, PendingSeatRequest> {
+  let m = pendingSeatRequests.get(room);
+  if (!m) { m = new Map(); pendingSeatRequests.set(room, m); }
+  return m;
+}
+
+// Finds the live socket (if any) for a given account userId within a room —
+// same lookup recordingHandler.ts's own findSocketByUserId does, duplicated
+// locally rather than shared since it's a three-line loop, not shared state.
+function findSocketByUserId(io: Server, room: string, uid: string): string | undefined {
+  const roomSockets = io.sockets.adapter.rooms.get(room);
+  if (!roomSockets) return undefined;
+  for (const sid of roomSockets) {
+    const s = io.sockets.sockets.get(sid);
+    if ((s?.data as { userId?: string })?.userId === uid) return sid;
+  }
+  return undefined;
 }
 
 // A seatId is only valid if it corresponds to a marker the admin actually
@@ -176,6 +215,115 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
     if (!existing || existing.userId !== uid) return;
     m.delete(data.seatId);
     io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
+  });
+
+  // Someone tried to claim a seat that's already taken and, unlike a plain
+  // CLAIM_SEAT, chose to ask the owner instead of silently redirecting to
+  // the nearest free desk.
+  socket.on(SocketEvents.SEAT_CLAIM_REQUEST, (data: { seatId: string }) => {
+    if (!currentRoom || typeof data?.seatId !== 'string') return;
+    const uid = userId();
+    if (!uid) return;
+    if (!seatExists(currentRoom, data.seatId)) return;
+
+    const m = roomClaims(currentRoom);
+    const existing = m.get(data.seatId);
+    const name = getPlayerName(socket.id) ?? 'Seseorang';
+
+    // No longer taken by anyone else (freed, or the confirm dialog was
+    // stale) — nothing to ask; claim it directly, same as CLAIM_SEAT would.
+    if (!existing || existing.userId === uid) {
+      assignSeat(currentRoom, data.seatId, uid, name);
+      io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
+      return;
+    }
+
+    const ownerSocketId = findSocketByUserId(io, currentRoom, existing.userId);
+    if (!ownerSocketId) {
+      // Owner isn't connected right now (a claim is a standing grant that
+      // survives disconnects — see this file's top doc comment) — nobody to
+      // ask, so fall back to the old silent-redirect rather than leaving the
+      // requester waiting on a decision that will never come.
+      const fallbackSeatId = nearestFreeSeat(currentRoom, data.seatId);
+      if (!fallbackSeatId) {
+        socket.emit(SocketEvents.SEAT_CLAIM_DENIED, { seatId: data.seatId, byName: existing.name });
+        return;
+      }
+      assignSeat(currentRoom, fallbackSeatId, uid, name);
+      socket.emit(SocketEvents.SEAT_CLAIM_DENIED, { seatId: data.seatId, byName: existing.name, fallbackSeatId });
+      io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
+      return;
+    }
+
+    roomSeatRequests(currentRoom).set(socket.id, {
+      seatId: data.seatId,
+      ownerSocketId,
+      ownerName: existing.name,
+      requesterUserId: uid,
+      requesterName: name,
+    });
+
+    const req: SeatClaimRequest = { seatId: data.seatId, requesterUserId: uid, playerId: socket.id, requesterName: name };
+    io.to(ownerSocketId).emit(SocketEvents.SEAT_CLAIM_REQUESTED, req);
+  });
+
+  socket.on(SocketEvents.SEAT_CLAIM_DECIDE, (data: { seatId: string; playerId: string; approve: boolean }) => {
+    if (!currentRoom || typeof data?.seatId !== 'string' || typeof data?.playerId !== 'string') return;
+    const m = roomSeatRequests(currentRoom);
+    const pending = m.get(data.playerId);
+    if (!pending || pending.seatId !== data.seatId) return;
+    // Re-checked server-side: only the seat's CURRENT owner may decide. A
+    // client faking this event for someone else's seat gets nothing.
+    const currentOwner = roomClaims(currentRoom).get(data.seatId);
+    if (!currentOwner || currentOwner.userId !== userId()) return;
+
+    m.delete(data.playerId);
+    if (data.approve) {
+      assignSeat(currentRoom, data.seatId, pending.requesterUserId, pending.requesterName);
+      io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
+    }
+    io.to(data.playerId).emit(SocketEvents.SEAT_CLAIM_DECIDED, {
+      seatId: data.seatId,
+      approved: !!data.approve,
+      byName: pending.ownerName,
+    });
+  });
+
+  // The requester backs out before the owner ever decides. Only their OWN
+  // pending request, matched by this socket's id — nobody can cancel
+  // someone else's.
+  socket.on(SocketEvents.SEAT_CLAIM_REQUEST_CANCEL, (data: { seatId: string }) => {
+    if (!currentRoom || typeof data?.seatId !== 'string') return;
+    const m = roomSeatRequests(currentRoom);
+    const pending = m.get(socket.id);
+    if (!pending || pending.seatId !== data.seatId) return;
+    m.delete(socket.id);
+    io.to(pending.ownerSocketId).emit(SocketEvents.SEAT_CLAIM_REQUEST_CANCELLED, { seatId: pending.seatId, requesterUserId: pending.requesterUserId });
+  });
+
+  // No DISCONNECT handler releases an actual seat claim (see this file's top
+  // doc comment) — this one only resolves PENDING requests, which can't
+  // outlive either party's connection the way a claim itself does.
+  socket.on(SocketEvents.DISCONNECT, () => {
+    if (!currentRoom) return;
+    const m = roomSeatRequests(currentRoom);
+
+    // This socket was the REQUESTER on some pending ask — moot now, tell the
+    // owner to drop that card.
+    const myPending = m.get(socket.id);
+    if (myPending) {
+      m.delete(socket.id);
+      io.to(myPending.ownerSocketId).emit(SocketEvents.SEAT_CLAIM_REQUEST_CANCELLED, { seatId: myPending.seatId, requesterUserId: myPending.requesterUserId });
+    }
+
+    // This socket was the OWNER one or more pending asks are waiting on —
+    // nobody left to decide; resolve each as a denial so the requester's
+    // "menunggu persetujuan" card doesn't hang forever.
+    for (const [requesterSocketId, pending] of m) {
+      if (pending.ownerSocketId !== socket.id) continue;
+      m.delete(requesterSocketId);
+      io.to(requesterSocketId).emit(SocketEvents.SEAT_CLAIM_DECIDED, { seatId: pending.seatId, approved: false, byName: pending.ownerName });
+    }
   });
 
   // QA item #6 — deliberately no DISCONNECT handler here anymore. A claim
