@@ -1029,12 +1029,28 @@ class WebRTCService {
         // camera on within the same moment — an ordinary "everyone camera on"
         // start-of-meeting pattern, not an edge case — means BOTH sides can
         // hit this handler near-simultaneously: classic SDP glare, no perfect-
-        // negotiation/rollback here to absorb it. Previously this guard
-        // silently dropped the renegotiation with zero trace — if that
-        // silent drop is what's actually happening, this is the log line
-        // that proves it (paired with the signalingState-change hook below).
-        if (pc.signalingState !== 'stable' || !this.socket) {
-          diag('negotiationneeded SKIPPED (not stable)', { peer: remoteId, signalingState: pc.signalingState });
+        // negotiation/rollback here to absorb it.
+        //
+        // Bug fix (screen-share blackout) — this used to just `return` here,
+        // silently, same failure shape as the initialNegotiationDone gap
+        // above: addTrack() had already run (the sender exists locally) but
+        // its SDP was never announced to the remote side, permanently — for
+        // a screen share specifically, that's a peer stuck on a black tile
+        // for the rest of the call. A busy meeting (screen share starting
+        // right as someone's camera comes on, or several peers connecting
+        // in the same tick) hits this far more than an idle one, since more
+        // than one addTrack lands on the same pc close together. Marking
+        // pendingRenegotiation here and firing it from onsignalingstatechange
+        // once the pc actually returns to 'stable' recovers it, the same way
+        // initialNegotiationDone's own pendingRenegotiation catch-up does for
+        // the very first negotiation.
+        if (!this.socket) {
+          diag('negotiationneeded SKIPPED (no socket)', { peer: remoteId });
+          return;
+        }
+        if (pc.signalingState !== 'stable') {
+          peer.pendingRenegotiation = true;
+          diag('negotiationneeded SKIPPED (not stable), deferred', { peer: remoteId, signalingState: pc.signalingState });
           return;
         }
         const offer = await pc.createOffer();
@@ -1106,6 +1122,14 @@ class WebRTCService {
     // desync.
     pc.onsignalingstatechange = () => {
       diag('signaling state', { peer: remoteId, signalingState: pc.signalingState });
+      // Catch-up for renegotiate()'s own pendingRenegotiation deferral (see
+      // its doc comment) — the pc just left whatever busy state blocked the
+      // earlier attempt, so replay it now instead of leaving that track
+      // (screen share, camera, ...) unannounced for the rest of the call.
+      if (pc.signalingState === 'stable' && peer.pendingRenegotiation) {
+        peer.pendingRenegotiation = false;
+        void peer.renegotiate?.();
+      }
     };
 
     pc.oniceconnectionstatechange = () => {
