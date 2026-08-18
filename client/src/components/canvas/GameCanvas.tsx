@@ -2484,10 +2484,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           viewport: { worldViewW, worldViewH },
         });
       }
+      // TEMP DEBUG — round 3: loud magenta instead of the normal dark
+      // overlay, so it's unmistakable on screen even if the real 0.55 black
+      // is too subtle against this zone's own colors to judge from a
+      // screenshot. Revert to the rgba(0,0,0,...) line below once diagnosed.
+      ctx.fillStyle = 'rgba(255,0,255,0.85)';
       // Focus area asked for a noticeably lighter dim than Private Area's —
       // "abu-abu, sekitar 50%" (grayish, ~50%) rather than the near-black
       // 0.55 private areas already use.
-      ctx.fillStyle = spotlightZone.type === 'focus' ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.55)';
+      // ctx.fillStyle = spotlightZone.type === 'focus' ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.55)';
       ctx.fillRect(0, 0, worldViewW, pzy); // above the zone
       ctx.fillRect(0, pzy + pzh, worldViewW, worldViewH - (pzy + pzh)); // below
       ctx.fillRect(0, pzy, pzx, pzh); // left of the zone
