@@ -29,6 +29,7 @@ import { PALETTE_BY_ID } from '@/data/themeAssets';
 import { isTileBlocked, isDoorTile } from '@/utils/createDefaultRoom';
 import { findFollowRouteTarget, findTilePath, getCardinalWaypointTarget, isNearWorldPoint, tilePathToWorldWaypoints, type RouteState } from '@/utils/pathfinding';
 import { avatarColor } from '@/components/ui/ChatAvatar';
+import { findZoneAt } from '@/hooks/useProximity';
 // Bug 16-project (Room Editor) — these map-draw helpers were moved verbatim to
 // mapRender.ts so the editor can render the map identically. GameCanvas's usage
 // is unchanged.
@@ -2457,11 +2458,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // Placed after avatars/overhead furniture (so people standing outside
     // the room read as dimmed too) but before speech bubbles/prompts below
     // (so in-world UI text stays legible either way).
-    const spotlightZone = isOverview ? undefined : zones.find((z) =>
-      isPrivateZone(z) &&
-      playerX / TILE_SIZE >= z.x && playerX / TILE_SIZE < z.x + z.width &&
-      playerY / TILE_SIZE >= z.y && playerY / TILE_SIZE < z.y + z.height,
-    );
+    //
+    // Bug fix — reuses findZoneAt's smallest-area tie-break (see its own doc
+    // comment in useProximity.ts) instead of a bare zones.find(), which
+    // always took whichever isolating zone happened to be earlier in the
+    // array — in practice a large Map Location an admin also marked "kedap
+    // suara", permanently shadowing any smaller Private Area drawn inside
+    // it. Same fix, same reasoning, applied here so the dim effect agrees
+    // with which zone chat/audio isolation (useProximity.ts) already picks.
+    const spotlightZone = isOverview ? undefined : findZoneAt({ x: playerX, y: playerY }, zones.filter(isPrivateZone));
     if (spotlightZone) {
       const pzx = spotlightZone.x * TILE_SIZE - cameraX;
       const pzy = spotlightZone.y * TILE_SIZE - cameraY;

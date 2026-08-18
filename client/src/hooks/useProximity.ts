@@ -30,10 +30,29 @@ export function calcGain(distanceTiles: number): number {
 // Finds the zone (if any) that contains a pixel position. Zone x/y/width/height
 // are in TILE units (see Zone in shared/types and the overlay draw in
 // GameCanvas.tsx), so the position is converted to tile coordinates first.
+//
+// Bug fix — when more than one zone covers the same point (e.g. a small,
+// specifically-drawn Private Area sitting inside a much larger Map Location
+// that was ALSO marked "kedap suara: YA"), this used to just return whichever
+// one happened to come first in the zones array — in practice always the
+// bigger, coarser one, since it's usually drawn first. That silently shadowed
+// every smaller area nested inside it (never selected for chat/audio/dim,
+// no matter how deliberately it was drawn) with no way to tell from the UI.
+// Smallest-area-wins matches what an admin actually means by drawing a
+// tighter rectangle on top of a looser one — same intuition as "the more
+// specific CSS selector wins" — and needs no data migration: it's purely a
+// tie-break over rects that were always there.
 export function findZoneAt(pos: { x: number; y: number }, zones: Zone[]): Zone | undefined {
   const tileX = pos.x / TILE_SIZE;
   const tileY = pos.y / TILE_SIZE;
-  return zones.find((z) => tileX >= z.x && tileX < z.x + z.width && tileY >= z.y && tileY < z.y + z.height);
+  let best: Zone | undefined;
+  let bestArea = Infinity;
+  for (const z of zones) {
+    if (tileX < z.x || tileX >= z.x + z.width || tileY < z.y || tileY >= z.y + z.height) continue;
+    const area = z.width * z.height;
+    if (area < bestArea) { best = z; bestArea = area; }
+  }
+  return best;
 }
 
 export function useProximity(
