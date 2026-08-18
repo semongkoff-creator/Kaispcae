@@ -23,6 +23,7 @@ import { getNearbyRecipients } from './proximityBroadcast';
 import { sanitizeChat } from '../middleware/validate';
 import { GUEST_LINK_REVOKED, GUEST_LINK_REVOKED_MESSAGE } from '../middleware/auth';
 import { findAssignedSeat } from './furnitureHandler';
+import { getClaimedSeatPosition } from './seatClaim';
 
 const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec per socket
 const canTeleport = socketRateLimit(2); // max 2 teleport requests/sec per socket
@@ -1097,6 +1098,20 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       ? { x: assignedSeat.x * TILE_SIZE + TILE_SIZE / 2, y: assignedSeat.y * TILE_SIZE + TILE_SIZE / 2 }
       : null;
     if (assignedSeatPixel) spawn = assignedSeatPixel;
+
+    // Bug fix — a self-claimed "Kursi Diklaim" seat (seatClaim.ts, player-
+    // chosen during play, distinct from the admin-granted assignedSeat
+    // above) previously had no effect on spawn at all, only ever landing
+    // someone back there by coincidence via `remembered` (and only if they
+    // happened to still be standing on it the instant they disconnected).
+    // Slots in below assignedSeat (an admin-granted desk still wins if
+    // somehow both exist) but above the plain remembered/Starting-Point
+    // fallback — same "durable intentional signal beats last-known-
+    // position" reasoning already used for assignedSeat.
+    if (!assignedSeatPixel) {
+      const claimedSeat = getClaimedSeatPosition(room, uid);
+      if (claimedSeat) spawn = { x: claimedSeat.x * TILE_SIZE + TILE_SIZE / 2, y: claimedSeat.y * TILE_SIZE + TILE_SIZE / 2 };
+    }
 
     // "Spawn near whoever let you in" — consumed at most once per admit/
     // approve decision (see markSpawnNearUser's own doc comment), so an

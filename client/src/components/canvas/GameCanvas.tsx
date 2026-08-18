@@ -2709,9 +2709,14 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         })}
       </div>
       {/* Banner furniture — decorative signage placed via the Room Editor,
-          same imperative-transform pattern as zone banners above. */}
+          same imperative-transform pattern as zone banners above.
+          Temporarily hidden per the room admin's own request — furniture-
+          based Banner is being replaced by a proper "Banner" tile effect
+          (like Map Location/Private/etc.) later; the underlying Furniture
+          rows are untouched here, just not rendered, so nothing is lost
+          once that replacement lands. */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {furniture.filter((f) => f.kind === 'banner').map((item) => (
+        {furniture.filter(() => false).map((item) => (
           <div
             key={item.id}
             ref={(el) => {

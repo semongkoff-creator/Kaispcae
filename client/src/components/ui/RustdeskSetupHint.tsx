@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, ClipboardCheck, Clipboard } from 'react-bootstrap-icons';
+import { XLg, ClipboardCheck, Clipboard, Display } from 'react-bootstrap-icons';
 
 // One-time RustDesk client config (ID Server / Relay Server / Key) that
 // every user needs to paste into RustDesk's own Settings -> Network once,
@@ -26,44 +26,71 @@ function CopyRow({ label, value }: { label: string; value: string }) {
           setTimeout(() => setCopied(false), 1500);
         }).catch(() => {});
       }}
-      className="w-full flex items-center justify-between gap-2 text-left"
+      className="w-full flex items-center justify-between gap-3 text-left px-3 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer"
     >
       <span className="min-w-0">
-        <span className="block text-[10px] text-gray-500 dark:text-gray-400">{label}</span>
-        <span className="block font-mono text-[11px] text-gray-800 dark:text-gray-100 truncate">{value}</span>
+        <span className="block text-[11px] text-gray-500 dark:text-gray-400">{label}</span>
+        {/* break-all, not truncate — the whole point of this popup (vs. the
+            cramped inline version it replaced) is that a 44-character key
+            must stay fully visible, not cut off. */}
+        <span className="block font-mono text-xs text-gray-800 dark:text-gray-100 break-all">{value}</span>
       </span>
       {copied ? (
-        <ClipboardCheck size={13} className="text-emerald-500 shrink-0" />
+        <ClipboardCheck size={16} className="text-emerald-500 shrink-0" />
       ) : (
-        <Clipboard size={13} className="text-gray-400 shrink-0" />
+        <Clipboard size={16} className="text-gray-400 shrink-0" />
       )}
     </button>
   );
 }
 
+// Bug fix — this used to be a collapsible section rendered INLINE inside
+// the (narrow, w-72) credential form/display panels, which cut off the
+// 44-character key and left everything cramped. Now a real popup —
+// separate from and layered above whichever narrow panel the trigger link
+// sits in (z-[200], same layer as GlobalModal, so it always renders on top
+// rather than being squeezed into the panel that opened it).
 export function RustdeskSetupHint() {
   const [open, setOpen] = useState(false);
   if (!ID_SERVER && !RELAY_SERVER && !KEY) return null;
 
   return (
-    <div className="border-t border-gray-200 dark:border-gray-700 pt-2 mt-1">
+    <>
       <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 text-[11px] text-purple-600 dark:text-purple-400 font-medium cursor-pointer"
+        onClick={() => setOpen(true)}
+        className="text-[11px] text-purple-600 dark:text-purple-400 font-medium underline decoration-dotted cursor-pointer"
       >
-        {open ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
         Belum atur RustDesk ke server sendiri?
       </button>
       {open && (
-        <div className="mt-2 flex flex-col gap-2 bg-gray-50 dark:bg-gray-800/60 rounded-lg p-2.5">
-          <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-snug">
-            Sekali saja: buka RustDesk → Settings → Network, isi 3 nilai ini, lalu Simpan. Klik tiap baris untuk copy.
-          </p>
-          {ID_SERVER && <CopyRow label="ID Server" value={ID_SERVER} />}
-          {RELAY_SERVER && <CopyRow label="Relay Server" value={RELAY_SERVER} />}
-          {KEY && <CopyRow label="Key" value={KEY} />}
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onMouseDown={() => setOpen(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-purple-100 dark:border-gray-700 w-full max-w-sm p-5"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-gray-100">
+                <Display size={15} className="text-purple-600 dark:text-purple-400" />
+                Setup RustDesk (sekali saja)
+              </h2>
+              <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
+                <XLg size={16} />
+              </button>
+            </div>
+            <p className="text-xs text-gray-600 dark:text-gray-300 mb-4 leading-relaxed">
+              Buka RustDesk → Settings → Network, isi 3 nilai di bawah, lalu Simpan. Klik tiap baris untuk copy.
+            </p>
+            <div className="flex flex-col gap-2">
+              {ID_SERVER && <CopyRow label="ID Server" value={ID_SERVER} />}
+              {RELAY_SERVER && <CopyRow label="Relay Server" value={RELAY_SERVER} />}
+              {KEY && <CopyRow label="Key" value={KEY} />}
+            </div>
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

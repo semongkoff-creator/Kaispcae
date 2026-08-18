@@ -91,6 +91,26 @@ function claimStates(room: string): SeatClaimState[] {
   return [...roomClaims(room).entries()].map(([seatId, c]) => ({ seatId, userId: c.userId, name: c.name }));
 }
 
+// Bug fix — a claimed seat previously had no bearing on where its owner
+// spawns on refresh/rejoin at all; only the separate, ALSO in-memory
+// `lastKnownPosition` (roomStore.ts) happened to coincidentally land them
+// back there, and only if they were standing exactly on the seat the
+// moment they disconnected. Exported so roomHandler.ts's JOIN_ROOM spawn
+// logic can give a claimed seat its own real priority tier, the same way
+// findAssignedSeat's admin-granted desk already does. Still in-memory only
+// (see this file's own top doc comment) — a server restart clears claims
+// the same way it clears lastKnownPosition, so this closes the common
+// "refresh mid-session" case, not "after the server itself restarted".
+export function getClaimedSeatPosition(room: string, uid: string): { x: number; y: number } | null {
+  for (const [seatId, c] of roomClaims(room)) {
+    if (c.userId === uid) {
+      const marker = allSeatMarkers(room).find((m) => m.seatId === seatId);
+      return marker ? { x: marker.x, y: marker.y } : null;
+    }
+  }
+  return null;
+}
+
 export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
   let currentRoom: string | null = null;
   const userId = (): string | undefined => socket.data.userId as string | undefined;
