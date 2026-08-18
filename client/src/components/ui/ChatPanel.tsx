@@ -7,6 +7,8 @@ import { useGameStore } from '@/stores/gameStore';
 import { ChatAvatar, avatarColor } from './ChatAvatar';
 import { AttachmentLightbox, type LightboxTarget } from './AttachmentLightbox';
 import { AttachmentMenuButton } from './AttachmentMenuButton';
+import { AttachmentTray } from './AttachmentTray';
+import { usePendingAttachments, type PendingAttachment } from '@/hooks/usePendingAttachments';
 import { Tooltip } from './Tooltip';
 import { CsChatConversation } from './CsChatConversation';
 import { useProfiles } from '@/hooks/useProfiles';
@@ -224,9 +226,12 @@ export function ChatPanel({
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [attachError, setAttachError] = useState('');
   // Potongan C3 — zone-chat file upload has no message bubble to show a
-  // pending state on (see handleAttachFile), so this is the ONLY signal the
-  // user gets that something's happening.
+  // pending state on (see sendPendingZoneAttachments), so this is the ONLY
+  // signal the user gets that something's happening.
   const [zoneFileUploading, setZoneFileUploading] = useState(false);
+  // Paste/attach stage files here first — nothing uploads or sends until
+  // Kirim (handleSend) drains this. See usePendingAttachments.ts.
+  const pendingAttachments = usePendingAttachments();
   // Scroll container (not an anchor element): we drive scrollTop directly,
   // which is steadier under React re-renders than scrollIntoView (that can
   // yank the whole page and fights the smooth-scroll mid-render).
@@ -341,9 +346,33 @@ export function ChatPanel({
     setMention(null);
   }, [activeChatTarget?.type, activeChatTarget?.id]);
 
+  // Zone (Private) chat has no persisted message / pending-bubble concept to
+  // hang an optimistic upload off of (see handleAttachFile's old doc
+  // comment — chatHandler.ts is a pure live relay, never saved), so each
+  // staged attachment uploads here, sequentially, only once Kirim is
+  // pressed — same upload call and "Mengunggah…" signal the old
+  // upload-on-attach path used, just moved to send time.
+  const sendPendingZoneAttachments = useCallback(
+    async (attachments: PendingAttachment[], zoneId: string) => {
+      setZoneFileUploading(true);
+      for (const { file } of attachments) {
+        try {
+          const { url, fileName } = await api.uploadMedia(file, roomSlug);
+          onSendZone?.('', zoneId, url, fileName);
+        } catch (e) {
+          console.error('[chat] zone file upload failed:', e);
+          setAttachError('Upload gagal — coba lagi.');
+        }
+      }
+      setZoneFileUploading(false);
+    },
+    [onSendZone, roomSlug]
+  );
+
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    const attachments = pendingAttachments.items;
+    if (!trimmed && attachments.length === 0) return;
     // Every zone/channel send also shows as a floating speech bubble over
     // the avatar — no separate "Bubble" mode to remember to turn on first.
     // DMs are excluded: their content is private, and a bubble is public to
@@ -355,30 +384,39 @@ export function ChatPanel({
     // over the avatar. stripMentionsToPlainText reduces it to "@Name" first.
     const bubbleText = stripMentionsToPlainText(trimmed);
     if (viewingZone && currentZone && onSendZone) {
-      onSendZone(trimmed, currentZone.id);
-      onBubble(bubbleText);
+      if (trimmed) {
+        onSendZone(trimmed, currentZone.id);
+        onBubble(bubbleText);
+      }
+      if (attachments.length > 0) sendPendingZoneAttachments(attachments, currentZone.id);
     } else {
-      onSend(trimmed);
-      if (activeChatTarget?.type !== 'dm') onBubble(bubbleText);
+      if (trimmed) {
+        onSend(trimmed);
+        if (activeChatTarget?.type !== 'dm') onBubble(bubbleText);
+      }
+      // Channel/DM attachments each go through onSendFile exactly like a
+      // single manual attach did before — instant optimistic bubble +
+      // background upload per file (see useChannelChat.ts's
+      // sendFileMessage). Several staged files just means several bubbles.
+      attachments.forEach((a) => onSendFile?.(a.file));
     }
+    pendingAttachments.clear();
     setText('');
     setShowEmoji(false);
     setMention(null);
-  }, [text, onSend, onBubble, viewingZone, currentZone, onSendZone, activeChatTarget]);
+  }, [text, onSend, onBubble, viewingZone, currentZone, onSendZone, activeChatTarget, onSendFile, pendingAttachments, sendPendingZoneAttachments]);
 
   const insertEmoji = (emoji: string) => {
     setText((prev) => prev + emoji);
   };
 
-  // Bug 6 — this used to await the ENTIRE upload here before calling onSend
-  // at all, so the bubble (and every send-round-trip-wait on top of it)
-  // never appeared until the file had already finished uploading. onSendFile
-  // (useChannelChat.ts's sendFileMessage) now shows the bubble immediately
-  // (local blob: preview) and runs the upload in the background — this
-  // function only does the synchronous size pre-check, which still belongs
-  // here since it should reject before any bubble is even created. A failed
-  // upload/send shows up as that bubble's own status:'failed' with a retry
-  // button (see the message-list rendering below), not a generic banner.
+  // Paste/attach no longer uploads or sends anything by itself — it only
+  // stages the file into pendingAttachments (rendered as AttachmentTray
+  // below the input) so the user can review, add more, and remove before
+  // committing. The actual upload/send happens in handleSend once Kirim is
+  // pressed, branching the same way it always did (zone upload-then-emit vs.
+  // onSendFile's instant-bubble-then-upload) — see sendPendingZoneAttachments
+  // and handleSend above.
   const handleAttachFile = useCallback(
     (file: File) => {
       setAttachError('');
@@ -386,40 +424,19 @@ export function ChatPanel({
         setAttachError(`File is too large — max ${Math.round(MAX_ATTACHMENT_BYTES / (1024 * 1024))}MB.`);
         return;
       }
-      // Potongan C3 — zone (Private) chat has no persisted message / pending-
-      // bubble concept to hang an optimistic upload off of (see chatHandler.ts
-      // — it's a pure live relay, never saved), so unlike onSendFile's
-      // instant-bubble-then-upload-in-background pattern, this uploads FIRST
-      // and only calls onSendZone once there's a real URL to send. The
-      // "Mengunggah…" state below covers the gap so it never looks stuck.
-      if (viewingZone && currentZone && onSendZone) {
-        setZoneFileUploading(true);
-        api.uploadMedia(file, roomSlug)
-          .then(({ url, fileName }) => {
-            onSendZone('', currentZone.id, url, fileName);
-          })
-          .catch((e) => {
-            console.error('[chat] zone file upload failed:', e);
-            setAttachError('Upload gagal — coba lagi.');
-          })
-          .finally(() => setZoneFileUploading(false));
-        return;
-      }
-      onSendFile?.(file);
+      pendingAttachments.add(file);
     },
-    [onSendFile, viewingZone, currentZone, onSendZone, roomSlug]
+    [pendingAttachments]
   );
 
   // Ctrl+V a screenshot straight into the input, Lark/WhatsApp-style —
-  // reuses handleAttachFile verbatim (same size check, same zone-vs-channel
-  // branching, same upload path), so this is zero new upload logic, just a
-  // new entry point into the existing one. Only intercepts when the
-  // clipboard actually carries image data; anything else (plain text,
-  // a copied file that isn't an image) falls through to the browser's
-  // normal paste behavior untouched. Multiple images pasted at once become
-  // multiple separate sends — this data model has no multi-attachment
-  // message (see ChannelMessage.attachmentUrl), same as attaching several
-  // files manually one after another.
+  // reuses handleAttachFile verbatim (same size check, same staging), so
+  // this is zero new upload logic, just a new entry point into the existing
+  // one. Only intercepts when the clipboard actually carries image data;
+  // anything else (plain text, a copied file that isn't an image) falls
+  // through to the browser's normal paste behavior untouched. Multiple
+  // images pasted at once all get staged together, same as attaching
+  // several files manually one after another.
   const handlePaste = useCallback(
     (e: ClipboardEvent<HTMLInputElement>) => {
       const imageFiles = Array.from(e.clipboardData?.items ?? [])
@@ -910,6 +927,7 @@ export function ChatPanel({
             </div>
           )}
 
+          <AttachmentTray items={pendingAttachments.items} onRemove={pendingAttachments.remove} />
           {attachError && (
             <p className="px-3 pb-1 text-[10px] text-red-500">{attachError}</p>
           )}
@@ -1002,7 +1020,7 @@ export function ChatPanel({
             <Tooltip label="Kirim" detail="Kirim pesanmu.">
               <button
                 onClick={handleSend}
-                disabled={!text.trim()}
+                disabled={!text.trim() && pendingAttachments.items.length === 0}
                 className="bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-xs px-3 py-1.5 rounded cursor-pointer"
               >
                 Send
@@ -1143,7 +1161,7 @@ function MessageBubble({
         <div
           onContextMenu={onContextMenu ?? (pinnable ? (e) => { e.preventDefault(); onPin?.(); } : undefined)}
           title={onContextMenu ? 'Klik kanan untuk opsi (sematkan, lihat yang sudah baca)' : pinnable ? 'Right-click to pin as notice' : undefined}
-          className={`rounded-2xl px-2.5 py-1.5 ${isOwn ? 'rounded-br-sm' : 'rounded-bl-sm'} ${onContextMenu || pinnable ? 'cursor-context-menu' : ''} ${bodyText} ${
+          className={`min-w-0 rounded-2xl px-2.5 py-1.5 ${isOwn ? 'rounded-br-sm' : 'rounded-bl-sm'} ${onContextMenu || pinnable ? 'cursor-context-menu' : ''} ${bodyText} ${
             isBot
               ? 'bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800'
               : mentioned ? 'bg-amber-100 dark:bg-amber-900/40' : isOwn ? 'bg-purple-600' : 'bg-gray-100 dark:bg-gray-700'

@@ -8,6 +8,8 @@ import { GroupMembers } from './GroupMembers';
 import { useProfiles } from '@/hooks/useProfiles';
 import { AttachmentLightbox, type LightboxTarget } from '@/components/ui/AttachmentLightbox';
 import { AttachmentMenuButton } from '@/components/ui/AttachmentMenuButton';
+import { AttachmentTray } from '@/components/ui/AttachmentTray';
+import { usePendingAttachments } from '@/hooks/usePendingAttachments';
 import { renderWithMentions, stripMentionsToPlainText } from '@/utils/mentions';
 
 // §Messenger — the full-screen chat surface, in the same "module panel over
@@ -179,6 +181,9 @@ export function MessengerApp({
   // Bug 10 — attachment preview opens in this in-app lightbox, not a new tab.
   const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
   const [attachError, setAttachError] = useState('');
+  // Paste/attach stage files here first — nothing uploads or sends until
+  // send() drains this. See usePendingAttachments.ts.
+  const pendingAttachments = usePendingAttachments();
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [showMembers, setShowMembers] = useState(false);
@@ -252,20 +257,24 @@ export function MessengerApp({
 
   const send = useCallback(() => {
     const t = text.trim();
-    if (!t) return;
-    onSend(t);
+    const attachments = pendingAttachments.items;
+    if (!t && attachments.length === 0) return;
+    if (t) onSend(t);
+    // Each staged attachment goes through onSendFile exactly like a single
+    // manual attach did before — instant optimistic bubble + background
+    // upload per file (see useChannelChat.ts's sendFileMessage). Several
+    // staged files just means several bubbles.
+    attachments.forEach((a) => onSendFile?.(a.file));
+    pendingAttachments.clear();
     setText('');
     setShowEmoji(false);
-  }, [text, onSend]);
+  }, [text, onSend, onSendFile, pendingAttachments]);
 
-  // Bug 6 — mirrors ChatPanel.tsx's handleAttachFile: this used to await the
-  // ENTIRE upload before onSend was even called, so the bubble never showed
-  // until the file had finished uploading. onSendFile (useChannelChat.ts's
-  // sendFileMessage) shows it immediately (local blob: preview) and uploads
-  // in the background — this only keeps the synchronous size pre-check,
-  // which should still reject before any bubble exists. A failed upload/send
-  // shows as that bubble's own status:'failed' with a retry button, not a
-  // generic banner, so `uploading` no longer needs to block the composer.
+  // Paste/attach no longer uploads or sends anything by itself — it only
+  // stages the file into pendingAttachments (rendered as AttachmentTray
+  // below the input) so the user can review, add more, and remove before
+  // committing. The actual upload/send happens in send() once the send
+  // button is pressed (see onSendFile's instant-bubble-then-upload above).
   const handleFile = useCallback(
     (file: File) => {
       setAttachError('');
@@ -273,17 +282,17 @@ export function MessengerApp({
         setAttachError('File terlalu besar (maks 50MB).');
         return;
       }
-      onSendFile?.(file);
+      pendingAttachments.add(file);
     },
-    [onSendFile]
+    [pendingAttachments]
   );
 
   // Ctrl+V a screenshot straight into the input, Lark/WhatsApp-style —
   // mirrors ChatPanel.tsx's own handlePaste, reusing handleFile verbatim
-  // (same size check, same upload path) instead of any new upload logic.
-  // Only intercepts when the clipboard actually carries image data; plain
-  // text paste falls through untouched. Multiple pasted images become
-  // multiple separate sends, same as attaching several files manually.
+  // (same size check, same staging) instead of any new upload logic. Only
+  // intercepts when the clipboard actually carries image data; plain text
+  // paste falls through untouched. Multiple pasted images all get staged
+  // together, same as attaching several files manually.
   const handlePaste = useCallback(
     (e: ClipboardEvent<HTMLTextAreaElement>) => {
       const imageFiles = Array.from(e.clipboardData?.items ?? [])
@@ -600,7 +609,7 @@ export function MessengerApp({
                             {m.isPinned && <PinAngleFill size={9} className="text-purple-500" title="Disematkan" />}
                           </span>
                         )}
-                        <div className="group relative">
+                        <div className="group relative min-w-0">
                           {editingId === m.id ? (
                             <div className="flex gap-1.5">
                               <input
@@ -713,6 +722,7 @@ export function MessengerApp({
             {/* ── Composer ───────────────────────────────────────── */}
             <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 px-4 py-3">
               {attachError && <p className="text-xs text-red-500 mb-1.5">{attachError}</p>}
+              <AttachmentTray items={pendingAttachments.items} onRemove={pendingAttachments.remove} />
               {showEmoji && (
                 <div className="mb-2 flex flex-wrap gap-1 p-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
                   {COMMON_EMOJIS.map((e) => (
@@ -758,7 +768,7 @@ export function MessengerApp({
                 />
                 <button
                   onClick={send}
-                  disabled={!text.trim()}
+                  disabled={!text.trim() && pendingAttachments.items.length === 0}
                   className="w-8 h-8 rounded-lg bg-purple-500 hover:bg-purple-600 disabled:opacity-40 disabled:hover:bg-purple-500 text-white inline-flex items-center justify-center shrink-0"
                 >
                   <SendFill size={13} />
