@@ -2662,20 +2662,32 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           // of these (one per desk), left at their default name, so the
           // label just repeats the same word across the whole screen. Per
           // the room admin, ONLY Map Location is meant to keep its name
-          // visible on the map — every other isolating area (Private,
-          // Focus) goes color-block-only, regardless of zoom level.
-          // Restricted stays labeled (checked via the same restrictedZoneIds
-          // set the 🔒 badge below uses) since it's typically a real, unique
-          // room name ("CEO Office"), not a repeated default. Map Location
-          // stays labeled via the explicit zone.isMapLocation flag, NOT via
-          // isPrivateZone's audioIsolated check — a Map Location created
-          // with "kedap suara: YA" has audioIsolated:true, which used to
-          // make it byte-identical to a genuine Private Area here and wipe
-          // its name too, even though isolation and "always show this
-          // area's name" are independent settings (see Zone.isMapLocation's
-          // own doc comment for why this needed a real, separate flag).
-          const suppressPrivateLabel = isPrivateZone(zone) && !zone.isMapLocation && !restrictedZoneIds?.has(zone.id);
-          if (suppressPrivateLabel) return null;
+          // visible on the map — every other area (Private, Focus, AND
+          // Meeting — see below) goes color-block-only, regardless of zoom
+          // level. Restricted stays labeled (checked via the same
+          // restrictedZoneIds set the 🔒 badge below uses) since it's
+          // typically a real, unique room name ("CEO Office"), not a
+          // repeated default.
+          //
+          // Bug fix — this used to be a denylist (`isPrivateZone(zone) &&
+          // !isMapLocation && !restricted`), and isPrivateZone's own
+          // definition explicitly EXEMPTS type:'meeting' zones (they're
+          // never dimmed as "private" — see its doc comment) — which meant
+          // a Meeting Area's own label was NEVER suppressed, map location or
+          // not. An admin who stamps a Map Location on top of the same
+          // tiles as a Meeting Area (a common combo — "In a meeting" status
+          // AND a persistent room name) got BOTH labels rendered at nearly
+          // the same on-screen spot: the Meeting Area's opaque full-width
+          // bar visually buried the Map Location's smaller pill at normal
+          // zoom (reading as "the name just isn't there"), while Overview
+          // mode's plain-text-no-background style let both draw
+          // simultaneously, overlapping into garbled text. Now an allowlist
+          // — show a label ONLY for Map Location or Restricted, exactly
+          // matching "only map location keeps its name" — so a Meeting
+          // Area's own label no longer exists to collide with anything,
+          // regardless of whether it's also isMapLocation.
+          const showLabel = zone.isMapLocation || restrictedZoneIds?.has(zone.id);
+          if (!showLabel) return null;
           return (
             <div
               key={zone.id}
