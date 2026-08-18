@@ -668,9 +668,6 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // seat) — click-to-move below no longer pushes to this, since it's
   // walking there now, not blinking.
   const teleportFlashRef = useRef<{ x: number; y: number; start: number }[]>([]);
-  // TEMP DEBUG — Private Area dim-effect investigation (throttled console
-  // log, remove once diagnosed). See the spotlightZone block below.
-  const privateAreaDebugLogRef = useRef(0);
   // Follow-up — click now WALKS to the tile (reusing useMovement's
   // updateFollow/tryMoveToward, the exact primitive Follow already uses to
   // approach an arbitrary point) instead of teleporting there instantly.
@@ -2470,29 +2467,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const pzy = spotlightZone.y * TILE_SIZE - cameraY;
       const pzw = spotlightZone.width * TILE_SIZE;
       const pzh = spotlightZone.height * TILE_SIZE;
-      // TEMP DEBUG — Private Area dim-effect investigation, round 2: print
-      // the MATCHED zone's own rect + the actual pixel rectangle the dim
-      // math derives from it (pzx/y/w/h) against the visible viewport size
-      // (worldViewW/H) — checks whether the zone is so large the "outside"
-      // rectangles land entirely off-screen, which would render nothing
-      // despite spotlightZone being correctly found. Remove once diagnosed.
-      if (now - privateAreaDebugLogRef.current > 2000) {
-        privateAreaDebugLogRef.current = now;
-        console.log('[private-area-debug]', {
-          zone: { id: spotlightZone.id, name: spotlightZone.name, type: spotlightZone.type, audioIsolated: spotlightZone.audioIsolated, x: spotlightZone.x, y: spotlightZone.y, w: spotlightZone.width, h: spotlightZone.height },
-          pixelRect: { pzx, pzy, pzw, pzh },
-          viewport: { worldViewW, worldViewH },
-        });
-      }
-      // TEMP DEBUG — round 3: loud magenta instead of the normal dark
-      // overlay, so it's unmistakable on screen even if the real 0.55 black
-      // is too subtle against this zone's own colors to judge from a
-      // screenshot. Revert to the rgba(0,0,0,...) line below once diagnosed.
-      ctx.fillStyle = 'rgba(255,0,255,0.85)';
       // Focus area asked for a noticeably lighter dim than Private Area's —
       // "abu-abu, sekitar 50%" (grayish, ~50%) rather than the near-black
       // 0.55 private areas already use.
-      // ctx.fillStyle = spotlightZone.type === 'focus' ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.55)';
+      ctx.fillStyle = spotlightZone.type === 'focus' ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.55)';
       ctx.fillRect(0, 0, worldViewW, pzy); // above the zone
       ctx.fillRect(0, pzy + pzh, worldViewW, worldViewH - (pzy + pzh)); // below
       ctx.fillRect(0, pzy, pzx, pzh); // left of the zone
