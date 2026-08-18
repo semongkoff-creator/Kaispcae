@@ -2465,28 +2465,25 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       playerX / TILE_SIZE >= z.x && playerX / TILE_SIZE < z.x + z.width &&
       playerY / TILE_SIZE >= z.y && playerY / TILE_SIZE < z.y + z.height,
     );
-    // TEMP DEBUG — Private Area dim-effect investigation. Once every 2s,
-    // dump exactly what this client thinks: the local player's own tile
-    // position, every zone it considers "private" (isPrivateZone) with its
-    // full rect + audioIsolated/type, and whether any of them actually
-    // matched. Remove this block once diagnosed.
-    if (now - privateAreaDebugLogRef.current > 2000) {
-      privateAreaDebugLogRef.current = now;
-      console.log('[private-area-debug]', {
-        playerTile: { x: playerX / TILE_SIZE, y: playerY / TILE_SIZE },
-        isOverview,
-        privateZones: zones.filter((z) => isPrivateZone(z)).map((z) => ({
-          id: z.id, name: z.name, label: z.label, type: z.type,
-          audioIsolated: z.audioIsolated, x: z.x, y: z.y, w: z.width, h: z.height,
-        })),
-        spotlightZoneId: spotlightZone?.id ?? null,
-      });
-    }
     if (spotlightZone) {
       const pzx = spotlightZone.x * TILE_SIZE - cameraX;
       const pzy = spotlightZone.y * TILE_SIZE - cameraY;
       const pzw = spotlightZone.width * TILE_SIZE;
       const pzh = spotlightZone.height * TILE_SIZE;
+      // TEMP DEBUG — Private Area dim-effect investigation, round 2: print
+      // the MATCHED zone's own rect + the actual pixel rectangle the dim
+      // math derives from it (pzx/y/w/h) against the visible viewport size
+      // (worldViewW/H) — checks whether the zone is so large the "outside"
+      // rectangles land entirely off-screen, which would render nothing
+      // despite spotlightZone being correctly found. Remove once diagnosed.
+      if (now - privateAreaDebugLogRef.current > 2000) {
+        privateAreaDebugLogRef.current = now;
+        console.log('[private-area-debug]', {
+          zone: { id: spotlightZone.id, name: spotlightZone.name, type: spotlightZone.type, audioIsolated: spotlightZone.audioIsolated, x: spotlightZone.x, y: spotlightZone.y, w: spotlightZone.width, h: spotlightZone.height },
+          pixelRect: { pzx, pzy, pzw, pzh },
+          viewport: { worldViewW, worldViewH },
+        });
+      }
       // Focus area asked for a noticeably lighter dim than Private Area's —
       // "abu-abu, sekitar 50%" (grayish, ~50%) rather than the near-black
       // 0.55 private areas already use.
