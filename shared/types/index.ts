@@ -1506,6 +1506,18 @@ export interface Furniture {
   flipV?: boolean;
   sizePercent?: { w: number; h: number };
   offsetPx?: { x: number; y: number };
+  // Free-angle rotation for kind:'banner' ONLY (degrees, 0-360, either
+  // direction of travel around 360 is fine since it's applied as a plain
+  // CSS rotate()) — deliberately a SEPARATE field from `rotation` above,
+  // which every other placed piece uses and which is hard-snapped to 90°
+  // steps (see GameCanvas's ROTATION_FRONT / computeSitFacingDirection,
+  // which assume exactly those 4 values for seat-facing math). A banner is
+  // never isInteractable/sittable, so it never touches that lookup — giving
+  // it its own field means "let a banner tilt to any angle" can never
+  // accidentally loosen the type every other furniture piece's rotation
+  // relies on. Absent = 0 (upright), same "as authored" convention as
+  // `rotation`.
+  bannerRotationDeg?: number;
   // ZEP's "Name" / "Hide object name" — an admin-chosen label, distinct from
   // any interactiveConfig text. Read by InteractiveObjectModal's title, and
   // by 'show_name' below (interactiveType === 'show_name' reveals THIS same

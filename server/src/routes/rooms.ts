@@ -339,6 +339,18 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
           }
           return o;
         })
+        // Banner tile-effect (Fitur: free-angle rotation) — bannerRotationDeg
+        // is the one genuinely new field this feature adds; same fail-soft
+        // posture as capacity below (drop the bad value, keep the rest of
+        // the piece) rather than rejecting the whole object over it.
+        .map((o) => {
+          const obj = o as { bannerRotationDeg?: unknown };
+          if (obj.bannerRotationDeg == null) return o;
+          if (typeof obj.bannerRotationDeg !== 'number' || !Number.isFinite(obj.bannerRotationDeg)) {
+            return { ...obj, bannerRotationDeg: undefined };
+          }
+          return { ...obj, bannerRotationDeg: ((Math.round(obj.bannerRotationDeg) % 360) + 360) % 360 };
+        })
         .slice(0, 2000) as LayerData['objects'];
     };
     if ('objects' in body) { const o = sanitizeObjs(body.objects); if (o) layerData.objects = o; }

@@ -106,11 +106,95 @@ function PieceThumb({ paletteId, size = 40 }: { paletteId: string; size?: number
   return <canvas ref={ref} style={{ width: size, height: size, imageRendering: 'pixelated' }} className="block" />;
 }
 
+// Banner (Furniture.kind==='banner') settings — a dedicated panel rather
+// than more conditionals inside ObjectSettingsPanel below, same pattern as
+// DoorSettingsPanel/SittableSettingsPanel: a banner isn't Interactive-Object
+// content, isn't sittable, and has no palette-sprite Type to pick, so all of
+// that generic UI would just be dead space here. Reuses sizePercent
+// (Size%) and drag-to-move (Select tool, unchanged) from the generic piece
+// exactly as-is; rotation is its own free-angle field (bannerRotationDeg),
+// deliberately NOT the shared 90°-snap `rotation` every other piece uses —
+// see that field's own doc comment in shared/types/index.ts.
+function BannerSettingsPanel({
+  furniture, layer, onBack,
+}: {
+  furniture: Furniture;
+  layer: 'objects' | 'top';
+  onBack: () => void;
+}) {
+  const patch = (p: Partial<Furniture>) => useEditorStore.getState().updateSelectedObject(p, layer);
+  const rotationDeg = furniture.bannerRotationDeg ?? 0;
+  const sizeW = furniture.sizePercent?.w ?? 100;
+  const sizeH = furniture.sizePercent?.h ?? 100;
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <button onClick={onBack} title="Kembali ke palette" className="w-6 h-6 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer text-white/70">←</button>
+        <p className="text-xs uppercase tracking-wider text-white/40">Banner Settings</p>
+      </div>
+
+      <p className="text-[11px] text-white/50 mb-1.5">Teks</p>
+      <textarea
+        value={furniture.text ?? ''}
+        onChange={(e) => patch({ text: e.target.value })}
+        placeholder="Ketik teks banner..."
+        rows={3}
+        className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400 resize-none"
+      />
+
+      <div className="flex items-center gap-2 mb-3">
+        <label className="flex-1 text-[10px] text-white/40">
+          Warna teks
+          <input type="color" value={furniture.textColor ?? '#ffffff'} onChange={(e) => patch({ textColor: e.target.value })} className="mt-0.5 w-full h-7 bg-gray-900 border border-white/10 rounded cursor-pointer" />
+        </label>
+        <label className="flex-1 text-[10px] text-white/40">
+          Warna latar
+          <input type="color" value={furniture.bgColor ?? '#7c3aed'} onChange={(e) => patch({ bgColor: e.target.value })} className="mt-0.5 w-full h-7 bg-gray-900 border border-white/10 rounded cursor-pointer" />
+        </label>
+      </div>
+
+      <p className="text-[11px] text-white/50 mb-1.5">Rotasi (bebas derajat)</p>
+      <div className="flex items-center gap-2 mb-3">
+        <input
+          type="range" min={0} max={359} value={rotationDeg}
+          onChange={(e) => patch({ bannerRotationDeg: Number(e.target.value) })}
+          className="flex-1 cursor-pointer"
+        />
+        <input
+          type="number" min={0} max={359} value={rotationDeg}
+          onChange={(e) => { const n = Math.round(Number(e.target.value)); patch({ bannerRotationDeg: Number.isFinite(n) ? ((n % 360) + 360) % 360 : 0 }); }}
+          className="w-14 bg-gray-900 border border-white/10 rounded px-1.5 py-1 text-xs text-white outline-none text-right"
+        />
+        <span className="text-[10px] text-white/40">°</span>
+      </div>
+
+      <p className="text-[11px] text-white/50 mb-1.5">Ukuran(%)</p>
+      <div className="flex items-center gap-2 mb-3">
+        <label className="flex-1 text-[10px] text-white/40">W<input type="number" min={10} value={sizeW} onChange={(e) => patch({ sizePercent: { w: Math.max(10, Number(e.target.value) || 100), h: sizeH } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
+        <label className="flex-1 text-[10px] text-white/40">H<input type="number" min={10} value={sizeH} onChange={(e) => patch({ sizePercent: { w: sizeW, h: Math.max(10, Number(e.target.value) || 100) } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
+      </div>
+
+      <p className="text-[11px] text-white/40 mb-3">Posisi: pilih tool Select, lalu drag banner ini di kanvas untuk memindahkan.</p>
+
+      <button
+        onClick={() => patch({ bannerRotationDeg: undefined, sizePercent: undefined, textColor: undefined, bgColor: undefined })}
+        className="w-full py-1.5 rounded bg-white/10 hover:bg-white/20 text-white/70 text-xs cursor-pointer"
+      >
+        ↺ Reset Settings
+      </button>
+    </div>
+  );
+}
+
 // Fitur 15B — ZEP-style "Object Settings" panel: shown instead of the
 // palette grid while a placed piece is selected (Select tool). Rotate&Flip/
 // Size/Reposition are generic to any piece; the Type dropdown below them is
 // the Interactive Object system — only 'text_popup' is wired up so far
 // (more of ZEP's pop-up/website/developer types land incrementally).
+// kind==='banner' delegates entirely to BannerSettingsPanel (see its own
+// doc comment) — a banner has none of the interactive/sittable/palette-Type
+// concepts this generic panel is built around.
 function ObjectSettingsPanel({
   furniture, layer, slug, onBack,
 }: {
@@ -124,6 +208,7 @@ function ObjectSettingsPanel({
   const [spriteBusy, setSpriteBusy] = useState(false);
   const [spriteErr, setSpriteErr] = useState('');
   if (!furniture) return null;
+  if (furniture.kind === 'banner') return <BannerSettingsPanel furniture={furniture} layer={layer} onBack={onBack} />;
   const patch = (p: Partial<Furniture>) => useEditorStore.getState().updateSelectedObject(p, layer);
   const rotation = furniture.rotation ?? 0;
   const sizeW = furniture.sizePercent?.w ?? 100;
@@ -760,6 +845,37 @@ function drawAreaHandles(ctx: CanvasRenderingContext2D, a: { x: number; y: numbe
   for (const [, hx, hy] of areaHandlePoints(a)) ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
 }
 
+// Editor-only preview for kind:'banner' pieces. drawFurnitureLayer (shared
+// with GameCanvas, see mapRender.ts) looks up item.paletteId in the real
+// sprite manifest and silently no-ops when it isn't found — which is every
+// banner, since paletteId is a stable placeholder for them (see Furniture's
+// own doc comment). Rather than teach the SHARED render function about a
+// non-sprite piece, this is a small, editor-only stand-in: a rotated box
+// with its text, just enough to place/aim/read it while editing. The real,
+// live rendering users actually see is GameCanvas's DOM-overlay banner pass
+// (font-floor, avatar-occlusion, etc.) — this doesn't need to match it
+// pixel-for-pixel, only be legible enough to work with.
+function drawBannerPlaceholder(ctx: CanvasRenderingContext2D, item: Furniture) {
+  const w = (item.tilesW * TILE_SIZE * (item.sizePercent?.w ?? 100)) / 100;
+  const h = (TILE_SIZE * (item.sizePercent?.h ?? 100)) / 100;
+  const cx = item.x * TILE_SIZE + (item.tilesW * TILE_SIZE) / 2 + (item.offsetPx?.x ?? 0);
+  const cy = item.y * TILE_SIZE + TILE_SIZE / 2 + (item.offsetPx?.y ?? 0);
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (item.bannerRotationDeg) ctx.rotate((item.bannerRotationDeg * Math.PI) / 180);
+  ctx.fillStyle = item.bgColor || '#7c3aed';
+  ctx.fillRect(-w / 2, -h / 2, w, h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(-w / 2, -h / 2, w, h);
+  ctx.fillStyle = item.textColor || '#ffffff';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(item.text || '(banner kosong)', 0, 0, w - 6);
+  ctx.restore();
+}
+
 function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomTheme, layer: EditorLayer) {
   if (layer === 'floor') {
     for (let y = 0; y < ld.height; y++) for (let x = 0; x < ld.width; x++)
@@ -768,9 +884,9 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
     for (let y = 0; y < ld.height; y++) for (let x = 0; x < ld.width; x++)
       if (ld.wall[y]?.[x]) drawWallTile(ctx, { x, y, type: 'wall', wallPaletteId: ld.wallPaletteId?.[y]?.[x] ?? undefined }, x * TILE_SIZE, y * TILE_SIZE, theme);
   } else if (layer === 'objects') {
-    for (const item of ld.objects) { drawFurnitureLayer(ctx, item, 0, 0, 'object'); drawFurnitureLayer(ctx, item, 0, 0, 'overhead'); }
+    for (const item of ld.objects) { drawFurnitureLayer(ctx, item, 0, 0, 'object'); drawFurnitureLayer(ctx, item, 0, 0, 'overhead'); if (item.kind === 'banner') drawBannerPlaceholder(ctx, item); }
   } else if (layer === 'top') {
-    for (const item of ld.topObjects) { drawFurnitureLayer(ctx, item, 0, 0, 'object'); drawFurnitureLayer(ctx, item, 0, 0, 'overhead'); }
+    for (const item of ld.topObjects) { drawFurnitureLayer(ctx, item, 0, 0, 'object'); drawFurnitureLayer(ctx, item, 0, 0, 'overhead'); if (item.kind === 'banner') drawBannerPlaceholder(ctx, item); }
   } else if (layer === 'effects') {
     // Every legacy 'desk'/'chair'/'blocked' tile round-trips into an
     // 'impassable' tileEffect (see shared/mapLayers.ts's legacyToLayerData) —
@@ -1066,6 +1182,16 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   // layerData; fetched separately and drawn as editor markers.
   const [mediaMode, setMediaMode] = useState<'image' | 'youtube' | 'website' | 'bgm' | null>(null);
   const mediaModeRef = useRef(mediaMode); useEffect(() => { mediaModeRef.current = mediaMode; }, [mediaMode]);
+  // Banner — a Furniture piece (kind:'banner') placed via the SAME
+  // click-to-stamp path as media above, not a new AreaEffect: unlike every
+  // other Tile Effect (rectangle-drag, no rotation/resize after creation),
+  // a Banner needs free rotation + resize + reposition, which only the
+  // Objects-layer settings-panel machinery (ObjectSettingsPanel/
+  // updateSelectedObject) already has. Placed with placeholder text, then
+  // immediately selected on the objects layer so its settings panel (see
+  // BannerSettingsPanel) opens right away for the admin to type the real text.
+  const [bannerMode, setBannerMode] = useState(false);
+  const bannerModeRef = useRef(bannerMode); useEffect(() => { bannerModeRef.current = bannerMode; }, [bannerMode]);
   const [media, setMedia] = useState<MediaObj[]>([]);
   const mediaRef = useRef<MediaObj[]>([]);
   useEffect(() => { mediaRef.current = media; }, [media]);
@@ -1380,6 +1506,25 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       if (mediaModeRef.current) {
         if (s.activeTool === 'stamp') void placeMedia(mediaModeRef.current, t.x, t.y);
         else if (s.activeTool === 'eraser') { const m = mediaAt(t.x, t.y); if (m) api.deleteRoomMedia(slug, m.id).then(refetchMedia).catch(() => {}); }
+        return;
+      }
+      // Banner (see bannerMode's own doc comment) — same "stamp/eraser
+      // intercept before the effects list" shape as media above. No
+      // dialog: placed with placeholder text, then switched straight to
+      // the objects layer + select tool + selected, so BannerSettingsPanel
+      // is the very next thing the admin sees.
+      if (bannerModeRef.current) {
+        if (s.activeTool === 'stamp') {
+          const id = crypto.randomUUID();
+          s.placeObject({ id, paletteId: 'banner', kind: 'banner', x: t.x, y: t.y, tilesW: 3, tilesH: 1, text: 'Banner baru' }, 'objects');
+          setBannerMode(false);
+          setActiveLayer('objects');
+          setActiveTool('select');
+          useEditorStore.getState().selectObjectAt(t.x, t.y, 'objects');
+        } else if (s.activeTool === 'eraser') {
+          const o = s.objectAt(t.x, t.y, 'objects');
+          if (o && o.kind === 'banner') s.removeObject(o.id, 'objects');
+        }
         return;
       }
       const eff = s.selectedEffect; if (!eff) return;
@@ -2005,12 +2150,23 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               <p className="text-xs uppercase tracking-wider text-white/40 mb-2">Tile Effects</p>
               <div className="space-y-1.5">
                 {EFFECTS.map((e) => (
-                  <button key={e.id} onClick={() => { setSelectedEffect(e.id); setMediaMode(null); }}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm cursor-pointer ${!mediaMode && selectedEffect === e.id ? 'bg-purple-600/30 border border-purple-400 text-white' : 'border border-white/10 text-white/70 hover:bg-white/5'}`}>
+                  <button key={e.id} onClick={() => { setSelectedEffect(e.id); setMediaMode(null); setBannerMode(false); }}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm cursor-pointer ${!mediaMode && !bannerMode && selectedEffect === e.id ? 'bg-purple-600/30 border border-purple-400 text-white' : 'border border-white/10 text-white/70 hover:bg-white/5'}`}>
                     <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: e.color }} /> {e.label}
                   </button>
                 ))}
               </div>
+              {/* Banner — see bannerMode's own doc comment for why this is a
+                  Furniture placement (Objects layer), not a new AreaEffect
+                  like the Tile Effects above, even though it lives in this
+                  same palette section. */}
+              <p className="text-xs uppercase tracking-wider text-white/40 mt-4 mb-2">Signage</p>
+              <button
+                onClick={() => { setBannerMode(true); setSelectedEffect(null); setMediaMode(null); }}
+                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm cursor-pointer ${bannerMode ? 'bg-purple-600/30 border border-purple-400 text-white' : 'border border-white/10 text-white/70 hover:bg-white/5'}`}
+              >
+                🪧 Banner
+              </button>
               {/* "Ngobrol dengan CEO" v2 — bookingMode toggle. No dedicated
                   per-zone settings panel exists yet (ZoneRestriction rows are
                   otherwise only ever written once, at area-creation time, see
@@ -2069,7 +2225,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               <p className="text-xs uppercase tracking-wider text-white/40 mt-4 mb-2">Media</p>
               <div className="space-y-1.5">
                 {([['image', '🖼️ Insert image'], ['youtube', '▶️ YouTube'], ['website', '🔗 Open website'], ['bgm', '🎵 Background music']] as const).map(([id, label]) => (
-                  <button key={id} onClick={() => { setMediaMode(id); setSelectedEffect(null); }}
+                  <button key={id} onClick={() => { setMediaMode(id); setSelectedEffect(null); setBannerMode(false); }}
                     className={`w-full px-2 py-1.5 rounded text-left text-sm cursor-pointer ${mediaMode === id ? 'bg-purple-600/30 border border-purple-400 text-white' : 'border border-white/10 text-white/70 hover:bg-white/5'}`}>
                     {label}
                   </button>
@@ -2078,7 +2234,9 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               <p className="text-[11px] text-white/50 mt-3 leading-relaxed">
                 {mediaMode
                   ? 'Stamp: klik tile untuk menaruh (image/BGM → upload; YouTube/Website → tempel URL). Eraser: klik untuk hapus.'
-                  : (EFFECTS.find((e) => e.id === selectedEffect)?.hint ?? 'Pilih efek/media lalu gambar di kanvas. Overlay ini hanya tampil di editor.')}
+                  : bannerMode
+                    ? 'Stamp: klik tile untuk menaruh banner. Langsung terpilih setelah ditaruh — ketik teksnya di panel yang muncul, lalu atur rotasi (bebas derajat), ukuran, dan warnanya di situ juga. Drag untuk pindah posisi. Eraser: klik untuk hapus.'
+                    : (EFFECTS.find((e) => e.id === selectedEffect)?.hint ?? 'Pilih efek/media lalu gambar di kanvas. Overlay ini hanya tampil di editor.')}
               </p>
             </>
           )}

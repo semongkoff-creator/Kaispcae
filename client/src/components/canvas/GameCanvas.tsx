@@ -1815,15 +1815,28 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     }
 
     // Banner furniture (DOM overlay) — same imperative positioning as zone
-    // banners above, anchored at the furniture's tile position.
+    // banners above, anchored at the furniture's CENTER (not top-left, like
+    // zone banners) since it needs to rotate around its own middle, the way
+    // a real sign tilts. Also carries the same font-floor fix zone banners
+    // already have (see MIN_ZONE_LABEL_FONT_PX's own comment above): the old
+    // version scaled the WHOLE box (including text) by a bare `scale(zoom)`,
+    // which shrank the text unreadable well before zoom-out finished — width
+    // is now sized in already-zoomed pixels and font-size is computed with
+    // the same explicit floor, so only the box's on-screen size shrinks with
+    // zoom, never the text past legibility.
     for (const item of furnitureList) {
       if (item.kind !== 'banner') continue;
       const el = bannerRefs.current.get(item.id);
       if (!el) continue;
-      const bx = (item.x * TILE_SIZE - cameraX) * zoom;
-      const by = (item.y * TILE_SIZE - cameraY) * zoom;
-      el.style.transform = `translate(${bx}px, ${by}px) scale(${zoom})`;
-      el.style.width = `${item.tilesW * TILE_SIZE}px`;
+      const scaleW = (item.sizePercent?.w ?? 100) / 100;
+      const scaleH = (item.sizePercent?.h ?? 100) / 100;
+      const cx = (item.x * TILE_SIZE + (item.tilesW * TILE_SIZE) / 2 - cameraX) * zoom;
+      const cy = (item.y * TILE_SIZE + TILE_SIZE / 2 - cameraY) * zoom;
+      const baseFontPx = 13;
+      el.style.fontSize = `${Math.max(MIN_ZONE_LABEL_FONT_PX, baseFontPx * zoom)}px`;
+      el.style.width = `${item.tilesW * TILE_SIZE * scaleW * zoom}px`;
+      el.style.height = `${TILE_SIZE * scaleH * zoom}px`;
+      el.style.transform = `translate(${cx}px, ${cy}px) translate(-50%, -50%) rotate(${item.bannerRotationDeg ?? 0}deg)`;
       el.style.opacity = isAvatarUnderLabel(item.x, item.y, item.tilesW) ? '0' : '1';
     }
 
@@ -2708,29 +2721,28 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
           );
         })}
       </div>
-      {/* Banner furniture — decorative signage placed via the Room Editor,
-          same imperative-transform pattern as zone banners above.
-          Temporarily hidden per the room admin's own request — furniture-
-          based Banner is being replaced by a proper "Banner" tile effect
-          (like Map Location/Private/etc.) later; the underlying Furniture
-          rows are untouched here, just not rendered, so nothing is lost
-          once that replacement lands. */}
+      {/* Banner furniture — decorative signage placed via the Room Editor's
+          "Signage" tool (see RoomEditorPage.tsx's bannerMode), same
+          imperative-transform pattern as zone banners above. Was
+          temporarily hidden while furniture-based Banner was being replaced
+          by a proper editor flow with free rotation + resize; that flow now
+          exists (BannerSettingsPanel), so this renders again. */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {furniture.filter(() => false).map((item) => (
+        {furniture.filter((item) => item.kind === 'banner').map((item) => (
           <div
             key={item.id}
             ref={(el) => {
               if (el) bannerRefs.current.set(item.id, el);
               else bannerRefs.current.delete(item.id);
             }}
-            className="absolute top-0 left-0 will-change-transform origin-top-left"
+            className="absolute top-0 left-0 will-change-transform origin-center"
           >
             {item.imageUrl ? (
-              <img src={item.imageUrl} alt={item.text || 'Banner'} className="w-full h-auto shadow-md" />
+              <img src={item.imageUrl} alt={item.text || 'Banner'} className="w-full h-full object-contain shadow-md" />
             ) : (
               <div
-                className="px-3 py-1.5 text-center font-bold text-sm tracking-wide shadow-md"
-                style={{ backgroundColor: item.bgColor || '#7c3aed', color: item.textColor || '#ffffff' }}
+                className="w-full h-full flex items-center justify-center px-3 text-center font-bold tracking-wide shadow-md whitespace-pre-line break-words"
+                style={{ backgroundColor: item.bgColor || '#7c3aed', color: item.textColor || '#ffffff', fontSize: 'inherit' }}
               >
                 {item.text || 'Banner'}
               </div>
