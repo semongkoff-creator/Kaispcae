@@ -59,6 +59,19 @@ const SPEAKING_THRESHOLD = 15;
 // someone genuinely stuck isn't silent for too long.
 const ICE_DISCONNECTED_TIMEOUT_MS = 5000;
 
+// Screen-share stall recovery — deliberately separate from the ICE
+// disconnected/failed handling above. A laggy link can stop delivering
+// screen-share frames while iceConnectionState stays 'connected' the whole
+// time (no packet loss severe enough to ever trip ICE, just not enough
+// throughput for a 1080p-ish capture) — the ICE watchdog above would never
+// fire for this at all. restartIce() is a much lighter recovery than tearing
+// down the whole peer (audio/camera keep running undisturbed); if repeated
+// attempts don't clear the stall, the link is likely bad enough that ICE
+// itself will eventually report disconnected/failed too, and the existing
+// watchdog above takes over from there on its own — no coordination needed.
+const SCREEN_STALL_RECOVERY_MAX_ATTEMPTS = 3;
+const SCREEN_STALL_RECOVERY_BASE_DELAY_MS = 2000;
+
 // Fallback classifier, used only until the presenter's RTC_SCREEN_SHARE
 // announcement is known. A camera is published in the same MediaStream as the
 // microphone; a screen comes from getDisplayMedia in a stream of its own with
@@ -252,6 +265,13 @@ interface PeerConnection {
   // (turning the camera on well after this peer already connected
   // audio-only must not silently bypass the same cap).
   videoEligible: boolean;
+  // Screen-share stall recovery (see SCREEN_STALL_RECOVERY_* above) — true
+  // while this peer's incoming screen-share frames have stopped advancing
+  // (checked in reportStats()) but ICE hasn't (yet) reported
+  // disconnected/failed. Drives the "Menyambung ulang..." overlay and gates
+  // attemptScreenRecovery so a peer already mid-recovery doesn't get a
+  // second overlapping restartIce() loop started against it.
+  screenStalled: boolean;
 }
 
 class WebRTCService {
@@ -298,6 +318,10 @@ class WebRTCService {
   // Before this, a permanently-failed peer had NO callback path at all —
   // their video tile just silently froze on the last frame forever.
   private onPeerConnectionStatus: ((id: string, failed: boolean) => void) | null = null;
+  // Screen-share stall recovery (see SCREEN_STALL_RECOVERY_* above) — fires
+  // whenever a peer's screenStalled flips, so the UI can swap the frozen
+  // picture for a "Menyambung ulang..." overlay instead of showing nothing.
+  private onScreenShareStalled: ((id: string, stalled: boolean) => void) | null = null;
   private analyserInterval: ReturnType<typeof setInterval> | null = null;
 
   setSocket(socket: Socket) {
@@ -328,6 +352,10 @@ class WebRTCService {
 
   setOnRemoteScreenEnded(cb: (id: string) => void) {
     this.onRemoteScreenEnded = cb;
+  }
+
+  setOnScreenShareStalled(cb: (id: string, stalled: boolean) => void) {
+    this.onScreenShareStalled = cb;
   }
 
   setOnSpeakingChange(cb: (id: string, speaking: boolean) => void) {
@@ -711,6 +739,12 @@ class WebRTCService {
   // started" into "packets in the last ~5s" (see its own comment for why the
   // cumulative number alone is misleading for a mid-call stall).
   private lastPacketCounts = new Map<string, { in: number; out: number }>();
+  // Screen-share stall recovery — cumulative framesReceived on the SCREEN
+  // track's own receiver, last tick, per peer. Scoped to that one receiver
+  // (RTCRtpReceiver.getStats(), not the aggregate pc.getStats()) so a peer
+  // whose camera is flowing fine doesn't mask their stalled screen share, or
+  // vice versa — the two tracks are counted completely independently.
+  private lastScreenFrameCounts = new Map<string, number>();
 
   // [webrtc-diag] The decisive measurement, and the reason this whole pass
   // exists: whether audio BYTES are actually crossing the wire.
@@ -781,7 +815,82 @@ class WebRTCService {
         out.statsError = String(err);
       }
       diag(`stats [peer ${id}]`, out);
+
+      await this.checkScreenStall(id, peer);
     }
+  }
+
+  // Screen-share stall detection — separate try/catch from the audio pass
+  // above so a receiver.getStats() failure here can never suppress the
+  // audio verdict, and separate iteration entirely from
+  // reportSelectedPath()'s pc-wide getStats() call, since this needs stats
+  // scoped to exactly one receiver (see lastScreenFrameCounts' own comment).
+  private async checkScreenStall(id: string, peer: PeerConnection): Promise<void> {
+    if (!peer.remoteScreenStream) {
+      // Not (or no longer) receiving a screen share from this peer at all —
+      // nothing to evaluate. Drop any stale baseline so a LATER share from
+      // this same peer starts its own fresh baseline tick, same as a
+      // brand-new peer would (see the `prevFrames === undefined` check
+      // below), rather than diffing against frame counts from a previous,
+      // unrelated share.
+      this.lastScreenFrameCounts.delete(id);
+      if (peer.screenStalled) {
+        peer.screenStalled = false;
+        this.onScreenShareStalled?.(id, false);
+      }
+      return;
+    }
+    const screenTrack = peer.remoteScreenStream.getVideoTracks()[0];
+    const receiver = screenTrack && peer.pc.getReceivers().find((r) => r.track === screenTrack);
+    if (!receiver) return;
+    try {
+      const stats = await receiver.getStats();
+      let framesReceived: number | undefined;
+      stats.forEach((r: Record<string, unknown>) => {
+        if (r.type === 'inbound-rtp') framesReceived = typeof r.framesReceived === 'number' ? r.framesReceived : undefined;
+      });
+      if (framesReceived === undefined) return;
+      const prevFrames = this.lastScreenFrameCounts.get(id);
+      this.lastScreenFrameCounts.set(id, framesReceived);
+      // No baseline yet (share just started, or just switched peers above) —
+      // one tick to establish a starting point rather than comparing against
+      // 0 and reading a brand-new share as instantly stalled.
+      if (prevFrames === undefined) return;
+      const stalled = framesReceived - prevFrames <= 0;
+      diag('screen frames', { peer: id, framesReceived, deltaSinceLastTick: framesReceived - prevFrames, stalled });
+      if (stalled === peer.screenStalled) return;
+      peer.screenStalled = stalled;
+      this.onScreenShareStalled?.(id, stalled);
+      if (stalled) void this.attemptScreenRecovery(id, peer, 1);
+    } catch (err) {
+      diag('screen stall check error', { peer: id, err: String(err) });
+    }
+  }
+
+  // Lighter-weight recovery than the full disconnectFromPlayer+connectToPlayer
+  // rebuild oniceconnectionstatechange falls back to (see
+  // SCREEN_STALL_RECOVERY_* above) — restartIce() leaves audio/camera on this
+  // same peer connection completely undisturbed. Backs off between attempts
+  // (2s, 4s, 6s) rather than hammering restartIce(); if the stall outlasts
+  // every attempt, this simply stops trying and leaves screenStalled true —
+  // the overlay keeps showing "Menyambung ulang...", and if the link is
+  // genuinely dead (not just slow), ICE itself will reach
+  // disconnected/failed on its own and the EXISTING watchdog
+  // (oniceconnectionstatechange) takes over the full-reconnect path
+  // completely independently of this one.
+  private attemptScreenRecovery(id: string, peer: PeerConnection, attempt: number): void {
+    if (!peer.screenStalled) return; // recovered already (checkScreenStall cleared it) — nothing to do
+    if (this.peers.get(id) !== peer) return; // this exact peer object was torn down/replaced since the stall was first seen
+    diag('screen stall recovery attempt', { peer: id, attempt });
+    try {
+      peer.pc.restartIce();
+    } catch (err) {
+      diag('restartIce error', { peer: id, err: String(err) });
+    }
+    if (attempt >= SCREEN_STALL_RECOVERY_MAX_ATTEMPTS) return;
+    setTimeout(() => {
+      if (peer.screenStalled && this.peers.get(id) === peer) this.attemptScreenRecovery(id, peer, attempt + 1);
+    }, SCREEN_STALL_RECOVERY_BASE_DELAY_MS * attempt);
   }
 
   // Proximity-driven — called on every proximity tick (see useWebRTC.ts).
@@ -858,6 +967,7 @@ class WebRTCService {
       initialNegotiationDone: false,
       pendingRenegotiation: false,
       disconnectedTimer: null,
+      screenStalled: false,
     };
 
     if (this.localStream) {
@@ -1008,6 +1118,11 @@ class WebRTCService {
         this.onRemoteScreenStream?.(remoteId, stream);
         event.track.onended = () => {
           peer.remoteScreenStream = null;
+          this.lastScreenFrameCounts.delete(remoteId);
+          if (peer.screenStalled) {
+            peer.screenStalled = false;
+            this.onScreenShareStalled?.(remoteId, false);
+          }
           this.onRemoteScreenEnded?.(remoteId);
         };
       }
@@ -1295,6 +1410,11 @@ class WebRTCService {
         const screenTrack = peer!.remoteScreenStream?.getVideoTracks()[0];
         if (peer!.remoteScreenStream && (!screenTrack || screenTrack.readyState === 'ended')) {
           peer!.remoteScreenStream = null;
+          this.lastScreenFrameCounts.delete(fromId);
+          if (peer!.screenStalled) {
+            peer!.screenStalled = false;
+            this.onScreenShareStalled?.(fromId, false);
+          }
           this.onRemoteScreenEnded?.(fromId);
         }
         for (const c of peer!.iceQueue) {
@@ -1394,6 +1514,18 @@ class WebRTCService {
       if (peer.remoteScreenStream) {
         peer.remoteScreenStream = null;
         this.onRemoteScreenEnded?.(id);
+      }
+      // Same reasoning as lastPacketCounts.delete below — a reconnect's
+      // brand-new receiver starts framesReceived at 0, so a stale prior
+      // count would read as an instant, spurious stall on the first tick.
+      // Also clears any "Menyambung ulang..." overlay left showing for a
+      // peer that's now gone entirely (their tile disappears anyway once
+      // onRemoteScreenEnded above removes them, but this keeps
+      // screenStalled from lingering true against a discarded peer object).
+      this.lastScreenFrameCounts.delete(id);
+      if (peer.screenStalled) {
+        peer.screenStalled = false;
+        this.onScreenShareStalled?.(id, false);
       }
       peer.analyser?.disconnect();
       peer.analyser = null;
@@ -1553,6 +1685,11 @@ class WebRTCService {
         // that proved unreliable and left ghost panels behind.
         if (peer?.remoteScreenStream) {
           peer.remoteScreenStream = null;
+          this.lastScreenFrameCounts.delete(data.fromId);
+          if (peer.screenStalled) {
+            peer.screenStalled = false;
+            this.onScreenShareStalled?.(data.fromId, false);
+          }
           this.onRemoteScreenEnded?.(data.fromId);
         }
       }

@@ -71,6 +71,13 @@ interface VideoGridProps {
   // tile (same as any other nearby player) but VideoTile shows a
   // "connection lost" badge over it instead of a silently frozen picture.
   failedPeerIds?: Set<string>;
+  // Peers whose incoming screen-share frames have stalled (see useWebRTC's
+  // screenStalledPeers) — ICE is still nominally connected, but no new
+  // frames arrived on the last tick. Distinct from failedPeerIds above:
+  // this is "actively trying to recover" (restartIce() in progress), not a
+  // permanent failure, so it gets its own "Menyambung ulang..." overlay
+  // rather than the connection-lost badge.
+  screenStalledPeerIds?: Set<string>;
   // Meeting View entry point — moved here from Sidebar's Room Features
   // dropdown to sit next to the hide/show camera-tiles toggle instead.
   // VideoGrid only ever renders while Meeting View is NOT active, so this
@@ -144,7 +151,7 @@ const MAX_ZOOM = 3;
 // cameraEntries/onEnlarge) — same zoom/pan/maximize behavior works just as
 // well for zooming into a face as it does a shared screen, so this one panel
 // covers both rather than a second hand-maintained copy.
-function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedChange }: { name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean; onClose: () => void; onMaximizedChange?: (maximized: boolean) => void }) {
+function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedChange, stalled }: { name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean; onClose: () => void; onMaximizedChange?: (maximized: boolean) => void; stalled?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [maximized, setMaximizedState] = useState(false);
@@ -439,6 +446,17 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
           style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})${mirror ? ' scaleX(-1)' : ''}` }}
           className="absolute inset-0 w-full h-full object-contain object-top"
         />
+        {/* Screen-share stall recovery — sits over whatever frame the video
+            froze on (never unmounted, so the moment frames resume this just
+            disappears again) instead of leaving a silently frozen/black
+            picture with no explanation. See webrtcService's
+            checkScreenStall/attemptScreenRecovery. */}
+        {stalled && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/55 text-white pointer-events-none">
+            <span className="w-8 h-8 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+            <span className="text-sm font-medium">Menyambung ulang...</span>
+          </div>
+        )}
         {/* The title bar's replacement while maximized — floats over the
             video (z-10, semi-transparent so the picture still reads through
             behind it) instead of pushing it down a row. */}
@@ -452,7 +470,7 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
   );
 }
 
-export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds, onToggleMeetingView, onScreenShareMaximizedChange }: VideoGridProps) {
+export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds, screenStalledPeerIds, onToggleMeetingView, onScreenShareMaximizedChange }: VideoGridProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayer = useGameStore((s) => s.localPlayer);
   const localHandRaised = localPlayer.handRaised;
@@ -493,12 +511,12 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // Local and remote shares merged into ONE list, because from the viewer's
   // side they're the same kind of thing — content someone is presenting —
   // and only their prominence should differ, not their source.
-  const screenEntries: { key: string; name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean }[] = [];
+  const screenEntries: { key: string; name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean; peerId?: string }[] = [];
   if (localScreenStream) {
     screenEntries.push({ key: 'local-screen', name: 'Layar Anda', stream: localScreenStream, isLocal: true });
   }
   for (const t of videoTiles) {
-    if (t.screenStream) screenEntries.push({ key: `${t.id}-screen`, name: `Layar ${t.name}`, stream: t.screenStream, isLocal: false });
+    if (t.screenStream) screenEntries.push({ key: `${t.id}-screen`, name: `Layar ${t.name}`, stream: t.screenStream, isLocal: false, peerId: t.id });
   }
 
   // A tile's own enlarge button (see VideoTile's onEnlarge) opens the SAME
@@ -506,7 +524,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // camera and that same person's screen share can never collide on one key.
   // Gated on the tile actually having a stream — same "nothing to enlarge"
   // rule VideoTile itself uses to decide whether to render the button.
-  const cameraEntries: { key: string; name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean }[] = [];
+  const cameraEntries: { key: string; name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean; peerId?: string }[] = [];
   if (localStream && !cameraOff) {
     cameraEntries.push({ key: 'local-camera', name: 'Anda', stream: localStream, isLocal: true, mirror: true });
   }
@@ -640,6 +658,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           mirror={featured.mirror}
           onClose={() => setFeaturedKey(null)}
           onMaximizedChange={(v) => { setHidden(v); onScreenShareMaximizedChange?.(v); }}
+          stalled={!featured.isLocal && !!featured.peerId && screenStalledPeerIds?.has(featured.peerId)}
         />
       )}
       {/* QA (Load checklist item 3, "War Room share massal") — this column
@@ -705,7 +724,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
             to tell a shared screen could be opened at all. */}
         {otherScreens.map((s) => (
           <div key={s.key} className="pointer-events-auto relative group/screen">
-            <VideoTile name={s.name} stream={s.stream} isLocal={s.isLocal} isScreen />
+            <VideoTile name={s.name} stream={s.stream} isLocal={s.isLocal} isScreen screenStalled={!s.isLocal && !!s.peerId && screenStalledPeerIds?.has(s.peerId)} />
             {/* wrapperClassName carries the positioning. `!absolute`
                 (important-modifier), not plain `absolute` — Tooltip's own
                 wrapper div hardcodes `relative` as a base class, and
@@ -756,6 +775,7 @@ export const VideoTile = memo(function VideoTile({
   speakingId,
   onEnlarge,
   connectionFailed,
+  screenStalled,
   isGuest,
 }: {
   name: string;
@@ -802,6 +822,12 @@ export const VideoTile = memo(function VideoTile({
   // permanently-failed peer's tile just silently froze on its last frame
   // with no indication anything was wrong.
   connectionFailed?: boolean;
+  // Screen-share stall recovery (see webrtcService's checkScreenStall) —
+  // ICE is still nominally connected, but this tile's incoming frames have
+  // stopped advancing and an automatic restartIce() recovery is in
+  // progress. Only ever set for isScreen tiles (see call sites) — distinct
+  // from connectionFailed above, which means "gave up", not "still trying".
+  screenStalled?: boolean;
   // QA (Akses tamu checklist item 6, "Label Guest") — already shown in
   // ParticipantPanel's list rows; this is the same signal, just also
   // surfaced on the tile itself (the more commonly glanced-at spot).
@@ -973,6 +999,16 @@ export const VideoTile = memo(function VideoTile({
         <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1 text-white">
           <WifiOff size={large ? 22 : 14} />
           {large && <span className="text-xs">Koneksi terputus</span>}
+        </div>
+      )}
+      {/* Screen-share stall recovery (see webrtcService's checkScreenStall) —
+          same "sits over whatever the tile would otherwise show" placement
+          as connectionFailed above, but its own overlay: this is "still
+          trying to recover" (spinner), not "gave up" (WifiOff). */}
+      {screenStalled && (
+        <div className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center gap-1 text-white">
+          <span className={`rounded-full border-2 border-white/40 border-t-white animate-spin ${large ? 'w-6 h-6' : 'w-4 h-4'}`} />
+          {large && <span className="text-xs">Menyambung ulang...</span>}
         </div>
       )}
       </div>

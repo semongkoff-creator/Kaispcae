@@ -10,7 +10,7 @@ import { AttachmentMenuButton } from './AttachmentMenuButton';
 import { Tooltip } from './Tooltip';
 import { CsChatConversation } from './CsChatConversation';
 import { useProfiles } from '@/hooks/useProfiles';
-import { textMentionsUser, renderWithMentions } from '@/utils/mentions';
+import { textMentionsUser, renderWithMentions, stripMentionsToPlainText } from '@/utils/mentions';
 import { showConfirm } from '@/stores/modalStore';
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024; // matches server/src/routes/uploads.ts's multer limit
@@ -347,13 +347,19 @@ export function ChatPanel({
     // Every zone/channel send also shows as a floating speech bubble over
     // the avatar — no separate "Bubble" mode to remember to turn on first.
     // DMs are excluded: their content is private, and a bubble is public to
-    // anyone standing nearby.
+    // anyone standing nearby. The bubble is plain canvas-drawn text (see
+    // GameCanvas's speech-bubble draw loop) with no mention-markup parsing
+    // of its own — sending it the raw "@[Name](userId)" token straight from
+    // the input (correct for onSend/onSendZone, which DO parse it via
+    // renderWithMentions) rendered the userId itself as garbled-looking text
+    // over the avatar. stripMentionsToPlainText reduces it to "@Name" first.
+    const bubbleText = stripMentionsToPlainText(trimmed);
     if (viewingZone && currentZone && onSendZone) {
       onSendZone(trimmed, currentZone.id);
-      onBubble(trimmed);
+      onBubble(bubbleText);
     } else {
       onSend(trimmed);
-      if (activeChatTarget?.type !== 'dm') onBubble(trimmed);
+      if (activeChatTarget?.type !== 'dm') onBubble(bubbleText);
     }
     setText('');
     setShowEmoji(false);

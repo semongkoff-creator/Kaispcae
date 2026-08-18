@@ -197,6 +197,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     mediaError,
     screenShareError,
     failedPeers,
+    screenStalledPeers,
     setManualVolume,
     destroy,
   } = useWebRTC({ socketRef });
@@ -2392,6 +2393,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onEmote={handleEmoteSelect}
           showReactions={showEmoteWheel}
           failedPeerIds={failedPeers}
+          screenStalledPeerIds={screenStalledPeers}
         />
       ) : (
         <>
@@ -2407,6 +2409,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             recordedTargetUserId={activeRecording?.targetUserId}
             isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
             failedPeerIds={failedPeers}
+            screenStalledPeerIds={screenStalledPeers}
             onToggleMeetingView={() => openPanel('meeting')}
             onScreenShareMaximizedChange={setScreenShareMaximized}
           />

@@ -29,6 +29,8 @@ interface MeetingViewProps {
   // View is the other place VideoTile is used (via renderTile below), so it
   // needs the same "connection lost" signal, not a second copy of the logic.
   failedPeerIds?: Set<string>;
+  // Same set VideoGrid.tsx takes — see webrtcService's checkScreenStall.
+  screenStalledPeerIds?: Set<string>;
 }
 
 // One normalized descriptor per video surface (local cam, local screen, each
@@ -51,6 +53,12 @@ interface MTile {
   speakingId?: string; // remote player id to check in the speaking-players store; ignored for isLocal tiles
   reactionSourceId?: string; // player id for latestReaction lookup (cam tiles)
   volumeTargetId?: string;   // remote id whose volume this tile's slider adjusts
+  // Which peer this SCREEN tile belongs to, for screenStalledPeerIds lookup
+  // in renderTile below. Deliberately separate from reactionSourceId above
+  // (never set for screen tiles) — reusing it here would also make that
+  // peer's reaction bubble double up onto their screen tile alongside
+  // their camera tile, a real behavior change this fix isn't meant to make.
+  peerId?: string;
   // QA (Akses tamu checklist item 6, "Label Guest") — never set on the
   // local-cam/screen entries above, same as VideoGrid.tsx's own tiles.
   isGuest?: boolean;
@@ -68,7 +76,7 @@ interface MTile {
 // leaving it drops you right back onto the map where you already are.
 export function MeetingView({
   nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams,
-  micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, onClose, onEmote, failedPeerIds, showReactions,
+  micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, onClose, onEmote, failedPeerIds, screenStalledPeerIds, showReactions,
 }: MeetingViewProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localHandRaised = useGameStore((s) => s.localPlayer.handRaised);
@@ -105,7 +113,7 @@ export function MeetingView({
   const tiles = useMemo<MTile[]>(() => {
     const out: MTile[] = [];
     if (localScreenStream) out.push({ key: 'local-screen', name: 'Layarmu', stream: localScreenStream, isLocal: true, isScreen: true });
-    for (const t of screenTiles) out.push({ key: `${t.id}-screen`, name: `Layar ${t.name}`, stream: t.screenStream, isLocal: false, isScreen: true });
+    for (const t of screenTiles) out.push({ key: `${t.id}-screen`, name: `Layar ${t.name}`, stream: t.screenStream, isLocal: false, isScreen: true, peerId: t.id });
     if (localStream) out.push({ key: 'local-cam', name: 'You', avatarName: profiles.get(localUserId)?.name || localName, photoUrl: profiles.get(localUserId)?.photo ?? undefined, stream: localStream, isLocal: true, isScreen: false, micMuted, cameraOff, handRaised: localHandRaised, isBeingRecorded: isLocalBeingRecorded, reactionSourceId: localPlayerId ?? undefined });
     for (const t of videoTiles) { const uid = playerRecords[t.id]?.userId; out.push({ key: t.id, name: t.name, avatarName: (uid ? profiles.get(uid)?.name : '') || t.name, photoUrl: uid ? profiles.get(uid)?.photo ?? undefined : undefined, stream: t.stream, isLocal: false, isScreen: false, translucent: t.translucent, handRaised: t.handRaised, isBeingRecorded: t.isBeingRecorded, speakingId: t.id, reactionSourceId: t.id, volumeTargetId: t.id, isGuest: t.isGuest }); }
     return out;
@@ -184,6 +192,7 @@ export function MeetingView({
       reaction={t.reactionSourceId ? latestReaction(emoteEvents, t.reactionSourceId, now) : null}
       onVolumeChange={t.volumeTargetId ? (v) => onManualVolumeChange(t.volumeTargetId!, v) : undefined}
       connectionFailed={!t.isLocal && !t.isScreen && !!t.reactionSourceId && failedPeerIds?.has(t.reactionSourceId)}
+      screenStalled={!t.isLocal && t.isScreen && !!t.peerId && screenStalledPeerIds?.has(t.peerId)}
       isGuest={t.isGuest}
       large
     />

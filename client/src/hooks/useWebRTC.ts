@@ -43,6 +43,12 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // webrtcService's onPeerConnectionStatus. Consumed by VideoGrid to show a
   // "connection lost" badge instead of a silently-frozen tile.
   const [failedPeers, setFailedPeers] = useState<Set<string>>(new Set());
+  // Peers whose incoming screen-share frames have stalled (ICE still
+  // nominally connected, but no new frames for a tick) — see
+  // webrtcService's checkScreenStall/onScreenShareStalled. Consumed by
+  // VideoGrid/MeetingView to show "Menyambung ulang..." over the frozen
+  // picture instead of leaving it silently black.
+  const [screenStalledPeers, setScreenStalledPeers] = useState<Set<string>>(new Set());
 
   // Guards against overlapping initLocalMedia() calls (e.g. mic and camera
   // buttons both clicked before the first request resolves) — NOT a
@@ -115,6 +121,15 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
         if (failed === already) return prev;
         const next = new Set(prev);
         if (failed) next.add(id); else next.delete(id);
+        return next;
+      });
+    });
+    webrtcService.setOnScreenShareStalled((id, stalled) => {
+      setScreenStalledPeers((prev) => {
+        const already = prev.has(id);
+        if (stalled === already) return prev;
+        const next = new Set(prev);
+        if (stalled) next.add(id); else next.delete(id);
         return next;
       });
     });
@@ -317,6 +332,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     streamRef.current = null;
     massGlitchSinceRef.current = null;
     setFailedPeers(new Set());
+    setScreenStalledPeers(new Set());
   }, []);
 
   return {
@@ -331,6 +347,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     mediaError,
     screenShareError,
     failedPeers,
+    screenStalledPeers,
     setManualVolume,
     destroy,
     getLocalStream: () => webrtcService.getLocalStream(),
