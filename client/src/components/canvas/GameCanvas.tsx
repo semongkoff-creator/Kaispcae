@@ -668,6 +668,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // seat) — click-to-move below no longer pushes to this, since it's
   // walking there now, not blinking.
   const teleportFlashRef = useRef<{ x: number; y: number; start: number }[]>([]);
+  // TEMP DEBUG — Private Area dim-effect investigation (throttled console
+  // log, remove once diagnosed). See the spotlightZone block below.
+  const privateAreaDebugLogRef = useRef(0);
   // Follow-up — click now WALKS to the tile (reusing useMovement's
   // updateFollow/tryMoveToward, the exact primitive Follow already uses to
   // approach an arbitrary point) instead of teleporting there instantly.
@@ -2462,6 +2465,23 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       playerX / TILE_SIZE >= z.x && playerX / TILE_SIZE < z.x + z.width &&
       playerY / TILE_SIZE >= z.y && playerY / TILE_SIZE < z.y + z.height,
     );
+    // TEMP DEBUG — Private Area dim-effect investigation. Once every 2s,
+    // dump exactly what this client thinks: the local player's own tile
+    // position, every zone it considers "private" (isPrivateZone) with its
+    // full rect + audioIsolated/type, and whether any of them actually
+    // matched. Remove this block once diagnosed.
+    if (now - privateAreaDebugLogRef.current > 2000) {
+      privateAreaDebugLogRef.current = now;
+      console.log('[private-area-debug]', {
+        playerTile: { x: playerX / TILE_SIZE, y: playerY / TILE_SIZE },
+        isOverview,
+        privateZones: zones.filter((z) => isPrivateZone(z)).map((z) => ({
+          id: z.id, name: z.name, label: z.label, type: z.type,
+          audioIsolated: z.audioIsolated, x: z.x, y: z.y, w: z.width, h: z.height,
+        })),
+        spotlightZoneId: spotlightZone?.id ?? null,
+      });
+    }
     if (spotlightZone) {
       const pzx = spotlightZone.x * TILE_SIZE - cameraX;
       const pzy = spotlightZone.y * TILE_SIZE - cameraY;
