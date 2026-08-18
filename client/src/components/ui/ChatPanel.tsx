@@ -16,6 +16,7 @@ import { textMentionsUser, renderWithMentions, stripMentionsToPlainText } from '
 import { showConfirm } from '@/stores/modalStore';
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024; // matches server/src/routes/uploads.ts's multer limit
+const MAX_COMPOSE_HEIGHT_PX = 96; // ~6 lines before the compose box scrolls internally instead of growing further
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
 const VIDEO_EXT_RE = /\.(mp4|webm|mov|avi)$/i;
 
@@ -152,7 +153,12 @@ export function ChatPanel({
   }, [open]);
 
   const [text, setText] = useState('');
-  const messageInputRef = useRef<HTMLInputElement>(null);
+  // A <textarea> now (was <input>) — a single-line input can never wrap, it
+  // only scrolls sideways forever, which is what was actually happening in
+  // the compose box for a long word with no spaces (separate from — and
+  // upstream of — the sent-bubble wrap fix, which only affects already-sent
+  // messages). See the auto-grow onChange below.
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   // Potongan C2 — @mention autocomplete (Bagian 1). null = closed. When open,
   // `query` is whatever's typed after the triggering "@" (before the cursor,
   // no whitespace yet), `start` is that "@"'s index in `text` so a selection
@@ -404,6 +410,10 @@ export function ChatPanel({
     setText('');
     setShowEmoji(false);
     setMention(null);
+    // Collapse the compose box back to one line — it only grows via a
+    // direct DOM style write (see the textarea's onChange below), so
+    // clearing the `text` state alone wouldn't shrink it back.
+    if (messageInputRef.current) messageInputRef.current.style.height = 'auto';
   }, [text, onSend, onBubble, viewingZone, currentZone, onSendZone, activeChatTarget, onSendFile, pendingAttachments, sendPendingZoneAttachments]);
 
   const insertEmoji = (emoji: string) => {
@@ -438,7 +448,7 @@ export function ChatPanel({
   // images pasted at once all get staged together, same as attaching
   // several files manually one after another.
   const handlePaste = useCallback(
-    (e: ClipboardEvent<HTMLInputElement>) => {
+    (e: ClipboardEvent<HTMLTextAreaElement>) => {
       const imageFiles = Array.from(e.clipboardData?.items ?? [])
         .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
         .map((item) => item.getAsFile())
@@ -991,8 +1001,9 @@ export function ChatPanel({
                   ))}
                 </div>
               )}
-              <input
+              <textarea
                 ref={messageInputRef}
+                rows={1}
                 value={text}
                 onChange={(e) => {
                   setText(e.target.value);
@@ -1000,6 +1011,11 @@ export function ChatPanel({
                   // Only the persisted channel/DM path has a typing indicator —
                   // zone chat is a different, ephemeral concept.
                   if (e.target.value && !viewingZone) onTyping?.();
+                  // Auto-grow with content, capped at MAX_COMPOSE_HEIGHT_PX —
+                  // reset to 'auto' first so it can shrink back down too
+                  // (deleting text), not just grow.
+                  e.target.style.height = 'auto';
+                  e.target.style.height = `${Math.min(e.target.scrollHeight, MAX_COMPOSE_HEIGHT_PX)}px`;
                 }}
                 onKeyDown={(e) => {
                   if (mention && mentionCandidates.length > 0) {
@@ -1008,13 +1024,16 @@ export function ChatPanel({
                     if (e.key === 'Enter') { e.preventDefault(); insertMention(mentionCandidates[mentionActiveIndex]); return; }
                     if (e.key === 'Escape') { e.preventDefault(); setMention(null); return; }
                   }
-                  if (e.key === 'Enter') handleSend();
+                  // Unchanged from the old <input>: Enter always sends (no
+                  // Shift+Enter newline support — out of scope here, this is
+                  // only fixing the overflow, not adding multi-line compose).
+                  if (e.key === 'Enter') { e.preventDefault(); handleSend(); }
                 }}
                 onBlur={() => setMention(null)}
                 onPaste={handlePaste}
                 placeholder={viewingZone ? `Message ${currentZone?.name}...` : 'Type a message...'}
                 maxLength={200}
-                className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 disabled:opacity-60"
+                className="w-full resize-none break-words bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 disabled:opacity-60"
               />
             </div>
             <Tooltip label="Kirim" detail="Kirim pesanmu.">
