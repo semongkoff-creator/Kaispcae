@@ -2477,6 +2477,23 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       ctx.fillRect(pzx + pzw, pzy, worldViewW - (pzx + pzw), pzh); // right
     }
 
+    // TEMP DEBUG — Private Area investigation, on-screen (no DevTools
+    // needed): always-visible label at the top-left of the canvas itself
+    // showing whether a private zone is currently detected under the local
+    // player, and which one. Drawn in SCREEN space (not world space) so it
+    // stays fixed regardless of camera/zoom — reset the transform first.
+    // Remove this block once diagnosed.
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'left';
+    const debugLabel = spotlightZone ? `🟢 PRIVATE: ${spotlightZone.name || spotlightZone.label || spotlightZone.id}` : '🔴 NO PRIVATE ZONE HERE';
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(4, 4, ctx.measureText(debugLabel).width + 12, 22);
+    ctx.fillStyle = spotlightZone ? '#4ade80' : '#f87171';
+    ctx.fillText(debugLabel, 10, 20);
+    ctx.restore();
+
     // Speech bubbles
     const bubbles = bubblesRef.current;
     for (const [pid, bubble] of Object.entries(bubbles)) {
