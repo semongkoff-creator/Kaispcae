@@ -201,7 +201,6 @@ export function ChatPanel({
     const pos = mention.start + token.length;
     requestAnimationFrame(() => { input?.focus(); input?.setSelectionRange(pos, pos); });
   }, [mention, text]);
-  const [proximityMode, setProximityMode] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [viewingZone, setViewingZone] = useState(false);
   // Customer Service chat — a tab alongside channels/DMs/zone, same
@@ -345,17 +344,21 @@ export function ChatPanel({
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
     if (!trimmed) return;
+    // Every zone/channel send also shows as a floating speech bubble over
+    // the avatar — no separate "Bubble" mode to remember to turn on first.
+    // DMs are excluded: their content is private, and a bubble is public to
+    // anyone standing nearby.
     if (viewingZone && currentZone && onSendZone) {
       onSendZone(trimmed, currentZone.id);
-    } else if (proximityMode) {
       onBubble(trimmed);
     } else {
       onSend(trimmed);
+      if (activeChatTarget?.type !== 'dm') onBubble(trimmed);
     }
     setText('');
     setShowEmoji(false);
     setMention(null);
-  }, [text, proximityMode, onSend, onBubble, viewingZone, currentZone, onSendZone]);
+  }, [text, onSend, onBubble, viewingZone, currentZone, onSendZone, activeChatTarget]);
 
   const insertEmoji = (emoji: string) => {
     setText((prev) => prev + emoji);
@@ -411,16 +414,8 @@ export function ChatPanel({
   // multiple separate sends — this data model has no multi-attachment
   // message (see ChannelMessage.attachmentUrl), same as attaching several
   // files manually one after another.
-  //
-  // Gated on !proximityMode to match AttachmentMenuButton's own visibility
-  // above ("Say nearby" hides the attach button entirely — handleAttachFile
-  // has no proximity branch, it would silently upload into the persisted
-  // channel/DM instead of the ephemeral nearby bubble). This <input> is
-  // shared across every mode, so the paste handler has to enforce the same
-  // restriction the button's own conditional render already does.
   const handlePaste = useCallback(
     (e: ClipboardEvent<HTMLInputElement>) => {
-      if (proximityMode) return;
       const imageFiles = Array.from(e.clipboardData?.items ?? [])
         .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
         .map((item) => item.getAsFile())
@@ -429,7 +424,7 @@ export function ChatPanel({
       e.preventDefault();
       imageFiles.forEach((file) => handleAttachFile(file));
     },
-    [handleAttachFile, proximityMode]
+    [handleAttachFile]
   );
 
   const handleLoadOlder = useCallback(async () => {
@@ -516,10 +511,6 @@ export function ChatPanel({
         >
           <div className="p-3 border-b border-purple-100 dark:border-gray-700 flex items-center justify-between">
             <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">Chat</span>
-            <label className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
-              <input type="checkbox" checked={proximityMode} onChange={(e) => setProximityMode(e.target.checked)} className="w-3 h-3 accent-purple-600" />
-              Bubble
-            </label>
           </div>
 
           <div className="flex gap-1 px-3 pt-2 pb-1 overflow-x-auto">
@@ -701,7 +692,7 @@ export function ChatPanel({
                       onPin={() => onPinNotice?.(m)}
                     >
                       {m.isProximity && <span className="opacity-60 mr-1">(nearby)</span>}
-                      {m.text && <span className={`break-words ${m.isBot ? 'whitespace-pre-line' : ''}`}>{renderWithMentions(m.text, localUserId)}</span>}
+                      {m.text && <span className={`break-words select-text ${m.isBot ? 'whitespace-pre-line' : ''}`}>{renderWithMentions(m.text, localUserId)}</span>}
                       {/* Potongan C3 — same attachment UI (icon by type, name,
                           click to open/download) as persisted chat, reused
                           as-is rather than a second render path. */}
@@ -783,7 +774,7 @@ export function ChatPanel({
                           />
                         ) : (
                           m.text && (
-                            <span className="break-words">
+                            <span className="break-words select-text">
                               {renderWithMentions(m.text, localUserId)}
                               {m.edited && <span className="ml-1 text-[9px] opacity-60">(diedit)</span>}
                             </span>
@@ -946,25 +937,20 @@ export function ChatPanel({
             <Tooltip label="Emoji" detail="Tambahkan emoji ke pesanmu.">
               <button onClick={() => setShowEmoji(!showEmoji)} className="text-purple-600 dark:text-purple-400 cursor-pointer"><EmojiSmile size={16} /></button>
             </Tooltip>
-            {/* Potongan C3 — file attachments now work for zone (Private)
-                chat too, not just persisted Channel/DM. Still hidden for
-                proximityMode ("Say nearby") — that's a floating speech
-                bubble over the avatar, not a real chat log to attach
-                anything to. */}
-            {!proximityMode && (
-              <AttachmentMenuButton
-                onFile={handleAttachFile}
-                title="Lampirkan File"
-                detail="Kirim gambar, video, atau dokumen."
-                disabled={zoneFileUploading}
-                buttonClassName="text-purple-600 dark:text-purple-400 disabled:opacity-40 cursor-pointer"
-              />
-            )}
+            {/* Potongan C3 — file attachments work for zone (Private) chat
+                too, not just persisted Channel/DM. */}
+            <AttachmentMenuButton
+              onFile={handleAttachFile}
+              title="Lampirkan File"
+              detail="Kirim gambar, video, atau dokumen."
+              disabled={zoneFileUploading}
+              buttonClassName="text-purple-600 dark:text-purple-400 disabled:opacity-40 cursor-pointer"
+            />
             <div className="relative flex-1">
               {/* Potongan C2 — @mention candidates, #general (persisted
-                  channel/DM) only: zone/bubble chat has no real userId-backed
+                  channel/DM) only: zone chat has no real userId-backed
                   participant list to mention from. */}
-              {mention && !viewingZone && !proximityMode && (
+              {mention && !viewingZone && (
                 <div className="absolute bottom-full left-0 mb-1 w-56 max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-purple-200 dark:border-gray-600 rounded-lg shadow-lg z-10">
                   {mentionCandidates.length === 0 ? (
                     <p className="px-2.5 py-1.5 text-[11px] text-gray-400">Tidak ada yang cocok</p>
@@ -988,8 +974,8 @@ export function ChatPanel({
                   setText(e.target.value);
                   updateMentionState(e.target.value, e.target.selectionStart ?? e.target.value.length);
                   // Only the persisted channel/DM path has a typing indicator —
-                  // zone/bubble chat is a different, ephemeral concept.
-                  if (e.target.value && !viewingZone && !proximityMode) onTyping?.();
+                  // zone chat is a different, ephemeral concept.
+                  if (e.target.value && !viewingZone) onTyping?.();
                 }}
                 onKeyDown={(e) => {
                   if (mention && mentionCandidates.length > 0) {
@@ -1002,7 +988,7 @@ export function ChatPanel({
                 }}
                 onBlur={() => setMention(null)}
                 onPaste={handlePaste}
-                placeholder={viewingZone ? `Message ${currentZone?.name}...` : proximityMode ? 'Say nearby...' : 'Type a message...'}
+                placeholder={viewingZone ? `Message ${currentZone?.name}...` : 'Type a message...'}
                 maxLength={200}
                 className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 disabled:opacity-60"
               />

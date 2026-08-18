@@ -625,7 +625,7 @@ export function MessengerApp({
                             <div
                               onContextMenu={(e) => { e.preventDefault(); setMsgMenu({ x: e.clientX, y: e.clientY, message: m }); }}
                               title="Klik kanan untuk opsi (sematkan, lihat yang sudah baca)"
-                              className={`px-3.5 py-2 rounded-2xl text-sm break-words whitespace-pre-wrap cursor-context-menu ${
+                              className={`px-3.5 py-2 rounded-2xl text-sm break-words whitespace-pre-wrap select-text cursor-context-menu ${
                                 own
                                   ? 'bg-purple-500 text-white rounded-br-md'
                                   : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-bl-md'
