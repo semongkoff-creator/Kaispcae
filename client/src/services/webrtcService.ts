@@ -1,6 +1,7 @@
 import { Socket } from 'socket.io-client';
 import { SocketEvents, MAX_SCREEN_SHARES_PER_ROOM } from '@kaispace/shared';
 import { isPeerNegotiationStuck, NEGOTIATION_TIMEOUT_MS } from './peerHealth';
+import { screenShareBitrateFor } from './mediaBudget';
 
 // STUN alone only tells a peer its public address — it can't help when the
 // network refuses direct peer-to-peer traffic at all, which is the norm on
@@ -119,8 +120,19 @@ const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
 //   cap; video (the expensive one) is reserved for whoever's actually
 //   nearest. Decided once at connection time, not renegotiated later if
 //   rank shifts mid-call — see updateProximity's own comment for why.
-export const MAX_TOTAL_PEERS = 8;
-export const MAX_VIDEO_PEERS = 4;
+// Raised from 8/4. The binding constraint on the total is each client's own
+// UPLOAD link, and audio is nearly free there: a mic track is ~40 kbps, so
+// 16 peers costs ~640 kbps up — nothing, on any connection that can load
+// this app at all. 8 was leaving people in a full desk area silently
+// unconnected (the zone rule asks for every member of an audio-isolated
+// area regardless of distance, which in a 12-person area is already past
+// the old cap), and a refused peer had no signal anywhere: it simply never
+// spoke. Video is the expensive track, so it keeps its own much smaller
+// cap — 6 cameras is ~3 Mbps up, still sane; the screen share on top of
+// that is bounded separately, and now by an aggregate budget rather than
+// per-peer (see mediaBudget.ts).
+export const MAX_TOTAL_PEERS = 16;
+export const MAX_VIDEO_PEERS = 6;
 
 // QA (Load checklist item 3, "War Room share massal") — previously
 // unbounded: getDisplayMedia({video: true}) with no constraints at all lets
@@ -138,15 +150,12 @@ const SCREEN_SHARE_CONSTRAINTS: MediaTrackConstraints = {
   height: { max: 1080 },
   frameRate: { ideal: 15, max: 15 },
 };
-// Applied via RTCRtpSender.setParameters — a hard ceiling on encoded
-// bitrate per peer connection, independent of the constraints above (which
-// only bound capture resolution/framerate, not what the encoder actually
-// sends once network conditions are factored in). 2.5 Mbps is comfortably
-// enough for 1080p/15fps screen content (mostly static regions — text,
-// slides — compress far better than natural video) while keeping a single
-// share's total mesh cost (this × however many peers) bounded and
-// predictable rather than opportunistically maxing out available bandwidth.
-const SCREEN_SHARE_MAX_BITRATE_BPS = 2_500_000;
+// The encoded-bitrate ceiling that used to live here (a flat 2.5 Mbps per
+// peer connection, applied via RTCRtpSender.setParameters) now comes from
+// mediaBudget.ts's screenShareBitrateFor — a share's real cost is per-peer
+// bitrate x peer count on the PRESENTER's uplink, so the budget has to be
+// aggregate, not per-peer. See that module for the reasoning; the capture
+// constraints above (resolution/framerate) are a separate bound and stay.
 
 // Volume smoothing. 25ms/tick with a 0.25 factor settles a full-range
 // change in roughly 150ms — fast enough that walking past someone still
@@ -1114,6 +1123,9 @@ class WebRTCService {
     if (this.screenStream) {
       const screenTrack = this.screenStream.getVideoTracks()[0];
       if (screenTrack) peer.screenSender = this.capScreenShareBitrate(pc.addTrack(screenTrack, this.screenStream));
+      // This peer joining just made everyone else's slice of the budget
+      // smaller — the existing senders are still on the old, larger one.
+      this.reapplyScreenShareBitrates();
     }
 
     pc.onicecandidate = (event) => {
@@ -1700,6 +1712,8 @@ class WebRTCService {
       peer.analyser?.disconnect();
       peer.analyser = null;
       this.peers.delete(id);
+      // One fewer viewer means a bigger slice for everyone still watching.
+      this.reapplyScreenShareBitrates();
       this.audioDestNodes.get(id)?.disconnect();
       this.audioDestNodes.delete(id);
       // [webrtc-diag] A reconnect starts a brand-new RTCPeerConnection whose
@@ -1776,9 +1790,24 @@ class WebRTCService {
   private capScreenShareBitrate(sender: RTCRtpSender): RTCRtpSender {
     const params = sender.getParameters();
     if (!params.encodings?.length) params.encodings = [{}];
-    params.encodings[0].maxBitrate = SCREEN_SHARE_MAX_BITRATE_BPS;
+    params.encodings[0].maxBitrate = screenShareBitrateFor(this.peers.size);
     sender.setParameters(params).catch((e) => console.warn('[webrtc] setParameters (screen bitrate cap) failed:', e));
     return sender;
+  }
+
+  // The budget is shared across however many peers are being sent to, so the
+  // per-peer number changes whenever that count does — someone walking into
+  // range mid-presentation, or out of it. Without this, the peers that were
+  // already connected would keep whatever slice was correct when THEY
+  // joined, and the total would drift straight past the budget as the
+  // audience grew (which is exactly the uplink collapse the budget exists to
+  // prevent). Cheap enough to just re-apply to everyone: setParameters on an
+  // active sender needs no renegotiation.
+  private reapplyScreenShareBitrates(): void {
+    if (!this.screenStream) return;
+    for (const peer of this.peers.values()) {
+      if (peer.screenSender) this.capScreenShareBitrate(peer.screenSender);
+    }
   }
 
   // §6 — adds the screen capture as its OWN sender/track on every existing

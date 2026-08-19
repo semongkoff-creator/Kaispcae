@@ -43,10 +43,26 @@ test('explicit audio isolation setting wins over size heuristic', () => {
   assert.equal(shouldIsolateZoneAudio(zone({ width: 4, height: 4, audioIsolated: false })), false);
 });
 
-test('mesh peer caps stay conservative for crowded office areas', () => {
+test('mesh peer caps bound the EXPENSIVE track, not the cheap one', () => {
+  // Was pinned to the literal 8/4. That guarded the wrong thing: the total
+  // is almost all audio (~40 kbps per peer — free, on any usable
+  // connection), and holding it at 8 left members of a crowded audio-
+  // isolated area silently unconnected, since the zone rule asks for every
+  // member regardless of distance. What actually has to stay small is the
+  // number of simultaneous CAMERAS, and (see mediaBudget.ts) the screen
+  // share's aggregate upload. So this now asserts the relationship rather
+  // than two magic numbers that had to be edited to change a decision.
   const source = readFileSync(resolve('client/src/services/webrtcService.ts'), 'utf8');
-  assert.match(source, /export const MAX_TOTAL_PEERS = 8;/);
-  assert.match(source, /export const MAX_VIDEO_PEERS = 4;/);
+  const total = Number(source.match(/export const MAX_TOTAL_PEERS = (\d+);/)?.[1]);
+  const video = Number(source.match(/export const MAX_VIDEO_PEERS = (\d+);/)?.[1]);
+  assert.ok(Number.isFinite(total) && Number.isFinite(video), 'both caps must stay plain exported constants');
+  assert.ok(video < total, 'cameras must stay a subset of connected peers');
+  assert.ok(video <= 8, `${video} simultaneous cameras is more uplink than a mesh can carry`);
+  assert.ok(total <= 24, `${total} peer connections per client is past what a mesh should attempt at all`);
+  // A flat per-peer screen-share ceiling is what made a share cost
+  // 2.5 Mbps x peers on the presenter's own uplink.
+  assert.equal(source.includes('const SCREEN_SHARE_MAX_BITRATE_BPS'), false, 'screen bitrate should come from the aggregate budget');
+  assert.ok(source.includes('screenShareBitrateFor(this.peers.size)'), 'the budget must be split by the CURRENT audience size');
 });
 
 test('proximity gain remains audible at the translucent edge', () => {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { isPeerNegotiationStuck, NEGOTIATION_TIMEOUT_MS } from '../client/src/services/peerHealth';
+import { screenShareBitrateFor, totalScreenShareUploadBps } from '../client/src/services/mediaBudget';
 
 let passed = 0;
 function test(name: string, fn: () => void) {
@@ -62,6 +63,59 @@ test('a peer the service has dropped is retried rather than assumed connected', 
     source.includes('if (!webrtcService.hasPeer(id)) connectedIds.delete(id);'),
     'the connected set must be reconciled against the service, or a dropped peer is never rebuilt',
   );
+});
+
+test('a small audience keeps the quality it had before the budget existed', () => {
+  assert.equal(screenShareBitrateFor(1), 2_500_000);
+  assert.equal(screenShareBitrateFor(3), 2_500_000, 'three viewers still fit inside the budget at full quality');
+});
+
+test('a crowd degrades the picture instead of the presenter uplink', () => {
+  // The whole point: total upload must stay bounded as the audience grows,
+  // because it is the presenter's own upstream link and nothing else can
+  // substitute for it.
+  const small = totalScreenShareUploadBps(4);
+  const large = totalScreenShareUploadBps(12);
+  assert.ok(large <= 9_600_000, `12 viewers should stay near the budget, got ${large}`);
+  assert.ok(screenShareBitrateFor(12) < screenShareBitrateFor(4), 'per-viewer bitrate must fall as viewers are added');
+  assert.ok(small <= large, 'the budget is shared, not per-peer');
+});
+
+test('the per-viewer bitrate never drops below readable', () => {
+  // Past this the share is pointless, so overshooting the budget is the
+  // lesser evil — and a room that big wants an SFU, not a smaller number.
+  assert.equal(screenShareBitrateFor(64), 600_000);
+});
+
+test('the budget curve never increases with more viewers', () => {
+  let previous = Infinity;
+  for (let peers = 1; peers <= 32; peers++) {
+    const per = screenShareBitrateFor(peers);
+    assert.ok(per <= previous, `${peers} viewers got MORE per-viewer bitrate than ${peers - 1}`);
+    previous = per;
+  }
+});
+
+// webrtcService itself cannot be imported here — it reads import.meta.env at
+// module scope, which only exists under Vite — so the caps are read from the
+// source text, same approach performanceGuards.test.ts already uses.
+function peerCaps(): { total: number; video: number } {
+  const source = readFileSync(resolve('client/src/services/webrtcService.ts'), 'utf8');
+  const total = source.match(/export const MAX_TOTAL_PEERS = (\d+);/);
+  const video = source.match(/export const MAX_VIDEO_PEERS = (\d+);/);
+  assert.ok(total && video, 'peer caps should still be declared as plain exported constants');
+  return { total: Number(total![1]), video: Number(video![1]) };
+}
+
+test('audio capacity is well past one crowded desk area, video stays bounded', () => {
+  const { total, video } = peerCaps();
+  // A 12-person audio-isolated area asks for every member regardless of
+  // distance, which is what used to overrun the old cap of 8 and leave the
+  // lowest-ranked members silent with no signal anywhere.
+  assert.ok(total >= 12, `${total} still starves a full desk area`);
+  // Video is the expensive track and must NOT follow the total up.
+  assert.ok(video <= 8, `${video} cameras is more uplink than a mesh should ask for`);
+  assert.ok(video < total, 'video must stay a subset of the total');
 });
 
 if (process.exitCode) {
