@@ -2108,6 +2108,17 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
           }
         }
       } else {
+        // Bug fix — leaving the seat's tile only ever cleared the proximity
+        // tracker below, not the popup it had already offered, so walking
+        // away mid-offer left the card stuck on screen indefinitely (only
+        // its own Batal button, or claiming/requesting, ever closed it).
+        // Retract it here too, same outcome as clicking Batal — but only
+        // for a still-undecided offer on THIS seat; once Klaim/Minta Kursi
+        // is clicked, pendingSeatClaim is already cleared (see its onClick
+        // above), so this never fights a real in-flight request.
+        if (seatProximityRef.current && pendingSeatClaimRef.current?.seatId === seatProximityRef.current.seatId) {
+          setPendingSeatClaim(null);
+        }
         seatProximityRef.current = null;
       }
     }
