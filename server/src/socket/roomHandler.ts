@@ -1191,8 +1191,10 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       // player read `undefined` (renders as unmuted) until this player's
       // own first manual mic toggle ever fired PLAYER_MIC — in practice,
       // often not until they actually spoke and unmuted. Hardcoded true
-      // here since every join really does start muted unconditionally, no
-      // branching to mirror from the client side.
+      // here for a genuinely fresh join. A reconnect (same uid rejoining
+      // while a stale entry still lingers) overwrites this further below,
+      // once the stale-entry eviction loop can read that entry's real
+      // last-known micMuted — see its own comment for why.
       micMuted: true,
     };
 
@@ -1227,6 +1229,16 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       const existing = await getPlayers(room);
       for (const ghost of existing) {
         if (ghost.userId === uid && ghost.id !== socket.id) {
+          // Bug fix — this loop runs on EVERY JOIN_ROOM for an account that
+          // still has a lingering entry, which includes an ordinary
+          // reconnect (brief socket drop mid-call), not just a genuinely
+          // fresh join. newPlayer.micMuted was hardcoded to true above
+          // unconditionally, so a reconnect while actively unmuted and
+          // talking got its mic forced back to "muted" for everyone else's
+          // display — their real audio track never actually muted, only the
+          // room's broadcast state did. Carry the ghost's last known
+          // micMuted forward instead of clobbering it.
+          newPlayer.micMuted = ghost.micMuted;
           await removePlayer(room, ghost.id);
           io.to(room).emit(SocketEvents.PLAYER_LEFT, ghost.id);
           // Also detach the ghost socket from the room if it somehow still
