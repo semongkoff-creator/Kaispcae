@@ -863,7 +863,17 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
           // when the tab is in the background, to avoid double-pinging someone
           // already looking at the screen).
           state.setNudgedBy(nudgerName);
-          if (state.isNotifKindEnabled('nudge')) notifyNudge(nudgerName);
+          // A single toast/native popup was easy to miss entirely, so one
+          // nudge now lands as a short burst instead of a one-shot alert —
+          // each pulse still respects the visible-tab/hidden-tab split
+          // inside notifyNudge itself (toast vs. native+tab-flash).
+          if (state.isNotifKindEnabled('nudge')) {
+            const NUDGE_BURST_COUNT = 3;
+            const NUDGE_BURST_INTERVAL_MS = 450;
+            for (let i = 0; i < NUDGE_BURST_COUNT; i++) {
+              setTimeout(() => notifyNudge(nudgerName), i * NUDGE_BURST_INTERVAL_MS);
+            }
+          }
         }
       }
     });

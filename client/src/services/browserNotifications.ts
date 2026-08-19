@@ -8,6 +8,7 @@
 // sync is deliberately NOT reused here for that reason.
 
 import { useGameStore } from '@/stores/gameStore';
+import { startTabAttentionFlash, stopTabAttentionFlash } from './tabAttention';
 
 const STORAGE_KEY = 'vm_notification_settings';
 
@@ -122,9 +123,16 @@ export function notifyNewMessage(title: string, text: string, onClick?: () => vo
 export function notifyNudge(nudgerName: string): void {
   const body = `${nudgerName} menyenggolmu`;
   if (document.visibilityState === 'visible') {
-    useGameStore.getState().pushInAppToast('👋', 'Disenggol!', body);
+    useGameStore.getState().pushInAppToast('👋', 'Disenggol!', body, 'nudge');
     return;
   }
+
+  // Flashing the tab title needs no Notification permission at all, so it
+  // runs regardless of the settings/permission gate below — it keeps
+  // re-alerting the user for as long as they stay away, instead of the one
+  // native popup they can easily miss.
+  startTabAttentionFlash('🔴 Disenggol! — KaiSpace');
+
   const settings = getNotificationSettings();
   if (!settings.browserNotifOn || !isNotificationSupported() || Notification.permission !== 'granted') return;
 
@@ -134,6 +142,6 @@ export function notifyNudge(nudgerName: string): void {
   // exists specifically to pull someone back to the app from another
   // tab/app, so the notification itself doing nothing on click defeated
   // that purpose the moment they actually clicked it instead of alt-tabbing.
-  n.onclick = () => window.focus();
+  n.onclick = () => { window.focus(); stopTabAttentionFlash(); };
   if (settings.soundOn) playNotificationSound();
 }

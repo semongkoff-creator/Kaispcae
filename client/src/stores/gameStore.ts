@@ -305,8 +305,8 @@ export interface GameState {
   // card in-app instead (see browserNotifications.ts's notifyNewMessage/
   // notifyNudge — native still fires as before while the tab is hidden,
   // this is purely the visible-tab case, which used to do nothing at all).
-  inAppToasts: { id: string; icon: string; title: string; text: string }[];
-  pushInAppToast: (icon: string, title: string, text: string) => void;
+  inAppToasts: { id: string; icon: string; title: string; text: string; variant: 'default' | 'nudge' }[];
+  pushInAppToast: (icon: string, title: string, text: string, variant?: 'default' | 'nudge') => void;
   dismissInAppToast: (id: string) => void;
 
   // Live ownership of claimable-seat markers (see mapLayers.ts's TileEffect
@@ -1030,8 +1030,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   sitNotice: null,
   setSitNotice: (notice) => set({ sitNotice: notice }),
   inAppToasts: [],
-  pushInAppToast: (icon, title, text) => set((s) => ({
-    inAppToasts: [...s.inAppToasts, { id: crypto.randomUUID(), icon, title, text }],
+  pushInAppToast: (icon, title, text, variant = 'default') => set((s) => ({
+    inAppToasts: [...s.inAppToasts, { id: crypto.randomUUID(), icon, title, text, variant }],
   })),
   dismissInAppToast: (id) => set((s) => ({ inAppToasts: s.inAppToasts.filter((t) => t.id !== id) })),
   seatClaims: {},
