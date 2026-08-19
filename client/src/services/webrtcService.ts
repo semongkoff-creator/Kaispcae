@@ -24,6 +24,24 @@ const TURN_URL = import.meta.env.VITE_TURN_URL as string | undefined;
 const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME as string | undefined;
 const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL as string | undefined;
 
+// A PARTIAL TURN config is the one case that must never pass silently. The
+// three variables are set independently (docker-compose build args, see
+// client/Dockerfile), the browser rejects a TURN entry missing any of them,
+// and the guard below therefore drops the whole entry — leaving STUN-only
+// behaviour that looks completely normal until two users who need a relay try
+// to talk, and simply never hear each other. That is exactly how production
+// ran: username and credential were set, VITE_TURN_URL was not, and nothing
+// anywhere said so. Unconditional (not behind the diag flag): someone
+// deploying a half-configured relay needs to be told at the console, once, on
+// every load, not only when they think to go looking.
+if ((TURN_URL || TURN_USERNAME || TURN_CREDENTIAL) && !(TURN_URL && TURN_USERNAME && TURN_CREDENTIAL)) {
+  console.warn(
+    '[webrtc] TURN is only half configured, so it has been DISABLED — voice/video will fail for anyone who needs a relay.',
+    { VITE_TURN_URL: !!TURN_URL, VITE_TURN_USERNAME: !!TURN_USERNAME, VITE_TURN_CREDENTIAL: !!TURN_CREDENTIAL },
+    'All three must be set at BUILD time (they are docker-compose build args, so rebuild — a restart will not pick them up).',
+  );
+}
+
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },

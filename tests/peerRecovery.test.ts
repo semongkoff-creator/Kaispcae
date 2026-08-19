@@ -118,6 +118,22 @@ test('audio capacity is well past one crowded desk area, video stays bounded', (
   assert.ok(video < total, 'video must stay a subset of the total');
 });
 
+test('a half-configured TURN relay is reported, not silently dropped', () => {
+  const source = readFileSync(resolve('client/src/services/webrtcService.ts'), 'utf8');
+  // The browser rejects a TURN entry missing any of the three, so the ICE
+  // config drops it entirely — which is indistinguishable from "no relay was
+  // ever wanted" unless something says so out loud. Production shipped with
+  // username+credential set and the URL blank for exactly this reason.
+  assert.ok(
+    source.includes('TURN is only half configured'),
+    'setting some but not all TURN vars must warn at the console',
+  );
+  assert.ok(
+    /if \(\(TURN_URL \|\| TURN_USERNAME \|\| TURN_CREDENTIAL\) && !\(TURN_URL && TURN_USERNAME && TURN_CREDENTIAL\)\)/.test(source),
+    'the warning must fire on a partial config specifically, not on an absent one',
+  );
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }
