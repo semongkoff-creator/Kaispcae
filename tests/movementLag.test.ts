@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { serverTimeToClient, resetServerClock, currentClockOffset } from '../client/src/stores/serverClock';
+import { serverTimeToClient, resetServerClock, currentClockOffset, appliedClockOffset } from '../client/src/stores/serverClock';
 import { proximityUnchanged } from '../client/src/hooks/useProximity';
 import { sampleMovementSnapshots } from '../client/src/stores/movementSmoothing';
 import {
   pushRemoteSnapshot, snapRemotePosition, forgetRemotePlayer, clearRemotePositions,
   interpolateRemotePositions, livePlayers, remotePos, pendingSnapshotCount,
 } from '../client/src/stores/remotePositions';
-import { ProximityPlayer } from '../shared/types';
+import { ProximityPlayer, PLAYER_RUN_SPEED } from '../shared/types';
 
 let passed = 0;
 function test(name: string, fn: () => void) {
@@ -176,6 +176,90 @@ test('the live position overrides the record it belongs to', () => {
   assert.deepEqual(remotePos(record), { x: 33, y: 44 });
   forgetRemotePlayer('p1');
   assert.deepEqual(remotePos(record), record, 'forgetting restores the fallback');
+});
+
+test('a clock-offset correction slews instead of rewriting the timeline', () => {
+  resetServerClock();
+  // A steady 4000ms skew with 300ms of latency, then one much faster packet
+  // that reveals the real skew is 4000. Applying that 300ms drop at once
+  // would map every later snapshot ahead of the ones already buffered.
+  serverTimeToClient(1000, 5300);
+  const before = appliedClockOffset();
+  serverTimeToClient(1050, 5050); // offset 4000 — 300ms better than the estimate so far
+  const after = appliedClockOffset();
+
+  assert.equal(currentClockOffset(), 4000, 'the estimate itself should track the fastest packet');
+  assert.ok(after! < before!, 'the applied offset should move toward the new estimate');
+  assert.ok(before! - after! < 300, `and get there gradually, not in one step (moved ${before! - after!}ms)`);
+});
+
+test('successive snapshots stay in order while the clock offset is converging', () => {
+  resetServerClock();
+  // 40 packets, each one revealing a slightly faster path — the pattern that
+  // used to drag the applied offset backwards fast enough to map a new
+  // snapshot BEFORE its predecessor, at which point appendMovementSnapshot
+  // discards it and the avatar loses a position.
+  let previous = -Infinity;
+  for (let i = 0; i < 40; i++) {
+    const serverTime = 1000 + i * 50;
+    const mapped = serverTimeToClient(serverTime, serverTime + 4300 - i * 5);
+    assert.ok(mapped > previous, `snapshot ${i} mapped to ${mapped}, not after ${previous}`);
+    previous = mapped;
+  }
+});
+
+test('a discontinuity is caught up smoothly rather than teleported', () => {
+  clearRemotePositions();
+  const t0 = 1_000_000;
+  // Settle the player, so there is a rendered position worth preserving.
+  snapRemotePosition('p1', 0, 0);
+  // Then a fresh packet 60px away, already in playback's past — the shape of
+  // playback resuming after it had run past the end of the buffer.
+  pushRemoteSnapshot('p1', 60, 0, t0 - 250);
+
+  interpolateRemotePositions(present, t0);
+  assert.equal(livePlayers.get('p1')!.x, 0, 'no time has passed yet, so nothing should move');
+
+  interpolateRemotePositions(present, t0 + 16);
+  const gliding = livePlayers.get('p1')!;
+  assert.ok(gliding.x > 0 && gliding.x < 60, `should be gliding, got x=${gliding.x}`);
+  assert.equal(pendingSnapshotCount(), 1, 'the buffer must survive until the avatar arrives');
+
+  // And it does arrive — this is a rate limit, not a permanent lag.
+  for (let i = 1; i <= 60; i++) interpolateRemotePositions(present, t0 + 16 + i * 16);
+  assert.equal(livePlayers.get('p1')!.x, 60);
+  assert.equal(pendingSnapshotCount(), 0, 'and the buffer retires once it has');
+});
+
+test('catch-up never lags behind a player who is actually running', () => {
+  clearRemotePositions();
+  const t0 = 2_000_000;
+  snapRemotePosition('p1', 0, 0);
+  // A steady stream of packets 50ms apart, each one PLAYER_RUN_SPEED further
+  // along — the fastest anyone can legitimately move.
+  const stepPx = (PLAYER_RUN_SPEED * 50) / 1000;
+  for (let i = 0; i < 12; i++) pushRemoteSnapshot('p1', i * stepPx, 0, t0 - 400 + i * 50);
+  for (let i = 0; i <= 40; i++) interpolateRemotePositions(present, t0 + i * 16);
+
+  const sample = sampleMovementSnapshots(
+    Array.from({ length: 12 }, (_, i) => ({ x: i * stepPx, y: 0, receivedAt: t0 - 400 + i * 50 })),
+    t0 + 40 * 16 - 200,
+  )!;
+  assert.ok(
+    Math.abs(livePlayers.get('p1')!.x - sample.x) < 0.001,
+    `sprinting must not be rate-limited: rendered ${livePlayers.get('p1')!.x} vs target ${sample.x}`,
+  );
+});
+
+test('a teleport-sized correction is not slid across the room', () => {
+  clearRemotePositions();
+  const t0 = 3_000_000;
+  snapRemotePosition('p1', 0, 0);
+  // 10 tiles away — a spawn or a server correction, not a walk.
+  pushRemoteSnapshot('p1', 320, 0, t0 - 250);
+  interpolateRemotePositions(present, t0);
+  interpolateRemotePositions(present, t0 + 16);
+  assert.equal(livePlayers.get('p1')!.x, 320, 'a jump this big should just be applied');
 });
 
 if (process.exitCode) {

@@ -29,11 +29,32 @@ const WINDOW_SIZE = 200;
 let offsets: number[] = [];
 let cachedOffset: number | null = null;
 
+// The estimate above can move in a step — the moment a faster-than-ever
+// packet lands, the minimum drops by however much faster it was. Applying
+// that step directly rewrites the playback timeline underneath the
+// interpolation buffer: every snapshot that arrives after it is mapped
+// EARLIER than the ones already buffered, so playback (which trails real
+// time by a fixed delay) suddenly finds itself past the newest snapshot —
+// the avatar freezes until fresh packets catch up. A large enough step also
+// maps a new snapshot before the previous one, and appendMovementSnapshot
+// correctly rejects it as out-of-order, so the position is simply lost.
+//
+// So the estimate is tracked exactly (currentClockOffset, and it is what
+// eventually gets applied) while what's APPLIED slews toward it at a bounded
+// rate. 50ms per second is far quicker than any real clock drift, and slow
+// enough that within one player's ~30-67ms packet spacing the timeline never
+// moves more than a couple of milliseconds — comfortably order-preserving.
+const OFFSET_SLEW_PER_MS = 0.05;
+let appliedOffset: number | null = null;
+let appliedAt = 0;
+
 /** Forget everything — the server clock is no longer comparable after a
  *  reconnect (possibly a different server process entirely). */
 export function resetServerClock(): void {
   offsets = [];
   cachedOffset = null;
+  appliedOffset = null;
+  appliedAt = 0;
 }
 
 /**
@@ -66,10 +87,28 @@ export function serverTimeToClient(serverTime: number | undefined, receivedAt: n
     cachedOffset = Math.min(...offsets);
   }
 
-  return serverTime + cachedOffset;
+  // First sample of a connection has nothing to slew from — a brand-new
+  // timeline can start wherever it likes, there is no buffered playback for
+  // it to disagree with yet.
+  if (appliedOffset === null) {
+    appliedOffset = cachedOffset;
+  } else if (appliedOffset !== cachedOffset) {
+    const maxStep = Math.max(1, (receivedAt - appliedAt) * OFFSET_SLEW_PER_MS);
+    const delta = cachedOffset - appliedOffset;
+    appliedOffset += Math.sign(delta) * Math.min(Math.abs(delta), maxStep);
+  }
+  appliedAt = receivedAt;
+
+  return serverTime + appliedOffset;
 }
 
 /** Test seam — the current skew estimate, or null before any sample. */
 export function currentClockOffset(): number | null {
   return cachedOffset;
+}
+
+/** Test seam — the offset actually in use, which slews toward the estimate
+ *  rather than snapping to it (see OFFSET_SLEW_PER_MS). */
+export function appliedClockOffset(): number | null {
+  return appliedOffset;
 }

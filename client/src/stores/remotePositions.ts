@@ -33,10 +33,46 @@ export const livePlayers = new Map<string, { x: number; y: number }>();
 // pure overhead on this path.
 const targets = new Map<string, MovementSnapshot[]>();
 
+// When interpolateRemotePositions last ran, for the catch-up limiter below.
+let lastInterpolatedAt = 0;
+
+import { PLAYER_RUN_SPEED, TILE_SIZE } from '@virtualmeet/shared';
+
 // Rendering trails receipt by this much so there is always a snapshot on
 // either side of the render time to interpolate between; without it every
 // position would be a hard jump to the newest packet.
-const REMOTE_MOVEMENT_RENDER_DELAY_MS = 120;
+//
+// Sized against how far apart packets actually arrive, which is NOT the
+// sender's 50ms throttle: a sender only emits from inside its own animation
+// frame (see GameCanvas's draw loop), so the real spacing is one frame
+// rounded up past 50ms — 50-67ms on a healthy client, and whatever their
+// frame time is on a struggling one. At the old 120ms this buffer held
+// barely two packets, so a single late or dropped one (PLAYER_MOVE is sent
+// volatile — the server may never see it at all) left playback past the end
+// of the buffer, and the avatar froze until the next packet landed and then
+// jumped to it. 200ms holds three or four, which absorbs one hiccup
+// entirely, at the cost of seeing everyone else 80ms further in the past —
+// invisible when nothing in this app is aimed or timed against another
+// player's exact position.
+const REMOTE_MOVEMENT_RENDER_DELAY_MS = 200;
+
+// Ceiling on how fast a rendered position may be dragged toward its
+// interpolated target, and the error past which it stops being dragged and
+// simply teleports.
+//
+// Interpolation output is not continuous across every event: playback
+// running past the end of the buffer and then resuming, a clock-offset
+// correction, a stop packet arriving with an authoritative position — each
+// can move the target several pixels in a single frame, which reads as the
+// avatar twitching. Catching up at a bounded speed turns each of those into
+// a brief glide instead. The ceiling sits ABOVE run speed on purpose: a
+// player's own motion is never limited by it (it would otherwise trail
+// permanently behind anyone sprinting), only discontinuities are.
+const MAX_CATCHUP_SPEED_PX_PER_S = PLAYER_RUN_SPEED * 1.6;
+// Past this, catching up smoothly would mean sliding across the room in
+// plain view — a teleport, a spawn, or a server correction, all of which
+// should just be where they say they are.
+const CATCHUP_SNAP_PX = TILE_SIZE * 4;
 
 /** A newly received position for this player, in client-clock time. */
 export function pushRemoteSnapshot(id: string, x: number, y: number, at: number): void {
@@ -52,8 +88,18 @@ export function pushRemoteSnapshot(id: string, x: number, y: number, at: number)
  * room — a stale buffer would otherwise keep writing a live position for
  * someone who left.
  */
-export function interpolateRemotePositions(isPresent: (id: string) => boolean): void {
-  const renderTime = Date.now() - REMOTE_MOVEMENT_RENDER_DELAY_MS;
+export function interpolateRemotePositions(isPresent: (id: string) => boolean, nowMs?: number): void {
+  // nowMs is a test seam — production always passes nothing and gets the
+  // wall clock, which is the only thing that can be compared with the
+  // snapshot timestamps serverClock.ts produces.
+  const now = nowMs ?? Date.now();
+  const renderTime = now - REMOTE_MOVEMENT_RENDER_DELAY_MS;
+  // Wall clock, not a frame counter: this is driven by the render loop AND by
+  // the proximity tick (which is what keeps positions advancing while the tab
+  // is hidden), so the interval between calls is anything from 16ms to 200ms.
+  const elapsedMs = lastInterpolatedAt === 0 ? 0 : Math.max(0, now - lastInterpolatedAt);
+  lastInterpolatedAt = now;
+  const maxCatchupPx = (MAX_CATCHUP_SPEED_PX_PER_S * elapsedMs) / 1000;
 
   for (const [id, snapshots] of targets) {
     if (!isPresent(id) || !snapshots.length) {
@@ -68,9 +114,40 @@ export function interpolateRemotePositions(isPresent: (id: string) => boolean): 
     // Deliberately NOT deleted once done — the entry stays as this player's
     // resting position so readers keep preferring it over the record's own
     // x/y, which may still be a frame or two behind.
-    livePlayers.set(id, { x: sample.x, y: sample.y });
-    if (sample.done) targets.delete(id);
+    const next = catchUp(livePlayers.get(id), sample, maxCatchupPx);
+    livePlayers.set(id, next);
+    // Retired only once the avatar has actually ARRIVED, not merely once
+    // playback has run out of snapshots to interpolate — dropping the buffer
+    // while catch-up is still closing a gap would freeze the avatar wherever
+    // the glide had got to, permanently short of the last position anyone
+    // reported for them.
+    if (sample.done && next.x === sample.x && next.y === sample.y) targets.delete(id);
   }
+}
+
+/** Bounded move from where this player is currently drawn toward where
+ *  interpolation says they should be — see MAX_CATCHUP_SPEED_PX_PER_S. */
+function catchUp(
+  current: { x: number; y: number } | undefined,
+  target: { x: number; y: number },
+  maxCatchupPx: number,
+): { x: number; y: number } {
+  // Nothing on screen yet (first packet since joining, or since a teleport
+  // dropped the entry) — there is no continuity to preserve.
+  if (!current) return { x: target.x, y: target.y };
+  // No time has passed — this is the render loop and the proximity tick
+  // landing in the same millisecond. Hold, rather than treating a zero
+  // budget as permission to jump the whole way.
+  if (maxCatchupPx <= 0) return current;
+
+  const dx = target.x - current.x;
+  const dy = target.y - current.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance === 0) return current;
+  if (distance > CATCHUP_SNAP_PX || distance <= maxCatchupPx) return { x: target.x, y: target.y };
+
+  const t = maxCatchupPx / distance;
+  return { x: current.x + dx * t, y: current.y + dy * t };
 }
 
 /** Position to draw this player at — the interpolated one if we have it. */
@@ -98,6 +175,7 @@ export function forgetRemotePlayer(id: string): void {
 export function clearRemotePositions(): void {
   livePlayers.clear();
   targets.clear();
+  lastInterpolatedAt = 0;
 }
 
 /** Test seam — how many players still have movement left to play out. */

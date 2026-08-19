@@ -1264,6 +1264,23 @@ class WebRTCService {
           return;
         }
         const offer = await pc.createOffer();
+        // Re-check, because createOffer above is asynchronous and the state
+        // this function decided to run in may no longer hold. If the remote
+        // side's own offer landed during that await, handleOffer has already
+        // applied it and the pc is now in 'have-remote-offer' — pushing a
+        // local OFFER into that state throws InvalidStateError ("Failed to
+        // set local offer sdp: Called in wrong state: have-remote-offer"),
+        // which is how this showed up in production. Their offer supersedes
+        // ours anyway (we're about to answer it, and the answer carries the
+        // very tracks this renegotiation existed to announce), so defer
+        // rather than fight it: pendingRenegotiation fires again from
+        // onsignalingstatechange once the pc is back to 'stable', and if
+        // the answer already covered everything the follow-up is a no-op.
+        if (pc.signalingState !== 'stable') {
+          peer.pendingRenegotiation = true;
+          diag('renegotiation ABANDONED (state changed during createOffer), deferred', { peer: remoteId, signalingState: pc.signalingState });
+          return;
+        }
         await pc.setLocalDescription(offer);
         this.socket.emit(SocketEvents.RTC_OFFER, {
           fromId: this.socket.id,
@@ -1549,6 +1566,25 @@ class WebRTCService {
   handleAnswer(fromId: string, sdp: RTCSessionDescriptionInit) {
     const peer = this.peers.get(fromId);
     if (peer) {
+      // An answer is only ever valid against an offer THIS pc is still
+      // waiting on — 'have-local-offer' is the only state that describes.
+      //
+      // Anything else is an answer that has outlived what it was answering,
+      // and applying it throws InvalidStateError. Both flavors seen in
+      // production come from a peer being torn down and rebuilt underneath
+      // an in-flight negotiation (proximity dropping several peers at once
+      // and reconnecting them — see useWebRTC's resync-glitch guard): the
+      // answer to the OLD pc's offer arrives after a NEW pc has replaced it
+      // under the same peer id, finding it either untouched ('stable') or
+      // already answering the remote side's own offer
+      // ('have-remote-offer'). Dropping it is not a lost connection —
+      // whichever offer is actually live still gets its own answer; the
+      // throw was the only real damage, and it left the error path (not the
+      // ICE-queue flush below) as the last thing to run on this pc.
+      if (peer.pc.signalingState !== 'have-local-offer') {
+        diag('answer IGNORED (no local offer outstanding)', { peer: fromId, signalingState: peer.pc.signalingState });
+        return;
+      }
       peer.pc.setRemoteDescription(new RTCSessionDescription(sdp))
         .then(() => {
           peer.remoteDescSet = true;
