@@ -6,8 +6,6 @@ export function ConnectionIndicator() {
   const remoteCount = Object.keys(playerRecords).length;
   const playerCount = remoteCount + 1;
 
-  console.log('[HUD] ConnectionIndicator — remoteCount:', remoteCount, 'total:', playerCount, 'records:', Object.keys(playerRecords));
-
   return (
     <div className="flex items-center gap-3 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-100 dark:border-gray-700 shadow-sm rounded-lg px-3 py-2 pointer-events-none">
       <div className="flex items-center gap-1.5">

@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointInImpassableArea, RoomTile, JumpEvent, NudgeEvent, PlayerMovePayload, PlayerMovedPayload, PlayerStoppedPayload } from '@kaispace/shared';
+import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointInImpassableArea, shouldIsolateZoneAudio, RoomTile, JumpEvent, NudgeEvent, PlayerMovePayload, PlayerMovedPayload, PlayerStoppedPayload } from '@kaispace/shared';
 import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas, getCachedDoorAreaRects, getCachedZones, getCachedPlayers } from '../store/roomStore';
 import { isDoorUnlocked, isDoorAreaUnlocked, clearUnlockedDoors } from './doorLock';
 import { isDoorOverrideActive } from './roomHandler';
@@ -133,20 +133,18 @@ function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string,
 // to EVERY private area, not just ones with a numeric capacity set (a
 // left-unlimited private area is still a "real room" someone shouldn't be
 // able to walk through another person inside). The Zone model has no
-// explicit "this is a Private Area, not a Map Location" flag (both are
-// zoneType 'desk' — see mapLayers.ts's layerDataToLegacy, which drops
-// AreaEffect.effect entirely once converted), so `audioIsolated !== false`
-// is the best available proxy: Private Area's whole point is isolating
-// audio (defaults to isolate=true), Map Location's is a plain name pin
-// (defaults to isolate=false) — matching the exact same inference
-// RoomEditorPage.tsx's own preview already uses to tell them apart.
+// explicit "this is a Private Area, not a Map Location" flag (both can be
+// zoneType 'desk'), so the shared audio-isolation predicate is the source of
+// truth: explicit audioIsolated wins, and very large desk zones default back
+// to open-office behaviour to avoid turning a whole department area into one
+// collision/audio room.
 // Meeting/Focus areas (zoneType 'meeting'/'focus') are naturally excluded by
 // the zoneType==='desk' check — this was never asked to extend to those. A
 // player is never blocked by their OWN current tile — this only stops
 // walking ONTO someone else, not standing still.
 function isTileOccupiedInPrivateArea(room: string, tileX: number, tileY: number, selfId: string): boolean {
   const zone = getCachedZones(room).find(
-    (z) => z.type === 'desk' && z.audioIsolated !== false && tileX >= z.x && tileX < z.x + z.width && tileY >= z.y && tileY < z.y + z.height,
+    (z) => z.type === 'desk' && shouldIsolateZoneAudio(z) && tileX >= z.x && tileX < z.x + z.width && tileY >= z.y && tileY < z.y + z.height,
   );
   if (!zone) return false;
   return getCachedPlayers(room).some((p) => {

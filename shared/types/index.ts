@@ -1841,6 +1841,14 @@ export interface Zone {
   isMapLocation?: boolean;
 }
 
+const LARGE_DESK_ZONE_AUDIO_AREA_TILES = 144;
+
+export function shouldIsolateZoneAudio(zone: Pick<Zone, 'audioIsolated' | 'type' | 'width' | 'height'>): boolean {
+  if (zone.audioIsolated != null) return zone.audioIsolated;
+  if (zone.type === 'desk' && zone.width * zone.height > LARGE_DESK_ZONE_AUDIO_AREA_TILES) return false;
+  return true;
+}
+
 // Chat. When zoneId is set, the message is private to that zone — the
 // server only broadcasts it to sockets currently tracked as inside that
 // zone (see zoneHandler.ts getSocketIdsInZone), and the client keeps it in

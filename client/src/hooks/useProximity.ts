@@ -8,6 +8,7 @@ import {
   Zone,
   Furniture,
   TILE_SIZE,
+  shouldIsolateZoneAudio,
 } from '@kaispace/shared';
 // Relative, not the '@/' alias: this module is loaded directly by the
 // test runner from the repo root, which doesn't resolve the client's
@@ -28,7 +29,7 @@ export function calcDistanceTiles(a: { x: number; y: number }, b: { x: number; y
 // "full") so audio doesn't hit silence right at the full/translucent
 // boundary while the peer is still rendered on screen.
 export function calcGain(distanceTiles: number): number {
-  return Math.max(0, Math.min(1, 1 - distanceTiles / TRANSLUCENT_THRESHOLD));
+  return Math.max(0, Math.min(1, 1 - distanceTiles / (TRANSLUCENT_THRESHOLD + 1)));
 }
 
 // Finds the zone (if any) that contains a pixel position. Zone x/y/width/height
@@ -71,14 +72,12 @@ export function computeProximity(
   furniture: Furniture[] = [],
 ): ProximityPlayer[] {
   {
-    // A zone only overrides distance-based hearing when it isolates audio
-    // (Zone.audioIsolated !== false) — a 'Map location' area (see the Room
-    // Editor's Map Location tool) is just a name pin, so standing near its
-    // boundary should hear people the normal distance-based way instead of
-    // going dead silent the instant someone's one step outside the pin.
+    // A zone only overrides distance-based hearing when it isolates audio.
+    // Explicit Zone.audioIsolated still wins; otherwise large desk areas are
+    // treated like open office labels so they don't make one giant RTC group.
     const audioZoneAt = (pos: { x: number; y: number }): Zone | undefined => {
       const z = findZoneAt(pos, zones);
-      return z && z.audioIsolated !== false ? z : undefined;
+      return z && shouldIsolateZoneAudio(z) ? z : undefined;
     };
     const localZone = audioZoneAt(localPlayer);
     // A3 — Do-Not-Disturb: a focus-mode avatar neither triggers nor receives

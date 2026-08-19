@@ -184,11 +184,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
         // lets the next proximity tick retry — same self-healing shape
         // whether the reason is "media not ready yet" or "room's crowded
         // right now, try again once someone else leaves range".
-        // [webrtc-diag] Proximity fired for this player — did a connection
-        // attempt actually start, or was it refused (no local media / no
-        // socket / at cap)? A refusal here means nothing downstream ever runs.
         const started = webrtcService.connectToPlayer(p.id);
-        console.log('[webrtc-diag] proximity connect', { peer: p.id, started, visibility: p.visibility });
         if (started) connectedIds.add(p.id);
       }
 

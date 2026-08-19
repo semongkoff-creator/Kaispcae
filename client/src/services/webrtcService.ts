@@ -118,8 +118,8 @@ const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
 //   cap; video (the expensive one) is reserved for whoever's actually
 //   nearest. Decided once at connection time, not renegotiated later if
 //   rank shifts mid-call — see updateProximity's own comment for why.
-export const MAX_TOTAL_PEERS = 16;
-export const MAX_VIDEO_PEERS = 8;
+export const MAX_TOTAL_PEERS = 8;
+export const MAX_VIDEO_PEERS = 4;
 
 // QA (Load checklist item 3, "War Room share massal") — previously
 // unbounded: getDisplayMedia({video: true}) with no constraints at all lets

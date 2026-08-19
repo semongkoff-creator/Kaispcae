@@ -18,6 +18,7 @@ import {
   Zone,
   doesRectOverlapImpassableArea,
   roleAtLeast,
+  shouldIsolateZoneAudio,
 } from '@kaispace/shared';
 import { useGameStore, OVERVIEW_ZOOM_THRESHOLD } from '@/stores/gameStore';
 import { livePos } from '@/stores/livePosition';
@@ -115,7 +116,7 @@ function drawLiveReferenceImage(ctx: CanvasRenderingContext2D, ref: ReferenceIma
 // isPrivateZone caught, which silently hid Private/Focus/Restricted Area's
 // banners too, not just the intended dimming).
 function isPrivateZone(zone: Zone): boolean {
-  return zone.audioIsolated !== false && zone.type !== 'meeting';
+  return shouldIsolateZoneAudio(zone) && zone.type !== 'meeting';
 }
 
 // Bug fix — a single "word" (no spaces — a long URL, a run-on typo) wider
