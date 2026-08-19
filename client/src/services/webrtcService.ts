@@ -2,6 +2,7 @@ import { Socket } from 'socket.io-client';
 import { SocketEvents, MAX_SCREEN_SHARES_PER_ROOM } from '@kaispace/shared';
 import { isPeerNegotiationStuck, NEGOTIATION_TIMEOUT_MS } from './peerHealth';
 import { screenShareBitrateFor } from './mediaBudget';
+import { tuneOpusForVoice } from './sdpAudio';
 
 // STUN alone only tells a peer its public address — it can't help when the
 // network refuses direct peer-to-peer traffic at all, which is the norm on
@@ -542,11 +543,11 @@ class WebRTCService {
       try {
         if (audioTrack) {
           if (audioSender) audioSender.replaceTrack(audioTrack).catch(() => {});
-          else peer.pc.addTrack(audioTrack, stream);
+          else this.prioritiseSender(peer.pc.addTrack(audioTrack, stream), 'high');
         }
         if (videoTrack) {
           if (videoSender) videoSender.replaceTrack(videoTrack).catch(() => {});
-          else peer.pc.addTrack(videoTrack, stream);
+          else this.prioritiseSender(peer.pc.addTrack(videoTrack, stream), 'low', 'maintain-framerate');
         }
       } catch (err) {
         console.error('[webrtc] failed to sync tracks to', remoteId, err);
@@ -633,7 +634,11 @@ class WebRTCService {
     for (const peer of this.peers.values()) {
       const sender = this.cameraSender(peer);
       if (sender) sender.replaceTrack(track).catch(() => {});
-      else this.videoSenders.add(peer.pc.addTrack(track, stream));
+      else {
+        const added = peer.pc.addTrack(track, stream);
+        this.videoSenders.add(added);
+        this.prioritiseSender(added, 'low', 'maintain-framerate');
+      }
     }
   }
 
@@ -703,7 +708,11 @@ class WebRTCService {
       if (!peer.videoEligible) continue;
       const sender = this.cameraSender(peer);
       if (sender) sender.replaceTrack(track).catch(() => {});
-      else this.videoSenders.add(peer.pc.addTrack(track, this.localStream));
+      else {
+        const added = peer.pc.addTrack(track, this.localStream);
+        this.videoSenders.add(added);
+        this.prioritiseSender(added, 'low', 'maintain-framerate');
+      }
     }
     return { success: true };
   }
@@ -1126,7 +1135,7 @@ class WebRTCService {
 
     if (this.localStream) {
       const audioTrack = this.localStream.getAudioTracks()[0];
-      if (audioTrack) pc.addTrack(audioTrack, this.localStream);
+      if (audioTrack) this.prioritiseSender(pc.addTrack(audioTrack, this.localStream), 'high');
       // MAX_VIDEO_PEERS — audio is cheap and always included up to the
       // total-peer cap; the camera track (the expensive one) is only added
       // for whoever was closest at connection time. `enableCamera()`
@@ -1134,7 +1143,7 @@ class WebRTCService {
       // still reaches them separately — see its own addTrack loop below,
       // which is untouched by this flag.
       const camTrack = includeVideo ? this.localStream.getVideoTracks()[0] : undefined;
-      if (camTrack) pc.addTrack(camTrack, this.localStream);
+      if (camTrack) this.prioritiseSender(pc.addTrack(camTrack, this.localStream), 'low', 'maintain-framerate');
     }
     // Pick up an already-in-progress screen share when connecting mid-share
     // (e.g. someone joins after sharing already started).
@@ -1343,7 +1352,7 @@ class WebRTCService {
           diag('renegotiation ABANDONED (state changed during createOffer), deferred', { peer: remoteId, signalingState: pc.signalingState });
           return;
         }
-        await pc.setLocalDescription(offer);
+        await this.setLocalDescriptionTuned(pc, offer, remoteId);
         this.socket.emit(SocketEvents.RTC_OFFER, {
           fromId: this.socket.id,
           toId: remoteId,
@@ -1512,7 +1521,7 @@ class WebRTCService {
 
     if (shouldCreateOffer) {
       peer.pc.createOffer()
-        .then((offer) => peer.pc.setLocalDescription(offer))
+        .then((offer) => this.setLocalDescriptionTuned(peer.pc, offer, remoteId))
         .then(() => {
           // [webrtc-diag] §2 — does the offer we send actually contain audio,
           // and do we declare ourselves as sending it?
@@ -1597,7 +1606,7 @@ class WebRTCService {
         peer!.iceQueue = [];
         return pc.createAnswer();
       })
-      .then((answer) => pc.setLocalDescription(answer))
+      .then((answer) => this.setLocalDescriptionTuned(pc, answer, fromId))
       .then(() => {
         // [webrtc-diag] §2 — the mirror of the offer log: an offer that
         // carried audio but an answer that does not (or says recvonly)
@@ -1809,8 +1818,72 @@ class WebRTCService {
     const params = sender.getParameters();
     if (!params.encodings?.length) params.encodings = [{}];
     params.encodings[0].maxBitrate = screenShareBitrateFor(this.peers.size);
+    // Screen content is mostly static text: when bandwidth runs short, drop
+    // frames and keep the pixels legible rather than the other way round.
+    params.degradationPreference = 'maintain-resolution';
+    // And it yields to the microphone — see prioritiseSender.
+    WebRTCService.setSenderPriority(params, 'low');
     sender.setParameters(params).catch((e) => console.warn('[webrtc] setParameters (screen bitrate cap) failed:', e));
     return sender;
+  }
+
+  // Who wins when the uplink cannot carry everything.
+  //
+  // A mesh puts the microphone, the camera and the screen share on the SAME
+  // connection and the same congestion controller, and by default they are all
+  // equal — so a saturating screen share degrades the voice call alongside
+  // itself. That is the wrong trade in every case: a frozen slide is an
+  // inconvenience, broken audio ends the conversation. Marking audio 'high'
+  // and the video tracks 'low' tells the bandwidth allocator which one to
+  // starve first.
+  //
+  // `priority` and `networkPriority` are the same knob under two names (the
+  // former is the older spelling); browsers read one or the other depending on
+  // version, so both are set.
+  private static setSenderPriority(params: RTCRtpSendParameters, priority: RTCPriorityType): void {
+    if (!params.encodings?.length) params.encodings = [{}];
+    params.encodings[0].networkPriority = priority;
+    params.encodings[0].priority = priority;
+  }
+
+  private prioritiseSender(sender: RTCRtpSender | undefined, priority: RTCPriorityType, degradation?: RTCDegradationPreference): void {
+    if (!sender) return;
+    try {
+      const params = sender.getParameters();
+      WebRTCService.setSenderPriority(params, priority);
+      if (degradation) params.degradationPreference = degradation;
+      // Never fatal — a browser that rejects these still has a working call,
+      // just without the preference expressed.
+      sender.setParameters(params).catch((e) => diag('setSenderPriority failed', { err: String(e) }));
+    } catch (e) {
+      diag('setSenderPriority threw', { err: String(e) });
+    }
+  }
+
+  // Applies the Opus tuning (see sdpAudio.ts) to a description we are about to
+  // set as our own, falling back to the untuned one if the browser refuses it.
+  //
+  // The fallback is the point: browsers have tightened what they accept back
+  // from setLocalDescription over the years, and while an fmtp-only edit like
+  // this is long-established practice, a future version rejecting it must cost
+  // us a tuning parameter — never the call itself.
+  private async setLocalDescriptionTuned(
+    pc: RTCPeerConnection,
+    description: RTCSessionDescriptionInit,
+    peerId: string,
+  ): Promise<void> {
+    const tunedSdp = description.sdp ? tuneOpusForVoice(description.sdp) : undefined;
+    if (!tunedSdp || tunedSdp === description.sdp) {
+      await pc.setLocalDescription(description);
+      return;
+    }
+    try {
+      await pc.setLocalDescription({ type: description.type, sdp: tunedSdp });
+    } catch (err) {
+      console.warn('[webrtc] Opus tuning rejected by the browser, using untuned SDP:', err);
+      diag('opus tuning rejected', { peer: peerId, err: String(err) });
+      await pc.setLocalDescription(description);
+    }
   }
 
   // The budget is shared across however many peers are being sent to, so the
