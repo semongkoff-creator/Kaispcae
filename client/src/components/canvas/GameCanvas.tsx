@@ -38,6 +38,8 @@ import { findZoneAt } from '@/hooks/useProximity';
 // is unchanged.
 import { drawTile, drawFloorTile, drawWallTile, drawFurnitureLayer, TILE_COLORS } from './mapRender';
 import { drawMiniTileType, drawMiniZoneBackground, MINI_FURNITURE, MINI_WALL_AREA, MINI_DOOR } from './miniRender';
+import { measureTextCached } from './textMetrics';
+import { cullOverlay, setOverlayStyle } from './overlayStyle';
 
 // Kept proportional to TILE_SIZE (same ratio as AvatarSprite.ts's own copy of
 // this constant) so decorations positioned relative to it — crown, speaker
@@ -47,6 +49,19 @@ const AVATAR_RADIUS = TILE_SIZE * (14 / 32);
 // Zone name banners never render smaller than this, regardless of zoom —
 // see the zone-banner positioning loop's own comment for why.
 const MIN_ZONE_LABEL_FONT_PX = 10;
+
+// Nominal on-screen height of a zone-banner pill, in unzoomed pixels — used
+// ONLY to decide whether the banner is still on screen (see overlayStyle.ts's
+// cullOverlay), never to size or position it. Approximate on purpose: the
+// element sizes itself from its own content, and the cull margin is far
+// larger than any error this introduces.
+const ZONE_BANNER_APPROX_H_PX = 24;
+
+// Same idea as ZONE_BANNER_APPROX_H_PX, for the small pin markers (note,
+// file/whiteboard media, claimable seat) and for the much larger inline
+// thumbnail an image/YouTube media marker renders instead of a pin.
+const MARKER_APPROX_SIZE_PX = 40;
+const MEDIA_THUMBNAIL_APPROX_SIZE_PX = 160;
 
 // Shared by both the legacy (approach-direction) and orientation-aware
 // (sitFacing) sit-direction paths in performSit below — one lookup, not two.
@@ -132,7 +147,7 @@ function breakLongWord(ctx: CanvasRenderingContext2D, word: string, maxWidth: nu
   let chunk = '';
   for (const ch of word) {
     const test = chunk + ch;
-    if (chunk && ctx.measureText(test).width >= maxWidth) {
+    if (chunk && measureTextCached(ctx, test) >= maxWidth) {
       lines.push(chunk);
       chunk = ch;
     } else {
@@ -148,12 +163,12 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   let current = '';
   for (const word of words) {
     const test = current ? `${current} ${word}` : word;
-    if (ctx.measureText(test).width < maxWidth) {
+    if (measureTextCached(ctx, test) < maxWidth) {
       current = test;
       continue;
     }
     if (current) lines.push(current);
-    current = ctx.measureText(word).width >= maxWidth ? breakLongWord(ctx, word, maxWidth, lines) : word;
+    current = measureTextCached(ctx, word) >= maxWidth ? breakLongWord(ctx, word, maxWidth, lines) : word;
   }
   if (current) lines.push(current);
   return lines.length > 0 ? lines : [text.slice(0, 30)];
@@ -1857,15 +1872,24 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     // twenty times a frame, each time walking every player in the room.
     // Live positions throughout: a throttled one would make labels flicker
     // back on for a few frames as an avatar passes under them.
-    const labelOccluders: { x: number; y: number }[] = [livePos];
-    for (const p of Object.values(playerRecordsRef.current)) labelOccluders.push(remotePos(p));
+    // Stored as TILE coordinates, converted once here rather than inside
+    // isAvatarUnderLabel — that predicate runs for every zone banner and
+    // every banner furniture item, so flooring the same positions in there
+    // repeated the same two divisions per player per label (50 labels x 20
+    // players = 2000 of them a frame) to arrive at the same answer every
+    // time.
+    const labelOccluders: { col: number; row: number }[] = [
+      { col: Math.floor(livePos.x / TILE_SIZE), row: Math.floor(livePos.y / TILE_SIZE) },
+    ];
+    for (const p of Object.values(playerRecordsRef.current)) {
+      const pos = remotePos(p);
+      labelOccluders.push({ col: Math.floor(pos.x / TILE_SIZE), row: Math.floor(pos.y / TILE_SIZE) });
+    }
 
     const isAvatarUnderLabel = (tileX: number, tileY: number, tilesW: number) => {
-      return labelOccluders.some((a) => {
-        const row = Math.floor(a.y / TILE_SIZE);
-        const col = Math.floor(a.x / TILE_SIZE);
-        return row >= tileY && row <= tileY + 1 && col >= tileX - 1 && col <= tileX + tilesW;
-      });
+      return labelOccluders.some(
+        (a) => a.row >= tileY && a.row <= tileY + 1 && a.col >= tileX - 1 && a.col <= tileX + tilesW,
+      );
     };
 
     // Zone banners (DOM overlay) — position each labeled zone's floating
@@ -1891,6 +1915,13 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       const zx = (zone.x * TILE_SIZE - cameraX) * zoom;
       const zy = (zone.y * TILE_SIZE - cameraY) * zoom;
       const zw = zone.width * TILE_SIZE * zoom;
+      // A banner is a thin strip pinned to its zone's TOP edge, so its own
+      // height (not the zone's) is what decides whether it's on screen —
+      // the body of a very tall zone extending down into view doesn't bring
+      // a label that sits far above the viewport with it. Everything below
+      // is skipped for an off-screen one; see overlayStyle.ts for why this
+      // is worth doing at all (a room can have 50+ of these).
+      if (!cullOverlay(el, zx, zy - ZONE_BANNER_APPROX_H_PX * zoom, zw, ZONE_BANNER_APPROX_H_PX * 2 * zoom, logicalW, logicalH)) continue;
       // Readability fix — this used to be a single `scale(zoom)` on the
       // whole element (font AND box together), so the name shrank in
       // lock-step with the room and went unreadable well before Overview
@@ -1901,7 +1932,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       // (translate) still uses the real, unclamped zoom so the banner stays
       // pinned to its actual on-screen corner at any zoom level.
       const baseFontPx = isOverview ? 11 : zone.type === 'meeting' ? 14 : 10;
-      el.style.fontSize = `${Math.max(MIN_ZONE_LABEL_FONT_PX, baseFontPx * zoom)}px`;
+      setOverlayStyle(el, 'font-size', `${Math.max(MIN_ZONE_LABEL_FONT_PX, baseFontPx * zoom)}px`);
       if (isOverview) {
         // Full Office View — every zone gets the SAME plain-text treatment
         // (no colored pill/bar) regardless of type, matching the flat,
@@ -1910,16 +1941,16 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
         // zone reads fine for a handful of rooms in the normal view, but
         // Kaitech's real room alone has 50+ named areas; that many colored
         // boxes at once in a whole-office view would bury the map itself.
-        el.style.transform = `translate(${zx + 4 * zoom}px, ${zy + 2 * zoom}px)`;
-        el.style.width = `${zw}px`;
+        setOverlayStyle(el, 'transform', `translate(${zx + 4 * zoom}px, ${zy + 2 * zoom}px)`);
+        setOverlayStyle(el, 'width', `${zw}px`);
       } else if (zone.type === 'meeting') {
-        el.style.transform = `translate(${zx}px, ${zy}px)`;
-        el.style.width = `${zw}px`;
+        setOverlayStyle(el, 'transform', `translate(${zx}px, ${zy}px)`);
+        setOverlayStyle(el, 'width', `${zw}px`);
       } else {
-        el.style.transform = `translate(${zx + 6 * zoom}px, ${zy - 12 * zoom}px)`;
-        el.style.width = 'auto';
+        setOverlayStyle(el, 'transform', `translate(${zx + 6 * zoom}px, ${zy - 12 * zoom}px)`);
+        setOverlayStyle(el, 'width', 'auto');
       }
-      el.style.opacity = isAvatarUnderLabel(zone.x, zone.y, zone.width) ? '0' : '1';
+      setOverlayStyle(el, 'opacity', isAvatarUnderLabel(zone.x, zone.y, zone.width) ? '0' : '1');
     }
 
     // Banner furniture (DOM overlay) — same imperative positioning as zone
@@ -1941,11 +1972,18 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       const cx = (item.x * TILE_SIZE + (item.tilesW * TILE_SIZE) / 2 - cameraX) * zoom;
       const cy = (item.y * TILE_SIZE + TILE_SIZE / 2 - cameraY) * zoom;
       const baseFontPx = 13;
-      el.style.fontSize = `${Math.max(MIN_ZONE_LABEL_FONT_PX, baseFontPx * zoom)}px`;
-      el.style.width = `${item.tilesW * TILE_SIZE * scaleW * zoom}px`;
-      el.style.height = `${TILE_SIZE * scaleH * zoom}px`;
-      el.style.transform = `translate(${cx}px, ${cy}px) translate(-50%, -50%) rotate(${item.bannerRotationDeg ?? 0}deg)`;
-      el.style.opacity = isAvatarUnderLabel(item.x, item.y, item.tilesW) ? '0' : '1';
+      const bw = item.tilesW * TILE_SIZE * scaleW * zoom;
+      const bh = TILE_SIZE * scaleH * zoom;
+      // cx/cy are the CENTER (the element re-centers itself with
+      // translate(-50%,-50%)), so the box starts half its size back from
+      // there. A rotated banner's bounding box is bigger than this — well
+      // within cullOverlay's own margin.
+      if (!cullOverlay(el, cx - bw / 2, cy - bh / 2, bw, bh, logicalW, logicalH)) continue;
+      setOverlayStyle(el, 'font-size', `${Math.max(MIN_ZONE_LABEL_FONT_PX, baseFontPx * zoom)}px`);
+      setOverlayStyle(el, 'width', `${bw}px`);
+      setOverlayStyle(el, 'height', `${bh}px`);
+      setOverlayStyle(el, 'transform', `translate(${cx}px, ${cy}px) translate(-50%, -50%) rotate(${item.bannerRotationDeg ?? 0}deg)`);
+      setOverlayStyle(el, 'opacity', isAvatarUnderLabel(item.x, item.y, item.tilesW) ? '0' : '1');
     }
 
     // QA #7/#8/#9 — Note markers (DOM overlay), same imperative positioning
@@ -1956,7 +1994,8 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       if (!el) continue;
       const nx = (note.x * TILE_SIZE - cameraX) * zoom;
       const ny = (note.y * TILE_SIZE - cameraY) * zoom;
-      el.style.transform = `translate(${nx}px, ${ny}px) scale(${zoom})`;
+      if (!cullOverlay(el, nx, ny, MARKER_APPROX_SIZE_PX * zoom, MARKER_APPROX_SIZE_PX * zoom, logicalW, logicalH)) continue;
+      setOverlayStyle(el, 'transform', `translate(${nx}px, ${ny}px) scale(${zoom})`);
     }
 
     // §6 — Media markers (DOM overlay), same imperative positioning.
@@ -1977,14 +2016,23 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       // a camera-relative translate) is what lets that `position: fixed`
       // actually size against the VIEWPORT — any transform on an ancestor
       // (even a no-op one) would otherwise trap it to this element's own box.
-      if (media.id === maximizedYtId) { if (el.style.transform) el.style.transform = ''; continue; }
+      // setOverlayStyle, not a raw style write — the write cache has to see
+      // this clear too, or un-maximizing would find its cached transform
+      // still matching the value it is about to write, skip the write, and
+      // leave the marker pinned at the top-left corner with no transform.
+      if (media.id === maximizedYtId) { setOverlayStyle(el, 'transform', ''); continue; }
       // Image/YouTube render as a much bigger inline thumbnail below (see
       // the marker JSX) than the small pin whiteboard/file still use, so
       // they need a wider stacking gap to avoid overlapping.
       const stackOffsetPx = media.type === 'image' || media.type === 'youtube' ? 40 : 18;
       const mx = (media.x * TILE_SIZE - cameraX + stackIndex * stackOffsetPx) * zoom;
       const my = (media.y * TILE_SIZE - cameraY) * zoom;
-      el.style.transform = `translate(${mx}px, ${my}px) scale(${zoom})`;
+      // Image/YouTube markers render a real thumbnail, several times the
+      // size of the small pin the other kinds use — hence the bigger box
+      // here, so a partly-visible thumbnail at the screen edge isn't culled.
+      const markerSize = (media.type === 'image' || media.type === 'youtube' ? MEDIA_THUMBNAIL_APPROX_SIZE_PX : MARKER_APPROX_SIZE_PX) * zoom;
+      if (!cullOverlay(el, mx, my, markerSize, markerSize, logicalW, logicalH)) continue;
+      setOverlayStyle(el, 'transform', `translate(${mx}px, ${my}px) scale(${zoom})`);
     }
 
     // Claimable-seat markers (DOM overlay), same imperative positioning,
@@ -1994,7 +2042,8 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       if (!el) continue;
       const sx = (seat.x * TILE_SIZE + TILE_SIZE / 2 - cameraX) * zoom;
       const sy = (seat.y * TILE_SIZE + TILE_SIZE / 2 - cameraY) * zoom;
-      el.style.transform = `translate(${sx}px, ${sy}px) scale(${zoom})`;
+      if (!cullOverlay(el, sx, sy, MARKER_APPROX_SIZE_PX * zoom, MARKER_APPROX_SIZE_PX * zoom, logicalW, logicalH)) continue;
+      setOverlayStyle(el, 'transform', `translate(${sx}px, ${sy}px) scale(${zoom})`);
     }
 
     // Zone draw preview (while dragging out a new zone rectangle)
@@ -2301,7 +2350,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
         const label = `🪑 ${item.assignedToName || 'Reserved'}`;
         ctx.font = 'bold 9px sans-serif';
         ctx.textAlign = 'center';
-        const tw = ctx.measureText(label).width;
+        const tw = measureTextCached(ctx, label);
         ctx.fillStyle = 'rgba(76, 29, 149, 0.85)';
         ctx.beginPath();
         ctx.roundRect(asx - tw / 2 - 5, asy - 20, tw + 10, 14, 6);
@@ -2367,7 +2416,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       const label = 'X';
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
-      const tw = ctx.measureText('X  Buka').width;
+      const tw = measureTextCached(ctx, 'X  Buka');
       const bx = msx - tw / 2 - 8;
       const by = msy - 40 + bob;
       // pill background
@@ -2393,7 +2442,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       const name = label || (target ? 'room lain' : 'titik lain');
       const text = `F — ${name}`;
       ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-      const tw = ctx.measureText(text).width;
+      const tw = measureTextCached(ctx, text);
       const bx = psx - tw / 2 - 8, by = psy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
       ctx.fillStyle = 'rgba(124, 58, 237, 0.95)';
       ctx.beginPath();
@@ -2417,7 +2466,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       const bob = Math.sin(timestamp * 0.005) * 2;
       const text = 'F — Buka';
       ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-      const tw = ctx.measureText(text).width;
+      const tw = measureTextCached(ctx, text);
       const bx = isx - tw / 2 - 8, by = isy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
       ctx.fillStyle = 'rgba(124, 58, 237, 0.95)';
       ctx.beginPath();
@@ -2441,7 +2490,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       const bob = Math.sin(timestamp * 0.005) * 2;
       const text = 'F — Buka Pintu';
       ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-      const tw = ctx.measureText(text).width;
+      const tw = measureTextCached(ctx, text);
       const bx = dsx - tw / 2 - 8, by = dsy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
       ctx.fillStyle = 'rgba(212, 160, 86, 0.95)';
       ctx.beginPath();
@@ -2464,7 +2513,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       const bob = Math.sin(timestamp * 0.005) * 2;
       const text = 'F — Buka Pintu';
       ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-      const tw = ctx.measureText(text).width;
+      const tw = measureTextCached(ctx, text);
       const bx = dasx - tw / 2 - 8, by = dasy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
       ctx.fillStyle = 'rgba(212, 160, 86, 0.95)';
       ctx.beginPath();
@@ -2489,7 +2538,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       const nsy = f.y * TILE_SIZE - cameraY;
       const bob = Math.sin(timestamp * 0.005) * 2;
       ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-      const tw = ctx.measureText(f.name).width;
+      const tw = measureTextCached(ctx, f.name);
       const bx = nsx - tw / 2 - 8, by = nsy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
       ctx.fillStyle = 'rgba(30,41,59,0.9)';
       ctx.beginPath();
@@ -2521,7 +2570,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       ctx.font = '10px sans-serif';
       const lines = wrapText(ctx, text, 100);
       const lineH = 13; const pad = 5;
-      const wbw = Math.min(110, ctx.measureText(text).width + pad * 2);
+      const wbw = Math.min(110, measureTextCached(ctx, text) + pad * 2);
       const wbh = lines.length * lineH + pad * 2;
       const wbx = wsx - wbw / 2;
       const wby = wsy - 40 - wbh;
@@ -2634,7 +2683,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       ctx.font = '10px sans-serif';
       const lines = wrapText(ctx, bubble.text, 100);
       const lineH = 13; const pad = 5;
-      const bw = Math.min(110, ctx.measureText(bubble.text).width + pad * 2);
+      const bw = Math.min(110, measureTextCached(ctx, bubble.text) + pad * 2);
       const bh = lines.length * lineH + pad * 2;
       const bx = bsx - bw / 2;
       const by = bsy - AVATAR_RADIUS - 40 - bh;

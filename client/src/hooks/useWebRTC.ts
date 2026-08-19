@@ -9,6 +9,12 @@ interface UseWebRTCOptions {
   onRemoteStream?: (id: string, stream: MediaStream) => void;
 }
 
+// How long a peer has to stay inside proximity range before a connection is
+// started for them. Deliberately short: at App's 200ms proximity tick this is
+// two or three ticks, imperceptible next to how long ICE negotiation itself
+// takes, but enough that simply walking past someone never negotiates at all.
+const CONNECT_DWELL_MS = 400;
+
 export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   const connectedRef = useRef<Set<string>>(new Set());
   const initRef = useRef(false);
@@ -20,6 +26,11 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // once and then, if it's still happening a bit later (a genuine mass
   // departure, not a one-off blip), let through rather than blocked forever.
   const massGlitchSinceRef = useRef<number | null>(null);
+  // peer id → when they FIRST read in-range, for the dwell gate in
+  // updateProximity below. Pruned the moment they leave range, so a peer who
+  // steps out and back in starts a fresh dwell rather than resuming an old
+  // one.
+  const inRangeSinceRef = useRef<Map<string, number>>(new Map());
 
   // Mic starts muted / camera starts off — matches webrtcService disabling
   // both tracks right after acquiring them, so the UI doesn't show "live"
@@ -161,6 +172,13 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     const inRangeIds = new Set(visible.map((p) => p.id));
     const connectedIds = connectedRef.current;
 
+    // Anyone no longer in range forfeits their accumulated dwell (see the
+    // dwell gate below) — and this is also what keeps the map from growing
+    // for the lifetime of the session as people come and go.
+    for (const id of inRangeSinceRef.current.keys()) {
+      if (!inRangeIds.has(id)) inRangeSinceRef.current.delete(id);
+    }
+
     // Recomputed fresh every tick from the CURRENT ranking — only takes
     // effect for a peer not yet connected (webrtcService locks
     // videoEligible in once at connection time and never revokes it, to
@@ -176,16 +194,38 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
       }
 
       if (!connectedIds.has(p.id)) {
-        // Only mark them connected if the attempt actually started — when
-        // local media isn't ready yet, or MAX_TOTAL_PEERS is already
-        // reached, connectToPlayer is a no-op, and marking them anyway
-        // meant this branch never ran again for that player, stranding
-        // them silent for the rest of the session. Leaving them unmarked
-        // lets the next proximity tick retry — same self-healing shape
-        // whether the reason is "media not ready yet" or "room's crowded
-        // right now, try again once someone else leaves range".
-        const started = webrtcService.connectToPlayer(p.id);
-        if (started) connectedIds.add(p.id);
+        // Dwell gate — crossing someone's proximity radius for a fraction of
+        // a second does not mean you meant to talk to them, but it used to
+        // start a full peer connection anyway. Walking through a busy area
+        // (Kaitech's desk floor, a dozen people in one open zone) therefore
+        // fired a burst of offer/answer/ICE negotiation for people already
+        // behind you by the time it completed — and SDP/ICE work runs on the
+        // main thread, so each one is a hitch in the walk itself, then a
+        // matching teardown a second later (see the debounced disconnect
+        // below). Requiring the peer to stay in range for CONNECT_DWELL_MS
+        // first means passers-by cost nothing, while anyone you actually
+        // stop near still connects well before the negotiation itself could
+        // have finished.
+        //
+        // Zone/table-mates (viaZone) bypass the dwell entirely: joining a
+        // meeting area is a deliberate act, not something you do in passing,
+        // and it should connect on the same tick as before.
+        const now = Date.now();
+        const inRangeSince = inRangeSinceRef.current.get(p.id) ?? now;
+        inRangeSinceRef.current.set(p.id, inRangeSince);
+
+        if (p.viaZone || now - inRangeSince >= CONNECT_DWELL_MS) {
+          // Only mark them connected if the attempt actually started — when
+          // local media isn't ready yet, or MAX_TOTAL_PEERS is already
+          // reached, connectToPlayer is a no-op, and marking them anyway
+          // meant this branch never ran again for that player, stranding
+          // them silent for the rest of the session. Leaving them unmarked
+          // lets the next proximity tick retry — same self-healing shape
+          // whether the reason is "media not ready yet" or "room's crowded
+          // right now, try again once someone else leaves range".
+          const started = webrtcService.connectToPlayer(p.id);
+          if (started) connectedIds.add(p.id);
+        }
       }
 
       // Zone-mates always get full volume; otherwise fall off with distance.

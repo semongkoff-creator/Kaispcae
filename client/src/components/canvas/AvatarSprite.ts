@@ -1,5 +1,6 @@
 import { Avatar, BodyShape, Accessory, Expression, Direction, TILE_SIZE } from '@kaispace/shared';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
+import { measureTextCached } from './textMetrics';
 
 // Radius for the shape-fallback avatar (drawn only while no sprite is
 // configured/loaded) AND the local-player glow ring (drawn around whichever
@@ -707,8 +708,7 @@ function drawNameLabel(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
 
-  const metrics = ctx.measureText(name);
-  const tw = metrics.width;
+  const tw = measureTextCached(ctx, name);
   const th = 14;
   const padX = 5;
   const padY = 2;
@@ -739,8 +739,7 @@ function drawStatusTag(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
 
-  const metrics = ctx.measureText(tag);
-  const tw = metrics.width;
+  const tw = measureTextCached(ctx, tag);
   const padX = 4;
   const padY = 1;
   const h = 12;
@@ -771,8 +770,7 @@ function drawPresencePill(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
 
-  const metrics = ctx.measureText(status);
-  const tw = metrics.width;
+  const tw = measureTextCached(ctx, status);
   const padX = 5;
   const padY = 1;
   const h = 13;
@@ -804,8 +802,7 @@ function drawQueueCountdownPill(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
 
-  const metrics = ctx.measureText(label);
-  const tw = metrics.width;
+  const tw = measureTextCached(ctx, label);
   const padX = 5;
   const padY = 1;
   const h = 13;
