@@ -1030,9 +1030,21 @@ export const useGameStore = create<GameState>((set, get) => ({
   sitNotice: null,
   setSitNotice: (notice) => set({ sitNotice: notice }),
   inAppToasts: [],
-  pushInAppToast: (icon, title, text, variant = 'default') => set((s) => ({
-    inAppToasts: [...s.inAppToasts, { id: crypto.randomUUID(), icon, title, text, variant }],
-  })),
+  pushInAppToast: (icon, title, text, variant = 'default') => set((s) => {
+    const toast = { id: crypto.randomUUID(), icon, title, text, variant };
+    if (variant !== 'nudge') return { inAppToasts: [...s.inAppToasts, toast] };
+
+    // A nudge already fires as a burst (see useSocket.ts's PLAYER_NUDGE
+    // handler) and the sender can nudge repeatedly (server allows up to
+    // 3/sec, see movementHandler.ts's canNudge) — without a cap, sustained
+    // nudge-spam piles up toasts forever instead of just repeating the
+    // alert. Keep at most MAX_CONCURRENT_NUDGE_TOASTS, dropping the oldest.
+    const MAX_CONCURRENT_NUDGE_TOASTS = 3;
+    const others = s.inAppToasts.filter((t) => t.variant !== 'nudge');
+    const nudges = s.inAppToasts.filter((t) => t.variant === 'nudge');
+    const keptNudges = nudges.slice(-(MAX_CONCURRENT_NUDGE_TOASTS - 1));
+    return { inAppToasts: [...others, ...keptNudges, toast] };
+  }),
   dismissInAppToast: (id) => set((s) => ({ inAppToasts: s.inAppToasts.filter((t) => t.id !== id) })),
   seatClaims: {},
   setSeatClaims: (claims) => set({
