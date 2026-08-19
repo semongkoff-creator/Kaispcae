@@ -7,6 +7,7 @@ import { isDoorOverrideActive } from './roomHandler';
 import { createStoppedPayload } from './movementPayload';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { clearMovementSequence, shouldAcceptMoveSequence } from './movementSequence';
+import { collectStaleMovers, MoverEntry, STALE_MOVE_SWEEP_INTERVAL_MS } from './staleMovers';
 import { recordPokeReceived } from '../lib/pokeResponse';
 import { getPlayerName } from './roomHandler';
 import { broadcastAnalyticsActivity } from './analyticsFeed';
@@ -24,6 +25,61 @@ import { broadcastAnalyticsActivity } from './analyticsFeed';
 // a client that sends 20/sec) while giving normal jitter room to land.
 const rateLimitMap = new Map<string, number>();
 const MIN_UPDATE_INTERVAL = 30;
+
+// Sockets currently believed to be walking, and when they last said so.
+//
+// A client only ever stops being "moving" by SENDING a stop, and that emit
+// lives inside the browser's requestAnimationFrame loop — which browsers
+// suspend entirely for a backgrounded tab. Switch tabs mid-stride and the
+// frame that would have sent it never runs: the server keeps the player
+// flagged as moving, and every other client keeps cycling their walk (or
+// run) animation over a position that never changes again. An avatar
+// jogging on the spot forever, and nothing in the system ever cleaned it
+// up — the flag only cleared on an explicit stop or on disconnect.
+//
+// So the server stops waiting to be told. If nothing has arrived from a
+// mover for STALE_MOVE_TIMEOUT_MS, it calls the stop itself. Deliberately
+// server-side rather than a client-side visibilitychange handler alone:
+// this also covers a frozen tab, a dropped packet, and a client that lies.
+const activeMovers = new Map<string, MoverEntry>();
+
+let staleMoveSweep: ReturnType<typeof setInterval> | null = null;
+
+function startStaleMoveSweep(io: Server): void {
+  if (staleMoveSweep) return;
+  staleMoveSweep = setInterval(() => {
+    const now = Date.now();
+    for (const { socketId, room } of collectStaleMovers(activeMovers, now)) {
+      activeMovers.delete(socketId);
+
+      // Gone already — the disconnect path has its own cleanup and has
+      // told the room; nothing to announce on behalf of a socket that
+      // isn't there.
+      const socket = io.sockets.sockets.get(socketId);
+      if (!socket) continue;
+
+      const player = getCachedPlayers(room).find((p) => p.id === socketId);
+      if (!player || !player.isMoving) continue;
+
+      const stopped: PlayerStoppedPayload = {
+        id: socketId,
+        x: player.x,
+        y: player.y,
+        direction: player.direction,
+        serverTime: now,
+      };
+      // socket.to(), NOT io.to() — everyone else needs correcting, but the
+      // stale client does not. Sending it to them too would snap their own
+      // avatar back to this position, and if the silence turned out to be a
+      // network hiccup rather than a backgrounded tab, that reads as a
+      // rubber-band on a player who never actually stopped.
+      socket.to(room).emit(SocketEvents.PLAYER_STOPPED, stopped);
+      void setPlayerStopped(room, socketId, player.x, player.y, player.direction);
+    }
+  }, STALE_MOVE_SWEEP_INTERVAL_MS);
+  // Never a reason to hold the process open for this.
+  staleMoveSweep.unref?.();
+}
 
 // QA #16 (Anti-spam) — Nudge had no cap at all: a spoofed/scripted client
 // could fire PLAYER_NUDGE as fast as the socket allows. Same burst budget as
@@ -123,6 +179,8 @@ function getMapBounds(tiles: RoomTile[][] | undefined): { mapWidth: number; mapH
 }
 
 export function registerMovementHandlers(io: Server, socket: Socket) {
+  startStaleMoveSweep(io);
+
   // Root cause of "jalan ke selatan snap balik" (walking south/diagonal
   // snapping back straight) — every handler below used to derive the game
   // room by picking the first entry in socket.rooms that wasn't the
@@ -210,6 +268,9 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
       };
       socket.to(gameRoom).emit(SocketEvents.PLAYER_MOVED, moved);
       updatePlayerPosition(gameRoom, socket.id, clampedX, clampedY, moved.direction, data.isRunning);
+      // Refreshed on every accepted move; the sweep above calls the stop
+      // itself if these ever run dry.
+      activeMovers.set(socket.id, { room: gameRoom, lastMoveAt: now });
     }
   });
 
@@ -232,10 +293,15 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     const direction = data.direction || 'down';
     socket.to(gameRoom).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: clampedX, y: clampedY, direction });
     updatePlayerPosition(gameRoom, socket.id, clampedX, clampedY, direction, false);
+    activeMovers.delete(socket.id);
   });
 
   socket.on(SocketEvents.PLAYER_STOP, (data: { x?: number; y?: number; direction: string }) => {
     const gameRoom = currentRoom;
+    // Told properly — the sweep has nothing left to clean up here. Cleared
+    // before the branch below so an early return can't leave a stale entry
+    // behind to fire a redundant stop a second later.
+    activeMovers.delete(socket.id);
     if (gameRoom) {
       const serverTime = Date.now();
       const tiles = getCachedTiles(gameRoom);
@@ -327,6 +393,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
   // Clean up rate limit map on disconnect
   socket.on('disconnect', () => {
     rateLimitMap.delete(socket.id);
+    activeMovers.delete(socket.id);
     clearMovementSequence(socket.id);
     clearUnlockedDoors(socket.id);
   });

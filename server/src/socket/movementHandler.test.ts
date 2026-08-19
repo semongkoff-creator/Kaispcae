@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createStoppedPayload } from './movementPayload';
+import { collectStaleMovers, MoverEntry } from './staleMovers';
 import { clearMovementSequence, shouldAcceptMoveSequence } from './movementSequence';
 import { clearLivePlayerMovement, mergeLivePlayerMovement, setLivePlayerMovement } from '../store/playerLiveState';
 
@@ -103,6 +104,46 @@ test('live player movement overlays active positions without mutating the source
   assert.equal(merged[0].isRunning, true);
 
   clearLivePlayerMovement(roomId, 'socket-live');
+});
+
+// ── stale movers: a client that never sent its stop ───────────────────────
+
+const movers = (entries: Record<string, number>): Map<string, MoverEntry> =>
+  new Map(Object.entries(entries).map(([id, lastMoveAt]) => [id, { room: 'office', lastMoveAt }]));
+
+test('a mover that went quiet past the timeout is swept', () => {
+  const now = 100_000;
+  const stale = collectStaleMovers(movers({ 'gone-quiet': now - 900 }), now, 800);
+  assert.equal(stale.length, 1);
+  assert.equal(stale[0].socketId, 'gone-quiet');
+  assert.equal(stale[0].room, 'office', 'the room has to survive — the stop is broadcast into it');
+});
+
+test('a mover still sending is left alone', () => {
+  const now = 100_000;
+  // 50ms is the client's own send interval; anything near it must not trip.
+  assert.equal(collectStaleMovers(movers({ walking: now - 50 }), now, 800).length, 0);
+  assert.equal(collectStaleMovers(movers({ jittery: now - 400 }), now, 800).length, 0);
+});
+
+test('the timeout boundary is inclusive, not off by one', () => {
+  const now = 100_000;
+  assert.equal(collectStaleMovers(movers({ a: now - 799 }), now, 800).length, 0, 'just inside stays');
+  assert.equal(collectStaleMovers(movers({ a: now - 800 }), now, 800).length, 1, 'exactly at the limit goes');
+});
+
+test('only the quiet movers are swept, not the whole room', () => {
+  const now = 100_000;
+  const stale = collectStaleMovers(
+    movers({ backgrounded: now - 5000, walking: now - 60, alsoStuck: now - 2000 }),
+    now,
+    800,
+  );
+  assert.deepEqual(stale.map((m) => m.socketId).sort(), ['alsoStuck', 'backgrounded']);
+});
+
+test('an empty roster sweeps nothing', () => {
+  assert.deepEqual(collectStaleMovers(new Map(), Date.now(), 800), []);
 });
 
 if (process.exitCode) {

@@ -254,8 +254,16 @@ function spriteFrameCoords(direction: Direction, isMoving: boolean, timestamp: n
     return { col, row: SIT_ROW, flipX: direction === 'left' };
   }
   const dirIndex = Math.max(0, DIRECTION_COLUMN_ORDER.indexOf(direction));
-  const row = isMoving ? WALK_ROW : IDLE_ROW;
-  const frameMs = isMoving ? (isRunning ? RUN_FRAME_MS : WALK_FRAME_MS) : IDLE_FRAME_MS;
+  // Sitting facing 'down' falls through to here (no sit art for that
+  // direction — see SIT_ROW). It must still never play a walk cycle: a
+  // seated avatar showing a run animation is how a stuck isMoving flag used
+  // to surface, and reading "someone jogging in their chair" as a rendering
+  // bug is exactly what happened. The flag itself is fixed elsewhere
+  // (movementHandler.ts's activeMovers sweep); this makes the pose
+  // impossible to draw regardless of what the flag says.
+  const animating = isMoving && !isSitting;
+  const row = animating ? WALK_ROW : IDLE_ROW;
+  const frameMs = animating ? (isRunning ? RUN_FRAME_MS : WALK_FRAME_MS) : IDLE_FRAME_MS;
   const frameInCycle = Math.floor(timestamp / frameMs) % FRAMES_PER_DIRECTION;
   const col = dirIndex * FRAMES_PER_DIRECTION + frameInCycle;
   return { col, row, flipX: false };

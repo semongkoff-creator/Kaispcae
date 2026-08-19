@@ -2783,6 +2783,40 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     if (!erasedBanner) onTilePaint(tile.x, tile.y, 'floor');
   }, [getTileFromMouse, onTilePaint, onTileHistoryPush, onFurnitureErase]);
 
+  // Announce the stop the instant the tab goes away, rather than leaving it
+  // to the render loop.
+  //
+  // emitStop only ever fires from inside draw(), and browsers suspend
+  // requestAnimationFrame entirely for a hidden tab. Switching tabs
+  // mid-stride therefore never sent one: the player stopped locally (blur
+  // clears the held keys, see useMovement) but nobody was told, so every
+  // other client kept animating them walking — or running — on the spot,
+  // forever.
+  //
+  // The server sweeps for this too (movementHandler.ts's activeMovers), and
+  // that is the authoritative fix since it also catches a frozen tab or a
+  // dropped packet. This is the fast path: it closes the gap in the common
+  // case immediately instead of a second later.
+  useEffect(() => {
+    const announceStop = () => {
+      if (!wasMovingRef.current) return;
+      wasMovingRef.current = false;
+      // livePos, not the store — this is the exact spot the avatar reached
+      // on the last frame that actually ran.
+      emitStopRef.current(livePos.x, livePos.y, livePos.direction);
+      useGameStore.getState().stopLocalPlayer(livePos.x, livePos.y, livePos.direction);
+    };
+    const onVisibility = () => { if (document.hidden) announceStop(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    // pagehide covers the mobile/bfcache path, where a tab can be frozen
+    // without visibilitychange ever being delivered.
+    window.addEventListener('pagehide', announceStop);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', announceStop);
+    };
+  }, []);
+
   useEffect(() => {
     resizeCanvas();
     const observer = new ResizeObserver(() => resizeCanvas());
