@@ -310,6 +310,12 @@ const SEAT_AUTO_PROMPT_DELAY_MS = 1000;
 // persetujuan..." cards) — capped and ellipsized via truncateName.
 const SEAT_CLAIM_NAME_MAX_CHARS = 20;
 
+// Tighter cap for the persistent on-seat marker itself (the small "🪑 name"
+// pill drawn over every claimed seat at all times, not just during the
+// claim flow) — this one has to stay compact since it sits directly on a
+// tile-sized chair icon, not a roomy card.
+const SEAT_MARKER_NAME_MAX_CHARS = 12;
+
 // Hand gesture shown on the NUDGER's own body (not the target) — a fist
 // bump reads as the closest match to "senggol" itself, and deliberately
 // isn't a single-finger pointing hand (👉).
@@ -3246,7 +3252,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
                   owner ? `shadow-md border-2 hover:scale-105 text-white ${isMine ? 'bg-emerald-500/95 border-emerald-600' : 'bg-amber-500/95 border-amber-600'}` : 'w-7'
                 }`}
               >
-                {owner ? `🪑 ${isMine ? 'Kamu' : owner.name}` : ''}
+                {owner ? `🪑 ${isMine ? 'Kamu' : truncateName(owner.name, SEAT_MARKER_NAME_MAX_CHARS)}` : ''}
               </button>
               {/* Follow-up — used to be a separate always-visible "Kamu" pill
                   PLUS this release button stacked below it, permanently in
