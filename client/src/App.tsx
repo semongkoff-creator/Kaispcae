@@ -29,6 +29,7 @@ import { toCurrentUser, type CurrentUser } from './hooks/useCurrentUser';
 import { isTypingTarget, shouldIgnoreRoomHotkey } from './utils/hotkeys';
 import { useZoneLock } from './hooks/useZoneLock';
 import { ZoneLockBar } from './components/ui/ZoneLockBar';
+import { InAppToastStack } from './components/ui/InAppToastStack';
 import { MiniMode, isMiniModeSupported, openMiniModeWindow } from './components/ui/MiniMode';
 import { ChatPanel } from './components/ui/ChatPanel';
 import { setProfileName } from './hooks/useProfiles';
@@ -2621,6 +2622,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {notice && !simplifiedView && (
         <NoticeBanner notice={notice} isAdmin={isAdmin} onUnpin={emitNoticeUnpin} />
       )}
+
+      <InAppToastStack />
 
       {!moduleOpen && (
         <ZoneLockBar

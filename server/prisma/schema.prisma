@@ -861,6 +861,7 @@ model Room {
   invites           RoomInvite[]
   deskNotes         DeskNote[]
   seatClaims        RoomSeatClaim[]
+  lastPositions     RoomLastPosition[]
 }
 
 // QA #7/#8/#9 — a sticky note placed on the map, same "Add Media, lands at
@@ -905,6 +906,27 @@ model RoomSeatClaim {
   createdAt DateTime @default(now())
 
   @@unique([roomId, seatId])
+}
+
+// Bug fix — same "in-memory only, wiped every deploy" gap as RoomSeatClaim
+// above, this time for server/src/store/roomStore.ts's lastKnownPosition:
+// a reconnect/refresh mid-session correctly resumed exactly where a player
+// left off (see that file's own doc comment), but a server restart silently
+// reset everyone back to the room's spawn tile. Persisted here as a
+// read-through cache the same way — the in-memory Map answers a lookup
+// instantly whenever it can, this table only gets queried as a fallback
+// when the in-memory entry is missing (i.e. right after a restart).
+model RoomLastPosition {
+  id        String   @id @default(cuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId    String
+  x         Float
+  y         Float
+  direction String
+  updatedAt DateTime @updatedAt
+
+  @@unique([roomId, userId])
 }
 
 // Guest Link & Ruang Tunggu — a room-scoped invite token an admin generates

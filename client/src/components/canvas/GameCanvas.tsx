@@ -990,15 +990,16 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     // LOCAL_PLAYER_STORE_INTERVAL_MS ago — enough at run speed to miss
     // someone standing right next to you.
     const player = livePos;
-    // Matches the visible white "Proximity ring" (PROXIMITY_THRESHOLD_PX,
-    // shared/types/index.ts) instead of its own separate, tighter radius
-    // (was TILE_SIZE * 1.5 = 72px, exactly half the 144px ring) — someone
-    // standing clearly inside the ring everyone can see read as reachable
-    // but was actually out of Z's real range, so it silently no-op'd. Same
-    // "visual circle drifted from the real range" bug PROXIMITY_THRESHOLD_PX
-    // itself was introduced to prevent for the ring's own video/audio
-    // connect distance (see its doc comment) — nudge just wasn't using it.
-    const NUDGE_RANGE_PX = PROXIMITY_THRESHOLD_PX;
+    // Bug fix — this used to match the full video/audio "Proximity ring"
+    // (PROXIMITY_THRESHOLD_PX, 3 tiles/144px) so a target inside that
+    // visible ring could never silently read as "out of range" for nudge.
+    // Per the room admin that made "colek" reach too far — a poke should be
+    // close-contact, not proximity-chat distance — so it's back to its own
+    // tighter radius (1.5 tiles/72px, half the ring). Trade-off: someone
+    // standing near the outer edge of the visible ring can now be just
+    // outside nudge range even though the ring itself suggests they're
+    // "in range" — accepted deliberately this time, not the same drift bug.
+    const NUDGE_RANGE_PX = TILE_SIZE * 1.5;
 
     let target: Avatar | null = null;
     let bestDist = Infinity;
@@ -3285,7 +3286,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
           request card below, fits an offer you can just as easily ignore
           and keep walking. */}
       {pendingSeatClaim && (
-        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-40 pointer-events-auto bg-white dark:bg-gray-900 rounded-lg px-4 py-2.5 shadow-xl border border-purple-100 dark:border-gray-700 flex items-center gap-3 text-sm">
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-auto bg-white dark:bg-gray-900 rounded-lg px-4 py-2.5 shadow-xl border border-purple-100 dark:border-gray-700 flex items-center gap-3 text-sm">
           <span className="text-gray-900 dark:text-gray-100">
             {pendingSeatClaim.ownerName
               ? <>Kursi ini sudah diklaim <span className="font-semibold">{pendingSeatClaim.ownerName}</span>. Minta kursi ini?</>

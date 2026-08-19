@@ -25,6 +25,14 @@ textarea {
   -webkit-user-select: text;
 }
 
+/* InAppToastStack.tsx's slide-in — declared once here rather than a
+   per-toast-instance <style> tag, which would inject a duplicate block
+   into the DOM for every toast shown. */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* Every canvas in this app (game view, Room Editor, avatar preview) is
    pixel art scaled up with nearest-neighbor — `image-rendering: pixelated`
    was already set inline on each one (a React style object can't declare a

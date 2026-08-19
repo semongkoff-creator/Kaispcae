@@ -1,6 +1,7 @@
 import { Avatar, RoomState, AvatarConfig, RoomTile, WorkMode, ImpassableAreaRect, DoorAreaRect, Zone } from '@kaispace/shared';
 import { Redis } from 'ioredis';
 import { clearLivePlayerMovement, mergeLivePlayerMovement, setLivePlayerMovement } from './playerLiveState';
+import { getPrisma } from '../lib/prisma';
 
 // In-memory fallback storage — always works, zero dependencies
 const memoryStore: Record<string, Avatar[]> = {};
@@ -421,6 +422,13 @@ export function getCachedZoneRestriction(roomSlug: string, zoneId: string): { mi
 // handleLeave) and consulted on JOIN_ROOM so refreshing/reconnecting
 // resumes where the player left off instead of always resetting to the
 // room's spawn tile (see the "Move" spec's explicit reconnect-persist rule).
+//
+// NOTE: despite the field name, every caller in this codebase actually
+// passes the room's SLUG here, not its Room.id — this map has always used
+// the slug as an opaque string key, which works fine for an in-memory
+// lookup. The DB fallback below resolves slug -> real Room.id internally
+// so every existing call site (save AND read) keeps passing the slug
+// completely unchanged.
 interface LastKnownPosition {
   roomId: string;
   x: number;
@@ -430,14 +438,48 @@ interface LastKnownPosition {
 
 const lastKnownPosition = new Map<string, LastKnownPosition>();
 
-export function saveLastKnownPosition(userId: string, roomId: string, x: number, y: number, direction: string): void {
-  lastKnownPosition.set(userId, { roomId, x, y, direction });
+// Bug fix — this used to be the ONLY copy of this data, so a server restart
+// (every deploy) silently reset every player back to the room's spawn tile
+// on their next join, even though nothing about a normal mid-session
+// reconnect changed. Now write-through: the in-memory Map updates
+// synchronously (nothing here needs to wait on it), and the DB upsert runs
+// alongside, fire-and-forget — a transient DB hiccup must never affect the
+// disconnect/leave path it's called from.
+export function saveLastKnownPosition(userId: string, roomSlug: string, x: number, y: number, direction: string): void {
+  lastKnownPosition.set(userId, { roomId: roomSlug, x, y, direction });
+  getPrisma().room.findUnique({ where: { slug: roomSlug }, select: { id: true } })
+    .then((room) => {
+      if (!room) return undefined;
+      return getPrisma().roomLastPosition.upsert({
+        where: { roomId_userId: { roomId: room.id, userId } },
+        create: { roomId: room.id, userId, x, y, direction },
+        update: { x, y, direction },
+      });
+    })
+    .catch((e) => console.error('[roomStore] failed to persist last known position:', e));
 }
 
 // Only returns a position if it's for THIS room — a player who last left
 // from a different room should still spawn fresh, not appear at their old
 // coordinates in an unrelated map.
-export function getLastKnownPosition(userId: string, roomId: string): LastKnownPosition | undefined {
+//
+// Async now: the in-memory Map answers instantly whenever it has the entry
+// (the common case — anything saved since this server last started), and
+// only falls back to a DB query when it doesn't, i.e. right after a
+// restart before this user's next disconnect/leave re-warms the cache.
+export async function getLastKnownPosition(userId: string, roomSlug: string): Promise<LastKnownPosition | undefined> {
   const entry = lastKnownPosition.get(userId);
-  return entry && entry.roomId === roomId ? entry : undefined;
+  if (entry && entry.roomId === roomSlug) return entry;
+  try {
+    const room = await getPrisma().room.findUnique({ where: { slug: roomSlug }, select: { id: true } });
+    if (!room) return undefined;
+    const row = await getPrisma().roomLastPosition.findUnique({ where: { roomId_userId: { roomId: room.id, userId } } });
+    if (!row) return undefined;
+    const restored: LastKnownPosition = { roomId: roomSlug, x: row.x, y: row.y, direction: row.direction };
+    lastKnownPosition.set(userId, restored);
+    return restored;
+  } catch (e) {
+    console.error('[roomStore] getLastKnownPosition DB fallback failed:', e);
+    return undefined;
+  }
 }

@@ -1080,16 +1080,15 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // Point markers via layerDataToLegacy's kind:'startingPoint' → 'spawn'
     // conversion. It also already returns its own (3,3) fallback, so the
     // old hardcoded `?? {...}` here is redundant and dropped.
-    const remembered = getLastKnownPosition(uid, room);
+    const remembered = await getLastKnownPosition(uid, room);
     let spawn = remembered ?? findSpawnPixel(tiles);
 
     // A member with a permanently-assigned seat in THIS room
     // (Furniture.assignedToUserId, see furnitureHandler.ts's FURNITURE_ASSIGN)
     // always spawns there instead — overriding both the remembered position
     // and the Starting Point default, so it's true every single join, not
-    // just the first one / the one right after a server restart clears
-    // getLastKnownPosition's in-memory map. "You have your own desk" is a
-    // more deliberate, durable signal than either. Guests can never have one
+    // just the first one. "You have your own desk" is a more deliberate,
+    // durable signal than either. Guests can never have one
     // (furniture:assign is member-only), so this is always a no-op for them.
     // Furniture.x/y are tile coordinates, same as every other spawn source
     // here — converted the same way findSpawnPixel/the near-placement block
@@ -1185,6 +1184,16 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       x: spawn.x, y: spawn.y, direction: (remembered?.direction as Avatar['direction']) || 'down',
       color, isMoving: false, avatarConfig: avatarConfig || undefined,
       isAdmin, userId: uid, isGuest: isGuest || undefined,
+      // Bug fix — useWebRTC.ts's local mic always starts muted on join
+      // (isMicMuted's own useState(true)), but that was never announced to
+      // the room: a fresh join's PLAYER_JOINED/ROOM_STATE entry carried no
+      // micMuted at all, so every OTHER client's playerRecords for this
+      // player read `undefined` (renders as unmuted) until this player's
+      // own first manual mic toggle ever fired PLAYER_MIC — in practice,
+      // often not until they actually spoke and unmuted. Hardcoded true
+      // here since every join really does start muted unconditionally, no
+      // branching to mirror from the client side.
+      micMuted: true,
     };
 
     console.log(`[room] ${newPlayer.name} (${socket.id}) uid=${uid} ${isAdmin ? isMasterAdmin ? '⭐' : '👑' : ''} joined ${room}`);

@@ -7,6 +7,8 @@
 // granted permission) as it would be useful. avatarConfig-style server
 // sync is deliberately NOT reused here for that reason.
 
+import { useGameStore } from '@/stores/gameStore';
+
 const STORAGE_KEY = 'vm_notification_settings';
 
 export interface NotificationSettings {
@@ -82,17 +84,27 @@ export function playNotificationSound(): void {
   }
 }
 
-// Called on every incoming chat message (see useSocket.ts) — the spec's own
-// rule: only actually show anything while the tab is in the background,
-// never while the user is already looking at it. `title` is the notification
-// heading — plain senderName for an ordinary message, or a "so-and-so
-// mentioned you in #channel" string (see Potongan C2's mention notify call)
-// so a mention reads as distinctly more important than regular chat noise.
-// `onClick`, if given, runs when the notification itself is clicked (in
-// addition to always focusing the tab) — the mention call site uses this to
-// jump straight to the channel that was mentioned in.
-export function notifyNewMessage(title: string, text: string, onClick?: () => void): void {
-  if (document.visibilityState === 'visible') return;
+// Called on every incoming chat message (see useSocket.ts). `title` is the
+// notification heading — plain senderName for an ordinary message, or a
+// "so-and-so mentioned you in #channel" string (see Potongan C2's mention
+// notify call) so a mention reads as distinctly more important than regular
+// chat noise. `onClick`, if given, runs when the notification itself is
+// clicked (in addition to always focusing the tab) — the mention call site
+// uses this to jump straight to the channel that was mentioned in.
+//
+// Bug fix — a native OS Notification()'s own chrome (icon, gear, close
+// button, host header) is entirely browser/OS-controlled; the app can only
+// ever set its title/body text, no amount of styling reaches it. While the
+// tab is visible there's also no real need for an OS-level interruption —
+// so this now shows a proper in-app toast instead (InAppToastStack.tsx),
+// matching the rest of the UI, and only falls back to the (unchanged)
+// native popup+sound path once the tab is actually backgrounded, the one
+// case an in-app toast physically can't reach.
+export function notifyNewMessage(title: string, text: string, onClick?: () => void, icon = '💬'): void {
+  if (document.visibilityState === 'visible') {
+    useGameStore.getState().pushInAppToast(icon, title, text);
+    return;
+  }
   const settings = getNotificationSettings();
   if (!settings.browserNotifOn || !isNotificationSupported() || Notification.permission !== 'granted') return;
 
@@ -102,16 +114,21 @@ export function notifyNewMessage(title: string, text: string, onClick?: () => vo
 }
 
 // Called only for the player actually being nudged (see useSocket.ts's
-// PLAYER_NUDGE handler) — same background-tab-only rule as chat above, so
-// someone who's switched to another tab/app still gets pulled back via the
-// OS's own notification popup+sound instead of just an in-game blip they'd
-// have no way to hear/see.
+// PLAYER_NUDGE handler). Same in-app-toast-when-visible / native-when-
+// hidden split as notifyNewMessage above — a nudge exists specifically to
+// pull someone's attention, which a plain in-app toast already does fine
+// while they're looking at the tab; the OS popup+sound is reserved for
+// when they've actually looked away.
 export function notifyNudge(nudgerName: string): void {
-  if (document.visibilityState === 'visible') return;
+  const body = `${nudgerName} menyenggolmu`;
+  if (document.visibilityState === 'visible') {
+    useGameStore.getState().pushInAppToast('👋', 'Disenggol!', body);
+    return;
+  }
   const settings = getNotificationSettings();
   if (!settings.browserNotifOn || !isNotificationSupported() || Notification.permission !== 'granted') return;
 
-  const n = new Notification('Disenggol!', { body: `${nudgerName} menyenggolmu`, tag: 'meetkai-nudge' });
+  const n = new Notification('Disenggol!', { body, tag: 'meetkai-nudge' });
   // Was missing entirely — unlike notifyNewMessage above, clicking the OS
   // popup did nothing at all, not even bring the tab back to front. A nudge
   // exists specifically to pull someone back to the app from another

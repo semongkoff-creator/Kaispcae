@@ -298,6 +298,17 @@ export interface GameState {
   sitNotice: string | null;
   setSitNotice: (notice: string | null) => void;
 
+  // In-app toast stack — the "nicer" replacement for a native OS
+  // Notification() popup while the tab is actually visible/focused: a
+  // native popup's own chrome (icon, gear, X, host header) is 100%
+  // OS-controlled and can't be restyled, so this renders a proper styled
+  // card in-app instead (see browserNotifications.ts's notifyNewMessage/
+  // notifyNudge — native still fires as before while the tab is hidden,
+  // this is purely the visible-tab case, which used to do nothing at all).
+  inAppToasts: { id: string; icon: string; title: string; text: string }[];
+  pushInAppToast: (icon: string, title: string, text: string) => void;
+  dismissInAppToast: (id: string) => void;
+
   // Live ownership of claimable-seat markers (see mapLayers.ts's TileEffect
   // 'claimableSeat'), keyed by seatId. Server-authoritative, in-memory only
   // — refreshed wholesale on every SEAT_CLAIMS_UPDATED broadcast.
@@ -1018,6 +1029,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   setRoomDeletedNotice: (notice) => set({ roomDeletedNotice: notice }),
   sitNotice: null,
   setSitNotice: (notice) => set({ sitNotice: notice }),
+  inAppToasts: [],
+  pushInAppToast: (icon, title, text) => set((s) => ({
+    inAppToasts: [...s.inAppToasts, { id: crypto.randomUUID(), icon, title, text }],
+  })),
+  dismissInAppToast: (id) => set((s) => ({ inAppToasts: s.inAppToasts.filter((t) => t.id !== id) })),
   seatClaims: {},
   setSeatClaims: (claims) => set({
     seatClaims: Object.fromEntries(claims.map((c) => [c.seatId, { userId: c.userId, name: c.name }])),
