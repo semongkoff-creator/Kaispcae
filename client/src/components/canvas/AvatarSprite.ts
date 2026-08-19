@@ -1,6 +1,7 @@
 import { Avatar, BodyShape, Accessory, Expression, Direction, TILE_SIZE } from '@kaispace/shared';
 import { drawSpriteFrame } from '@/utils/spriteLoader';
 import { measureTextCached } from './textMetrics';
+import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
 
 // Radius for the shape-fallback avatar (drawn only while no sprite is
 // configured/loaded) AND the local-player glow ring (drawn around whichever
@@ -129,15 +130,20 @@ export function drawAvatar(
   }
 
   // ─── Single unified status pill ─────────────────────────────────────
-  // The effective work-mode/presence status (WFH/In Meeting/Focus/Lunch/
-  // Break/Away), shown as one glanceable pill above the avatar.
-  const presenceLabel =
-    avatar.workMode === 'wfh' ? '🏠 WFH' :
-    avatar.workMode === 'in_meeting' ? '🎥 In Meeting' :
-    avatar.workMode === 'focus' ? '🎧 Focus' :
-    avatar.workMode === 'lunch' ? '🍽️ Lunch' :
-    avatar.workMode === 'break' ? '☕ Break' :
-    avatar.workMode === 'away' ? '🌙 Away' : '';
+  // The effective work-mode/presence status, shown as one glanceable pill
+  // above the avatar. Bug fix — this used to be a hand-written ternary
+  // chain covering only the original 6 statuses (wfh/in_meeting/focus/
+  // lunch/break/away); wfo/wfa/cuti (QA #1) were added to WorkMode and the
+  // STATUS dropdown but never to this chain, so picking any of those three
+  // silently showed no pill at all. Now reads PRESENCE_LABEL/PRESENCE_EMOJI
+  // (data/presence.ts) — the same shared map the HUD dropdown and
+  // Participant panel already use — so a future status added there can't
+  // drift out of sync with this pill again. 'available' still shows no
+  // pill (PRESENCE_EMOJI has no entry for it — a plain online dot instead,
+  // unchanged from before).
+  const presenceLabel = avatar.workMode && avatar.workMode !== 'available'
+    ? `${PRESENCE_EMOJI[avatar.workMode]} ${PRESENCE_LABEL[avatar.workMode]}`
+    : '';
   if (presenceLabel) {
     drawPresencePill(ctx, cx, nextBadgeY, presenceLabel);
     nextBadgeY -= 15;
