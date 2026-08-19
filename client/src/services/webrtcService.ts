@@ -1410,12 +1410,12 @@ class WebRTCService {
     if (!this.socket?.connected) return false;
     if (!this.localStream) return false;
     if (this.peers.size >= MAX_TOTAL_PEERS) {
-      console.log('[webrtc] at MAX_TOTAL_PEERS, refusing new connection to', remoteId);
+      diag('MAX_TOTAL_PEERS refusing connection', { peer: remoteId });
       return false;
     }
 
     const includeVideo = this.videoEligibleIds.has(remoteId);
-    console.log('[webrtc] connecting to', remoteId, includeVideo ? '(with video)' : '(audio-only)');
+    diag('connecting', { peer: remoteId, video: includeVideo });
     const peer = this.createPeer(remoteId, includeVideo);
     this.peers.set(remoteId, peer);
 
@@ -1471,7 +1471,7 @@ class WebRTCService {
     // permanently mute and invisible to them. Answer now with whatever
     // tracks exist (possibly none); syncTracksToPeers() attaches them the
     // moment media is acquired.
-    console.log('[webrtc] received offer from', fromId);
+    diag('received offer', { peer: fromId });
 
     // If PC already exists (from connectToPlayer, or an earlier
     // negotiation round), reuse it — this is also the path a mid-call
@@ -1637,7 +1637,7 @@ class WebRTCService {
       // explicit cleanup) — a stale "connection lost" badge from an earlier
       // permanent failure must not linger once the peer itself is gone.
       this.onPeerConnectionStatus?.(id, false);
-      console.log('[webrtc] disconnected from', id);
+      diag('disconnected', { peer: id });
     }
   }
 

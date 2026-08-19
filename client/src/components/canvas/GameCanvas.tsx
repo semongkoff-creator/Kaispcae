@@ -17,6 +17,7 @@ import {
   ReferenceImageData,
   Zone,
   doesRectOverlapImpassableArea,
+  ImpassableAreaRect,
   roleAtLeast,
   shouldIsolateZoneAudio,
 } from '@kaispace/shared';
@@ -577,6 +578,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
   // §6 — Add Media markers: same DOM-overlay-positioned-via-transform
   // pattern as zone/banner above, one small clickable pin per object.
   const mediaMarkerRefs = useRef(new Map<string, HTMLDivElement>());
+  const movementCollisionAreasRef = useRef<ImpassableAreaRect[]>([]);
 
   useEffect(() => {
     tilesRef.current = tiles;
@@ -607,6 +609,12 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     liveReferenceImageRef.current = liveReferenceImage;
     avatarScaleRef.current = avatarScale;
     activeZoneSessionsRef.current = useGameStore.getState().activeZoneSessions;
+    const lockedDoorAreas = doorOverride
+      ? []
+      : doorAreaRects.filter((r) => r.doorPasswordEnabled && !unlockedDoorAreaIds.has(r.id));
+    movementCollisionAreasRef.current = lockedDoorAreas.length > 0
+      ? impassableAreaRects.concat(lockedDoorAreas)
+      : impassableAreaRects;
     // Deliberately dependency-free: this mirrors ~30 store slices into refs
     // for the render loop, and every one of them is already a reactive
     // subscription above, so the component only re-renders when at least one
@@ -682,26 +690,12 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     useGameStore.getState().setLocalPlayerMoving(x, y, direction, isRunning);
   });
 
-  // "Door Area" — client-side prediction only (the server independently
-  // enforces the same thing authoritatively, see movementHandler.ts's
-  // isBlockedForSocket). Reuses useMovement's existing Impassable Area
-  // collision path AS-IS (same {x,y,w,h} rect shape) rather than teaching it
-  // a new per-socket concept — this just returns the SUBSET of door areas
-  // that are still locked right now, same trick the server's own filter
-  // uses. Item #9 — emergency override mirrors the server's own bypass.
-  const getLockedDoorAreas = useCallback(() => {
-    if (doorOverrideRef.current) return [];
-    return doorAreaRectsRef.current.filter(
-      (r) => r.doorPasswordEnabled && !unlockedDoorAreaIdsRef.current.has(r.id),
-    );
-  }, []);
-
   const { update, setPosition, updateFollow } = useMovement({
     isBlocked,
     onMove: onMoveRef.current,
     isFrozen: () => useGameStore.getState().localPlayer.isSitting === true,
     isDoor,
-    getImpassableAreas: () => [...impassableAreaRectsRef.current, ...getLockedDoorAreas()],
+    getImpassableAreas: () => movementCollisionAreasRef.current,
   });
 
   // Keyed on posEpoch, NOT on localPlayer.x/y. The store position now lags
@@ -764,12 +758,12 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     // locked per-tile door already does via isBlocked below — click-to-move,
     // Locate, and Follow must not path straight through a door nobody's
     // unlocked yet.
-    const areas = [...impassableAreaRectsRef.current, ...getLockedDoorAreas()];
+    const areas = movementCollisionAreasRef.current;
     if (areas.length === 0) return false;
     const left = tx * TILE_SIZE;
     const top = ty * TILE_SIZE;
     return doesRectOverlapImpassableArea(areas, left, top, left + TILE_SIZE, top + TILE_SIZE);
-  }, [isBlocked, getLockedDoorAreas]);
+  }, [isBlocked]);
 
   const computeWalkWaypoints = useCallback((targetTileX: number, targetTileY: number) => {
     // livePos — a click-to-move issued mid-stride must path from where the

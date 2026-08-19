@@ -56,6 +56,18 @@ test('connection HUD does not spam full peer lists into DevTools', () => {
   assert.equal(source.includes('[HUD] ConnectionIndicator'), false);
 });
 
+test('client WebRTC lifecycle logs stay behind diagnostics', () => {
+  const source = readFileSync(resolve('client/src/services/webrtcService.ts'), 'utf8');
+  assert.equal(source.includes("console.log('[webrtc]"), false);
+});
+
+test('movement collision areas are cached outside hot callbacks', () => {
+  const source = readFileSync(resolve('client/src/components/canvas/GameCanvas.tsx'), 'utf8');
+  assert.equal(source.includes('getImpassableAreas: () => [...impassableAreaRectsRef.current, ...getLockedDoorAreas()]'), false);
+  assert.equal(source.includes('const areas = [...impassableAreaRectsRef.current, ...getLockedDoorAreas()]'), false);
+  assert.ok(source.includes('movementCollisionAreasRef'), 'movement collision areas should be cached in a ref');
+});
+
 test('server nearby broadcast uses the shared zone isolation rule', () => {
   const source = readFileSync(resolve('server/src/socket/proximityBroadcast.ts'), 'utf8');
   assert.ok(source.includes('shouldIsolateZoneAudio'), 'server broadcast must not treat every labelled zone as isolated');
