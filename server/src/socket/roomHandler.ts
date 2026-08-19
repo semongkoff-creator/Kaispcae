@@ -1108,8 +1108,8 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // somehow both exist) but above the plain remembered/Starting-Point
     // fallback — same "durable intentional signal beats last-known-
     // position" reasoning already used for assignedSeat.
-    if (!assignedSeatPixel) {
-      const claimedSeat = getClaimedSeatPosition(room, uid);
+    if (!assignedSeatPixel && dbRoom) {
+      const claimedSeat = await getClaimedSeatPosition(room, dbRoom.id, uid);
       if (claimedSeat) spawn = { x: claimedSeat.x * TILE_SIZE + TILE_SIZE / 2, y: claimedSeat.y * TILE_SIZE + TILE_SIZE / 2 };
     }
 

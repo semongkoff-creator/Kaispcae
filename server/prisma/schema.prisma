@@ -860,6 +860,7 @@ model Room {
   mapFormatVersion  Int?
   invites           RoomInvite[]
   deskNotes         DeskNote[]
+  seatClaims        RoomSeatClaim[]
 }
 
 // QA #7/#8/#9 — a sticky note placed on the map, same "Add Media, lands at
@@ -883,6 +884,27 @@ model DeskNote {
   text         String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// Bug fix — claimable-seat ownership (Room Editor's 'claimableSeat' tile
+// effect, see server/src/socket/seatClaim.ts) used to live ONLY in an
+// in-memory Map, so it was a standing grant WITHIN a server's lifetime
+// (survived disconnects/reconnects/leaving the room) but never survived an
+// actual server restart — every deploy silently wiped every claimed desk.
+// Persisted here now for the same "survives everything except an explicit
+// release" grant seatClaim.ts's own doc comment already promises; the
+// in-memory Map stays as a fast read-through cache, refreshed from this
+// table on first access per room after a restart.
+model RoomSeatClaim {
+  id        String   @id @default(cuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  seatId    String
+  userId    String
+  userName  String
+  createdAt DateTime @default(now())
+
+  @@unique([roomId, seatId])
 }
 
 // Guest Link & Ruang Tunggu — a room-scoped invite token an admin generates

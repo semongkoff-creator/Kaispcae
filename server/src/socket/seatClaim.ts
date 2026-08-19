@@ -9,18 +9,23 @@ import { getPrisma } from '../lib/prisma';
 // The seat MARKER itself (id, position) is admin-authored data living in
 // Room.layerData (see mapLayers.ts's TileEffect 'claimableSeat', edited via
 // the Room Editor). This file is the OTHER half: who currently owns each
-// marker. In-memory only (never written to the DB, so it doesn't outlive a
-// server restart — same caveat as every other in-memory admin/lock state in
-// this codebase), but WITHIN a server's lifetime a claim is a standing
-// grant, not a session-scoped lock: it survives disconnects, reconnects,
-// and leaving/re-entering the room entirely. QA item #6 — this used to
-// auto-release on disconnect ("owner disconnects → seat auto-releases"),
-// but that meant a brief wifi drop or even just walking out of the room
-// silently lost someone their claimed desk. The only way to free a seat now
-// is the owner explicitly releasing it (RELEASE_SEAT), or approving someone
-// else's SEAT_CLAIM_REQUEST below — CLAIM_SEAT itself still only ever
-// redirects a blocked claimant to the nearest free seat, never displaces
-// the existing owner on its own.
+// marker. A claim is a standing grant, not a session-scoped lock: it
+// survives disconnects, reconnects, and leaving/re-entering the room
+// entirely. QA item #6 — this used to auto-release on disconnect ("owner
+// disconnects → seat auto-releases"), but that meant a brief wifi drop or
+// even just walking out of the room silently lost someone their claimed
+// desk. The only way to free a seat now is the owner explicitly releasing
+// it (RELEASE_SEAT), or approving someone else's SEAT_CLAIM_REQUEST below —
+// CLAIM_SEAT itself still only ever redirects a blocked claimant to the
+// nearest free seat, never displaces the existing owner on its own.
+//
+// Bug fix — this map used to be the ONLY copy of this data, so a server
+// restart (every deploy) silently wiped every claimed desk. It's now a
+// read-through cache backed by the RoomSeatClaim table: writes go to both
+// (in-memory first, so the immediate broadcast never waits on a DB round
+// trip; the DB write is fire-and-forget alongside it), and a room's claims
+// are lazily loaded from the DB into this map on its first JOIN_ROOM per
+// server lifetime (see loadedRooms/ensureSeatClaimsLoaded below).
 interface SeatClaim {
   userId: string;
   name: string;
@@ -33,6 +38,33 @@ function roomClaims(room: string): Map<string, SeatClaim> {
   let m = claims.get(room);
   if (!m) { m = new Map(); claims.set(room, m); }
   return m;
+}
+
+// Which rooms' claims have already been warmed from the DB this server
+// lifetime — checked/set by ensureSeatClaimsLoaded, read by
+// getClaimedSeatPosition's own DB-fallback branch (see its doc comment for
+// why that one can't just wait on this).
+const loadedRooms = new Set<string>();
+
+// Warms roomClaims(room) from the DB exactly once per server lifetime (a
+// bare in-memory Map starts empty even for a room with real, previously-
+// claimed seats after a restart). Idempotent and safe to call on every
+// JOIN_ROOM — the loadedRooms guard makes every call after the first a
+// no-op.
+async function ensureSeatClaimsLoaded(room: string, roomId: string): Promise<void> {
+  if (loadedRooms.has(room)) return;
+  try {
+    const rows = await getPrisma().roomSeatClaim.findMany({ where: { roomId } });
+    const m = roomClaims(room);
+    for (const row of rows) m.set(row.seatId, { userId: row.userId, name: row.userName });
+    loadedRooms.add(room);
+  } catch (e) {
+    console.error('[seatClaim] failed to load persisted seat claims:', e);
+    // Deliberately NOT marking loadedRooms here — a transient DB error
+    // should let the NEXT join retry the load, rather than permanently
+    // stranding this room on an empty in-memory map for the rest of the
+    // server's lifetime.
+  }
 }
 
 // A request to take over someone else's seat, waiting on that OWNER's own
@@ -117,13 +149,29 @@ function nearestFreeSeat(room: string, fromSeatId: string): string | null {
   return best?.seatId ?? null;
 }
 
-function assignSeat(room: string, seatId: string, uid: string, name: string): void {
+function assignSeat(room: string, roomId: string, seatId: string, uid: string, name: string): void {
   const m = roomClaims(room);
   // One seat per user: claiming a new one frees whichever one they held.
+  const freedSeatIds: string[] = [];
   for (const [sid, c] of m) {
-    if (c.userId === uid) m.delete(sid);
+    if (c.userId === uid) { m.delete(sid); freedSeatIds.push(sid); }
   }
   m.set(seatId, { userId: uid, name });
+
+  // In-memory state above is already correct and used for the immediate
+  // SEAT_CLAIMS_UPDATED broadcast — this write-through runs alongside it,
+  // not before it, same fire-and-forget posture as ensureCheckedInToday
+  // elsewhere in this codebase: a transient DB hiccup must never block or
+  // delay the actual claim.
+  const prisma = getPrisma();
+  Promise.all([
+    ...freedSeatIds.map((sid) => prisma.roomSeatClaim.deleteMany({ where: { roomId, seatId: sid } })),
+    prisma.roomSeatClaim.upsert({
+      where: { roomId_seatId: { roomId, seatId } },
+      create: { roomId, seatId, userId: uid, userName: name },
+      update: { userId: uid, userName: name },
+    }),
+  ]).catch((e) => console.error('[seatClaim] failed to persist seat claim:', e));
 }
 
 function claimStates(room: string): SeatClaimState[] {
@@ -131,27 +179,45 @@ function claimStates(room: string): SeatClaimState[] {
 }
 
 // Bug fix — a claimed seat previously had no bearing on where its owner
-// spawns on refresh/rejoin at all; only the separate, ALSO in-memory
-// `lastKnownPosition` (roomStore.ts) happened to coincidentally land them
-// back there, and only if they were standing exactly on the seat the
-// moment they disconnected. Exported so roomHandler.ts's JOIN_ROOM spawn
-// logic can give a claimed seat its own real priority tier, the same way
-// findAssignedSeat's admin-granted desk already does. Still in-memory only
-// (see this file's own top doc comment) — a server restart clears claims
-// the same way it clears lastKnownPosition, so this closes the common
-// "refresh mid-session" case, not "after the server itself restarted".
-export function getClaimedSeatPosition(room: string, uid: string): { x: number; y: number } | null {
-  for (const [seatId, c] of roomClaims(room)) {
-    if (c.userId === uid) {
-      const marker = allSeatMarkers(room).find((m) => m.seatId === seatId);
-      return marker ? { x: marker.x, y: marker.y } : null;
+// spawns on refresh/rejoin at all; only the separate `lastKnownPosition`
+// (roomStore.ts) happened to coincidentally land them back there, and only
+// if they were standing exactly on the seat the moment they disconnected.
+// Exported so roomHandler.ts's JOIN_ROOM spawn logic can give a claimed
+// seat its own real priority tier, the same way findAssignedSeat's admin-
+// granted desk already does.
+//
+// Async, and takes roomId now (not just the in-memory-friendly slug) — this
+// is called from roomHandler.ts's OWN independent JOIN_ROOM listener, which
+// races this file's (see registerSeatClaimHandlers' JOIN_ROOM handler
+// below) rather than being sequenced after it; on the very first join for a
+// room since a restart, ensureSeatClaimsLoaded's warm-up might not have
+// finished yet. Rather than coordinate the two listeners, this just falls
+// back to a direct single-row DB query when the room isn't marked loaded —
+// cheap, and correct regardless of which listener wins the race.
+export async function getClaimedSeatPosition(room: string, roomId: string, uid: string): Promise<{ x: number; y: number } | null> {
+  if (loadedRooms.has(room)) {
+    for (const [seatId, c] of roomClaims(room)) {
+      if (c.userId === uid) {
+        const marker = allSeatMarkers(room).find((m) => m.seatId === seatId);
+        return marker ? { x: marker.x, y: marker.y } : null;
+      }
     }
+    return null;
   }
-  return null;
+  try {
+    const row = await getPrisma().roomSeatClaim.findFirst({ where: { roomId, userId: uid } });
+    if (!row) return null;
+    const marker = allSeatMarkers(room).find((m) => m.seatId === row.seatId);
+    return marker ? { x: marker.x, y: marker.y } : null;
+  } catch (e) {
+    console.error('[seatClaim] getClaimedSeatPosition DB fallback failed:', e);
+    return null;
+  }
 }
 
 export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
   let currentRoom: string | null = null;
+  let currentRoomId: string | null = null;
   const userId = (): string | undefined => socket.data.userId as string | undefined;
 
   socket.on(SocketEvents.JOIN_ROOM, async (roomId: string) => {
@@ -159,21 +225,30 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
     // Multi-tenant Fase 3 — this module registers its own independent
     // JOIN_ROOM listener (see mediaHandler.ts's comment on why roomHandler.ts
     // rejecting a cross-org join doesn't stop this one from also running).
+    let dbRoomId: string;
     try {
-      const room = await getPrisma().room.findUnique({ where: { slug }, select: { organizationId: true } });
-      if (!room || room.organizationId !== (socket.data as { organizationId?: string }).organizationId) { currentRoom = null; return; }
+      const room = await getPrisma().room.findUnique({ where: { slug }, select: { id: true, organizationId: true } });
+      if (!room || room.organizationId !== (socket.data as { organizationId?: string }).organizationId) { currentRoom = null; currentRoomId = null; return; }
+      dbRoomId = room.id;
     } catch (e) {
       console.error('[seatClaim] org check failed:', e);
       currentRoom = null;
+      currentRoomId = null;
       return;
     }
     currentRoom = slug;
+    currentRoomId = dbRoomId;
+    // Warm the in-memory cache from the DB before sending the snapshot below
+    // — otherwise a late joiner right after a restart would see an empty
+    // list even for seats that really are claimed (see ensureSeatClaimsLoaded's
+    // own doc comment).
+    await ensureSeatClaimsLoaded(currentRoom, currentRoomId);
     // Late joiner catches up on who's sitting where.
     socket.emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
   });
 
   socket.on(SocketEvents.CLAIM_SEAT, (data: { seatId: string }) => {
-    if (!currentRoom || typeof data?.seatId !== 'string') return;
+    if (!currentRoom || !currentRoomId || typeof data?.seatId !== 'string') return;
     const uid = userId();
     // Anonymous sockets can't own a seat: ownership keyed by nothing would
     // let anyone through after a reconnect.
@@ -194,18 +269,18 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
         socket.emit(SocketEvents.SEAT_CLAIM_DENIED, { seatId: data.seatId, byName: existing.name });
         return;
       }
-      assignSeat(currentRoom, fallbackSeatId, uid, name);
+      assignSeat(currentRoom, currentRoomId, fallbackSeatId, uid, name);
       socket.emit(SocketEvents.SEAT_CLAIM_DENIED, { seatId: data.seatId, byName: existing.name, fallbackSeatId });
       io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
       return;
     }
 
-    assignSeat(currentRoom, data.seatId, uid, name);
+    assignSeat(currentRoom, currentRoomId, data.seatId, uid, name);
     io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
   });
 
   socket.on(SocketEvents.RELEASE_SEAT, (data: { seatId: string }) => {
-    if (!currentRoom || typeof data?.seatId !== 'string') return;
+    if (!currentRoom || !currentRoomId || typeof data?.seatId !== 'string') return;
     const uid = userId();
     if (!uid) return;
 
@@ -214,6 +289,8 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
     // Only the owner may release — not a passer-by, not an admin.
     if (!existing || existing.userId !== uid) return;
     m.delete(data.seatId);
+    getPrisma().roomSeatClaim.deleteMany({ where: { roomId: currentRoomId, seatId: data.seatId } })
+      .catch((e) => console.error('[seatClaim] failed to persist seat release:', e));
     io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
   });
 
@@ -221,7 +298,7 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
   // CLAIM_SEAT, chose to ask the owner instead of silently redirecting to
   // the nearest free desk.
   socket.on(SocketEvents.SEAT_CLAIM_REQUEST, (data: { seatId: string }) => {
-    if (!currentRoom || typeof data?.seatId !== 'string') return;
+    if (!currentRoom || !currentRoomId || typeof data?.seatId !== 'string') return;
     const uid = userId();
     if (!uid) return;
     if (!seatExists(currentRoom, data.seatId)) return;
@@ -233,7 +310,7 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
     // No longer taken by anyone else (freed, or the confirm dialog was
     // stale) — nothing to ask; claim it directly, same as CLAIM_SEAT would.
     if (!existing || existing.userId === uid) {
-      assignSeat(currentRoom, data.seatId, uid, name);
+      assignSeat(currentRoom, currentRoomId, data.seatId, uid, name);
       io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
       return;
     }
@@ -249,7 +326,7 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
         socket.emit(SocketEvents.SEAT_CLAIM_DENIED, { seatId: data.seatId, byName: existing.name });
         return;
       }
-      assignSeat(currentRoom, fallbackSeatId, uid, name);
+      assignSeat(currentRoom, currentRoomId, fallbackSeatId, uid, name);
       socket.emit(SocketEvents.SEAT_CLAIM_DENIED, { seatId: data.seatId, byName: existing.name, fallbackSeatId });
       io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
       return;
@@ -268,7 +345,7 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
   });
 
   socket.on(SocketEvents.SEAT_CLAIM_DECIDE, (data: { seatId: string; playerId: string; approve: boolean }) => {
-    if (!currentRoom || typeof data?.seatId !== 'string' || typeof data?.playerId !== 'string') return;
+    if (!currentRoom || !currentRoomId || typeof data?.seatId !== 'string' || typeof data?.playerId !== 'string') return;
     const m = roomSeatRequests(currentRoom);
     const pending = m.get(data.playerId);
     if (!pending || pending.seatId !== data.seatId) return;
@@ -279,7 +356,7 @@ export function registerSeatClaimHandlers(io: Server, socket: Socket): void {
 
     m.delete(data.playerId);
     if (data.approve) {
-      assignSeat(currentRoom, data.seatId, pending.requesterUserId, pending.requesterName);
+      assignSeat(currentRoom, currentRoomId, data.seatId, pending.requesterUserId, pending.requesterName);
       io.to(currentRoom).emit(SocketEvents.SEAT_CLAIMS_UPDATED, { claims: claimStates(currentRoom) });
     }
     io.to(data.playerId).emit(SocketEvents.SEAT_CLAIM_DECIDED, {
