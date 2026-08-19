@@ -28,6 +28,7 @@ import { useMovement } from '@/hooks/useMovement';
 import { drawAvatar } from './AvatarSprite';
 import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
+import { truncateName } from '@/utils/truncateName';
 import { PALETTE_BY_ID } from '@/data/themeAssets';
 import { isTileBlocked, isDoorTile } from '@/utils/createDefaultRoom';
 import { findFollowRouteTarget, findTilePath, getCardinalWaypointTarget, isNearWorldPoint, tilePathToWorldWaypoints, type RouteState } from '@/utils/pathfinding';
@@ -303,6 +304,11 @@ const SIT_TILE_RADIUS = 1;
 // that just walking through the tile on the way somewhere else never
 // triggers it, per the room admin.
 const SEAT_AUTO_PROMPT_DELAY_MS = 1000;
+
+// Long names were overflowing the seat-claim cards (owner/requester name in
+// the "Kursi ini sudah diklaim...", incoming-request, and "Menunggu
+// persetujuan..." cards) — capped and ellipsized via truncateName.
+const SEAT_CLAIM_NAME_MAX_CHARS = 20;
 
 // Hand gesture shown on the NUDGER's own body (not the target) — a fist
 // bump reads as the closest match to "senggol" itself, and deliberately
@@ -3289,7 +3295,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-auto bg-white dark:bg-gray-900 rounded-lg px-4 py-2.5 shadow-xl border border-purple-100 dark:border-gray-700 flex items-center gap-3 text-sm">
           <span className="text-gray-900 dark:text-gray-100">
             {pendingSeatClaim.ownerName
-              ? <>Kursi ini sudah diklaim <span className="font-semibold">{pendingSeatClaim.ownerName}</span>. Minta kursi ini?</>
+              ? <>Kursi ini sudah diklaim <span className="font-semibold">{truncateName(pendingSeatClaim.ownerName, SEAT_CLAIM_NAME_MAX_CHARS)}</span>. Minta kursi ini?</>
               : 'Klaim kursi ini sebagai milikmu?'}
           </span>
           <button
@@ -3337,7 +3343,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
               className="pointer-events-auto bg-white dark:bg-gray-900 rounded-lg px-4 py-2.5 shadow-xl border border-purple-100 dark:border-gray-700 flex items-center gap-3 text-sm"
             >
               <span className="text-gray-900 dark:text-gray-100">
-                <span className="font-semibold">{req.requesterName}</span> minta kursi ini.
+                <span className="font-semibold">{truncateName(req.requesterName, SEAT_CLAIM_NAME_MAX_CHARS)}</span> minta kursi ini.
               </span>
               <button
                 onClick={() => { emitSeatClaimDecide(req.seatId, req.playerId, false); removeSeatClaimRequest(req.seatId, req.requesterUserId); }}
@@ -3364,7 +3370,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-40 pointer-events-auto bg-white dark:bg-gray-900 rounded-lg px-4 py-2.5 shadow-xl border border-purple-100 dark:border-gray-700 flex items-center gap-3 text-sm">
           <span className="text-gray-500 dark:text-gray-400 inline-flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
-            Menunggu persetujuan {pendingSeatClaimRequest.ownerName}...
+            Menunggu persetujuan {truncateName(pendingSeatClaimRequest.ownerName, SEAT_CLAIM_NAME_MAX_CHARS)}...
           </span>
           <button
             onClick={() => { emitSeatClaimRequestCancel(pendingSeatClaimRequest.seatId); setPendingSeatClaimRequest(null); }}

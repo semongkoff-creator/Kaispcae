@@ -2,6 +2,7 @@ import { Avatar, BodyShape, Accessory, Expression, Direction, TILE_SIZE } from '
 import { drawSpriteFrame } from '@/utils/spriteLoader';
 import { measureTextCached } from './textMetrics';
 import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
+import { truncateName } from '@/utils/truncateName';
 
 // Radius for the shape-fallback avatar (drawn only while no sprite is
 // configured/loaded) AND the local-player glow ring (drawn around whichever
@@ -703,6 +704,8 @@ function drawBow(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: numbe
 
 // ─── Labels ───────────────────────────────────────────────────────
 
+const NAME_LABEL_MAX_CHARS = 14;
+
 function drawNameLabel(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -714,7 +717,8 @@ function drawNameLabel(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
 
-  const tw = measureTextCached(ctx, name);
+  const displayName = truncateName(name, NAME_LABEL_MAX_CHARS);
+  const tw = measureTextCached(ctx, displayName);
   const th = 14;
   const padX = 5;
   const padY = 2;
@@ -732,7 +736,7 @@ function drawNameLabel(
 
   // Text
   ctx.fillStyle = isLocal ? '#ffdd57' : '#ffffff';
-  ctx.fillText(name, x, baseY);
+  ctx.fillText(displayName, x, baseY);
 }
 
 function drawStatusTag(
