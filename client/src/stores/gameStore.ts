@@ -744,15 +744,8 @@ export interface GameState {
   nudgerPlayers: Map<string, number>;
   triggerNudge: (targetId: string, timestamp: number, fromId?: string) => void;
 
-  // Name of whoever last nudged ME (the local player) — drives a transient
-  // on-screen toast (see App.tsx), so being nudged is obvious even while the
-  // tab is focused, when the OS-level notification (browserNotifications.ts)
-  // deliberately stays silent. Same one-shot-then-auto-clear pattern as
-  // summonResult above.
-  nudgedBy: string | null;
-  setNudgedBy: (name: string | null) => void;
   // A10 — name of whoever last "colek"-ed (slapped) the local user; drives a
-  // brief toast, separate from nudgedBy so the copy can differ.
+  // brief toast.
   slappedBy: string | null;
   setSlappedBy: (name: string | null) => void;
 
@@ -762,13 +755,13 @@ export interface GameState {
   // side permission for (a stale client-side role check, a room-admin list
   // that hasn't caught up, etc.) then did NOTHING visible at all —
   // indistinguishable from "the feature is just broken". Same brief-toast
-  // pattern as slappedBy/nudgedBy above.
+  // pattern as slappedBy above.
   adminErrorMessage: string | null;
   setAdminErrorMessage: (message: string | null) => void;
 
   // QA #9/#10 — CEO/admin text broadcast; drives a prominent room-wide
   // toast (see App.tsx), same one-shot-then-auto-clear pattern as
-  // nudgedBy/slappedBy above. Not persisted anywhere — a client that wasn't
+  // slappedBy above. Not persisted anywhere — a client that wasn't
   // connected when it was sent simply never sees it (see RoomBroadcast's own
   // doc comment, shared/types/index.ts).
   // Admin announcements waiting to be shown, oldest first. A QUEUE rather
@@ -1578,8 +1571,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       return { nudgedPlayers: nextTargets, nudgerPlayers: nextNudgers };
     }),
 
-  nudgedBy: null,
-  setNudgedBy: (name) => set({ nudgedBy: name }),
   slappedBy: null,
   setSlappedBy: (name) => set({ slappedBy: name }),
   adminErrorMessage: null,

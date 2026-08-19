@@ -862,7 +862,6 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
           // OS-level notification below deliberately does not (it only fires
           // when the tab is in the background, to avoid double-pinging someone
           // already looking at the screen).
-          state.setNudgedBy(nudgerName);
           // A single toast/native popup was easy to miss entirely, so one
           // nudge now lands as a short burst instead of a one-shot alert —
           // each pulse still respects the visible-tab/hidden-tab split

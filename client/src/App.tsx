@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
-import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill, Display } from 'react-bootstrap-icons';
+import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill, Display } from 'react-bootstrap-icons';
 import { Avatar, AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents, ProximityPlayer } from '@kaispace/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
@@ -858,17 +858,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     return () => clearTimeout(timer);
   }, [summonResult]);
 
-  // "Kamu disenggol!" toast — set by useSocket.ts's PLAYER_NUDGE handler
-  // only when I'm the target; auto-clears after a few seconds, same one-shot
-  // ping pattern as summonResult above.
-  const nudgedBy = useGameStore((s) => s.nudgedBy);
-  useEffect(() => {
-    if (!nudgedBy) return;
-    const timer = setTimeout(() => useGameStore.getState().setNudgedBy(null), 3000);
-    return () => clearTimeout(timer);
-  }, [nudgedBy]);
-
-  // A10 — "colek"/slap toast, same auto-clear pattern as the nudge toast above.
+  // A10 — "colek"/slap toast, same auto-clear pattern as summonResult above.
   const slappedBy = useGameStore((s) => s.slappedBy);
   useEffect(() => {
     if (!slappedBy) return;
@@ -877,7 +867,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   }, [slappedBy]);
 
   // Server-side admin-permission rejections (Spotlight, Kick, room lock, …)
-  // — same brief-toast pattern as nudgedBy/slappedBy above, see gameStore's
+  // — same brief-toast pattern as slappedBy above, see gameStore's
   // doc comment on adminErrorMessage for why this needed to exist at all.
   const adminErrorMessage = useGameStore((s) => s.adminErrorMessage);
   useEffect(() => {
@@ -1962,12 +1952,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
                 : remoteHelpResult.reason === 'helper-busy'
                   ? 'Kamu sedang aktif membantu orang lain — selesaikan sesi itu dulu.'
                   : `${remoteHelpResult.targetName} ${describeConsentDecline(remoteHelpResult.reason)} your remote-help request`}
-          </div>
-        )}
-        {nudgedBy && (
-          <div className="bg-amber-500/95 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-2 animate-fade-in">
-            <HandIndexThumbFill size={14} />
-            <span className="font-bold">{nudgedBy}</span> menyenggolmu!
           </div>
         )}
         {slappedBy && (
