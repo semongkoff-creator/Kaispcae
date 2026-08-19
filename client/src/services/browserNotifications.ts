@@ -117,15 +117,15 @@ export function notifyNewMessage(title: string, text: string, onClick?: () => vo
 // Called only for the player actually being nudged (see useSocket.ts's
 // PLAYER_NUDGE handler). Same in-app-toast-when-visible / native-when-
 // hidden split as notifyNewMessage above — a nudge exists specifically to
-// pull someone's attention, which a plain in-app toast already does fine
-// while they're looking at the tab; the OS popup+sound is reserved for
-// when they've actually looked away.
+// pull someone's attention, which the avatar shake + sound (useSocket.ts's
+// PLAYER_NUDGE handler) already do fine while they're looking at the tab —
+// an in-app toast here was tried and reverted (kept popping up and piling
+// up in a way that read as more annoying than helpful), so this stays
+// silent while visible; the OS popup+sound is reserved for when they've
+// actually looked away.
 export function notifyNudge(nudgerName: string): void {
   const body = `${nudgerName} menyenggolmu`;
-  if (document.visibilityState === 'visible') {
-    useGameStore.getState().pushInAppToast('👋', 'Disenggol!', body, 'nudge');
-    return;
-  }
+  if (document.visibilityState === 'visible') return;
 
   // Flashing the tab title needs no Notification permission at all, so it
   // runs regardless of the settings/permission gate below — it keeps

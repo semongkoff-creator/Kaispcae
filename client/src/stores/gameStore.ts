@@ -302,11 +302,12 @@ export interface GameState {
   // Notification() popup while the tab is actually visible/focused: a
   // native popup's own chrome (icon, gear, X, host header) is 100%
   // OS-controlled and can't be restyled, so this renders a proper styled
-  // card in-app instead (see browserNotifications.ts's notifyNewMessage/
-  // notifyNudge — native still fires as before while the tab is hidden,
-  // this is purely the visible-tab case, which used to do nothing at all).
-  inAppToasts: { id: string; icon: string; title: string; text: string; variant: 'default' | 'nudge' }[];
-  pushInAppToast: (icon: string, title: string, text: string, variant?: 'default' | 'nudge') => void;
+  // card in-app instead (see browserNotifications.ts's notifyNewMessage —
+  // native still fires as before while the tab is hidden, this is purely
+  // the visible-tab case, which used to do nothing at all). A nudge tried
+  // this same path too and was reverted — see notifyNudge's own comment.
+  inAppToasts: { id: string; icon: string; title: string; text: string }[];
+  pushInAppToast: (icon: string, title: string, text: string) => void;
   dismissInAppToast: (id: string) => void;
 
   // Live ownership of claimable-seat markers (see mapLayers.ts's TileEffect
@@ -1023,21 +1024,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   sitNotice: null,
   setSitNotice: (notice) => set({ sitNotice: notice }),
   inAppToasts: [],
-  pushInAppToast: (icon, title, text, variant = 'default') => set((s) => {
-    const toast = { id: crypto.randomUUID(), icon, title, text, variant };
-    if (variant !== 'nudge') return { inAppToasts: [...s.inAppToasts, toast] };
-
-    // A nudge already fires as a burst (see useSocket.ts's PLAYER_NUDGE
-    // handler) and the sender can nudge repeatedly (server allows up to
-    // 3/sec, see movementHandler.ts's canNudge) — without a cap, sustained
-    // nudge-spam piles up toasts forever instead of just repeating the
-    // alert. Keep at most MAX_CONCURRENT_NUDGE_TOASTS, dropping the oldest.
-    const MAX_CONCURRENT_NUDGE_TOASTS = 3;
-    const others = s.inAppToasts.filter((t) => t.variant !== 'nudge');
-    const nudges = s.inAppToasts.filter((t) => t.variant === 'nudge');
-    const keptNudges = nudges.slice(-(MAX_CONCURRENT_NUDGE_TOASTS - 1));
-    return { inAppToasts: [...others, ...keptNudges, toast] };
-  }),
+  pushInAppToast: (icon, title, text) => set((s) => ({
+    inAppToasts: [...s.inAppToasts, { id: crypto.randomUUID(), icon, title, text }],
+  })),
   dismissInAppToast: (id) => set((s) => ({ inAppToasts: s.inAppToasts.filter((t) => t.id !== id) })),
   seatClaims: {},
   setSeatClaims: (claims) => set({
