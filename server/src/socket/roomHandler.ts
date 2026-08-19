@@ -20,6 +20,7 @@ import { socketRateLimit } from '../middleware/rateLimit';
 import { redactInteractiveSecrets, redactDoorPasswords, redactDoorAreaPasswords } from '../lib/redactFurniture';
 import { unlockDoor, unlockDoorArea, clearUnlockedDoorsForRoom } from './doorLock';
 import { getNearbyRecipients } from './proximityBroadcast';
+import { releaseScreenShareOnLeave } from './rtcHandler';
 import { sanitizeChat } from '../middleware/validate';
 import { GUEST_LINK_REVOKED, GUEST_LINK_REVOKED_MESSAGE } from '../middleware/auth';
 import { findAssignedSeat } from './furnitureHandler';
@@ -2636,6 +2637,11 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
 
   removePlayer(room, socket.id);
   io.to(room).emit(SocketEvents.PLAYER_LEFT, socket.id);
+  // Must run BEFORE socket.leave() — it broadcasts to `room`, and a socket
+  // that has already left can't. Covers every explicit-leave path (back to
+  // lobby, portal travel, logout, kick, superseded tab); the hard-drop path
+  // is handled by rtcHandler's own 'disconnecting' listener.
+  releaseScreenShareOnLeave(socket, room);
   socket.leave(room);
   await broadcastRoomCount(io, room);
   playerNames.delete(socket.id);

@@ -118,9 +118,38 @@ canvas {
   animation: wave-bar 0.9s ease-in-out infinite;
 }
 
+
+/* Admin announcement ticker. Travels the full width of the viewport plus its
+   own length, so the message enters from the right edge and fully exits left.
+   --announce-travel is measured once per message (text width + strip width)
+   and --announce-duration derived from it, so a long announcement scrolls for
+   longer rather than faster — reading speed stays constant regardless of
+   length. See AnnouncementTicker.tsx.
+
+   Deliberately a compositor-only transform with no JS driving it: a
+   rAF/setInterval marquee would put a 60Hz job back on the main thread, which
+   is precisely what the movement work spent its time removing. */
+@keyframes announcement-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(calc(-1 * var(--announce-travel))); }
+}
+.animate-announcement {
+  animation: announcement-scroll var(--announce-duration) linear var(--announce-loops) both;
+  will-change: transform;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in { animation: none; }
   .animate-reaction-float { animation: reaction-float 2.4s linear both; }
   .animate-speaking-glow { animation: none; opacity: 1; }
   .animate-wave-bar { animation: none; transform: scaleY(0.75); }
+
+  /* Scrolling text is a genuine problem for vestibular sensitivity, so the
+     motion goes. Turning the animation off ALONE would be worse than useless
+     here: the strip is laid out as one non-wrapping line wider than the
+     screen, so the message would simply sit there truncated and unreadable.
+     AnnouncementTicker renders a static wrapped card instead when this is
+     set — this rule is the belt-and-braces half, in case the media query and
+     the JS check ever disagree. */
+  .animate-announcement { animation: none; transform: none; }
 }

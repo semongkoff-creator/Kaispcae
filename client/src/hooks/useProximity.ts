@@ -9,6 +9,10 @@ import {
   Furniture,
   TILE_SIZE,
 } from '@kaispace/shared';
+// Relative, not the '@/' alias: this module is loaded directly by the
+// test runner from the repo root, which doesn't resolve the client's
+// tsconfig paths.
+import { remotePos } from '../stores/remotePositions';
 
 // §6 (RTC upgrade) — Chebyshev distance (max(|dx|,|dy|)), not Euclidean:
 // movement here is grid-based with 8 directions (see useMovement.ts), so
@@ -55,13 +59,18 @@ export function findZoneAt(pos: { x: number; y: number }, zones: Zone[]): Zone |
   return best;
 }
 
-export function useProximity(
+// Pure form of the calculation. Split out of the hook because proximity is
+// no longer derived from React state on every render: remote positions live
+// outside the store now (see remotePositions.ts), so App drives this on a
+// fixed tick instead. The hook below is kept for any caller that still wants
+// the memoised, props-driven shape.
+export function computeProximity(
   localPlayer: Pick<Avatar, 'x' | 'y' | 'id' | 'isSitting' | 'seatFurnitureId' | 'workMode'>,
   remotePlayers: Record<string, Avatar>,
   zones: Zone[] = [],
   furniture: Furniture[] = [],
 ): ProximityPlayer[] {
-  return useMemo(() => {
+  {
     // A zone only overrides distance-based hearing when it isolates audio
     // (Zone.audioIsolated !== false) — a 'Map location' area (see the Room
     // Editor's Map Location tool) is just a name pin, so standing near its
@@ -88,7 +97,12 @@ export function useProximity(
     const localTable = seatedTable(localPlayer);
 
     return Object.values(remotePlayers).map((p) => {
-      const distanceTiles = calcDistanceTiles(localPlayer, p);
+      // remotePos, not p.x/p.y — a moving player's record no longer carries
+      // their current position; the interpolated overlay does (see
+      // remotePositions.ts). Reading the record here would freeze everyone
+      // at wherever they last came to a stop.
+      const pos = remotePos(p);
+      const distanceTiles = calcDistanceTiles(localPlayer, pos);
 
       // ZEP-style Spotlight — an admin-toggled PA broadcast (see
       // shared/permissions.ts's 'presence:spotlight'). Checked BEFORE the
@@ -119,7 +133,7 @@ export function useProximity(
         return { id: p.id, distanceTiles, visibility: 'full_visible' as VisibilityStatus, viaZone: true };
       }
 
-      const remoteZone = audioZoneAt(p);
+      const remoteZone = audioZoneAt(pos);
 
       // Zone membership overrides the global distance radius: players who
       // share a private zone always connect (regardless of distance), and
@@ -134,5 +148,38 @@ export function useProximity(
         distanceTiles <= PROXIMITY_THRESHOLD ? 'full_visible' : distanceTiles <= TRANSLUCENT_THRESHOLD ? 'translucent' : 'not_visible';
       return { id: p.id, distanceTiles, visibility };
     });
-  }, [localPlayer.x, localPlayer.y, localPlayer.isSitting, localPlayer.seatFurnitureId, localPlayer.workMode, remotePlayers, zones, furniture]);
+  }
+}
+
+export function useProximity(
+  localPlayer: Pick<Avatar, 'x' | 'y' | 'id' | 'isSitting' | 'seatFurnitureId' | 'workMode'>,
+  remotePlayers: Record<string, Avatar>,
+  zones: Zone[] = [],
+  furniture: Furniture[] = [],
+): ProximityPlayer[] {
+  return useMemo(
+    () => computeProximity(localPlayer, remotePlayers, zones, furniture),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [localPlayer.x, localPlayer.y, localPlayer.isSitting, localPlayer.seatFurnitureId, localPlayer.workMode, remotePlayers, zones, furniture],
+  );
+}
+
+// Two proximity results are interchangeable when nothing downstream would
+// behave differently: same peers, same visibility, and a distance close
+// enough that the gain it produces is indistinguishable. Used to skip the
+// state update on a tick where nobody meaningfully moved, so standing still
+// costs zero renders rather than one per tick.
+export function proximityUnchanged(a: ProximityPlayer[], b: ProximityPlayer[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x.id !== y.id) return false;
+    if (x.visibility !== y.visibility) return false;
+    if (!!x.viaZone !== !!y.viaZone) return false;
+    // 0.01 tile is well below the resolution of anything reading this —
+    // gain, the video-slot ranking, or the distance shown in the UI.
+    if (Math.abs(x.distanceTiles - y.distanceTiles) > 0.01) return false;
+  }
+  return true;
 }

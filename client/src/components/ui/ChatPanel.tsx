@@ -146,11 +146,28 @@ export function ChatPanel({
   // 1s tick while open so typing entries lapse on their own (there's no
   // explicit "stopped typing" event — they just pass their expiry).
   const [, setTypingTick] = useState(0);
+  // Ticks ONLY while there is an unexpired typing entry to expire. It used
+  // to run unconditionally for as long as the surface was up, re-rendering
+  // this whole component once a second forever — and a chat surface is
+  // typically left open, so that was a permanent 1Hz render of one of the
+  // largest components in the app to do nothing at all. Someone starting to
+  // type changes typingByTarget, which restarts this effect; the tick that
+  // notices the last entry lapse stops it again.
+  const anyoneTyping = () =>
+    Object.values(useGameStore.getState().typingByTarget).some((byUser) =>
+      Object.values(byUser).some((expiresAt) => expiresAt > Date.now()),
+    );
   useEffect(() => {
-    if (!open) return;
-    const iv = setInterval(() => setTypingTick((t) => t + 1), 1000);
+    if (!open || !anyoneTyping()) return;
+    const iv = setInterval(() => {
+      // Re-render first so the lapsed entry actually leaves the screen, then
+      // decide whether there is any reason to tick again.
+      setTypingTick((t) => t + 1);
+      if (!anyoneTyping()) clearInterval(iv);
+    }, 1000);
     return () => clearInterval(iv);
-  }, [open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, typingByTarget]);
 
   const [text, setText] = useState('');
   // A <textarea> now (was <input>) — a single-line input can never wrap, it

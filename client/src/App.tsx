@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill, Display } from 'react-bootstrap-icons';
-import { Avatar, AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents } from '@kaispace/shared';
+import { Avatar, AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents, ProximityPlayer } from '@kaispace/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -25,8 +25,6 @@ const OperatorConsole = lazy(() => import('./operator/OperatorConsole').then((m)
 // doc comment), so it's split out for the same "don't pay for code you
 // never load" reason as AdminConsole above, just for a much larger audience.
 const MyAnalyticsPanel = lazy(() => import('./admin/MyAnalyticsPanel').then((m) => ({ default: m.MyAnalyticsPanel })));
-import { CalendarApp } from './components/Calendar/CalendarApp';
-import { AttendanceApp } from './components/Attendance/AttendanceApp';
 import { toCurrentUser, type CurrentUser } from './hooks/useCurrentUser';
 import { isTypingTarget, shouldIgnoreRoomHotkey } from './utils/hotkeys';
 import { useZoneLock } from './hooks/useZoneLock';
@@ -35,7 +33,6 @@ import { MiniMode, isMiniModeSupported, openMiniModeWindow } from './components/
 import { ChatPanel } from './components/ui/ChatPanel';
 import { setProfileName } from './hooks/useProfiles';
 import { JoinGate, JoinRequestPanel } from './components/ui/JoinApproval';
-import { MessengerApp } from './components/Messenger/MessengerApp';
 import { NoticeBanner } from './components/ui/NoticeBanner';
 import { EmoteWheel } from './components/ui/EmoteWheel';
 import { BookingForm } from './components/ui/BookingForm';
@@ -52,6 +49,17 @@ import { TeleportPanel } from './components/ui/TeleportPanel';
 // TESTING.md's "no code-splitting" gap). Splitting it into its own chunk
 // means only whoever actually opens the editor pays that cost.
 const RoomEditorPage = lazy(() => import('./pages/RoomEditorPage').then((m) => ({ default: m.RoomEditorPage })));
+
+// Panels reached from the sidebar, never on the path to rendering the room
+// itself — so they have no business being in the chunk that has to download
+// before anything appears. Each is already conditionally rendered, which
+// makes lazy() a drop-in. Their dependency trees are the real prize:
+// CalendarApp pulls in rrule, and the calendar/attendance surfaces together
+// account for most of this app's luxon usage.
+const CalendarApp = lazy(() => import('./components/Calendar/CalendarApp').then((m) => ({ default: m.CalendarApp })));
+const AttendanceApp = lazy(() => import('./components/Attendance/AttendanceApp').then((m) => ({ default: m.AttendanceApp })));
+const MessengerApp = lazy(() => import('./components/Messenger/MessengerApp').then((m) => ({ default: m.MessengerApp })));
+
 import { useBgm } from './hooks/useBgm';
 import { AddMediaPanel } from './components/ui/AddMediaPanel';
 import { MediaViewerModal } from './components/ui/MediaViewerModal';
@@ -91,11 +99,21 @@ import { useAuth } from './hooks/useAuth';
 import { useTheme, Theme } from './hooks/useTheme';
 import { api, UserPreferences } from './services/api';
 import { createDefaultRoom, isTileBlocked } from './utils/createDefaultRoom';
+import { ZoneWatcher } from './components/ZoneWatcher';
+import { AnnouncementTicker } from './components/ui/AnnouncementTicker';
+import { BroadcastComposer } from './components/ui/BroadcastComposer';
+import { livePos } from '@/stores/livePosition';
+import { setProximitySnapshot, interpolateRemotePositions } from '@/stores/remotePositions';
+
+// How often proximity is recomputed. Crossing one tile takes ~170ms at
+// walking speed and ~116ms running, so 200ms still catches every
+// boundary well before it matters for audio or video.
+const PROXIMITY_TICK_MS = 200;
 import { useGameStore } from './stores/gameStore';
 import { showAlert, showConfirm, showPrompt } from '@/stores/modalStore';
 import { useSocket } from './hooks/useSocket';
 import { useChannelChat } from './hooks/useChannelChat';
-import { useProximity, findZoneAt } from './hooks/useProximity';
+import { computeProximity, proximityUnchanged } from './hooks/useProximity';
 import { useWebRTC } from './hooks/useWebRTC';
 import { useScreenRecording } from './hooks/useScreenRecording';
 import { webrtcService } from './services/webrtcService';
@@ -241,7 +259,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   }, [initMedia]);
 
   // Proximity calculation
-  const localPlayer = useGameStore((s) => s.localPlayer);
+  // Per-field, NOT the whole localPlayer object. The object's identity
+  // changes on every throttled position write (10/sec while walking);
+  // these four fields change only when the player actually does
+  // something. Position itself is nobody's business up here any more —
+  // <ZoneWatcher/> owns it.
+  const localPlayerName = useGameStore((s) => s.localPlayer.name);
+  const localHidden = useGameStore((s) => s.localPlayer.hidden);
+  const localIsSitting = useGameStore((s) => s.localPlayer.isSitting);
+  const localHandRaised = useGameStore((s) => s.localPlayer.handRaised);
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const roomStateReceived = useGameStore((s) => s.roomStateReceived);
@@ -325,12 +351,52 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     emitTeleportRequest({ kind: 'seat' });
   }, [emitTeleportRequest, emitTeleportTo, furniture, localUserId, myClaimedSeatId, tiles]);
 
-  const nearby = useProximity(
-    { x: localPlayer.x, y: localPlayer.y, id: localPlayerId, isSitting: localPlayer.isSitting, seatFurnitureId: localPlayer.seatFurnitureId, workMode: localPlayer.workMode },
-    playerRecords,
-    zones,
-    furniture,
-  );
+  // Proximity runs on its own fixed tick rather than as a render-derived
+  // memo. Two reasons it can no longer be reactive: remote positions live
+  // outside the store now (remotePositions.ts), so a peer walking toward you
+  // changes nothing React would notice; and recomputing it per render meant
+  // updateProximity's whole WebRTC pass — filter, sort, Set, loop every peer
+  // — ran 60x/sec. 5/sec is still far quicker than anyone can cross the
+  // proximity radius, and an unchanged result skips the state update
+  // entirely, so standing still costs nothing at all.
+  const [nearby, setNearby] = useState<ProximityPlayer[]>([]);
+  useEffect(() => {
+    const tick = () => {
+      const s = useGameStore.getState();
+      // Also advance interpolation here, not just in the render loop.
+      // requestAnimationFrame stops entirely while the tab is hidden, which
+      // would freeze everyone's position — and since proximity now reads
+      // those positions, someone walking up to a backgrounded tab would
+      // never connect. Sampling is a pure function of the wall clock, so
+      // running it from both places is harmless: whichever fires first for a
+      // given moment produces the same answer.
+      interpolateRemotePositions((id) => id in s.playerRecords);
+      const next = computeProximity(
+        {
+          // livePos, not the store copy — proximity should react to where
+          // the avatar is, not to where it was at the last throttled write.
+          x: livePos.x,
+          y: livePos.y,
+          id: s.localPlayerId,
+          isSitting: s.localPlayer.isSitting,
+          seatFurnitureId: s.localPlayer.seatFurnitureId,
+          workMode: s.localPlayer.workMode,
+        },
+        s.playerRecords,
+        s.zones,
+        s.furniture,
+      );
+      // The canvas reads this outside React (it renders every frame
+      // regardless), so publish unconditionally — skipping it when the
+      // result is 'unchanged' would leave the canvas on a value up to
+      // 0.01 tile stale for no benefit.
+      setProximitySnapshot(next);
+      setNearby((prev) => (proximityUnchanged(prev, next) ? prev : next));
+    };
+    tick();
+    const id = setInterval(tick, PROXIMITY_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
 
   // Potong 6 — area background music. Conversation (any full-connected peer)
   // always takes priority: the hook pauses the music while one is active.
@@ -342,35 +408,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     updateSoundboardVolumes(nearby);
   }, [nearby, updateProximity]);
 
-  // Meeting zone detection — purely derived; feeds the A11 presence status
-  // below, so standing inside a Zone of type 'meeting' shows as "In a
-  // meeting". Conversation itself happens over the room's own proximity
-  // WebRTC, with the zone's audio isolation deciding who can hear whom.
-  const meetingZone = useMemo(
-    () => findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'meeting')),
-    [localPlayer.x, localPlayer.y, zones],
-  );
-
-  // A11 — Presence status (consolidates A3 Focus + A5 meeting detection). Zone
-  // wins over the manual choice: inside a meeting zone → 'in_meeting'; inside a
-  // focus zone → 'focus'; otherwise the user's last manual pick
-  // (available/lunch/away). On change, update the store (drives DND gating +
-  // badge) and broadcast so other clients see it. Leaving a zone re-applies the
-  // remembered manual status automatically.
-  const workMode = useGameStore((s) => s.workMode);
-  const setWorkMode = useGameStore((s) => s.setWorkMode);
-  const manualStatus = useGameStore((s) => s.manualStatus);
+  // Meeting-zone and presence detection moved into <ZoneWatcher/> below, so
+  // App no longer subscribes to the local position at all. Only the RESULT
+  // lands here, and only when it changes.
+  const [meetingZoneId, setMeetingZoneId] = useState<string | null>(null);
+  // Kept for the workMode effect that ZoneWatcher owns; the setters stay here
+  // because the presence menu writes them directly.
   const setManualStatus = useGameStore((s) => s.setManualStatus);
-  const awayReason = useGameStore((s) => s.awayReason);
   const setAwayReason = useGameStore((s) => s.setAwayReason);
-  useEffect(() => {
-    const focusZone = findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'focus'));
-    const effective: WorkMode = meetingZone ? 'in_meeting' : focusZone ? 'focus' : manualStatus;
-    if (effective !== workMode) {
-      setWorkMode(effective);
-      emitWorkMode(effective, meetingZone?.id ?? focusZone?.id, effective === 'away' ? awayReason ?? undefined : undefined);
-    }
-  }, [localPlayer.x, localPlayer.y, zones, meetingZone, manualStatus, workMode, setWorkMode, emitWorkMode, awayReason]);
+  const workMode = useGameStore((s) => s.workMode);
+  const manualStatus = useGameStore((s) => s.manualStatus);
+  const awayReason = useGameStore((s) => s.awayReason);
 
   // Focus area — the room's dedicated "Fokus" text channel (lazily created
   // server-side the first time an admin saves a Focus area, see rooms.ts's
@@ -486,7 +534,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // people was only ever reachable by first spotlighting them; that feature
   // was removed in Bug 7, so the picker is now just this single entry.)
   const recordingTargets = [
-    { userId: localUserId, name: `${localPlayer.name} (You)` },
+    { userId: localUserId, name: `${localPlayerName} (You)` },
   ];
 
   // Track which zone (if any) the local player is standing in — drives the
@@ -573,109 +621,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     const p = useGameStore.getState().localPlayer;
     setLocal({
       ...p,
-      x: clamp(p.x, (z.x + 0.5) * TILE_SIZE, (z.x + z.width - 0.5) * TILE_SIZE),
-      y: clamp(p.y, (z.y + 0.5) * TILE_SIZE, (z.y + z.height - 0.5) * TILE_SIZE),
+      // Clamp the LIVE position — clamping the throttled copy would also
+      // rewind the avatar to it, which is a visible snap backwards.
+      x: clamp(livePos.x, (z.x + 0.5) * TILE_SIZE, (z.x + z.width - 0.5) * TILE_SIZE),
+      y: clamp(livePos.y, (z.y + 0.5) * TILE_SIZE, (z.y + z.height - 0.5) * TILE_SIZE),
       isMoving: false,
     });
   }, [zones]);
-  // Last position we know we were legitimately allowed to occupy — restored
-  // when a zone-entry attempt gets refused, so the avatar snaps back out
-  // instead of visibly standing inside a locked room it was denied entry to.
-  const lastAllowedPosRef = useRef({ x: localPlayer.x, y: localPlayer.y });
-
-  useEffect(() => {
-    const zone = findZoneAt(localPlayer, zones);
-    const zoneId = zone?.id ?? null;
-    if (zoneId === currentZoneIdRef.current) {
-      lastAllowedPosRef.current = { x: localPlayer.x, y: localPlayer.y };
-      return;
-    }
-
-    // A locked zone holds you in until it's unlocked (even for the person who
-    // locked it — see server zoneLock.ts). The server refuses the zone:exit
-    // anyway (membership drives zone chat + A/V), so without this the avatar
-    // would stand outside while still being IN the meeting — worse than not
-    // letting them walk out at all.
-    const leaving = currentZoneIdRef.current;
-    if (leaving) {
-      const lock = zoneLock.lockOf(leaving);
-      if (lock) {
-        pushBackInside(leaving);
-        return;
-      }
-      emitZoneExit(leaving);
-      // "Ngobrol dengan CEO" queue — leaving early completes the ticket
-      // server-side (zoneHandler.ts's completeActiveZoneQueueEntry), but
-      // nothing else ever refreshes our own cached zoneQueueTicket once its
-      // status is 'active' (useZoneLock.ts's poll deliberately stops once
-      // active — there's nothing left to wait for while genuinely inside).
-      // Without dropping it here, walking back in during the same session
-      // would read the stale 'active' status as still-admitted and skip the
-      // restricted-zone bounce below entirely, even though the server has
-      // already closed that ticket and will deny the re-entry.
-      zoneLock.clearZoneQueueTicketOnExit(leaving);
-    }
-
-    // A locked zone also holds people OUT — not just chat/AV membership, the
-    // avatar itself must not be able to stand inside it. Checked client-side
-    // against the mirrored lock state (same pattern as the leaving check
-    // above) so the bounce is instant, no round trip needed.
-    if (zoneId) {
-      const lock = zoneLock.lockOf(zoneId);
-      if (lock && !zoneLock.isKeyholder(zoneId) && !zoneLock.isAdmitted(zoneId)) {
-        const back = lastAllowedPosRef.current;
-        useGameStore.getState().setLocalPlayer({ x: back.x, y: back.y, isMoving: false });
-        zoneLock.denyEntry(zoneId);
-        return;
-      }
-      // "Ngobrol dengan CEO" queue, zone-level — a restricted zone (Room
-      // Editor's "Restricted area" tool) must physically hold out anyone who
-      // isn't the room owner or explicitly granted CEO access, AND hasn't
-      // been called/admitted into their queue slot, same bounce as a manual
-      // lock above, mirroring the exact authoritative check
-      // zoneHandler.ts's ZONE_ENTER does server-side so the decision is
-      // instant and client-only — no round trip, no brief "stood inside it"
-      // flash before the server's own ZONE_LOCKED_DENIED came back.
-      //
-      // Deliberately NOT role-based (no roleAtLeast/minRole check) — an
-      // ordinary room admin must queue like anyone else here; only the room
-      // owner and whoever's been granted CEO access (see gameStore's
-      // localIsCeo, roomHandler.ts's ceoUserIds) bypass.
-      // "Ngobrol dengan CEO" v2 — a bookingMode zone is always freely
-      // walkable (see zoneHandler.ts's own ZONE_ENTER, which skips this same
-      // gate server-side), so this client-side mirror must skip it too, or
-      // the avatar would get bounced back out locally even though the
-      // server would have let it through.
-      const restriction = zoneLock.restrictionOf(zoneId);
-      if (restriction && !restriction.bookingMode && localRole !== 'owner' && !localIsCeo) {
-        const ticket = zoneLock.zoneQueueTicket;
-        const admitted = ticket?.zoneId === zoneId && (ticket.status === 'called' || ticket.status === 'active');
-        if (!admitted) {
-          const back = lastAllowedPosRef.current;
-          useGameStore.getState().setLocalPlayer({ x: back.x, y: back.y, isMoving: false });
-          zoneLock.denyEntry(zoneId, restriction.queueEnabled ? 'queue' : 'restricted');
-          return;
-        }
-      }
-      emitZoneEnter(zoneId);
-    }
-    currentZoneIdRef.current = zoneId;
-    setCurrentZone(zone ? { id: zone.id, name: zone.name } : null);
-    lastAllowedPosRef.current = { x: localPlayer.x, y: localPlayer.y };
-    // Reaching this line at all means the crossing succeeded (every denial
-    // branch above returns early) — whether that landed us in no zone or a
-    // completely different one, whatever we were previously denied from is
-    // no longer relevant, so the knock/queue-form card should go away.
-    //
-    // Bug fix — this used to only clear when zoneId was null (no zone at
-    // all), so walking straight from a CEO Office denial into a DIFFERENT
-    // zone (e.g. a neighboring "AI Team" area) skipped this entirely — the
-    // stale "isi form antrean" card for CEO Office stayed on screen
-    // indefinitely, since the player never passed through a genuine
-    // "in no zone" gap to trigger the old guard.
-    zoneLock.clearDenied();
-  }, [localPlayer.x, localPlayer.y, zones, emitZoneEnter, emitZoneExit]);
-
   // "Ngobrol dengan CEO" queue, zone-level — our timed slot in a restricted
   // zone ran out (see roomHandler.ts's forceZoneExitForQueue). Unlike a
   // manually-locked zone (which the player can only ever be pushed BACK INTO,
@@ -878,14 +830,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     }
   }, [roomSlug]);
 
-  // QA #9/#10 — CEO/admin text broadcast. Same prompt-based "quick admin
-  // config" convention as Guest Link above — the server independently
-  // re-checks 'broadcast:text' (roomHandler.ts), this is just the trigger.
-  const handleBroadcast = useCallback(async () => {
-    const text = ((await showPrompt('Pesan broadcast ke SEMUA orang di room ini:')) ?? '').trim();
-    if (!text) return;
-    emitBroadcastSend(text);
-  }, [emitBroadcastSend]);
+  // QA #9/#10 — CEO/admin text broadcast, shown to everyone as a running
+  // text strip (AnnouncementTicker). Opens a composer rather than a bare
+  // prompt: this goes to the whole room at once and can't be recalled, so
+  // the character budget and a preview are worth the extra component. The
+  // server independently re-checks 'broadcast:text' (roomHandler.ts) — this
+  // is only the trigger, never the permission.
+  const [broadcastComposerOpen, setBroadcastComposerOpen] = useState(false);
+  const handleBroadcast = useCallback(() => setBroadcastComposerOpen(true), []);
 
   // Summon/Follow consent requests (see PendingRequestToast.tsx). Incoming
   // requests auto-clear on the same clock the server uses to auto-decline
@@ -936,12 +888,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // QA #9/#10 — CEO/admin text broadcast toast. Longer-lived (8s) than the
   // other brief pings above — this is a room-wide announcement meant to
   // actually be read, not a quick "someone poked you" ping.
-  const roomBroadcast = useGameStore((s) => s.roomBroadcast);
-  useEffect(() => {
-    if (!roomBroadcast) return;
-    const timer = setTimeout(() => useGameStore.getState().setRoomBroadcast(null), 8000);
-    return () => clearTimeout(timer);
-  }, [roomBroadcast]);
+  // Announcements no longer time out on a fixed clock here — a running text
+  // has to stay up as long as it takes to travel, which depends on its own
+  // length. AnnouncementTicker owns that and drops each message from the
+  // queue when it has finished.
 
   const incomingFollowRequest = useGameStore((s) => s.incomingFollowRequest);
   useEffect(() => {
@@ -1531,13 +1481,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   }, [doorAreaPasswordAreaId, emitInteractiveDoorAreaPasswordCheck]);
 
   const handleEmoteSelect = useCallback((emote: EmoteType) => {
-    const lp = useGameStore.getState().localPlayer;
-    emitEmote(emote, lp.x, lp.y);
+    // livePos — the store position is throttled while walking (see
+    // livePosition.ts), and an emote fired mid-stride should appear over the
+    // avatar, not over where it was a tenth of a second ago.
+    emitEmote(emote, livePos.x, livePos.y);
     useGameStore.getState().addEmote({
       playerId: localPlayerId,
       emote,
-      x: lp.x,
-      y: lp.y,
+      x: livePos.x,
+      y: livePos.y,
       timestamp: Date.now(),
     });
     setShowEmoteWheel(false);
@@ -1673,12 +1625,31 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
   return (
     <div className="w-screen h-screen overflow-hidden bg-purple-50">
+      {/* Room-wide admin announcement, running across the top of the
+          screen above everything else. */}
+      <AnnouncementTicker />
+      {broadcastComposerOpen && (
+        <BroadcastComposer
+          onSend={emitBroadcastSend}
+          onClose={() => setBroadcastComposerOpen(false)}
+        />
+      )}
+      {/* Renders nothing. Owns the local position so App doesn't have to —
+          see ZoneWatcher.tsx. */}
+      <ZoneWatcher
+        zoneLock={zoneLock}
+        currentZoneIdRef={currentZoneIdRef}
+        onZoneChange={setCurrentZone}
+        onMeetingZoneChange={setMeetingZoneId}
+        emitZoneEnter={emitZoneEnter}
+        emitZoneExit={emitZoneExit}
+        emitWorkMode={emitWorkMode}
+      />
       <GameCanvas
         emitMove={emitMove}
         emitStop={emitStop}
         emitJump={emitJump}
         emitNudge={emitNudge}
-        proximityData={nearby}
         micMuted={isMicMuted}
         cameraOn={isCameraOn}
         editorMode={editorMode}
@@ -2003,18 +1974,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             👋 <span className="font-bold">{slappedBy}</span> nyoel kamu — sadar dong!
           </div>
         )}
-        {/* QA #9/#10 — CEO/admin text broadcast. rounded-2xl + max-w-md
-            (not the pill shape above) since this can be a real multi-word
-            announcement, not a short one-liner ping. */}
-        {roomBroadcast && (
-          <div className="bg-teal-600/95 text-white text-sm font-semibold px-4 py-3 rounded-2xl shadow-lg pointer-events-none flex items-start gap-2 animate-fade-in max-w-md text-left">
-            <VolumeUpFill size={16} className="shrink-0 mt-0.5" />
-            <span>
-              <span className="block text-[11px] font-normal opacity-80 mb-0.5">Pengumuman dari {roomBroadcast.senderName}</span>
-              {roomBroadcast.text}
-            </span>
-          </div>
-        )}
         {adminErrorMessage && (
           <div className="bg-red-600/95 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-2 animate-fade-in">
             ⚠️ {adminErrorMessage}
@@ -2171,7 +2130,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onStopRecording={stopMyRecording}
         onLeaveRoom={onLeave}
         onLogout={() => setShowLogoutConfirm(true)}
-        hiddenActive={!!localPlayer.hidden}
+        hiddenActive={!!localHidden}
         canToggleHidden={roleAtLeast(localRole, 'admin')}
         onToggleHidden={handleHiddenToggle}
         theme={theme}
@@ -2185,7 +2144,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           on the canvas itself (GameCanvas.tsx), which anyone can use
           regardless of login; assigning requires an account (server-side
           checked) since it's meant to persist across sessions. */}
-      {localPlayer.isSitting && sittingItem && (
+      {localIsSitting && sittingItem && (
         <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
           {!sittingItem.assignedToUserId ? (
             <Tooltip label="Jadikan Kursi Saya" detail="Tandai kursi ini jadi kursi tetapmu — otomatis kamu duduk di sini tiap masuk room.">
@@ -2230,7 +2189,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </Suspense>
       )}
       {/* Absensi + Cuti sekaligus — Cuti adalah tab di dalam AttendanceApp. */}
-      {attendanceViewActive && <AttendanceApp onClose={closePanel} />}
+      {attendanceViewActive && <Suspense fallback={null}><AttendanceApp onClose={closePanel} /></Suspense>}
       {joinQueueActive && isAdmin && (
         <JoinRequestPanel roomSlug={roomSlug} onClose={closePanel} />
       )}
@@ -2238,6 +2197,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           with the floating ChatPanel below (same useChannelChat instance), so
           the two are two views of one conversation, not two inboxes. */}
       {messengerViewActive && (
+        <Suspense fallback={null}>
         <MessengerApp
           localUserId={authUserId}
           isAdmin={isAdmin}
@@ -2258,13 +2218,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onLoadOlder={channelChat.loadOlder}
           onCreateChannel={channelChat.createChannel}
         />
+        </Suspense>
       )}
       {calendarViewActive && (
+        <Suspense fallback={null}>
         <CalendarApp
           currentUser={{ id: authUserId, name: authDisplayName, timezone: currentUser.timezone }}
           onClose={closePanel}
           onStartMeeting={(slug) => { closePanel(); onPortalTravel(slug); }}
         />
+        </Suspense>
       )}
 
       {showAdminPanel && (
@@ -2482,7 +2445,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
               gate as this bar, just relocated, not removed from the set.
               Chat is its own standalone bottom-right button again (see
               ChatPanel.tsx), not part of this bar. */}
-          {!isGuest && <HandButton raised={!!localPlayer.handRaised} onToggle={handleHandToggle} />}
+          {!isGuest && <HandButton raised={!!localHandRaised} onToggle={handleHandToggle} />}
           {!isGuest && <EmojiButton open={showEmoteWheel} onToggle={() => setShowEmoteWheel((v) => !v)} />}
           {/* Mic/speaker/camera device picker — was two small carets glued
               to Mic and Camera, merged into one ⋮ menu (see DeviceMenu.tsx)

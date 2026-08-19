@@ -1,8 +1,9 @@
 import { create } from 'zustand';
-import { Avatar, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, RemoteHelpRequestPayload, RemoteHelpResultPayload, SummonRequestPayload, SummonResultPayload, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess, SeatClaimRequest } from '@kaispace/shared';
+import { Avatar, Direction, RoomTile, RoomState, ChatMessage, EmoteEvent, SpeechBubble, Furniture, Zone, TileType, RoomTheme, RoomTemplateId, Notice, RoomBroadcast, FollowInfo, Role, FollowRequestPayload, FollowResultPayload, RemoteHelpRequestPayload, RemoteHelpResultPayload, SummonRequestPayload, SummonResultPayload, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, GuestJoinRequest, MapMediaObject, ImpassableAreaRect, DoorAreaRect, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationSummary, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, InteractiveDoorAreaPasswordResultPayload, InteractiveChoiceResultPayload, SoundboardSoundData, MusicSessionState, ReferenceImageData, DeskNoteData, RosterEntry, RosterUpdate, hasFeatureAccess, SeatClaimRequest } from '@kaispace/shared';
 import type { ManualStatus } from '../data/presence';
 import { getMutedUserIds, saveMutedUserIds } from '../services/mutedUsers';
-import { appendMovementSnapshot, MovementSnapshot, sampleMovementSnapshots } from './movementSmoothing';
+import { livePos, setLivePosition } from './livePosition';
+import { forgetRemotePlayer } from './remotePositions';
 import type { UserPreferences } from '../services/api';
 
 // §7 — only ever populated for clients who are allowed to see it at all
@@ -147,7 +148,28 @@ function randomColor(): string {
   return AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
 }
 
-const REMOTE_MOVEMENT_RENDER_DELAY_MS = 120;
+
+// How often the local avatar's position reaches React while walking.
+// 100ms (10/sec) is far finer than anything downstream reacts to —
+// proximity, zone entry, the participant panel — while cutting the
+// per-frame store write that used to re-render the whole app 60x/sec.
+// The canvas is unaffected either way: it draws from the movement result
+// directly, never from the store.
+const LOCAL_PLAYER_STORE_INTERVAL_MS = 100;
+let lastLocalPlayerStoreWrite = 0;
+
+// Shallow "is this actually different" check for upsertPlayer's bail-out.
+// Deliberately compares every own key of the merged result rather than a
+// hardcoded field list — a field added to Avatar later must not silently
+// start being swallowed here. Avatar values are primitives except
+// avatarConfig, which is replaced wholesale (never mutated) whenever it
+// changes, so reference equality is the right test for it too.
+function hasAvatarChanges(existing: Avatar, next: Avatar): boolean {
+  for (const key of Object.keys(next) as (keyof Avatar)[]) {
+    if (!Object.is(existing[key], next[key])) return true;
+  }
+  return false;
+}
 
 export interface GameState {
   localPlayerId: string;
@@ -155,6 +177,24 @@ export interface GameState {
 
   localPlayer: Avatar;
   setLocalPlayer: (partial: Partial<Avatar>) => void;
+  // Movement-driven position update, called once per animation frame.
+  // Always updates livePos; writes to the store only on a change worth
+  // re-rendering for, or every LOCAL_PLAYER_STORE_INTERVAL_MS — see
+  // livePosition.ts for why the per-frame store write had to go. Never
+  // touches posEpoch: this is the player moving themselves, which the
+  // movement system is already the source of truth for.
+  setLocalPlayerMoving: (x: number, y: number, direction: Direction, isRunning: boolean) => void;
+  // Final position as movement ends, flushed past the throttle so the store
+  // doesn't settle on a position up to one interval stale. Also epoch-free —
+  // still our own movement.
+  stopLocalPlayer: (x: number, y: number, direction: Direction) => void;
+  // Bumped ONLY when something outside the movement system sets the local
+  // position: teleport, portal, sit/stand, a server correction, a bounce
+  // back out of a restricted zone. GameCanvas re-seeds its movement state
+  // from this rather than from x/y, which now lags behind the real position
+  // by design — keying off x/y would drag the avatar back to a throttled
+  // value mid-stride, every stride.
+  posEpoch: number;
 
   // All players (excluding local) keyed by id for O(1) lookup
   playerRecords: Record<string, Avatar>;
@@ -162,13 +202,10 @@ export interface GameState {
   upsertPlayer: (player: Avatar) => void;
   removePlayer: (id: string) => void;
 
-  // Remote player position snapshots. Rendering trails receipt time slightly
-  // so jittery packets can be interpolated instead of chased one-by-one.
-  playerTargets: Record<string, MovementSnapshot[]>;
-  setPlayerTarget: (id: string, x: number, y: number, receivedAt?: number) => void;
-
-  // Interpolate all remote players one step toward their targets
-  interpolatePlayers: () => void;
+  // Remote player positions and their interpolation buffers do NOT live here
+  // — see remotePositions.ts. Nothing ever subscribed to them, and routing
+  // them through the store meant a full state rebuild plus a sweep of every
+  // subscribed selector on each incoming movement packet.
 
   // Tiles
   tiles: RoomTile[][];
@@ -723,8 +760,15 @@ export interface GameState {
   // nudgedBy/slappedBy above. Not persisted anywhere — a client that wasn't
   // connected when it was sent simply never sees it (see RoomBroadcast's own
   // doc comment, shared/types/index.ts).
-  roomBroadcast: RoomBroadcast | null;
-  setRoomBroadcast: (broadcast: RoomBroadcast | null) => void;
+  // Admin announcements waiting to be shown, oldest first. A QUEUE rather
+  // than a single slot: two admins sending seconds apart used to mean the
+  // second overwrote the first mid-display, so an announcement could vanish
+  // having never been read. A PA system that silently drops messages isn't
+  // one. Index 0 is whatever is on screen right now.
+  broadcastQueue: RoomBroadcast[];
+  enqueueBroadcast: (broadcast: RoomBroadcast) => void;
+  // Called by the ticker when a message has finished its run.
+  dismissCurrentBroadcast: () => void;
 
   // Soundboard — this room's custom uploaded sounds (defaults live purely
   // client-side as SOUNDBOARD_DEFAULT_SOUNDS, no server round trip needed).
@@ -862,81 +906,85 @@ export const useGameStore = create<GameState>((set, get) => ({
     color: randomColor(),
     isMoving: false,
   },
+  posEpoch: 0,
+
   setLocalPlayer: (partial) =>
     set((state) => {
       const localPlayer = { ...state.localPlayer, ...partial };
       if (localPlayer.isMoving !== true) localPlayer.isRunning = false;
-      return { localPlayer };
+      // Every remaining caller that passes x/y is an authoritative jump (the
+      // per-frame movement path goes through setLocalPlayerMoving instead),
+      // so this is the right place to both bump the epoch and re-seed the
+      // live position — leaving livePos stale after a teleport would have
+      // the next frame's collision and nudge checks reading the pre-teleport
+      // spot.
+      const movedExternally = partial.x !== undefined || partial.y !== undefined;
+      if (!movedExternally) return { localPlayer };
+      setLivePosition(localPlayer.x, localPlayer.y, localPlayer.direction);
+      return { localPlayer, posEpoch: state.posEpoch + 1 };
     }),
+
+  setLocalPlayerMoving: (x, y, direction, isRunning) => {
+    livePos.x = x;
+    livePos.y = y;
+    livePos.direction = direction;
+    livePos.isMoving = true;
+
+    const prev = get().localPlayer;
+    // Anything a subscriber would visibly react to goes through immediately;
+    // only the position itself is rate-limited, because it is the only part
+    // that changes every single frame.
+    const shouldFlush =
+      prev.direction !== direction ||
+      prev.isMoving !== true ||
+      (prev.isRunning === true) !== isRunning;
+
+    const now = Date.now();
+    if (!shouldFlush && now - lastLocalPlayerStoreWrite < LOCAL_PLAYER_STORE_INTERVAL_MS) return;
+    lastLocalPlayerStoreWrite = now;
+
+    set({ localPlayer: { ...prev, x, y, direction, isMoving: true, isRunning } });
+  },
+
+  stopLocalPlayer: (x, y, direction) => {
+    livePos.x = x;
+    livePos.y = y;
+    livePos.direction = direction;
+    livePos.isMoving = false;
+    lastLocalPlayerStoreWrite = Date.now();
+    set((state) => ({
+      localPlayer: { ...state.localPlayer, x, y, direction, isMoving: false, isRunning: false },
+    }));
+  },
 
   playerRecords: {},
   setPlayerRecords: (players) => set({ playerRecords: players }),
   upsertPlayer: (player) =>
     set((state) => {
-      const records = { ...state.playerRecords };
-      const nextPlayer = { ...records[player.id], ...player };
+      const existing = state.playerRecords[player.id];
+      const nextPlayer = { ...existing, ...player };
       if (nextPlayer.isMoving !== true) nextPlayer.isRunning = false;
-      records[player.id] = nextPlayer;
-      return { playerRecords: records };
+
+      // PLAYER_MOVED calls this on every packet — 20/sec per moving player,
+      // so ~400/sec in a busy room — carrying direction/isMoving/isRunning
+      // that are almost always identical to what's already stored. Each of
+      // those used to clone the whole records map and hand React a new
+      // object, re-rendering every subscriber for no change at all. Bail out
+      // instead when nothing actually differs; the position itself doesn't
+      // come through here (see setPlayerTarget / livePlayers), so this is
+      // purely status.
+      if (existing && !hasAvatarChanges(existing, nextPlayer)) return state;
+
+      return { playerRecords: { ...state.playerRecords, [player.id]: nextPlayer } };
     }),
   removePlayer: (id) =>
     set((state) => {
       const records = { ...state.playerRecords };
       delete records[id];
-      // Also clean up targets
-      const targets = { ...state.playerTargets };
-      delete targets[id];
-      return { playerRecords: records, playerTargets: targets };
+      // Position and snapshot buffer both live outside the store now.
+      forgetRemotePlayer(id);
+      return { playerRecords: records };
     }),
-
-  playerTargets: {},
-  setPlayerTarget: (id, x, y, receivedAt = Date.now()) =>
-    set((state) => ({
-      playerTargets: {
-        ...state.playerTargets,
-        [id]: appendMovementSnapshot(state.playerTargets[id] ?? [], { x, y, receivedAt }),
-      },
-    })),
-
-  interpolatePlayers: () => {
-    const state = get();
-    const records = { ...state.playerRecords };
-    const targets = { ...state.playerTargets };
-    const renderTime = Date.now() - REMOTE_MOVEMENT_RENDER_DELAY_MS;
-    let recordsChanged = false;
-    let targetsChanged = false;
-
-    for (const id of Object.keys(targets)) {
-      const player = records[id];
-      const snapshots = targets[id];
-      if (!player || !snapshots?.length) {
-        delete targets[id];
-        targetsChanged = true;
-        continue;
-      }
-
-      const sample = sampleMovementSnapshots(snapshots, renderTime);
-      if (!sample) {
-        delete targets[id];
-        targetsChanged = true;
-        continue;
-      }
-
-      records[id] = { ...player, x: sample.x, y: sample.y };
-      if (sample.done) {
-        delete targets[id];
-        targetsChanged = true;
-      }
-      recordsChanged = true;
-    }
-
-    if (recordsChanged || targetsChanged) {
-      set({
-        ...(recordsChanged ? { playerRecords: records } : {}),
-        ...(targetsChanged ? { playerTargets: targets } : {}),
-      });
-    }
-  },
 
   tiles: [],
   setTiles: (tiles) => set({ tiles }),
@@ -1509,8 +1557,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   adminErrorMessage: null,
   setAdminErrorMessage: (message) => set({ adminErrorMessage: message }),
 
-  roomBroadcast: null,
-  setRoomBroadcast: (broadcast) => set({ roomBroadcast: broadcast }),
+  broadcastQueue: [],
+  enqueueBroadcast: (broadcast) =>
+    set((state) => ({ broadcastQueue: [...state.broadcastQueue, broadcast] })),
+  dismissCurrentBroadcast: () =>
+    set((state) => (state.broadcastQueue.length === 0 ? state : { broadcastQueue: state.broadcastQueue.slice(1) })),
 
   soundboardSounds: [],
   setSoundboardSounds: (sounds) => set({ soundboardSounds: sounds }),

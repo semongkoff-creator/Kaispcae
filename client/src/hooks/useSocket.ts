@@ -1,6 +1,8 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, RoomBroadcast, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, RemoteHelpRequestPayload, RemoteHelpResultPayload, RemoteHelpCredentialPayload, RemoteHelpEndPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveDoorAreaPasswordResultPayload, DoorAreaUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, ZoneQueueSessionClearedPayload, GuestJoinRequest, PlayerMovedPayload, PlayerStoppedPayload, DeskNoteData, RosterEntry, RosterUpdate, SeatClaimRequest } from '@kaispace/shared';
+import { serverTimeToClient, resetServerClock } from '@/stores/serverClock';
+import { snapRemotePosition, clearRemotePositions, pushRemoteSnapshot } from '@/stores/remotePositions';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
@@ -49,8 +51,6 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   const setLocalPlayer = useGameStore((s) => s.setLocalPlayer);
   const upsertPlayer = useGameStore((s) => s.upsertPlayer);
   const removePlayer = useGameStore((s) => s.removePlayer);
-  const setPlayerTarget = useGameStore((s) => s.setPlayerTarget);
-  const interpolatePlayers = useGameStore((s) => s.interpolatePlayers);
   const addZoneChatMessage = useGameStore((s) => s.addZoneChatMessage);
   const setSpeechBubble = useGameStore((s) => s.setSpeechBubble);
   const addEmote = useGameStore((s) => s.addEmote);
@@ -86,12 +86,15 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     setLocalUserId(uid);
   }, [authUserId]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      interpolatePlayers();
-    }, 16);
-    return () => clearInterval(interval);
-  }, [interpolatePlayers]);
+  // Interpolation is driven by GameCanvas's requestAnimationFrame loop now,
+  // not by a standalone 16ms setInterval. One clock instead of two racing
+  // ones, no work at all while the tab is backgrounded (rAF pauses,
+  // setInterval does not), and the sampled positions land in the same frame
+  // that draws them rather than up to a frame early or late.
+  //
+  // Remote position overlays are per-room state: leaving must not carry
+  // someone else's coordinates into the next room.
+  useEffect(() => () => clearRemotePositions(), []);
 
   useEffect(() => {
     // Reset for this room-join attempt — see gameStore.ts's doc comment on
@@ -134,6 +137,12 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       console.log('[socket] connected:', socket.id);
       setLocalPlayerId(socket.id!);
       setConnected(true);
+      // Skew samples from the previous connection describe a clock this
+      // session can no longer be compared against — a reconnect can land on
+      // a different server process entirely, and even the same one may have
+      // been restarted. Keeping them would offset every snapshot by a
+      // constant error for the rest of the session.
+      resetServerClock();
 
       const config = loadAvatarConfig();
       const uid = authUserId || localStorage.getItem('vm_userId') || socket.id;
@@ -196,7 +205,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
         if (lastSeq !== undefined && data.seq <= lastSeq) return;
         lastRemoteMoveSeqRef.current.set(data.id, data.seq);
       }
-      setPlayerTarget(data.id, data.x, data.y, receivedAt);
+      // Timestamp the snapshot by when the server SENT it, not when it
+      // happened to land here — see serverClock.ts. Arrival time carried the
+      // network's jitter into the interpolation buffer, which is what made
+      // remote avatars stutter on an otherwise healthy connection.
+      pushRemoteSnapshot(data.id, data.x, data.y, serverTimeToClient(data.serverTime, receivedAt));
       upsertPlayer({
         id: data.id,
         direction: data.direction as Avatar['direction'],
@@ -210,7 +223,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       const y = data.y;
       const hasPosition = typeof x === 'number' && typeof y === 'number';
       if (hasPosition) {
-        const receivedAt = Date.now();
+        const receivedAt = serverTimeToClient(data.serverTime, Date.now());
         const state = useGameStore.getState();
         if (data.id === state.localPlayerId) {
           setLocalPlayer({
@@ -222,7 +235,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
           });
           return;
         }
-        setPlayerTarget(data.id, x, y, receivedAt);
+        pushRemoteSnapshot(data.id, x, y, receivedAt);
       }
       upsertPlayer({
         id: data.id,
@@ -308,7 +321,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // (including the sender) gets this since the server emits via
     // io.to(room), same reasoning as SPOTLIGHT_CHANGED above.
     socket.on(SocketEvents.BROADCAST_RECEIVED, (data: RoomBroadcast) => {
-      useGameStore.getState().setRoomBroadcast(data);
+      useGameStore.getState().enqueueBroadcast(data);
     });
 
     socket.on(SocketEvents.PLAYER_SAT, (data: { id: string; isSitting: boolean; x: number; y: number; direction: Avatar['direction']; seatFurnitureId?: string }) => {
@@ -316,6 +329,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       if (data.id === state.localPlayerId) return;
       // seatFurnitureId carried through so this peer's table membership (and
       // chair occupancy) is known locally — undefined once they stand.
+      // Sitting places the avatar exactly on the chair — snap the live
+      // overlay too, or it would keep drawing them at the last interpolated
+      // step until the buffer drains.
+      snapRemotePosition(data.id, data.x, data.y);
       upsertPlayer({ id: data.id, isSitting: data.isSitting, seatFurnitureId: data.seatFurnitureId, x: data.x, y: data.y, direction: data.direction, isMoving: false } as Avatar);
     });
 
@@ -377,10 +394,13 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
         return;
       }
       upsertPlayer({ id: data.id, x: data.x, y: data.y, direction: data.direction, isMoving: false } as Avatar);
-      // Clears any in-flight lerp target left over from a move right before
-      // the teleport — otherwise interpolatePlayers would still nudge this
-      // avatar toward the pre-teleport target for a frame or two.
-      setPlayerTarget(data.id, data.x, data.y);
+      // Drops the lerp buffer and places the avatar, in one call. This
+      // used to append a snapshot under a comment claiming it CLEARED the
+      // in-flight target — appending does the opposite, handing the
+      // interpolator one more point to glide toward, so a teleport rendered
+      // as a slide across the map: the very thing PLAYER_TELEPORTED exists
+      // to avoid.
+      snapRemotePosition(data.id, data.x, data.y);
     });
 
     // §5 — Summon, consent-gated. SUMMON_REQUEST is someone else asking to

@@ -11,9 +11,19 @@ import { recordPokeReceived } from '../lib/pokeResponse';
 import { getPlayerName } from './roomHandler';
 import { broadcastAnalyticsActivity } from './analyticsFeed';
 
-// Rate limiting: max 20 updates per second per player
+// Rate limiting, per player.
+//
+// This has to sit BELOW the client's own send interval, not level with it.
+// The client throttles emitMove to one packet per 50ms (useSocket.ts), so a
+// 50ms floor here left exactly zero tolerance: a packet delayed even a
+// millisecond less than its predecessor arrives 49ms after it and gets
+// dropped as "too fast", even though the sender was perfectly well behaved.
+// Ordinary network jitter therefore ate a steady fraction of legitimate
+// movement updates, and the gaps showed up as stutter on every other
+// client's screen. 30ms keeps the abuse ceiling meaningful (~33/sec against
+// a client that sends 20/sec) while giving normal jitter room to land.
 const rateLimitMap = new Map<string, number>();
-const MIN_UPDATE_INTERVAL = 1000 / 20; // 50ms
+const MIN_UPDATE_INTERVAL = 30;
 
 // QA #16 (Anti-spam) — Nudge had no cap at all: a spoofed/scripted client
 // could fire PLAYER_NUDGE as fast as the socket allows. Same burst budget as

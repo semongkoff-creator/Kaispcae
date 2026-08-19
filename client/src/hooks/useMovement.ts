@@ -11,7 +11,7 @@ const DOOR_MARGIN_PX = 6;
 
 interface UseMovementOptions {
   isBlocked: (tileX: number, tileY: number) => boolean;
-  onMove: (x: number, y: number, direction: Direction) => void;
+  onMove: (x: number, y: number, direction: Direction, isRunning: boolean) => void;
   // While this returns true, WASD/arrow input is ignored entirely (used
   // while sitting) — checked fresh every frame, same ref pattern as
   // isBlocked, so GameCanvas doesn't need to recreate the hook's callbacks.
@@ -258,7 +258,7 @@ export function useMovement({ isBlocked, onMove, isFrozen, isDoor, getImpassable
       if (moved) {
         currentXRef.current = result.x;
         currentYRef.current = result.y;
-        onMoveRef.current(result.x, result.y, result.direction);
+        onMoveRef.current(result.x, result.y, result.direction, result.isRunning);
       }
       return result;
     },
@@ -282,7 +282,7 @@ export function useMovement({ isBlocked, onMove, isFrozen, isDoor, getImpassable
       // direction the player last successfully moved in, rather than the
       // direction they're actually pressing/facing now.
       if (moved || result.isMoving) {
-        onMoveRef.current(result.x, result.y, result.direction);
+        onMoveRef.current(result.x, result.y, result.direction, result.isRunning);
       }
       return result;
     },

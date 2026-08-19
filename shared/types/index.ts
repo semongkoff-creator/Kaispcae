@@ -1399,6 +1399,16 @@ export const TRANSLUCENT_THRESHOLD = PROXIMITY_THRESHOLD;
 // genuine walk-away.
 export const DISCONNECT_DEBOUNCE_MS = 1000;
 
+// QA (Load checklist item 3, "War Room share massal") — max simultaneous
+// screen shares per room. Lives here rather than only server-side because
+// BOTH ends check it now: the client screens locally (synchronously, off
+// the RTC_SCREEN_SHARE announcements it already tracks) so a full room
+// never even opens the OS picker, and the server re-checks authoritatively
+// since the local count can only see peers this client is connected to.
+// Two copies of the number that could drift apart is exactly the bug this
+// placement avoids.
+export const MAX_SCREEN_SHARES_PER_ROOM = 4;
+
 // §6 — mirrors the spec's own three-state enum name
 // (full_visible/translucent/not_visible) for computeVisibility's result.
 export type VisibilityStatus = 'full_visible' | 'translucent' | 'not_visible';

@@ -1,5 +1,5 @@
 import { Socket } from 'socket.io-client';
-import { SocketEvents } from '@kaispace/shared';
+import { SocketEvents, MAX_SCREEN_SHARES_PER_ROOM } from '@kaispace/shared';
 
 // STUN alone only tells a peer its public address — it can't help when the
 // network refuses direct peer-to-peer traffic at all, which is the norm on
@@ -147,20 +147,47 @@ const SCREEN_SHARE_CONSTRAINTS: MediaTrackConstraints = {
 // predictable rather than opportunistically maxing out available bandwidth.
 const SCREEN_SHARE_MAX_BITRATE_BPS = 2_500_000;
 
-// ── DIAGNOSTIC INSTRUMENTATION (temporary) ───────────────────────────────
-// Purely observational: added to locate where two-way audio breaks, after
-// two code-reading fixes failed to resolve it. Remove once the real cause is
-// found and fixed — it must not become permanent noise in the console.
+// Volume smoothing. 25ms/tick with a 0.25 factor settles a full-range
+// change in roughly 150ms — fast enough that walking past someone still
+// tracks their distance, slow enough that no single step is audible.
+const VOLUME_RAMP_INTERVAL_MS = 25;
+const VOLUME_RAMP_FACTOR = 0.25;
+
+// ── DIAGNOSTIC INSTRUMENTATION (opt-in) ──────────────────────────────────
+// Added to locate where two-way audio breaks. It was running for EVERY user
+// in production, unconditionally: fifteen console.log sites plus a 5-second
+// timer calling getStats() on every peer (one of the more expensive WebRTC
+// calls there is) and logging an object per peer, forever. Objects logged to
+// the console are also retained by devtools once it has been opened, so it
+// leaked memory on top of the CPU cost.
 //
-// Buffered in memory (never localStorage/sessionStorage — gone on reload,
-// which is fine for a temporary diagnostic) so a non-technical person on a
-// real call doesn't have to manually scroll/select console output: they run
-// webrtcDiagExport() once (see bottom of file) and get the whole session's
-// log as one copyable block. Capped so a long-running room can't grow this
-// unbounded.
+// Kept rather than deleted — the audio issue it was built for may not be
+// settled — but off unless asked for. Two ways in:
+//   - automatically in a dev build
+//   - localStorage.setItem('vm_webrtc_diag', '1') then reload, in any build,
+//     which is what makes it usable against a real deployment
+// The manual webrtcDiag() console hook works regardless of the flag, so a
+// one-off snapshot never needs a reload.
+const DIAG_ENABLED = (() => {
+  if (import.meta.env.DEV) return true;
+  try {
+    return localStorage.getItem('vm_webrtc_diag') === '1';
+  } catch {
+    // Storage can throw outright under strict privacy settings.
+    return false;
+  }
+})();
+
+// Buffered in memory (never localStorage/sessionStorage — gone on reload)
+// so a non-technical person on a real call doesn't have to manually
+// scroll/select console output: they run webrtcDiagExport() once (see
+// bottom of file) and get the whole session's log as one copyable block.
+// Capped so a long-running room can't grow this unbounded.
 const diagLog: string[] = [];
 const MAX_DIAG_LOG_LINES = 2000;
+
 function diag(event: string, data?: unknown): void {
+  if (!DIAG_ENABLED) return;
   if (data === undefined) console.log(`[webrtc-diag] ${event}`);
   else console.log(`[webrtc-diag] ${event}`, data);
   diagLog.push(`${new Date().toISOString()} ${event}${data === undefined ? '' : ' ' + JSON.stringify(data)}`);
@@ -218,6 +245,11 @@ interface PeerConnection {
   // per the spec ("tidak perlu sinkron ke server").
   proximityGain: number;
   manualVolume: number;
+  // Where the volume is headed, and where it currently is. Split so the
+  // 5Hz proximity tick can move the target in one jump while what the
+  // listener hears slides there smoothly — see applyGain / rampVolumes.
+  targetVolume: number;
+  currentVolume: number;
   retryCount: number;
   remoteDescSet: boolean;
   iceQueue: RTCIceCandidateInit[];
@@ -323,6 +355,9 @@ class WebRTCService {
   // picture for a "Menyambung ulang..." overlay instead of showing nothing.
   private onScreenShareStalled: ((id: string, stalled: boolean) => void) | null = null;
   private analyserInterval: ReturnType<typeof setInterval> | null = null;
+  // Runs only while at least one peer's volume is still travelling —
+  // rampVolumes stops it once everyone has arrived.
+  private volumeRampInterval: ReturnType<typeof setInterval> | null = null;
 
   setSocket(socket: Socket) {
     this.socket = socket;
@@ -670,15 +705,66 @@ class WebRTCService {
     return this.screenStream;
   }
 
+  // Records where this peer's volume SHOULD be. The actual move happens in
+  // rampVolumes below, a step at a time.
+  //
+  // This used to write the new volume straight through. That was fine while
+  // proximity recomputed 60x/sec — each step was a fraction of a percent —
+  // but proximity now runs at 5/sec (see App.tsx's PROXIMITY_TICK_MS), and
+  // at walking speed that is a jump of up to ~0.4 in a single assignment.
+  // Stepping a volume that hard is audible as a click, and HTMLMediaElement
+  // .volume has no scheduling API to smooth it, so the smoothing has to be
+  // done here.
   private applyGain(peer: PeerConnection) {
-    const volume = Math.max(0, Math.min(1, peer.proximityGain * peer.manualVolume));
+    peer.targetVolume = Math.max(0, Math.min(1, peer.proximityGain * peer.manualVolume));
+    // Push the current level out straight away, before any ramping. ontrack
+    // calls this the moment it attaches a fresh <audio> element, and a brand
+    // new element defaults to volume 1 — if the ramp had already settled at,
+    // say, 0.3 for this peer, waiting for the next ramp tick (which would
+    // see nothing left to move and skip the write entirely) would leave them
+    // playing at full volume permanently.
+    this.writePeerVolume(peer);
+    this.ensureVolumeRamp();
+  }
+
+  private writePeerVolume(peer: PeerConnection): void {
     // The element is what the user actually hears, so proximity falloff has
     // to land here — the gain node alone only affects the recording tap.
-    if (peer.audioEl) peer.audioEl.volume = volume;
+    if (peer.audioEl) peer.audioEl.volume = peer.currentVolume;
     // A peer created before the AudioContext existed (offer arrived ahead of
     // local media) has no gain node — proximity ticks must not throw on it.
-    if (!peer.audioGain) return;
-    peer.audioGain.gain.value = volume;
+    if (peer.audioGain) peer.audioGain.gain.value = peer.currentVolume;
+  }
+
+  private ensureVolumeRamp(): void {
+    if (this.volumeRampInterval) return;
+    this.volumeRampInterval = setInterval(() => this.rampVolumes(), VOLUME_RAMP_INTERVAL_MS);
+  }
+
+  // Exponential approach — each tick closes a fixed fraction of the
+  // remaining distance, so a big jump moves fast at first and settles
+  // gently, and a small one is essentially instant. Snaps the last sliver
+  // rather than approaching zero forever, which also lets the interval stop
+  // once every peer has arrived.
+  private rampVolumes(): void {
+    let anyMoving = false;
+    for (const peer of this.peers.values()) {
+      const target = peer.targetVolume;
+      let current = peer.currentVolume;
+      if (Math.abs(target - current) < 0.005) {
+        if (current === target) continue;
+        current = target;
+      } else {
+        current += (target - current) * VOLUME_RAMP_FACTOR;
+        anyMoving = true;
+      }
+      peer.currentVolume = current;
+      this.writePeerVolume(peer);
+    }
+    if (!anyMoving && this.volumeRampInterval) {
+      clearInterval(this.volumeRampInterval);
+      this.volumeRampInterval = null;
+    }
   }
 
   // Browsers refuse both AudioContext.resume() and <audio>.play() until the
@@ -762,8 +848,15 @@ class WebRTCService {
   // "fine" even if it has been stalled for the last 10 minutes — inDelta/
   // outDelta (packets since the LAST tick, ~5s ago) is what actually proves
   // "flowing right now" vs "flowed once, then stopped".
-  async reportStats(): Promise<void> {
-    if (!this.peers.size) { diag('stats: no peers connected'); return; }
+  async reportStats(force = false): Promise<void> {
+    // getStats() walks the whole RTC stats graph per peer — never run it on
+    // a timer unless diagnostics are actually switched on. `force` is the
+    // manual window.webrtcDiag() hook, which is always allowed.
+    if (!force && !DIAG_ENABLED) return;
+    const log = force
+      ? (event: string, data?: unknown) => console.log(`[webrtc-diag] ${event}`, data ?? '')
+      : diag;
+    if (!this.peers.size) { log('stats: no peers connected'); return; }
     for (const [id, peer] of this.peers) {
       const ice = peer.pc.iceConnectionState;
       const out: Record<string, unknown> = {
@@ -814,7 +907,7 @@ class WebRTCService {
       } catch (err) {
         out.statsError = String(err);
       }
-      diag(`stats [peer ${id}]`, out);
+      log(`stats [peer ${id}]`, out);
 
       await this.checkScreenStall(id, peer);
     }
@@ -960,6 +1053,8 @@ class WebRTCService {
       screenSender: null,
       proximityGain: 1,
       manualVolume: 1,
+      targetVolume: 1,
+      currentVolume: 1,
       retryCount: 0,
       remoteDescSet: false,
       videoEligible: includeVideo,
@@ -1556,17 +1651,26 @@ class WebRTCService {
     return !!this.screenStream;
   }
 
-  // QA (Load checklist item 3) — asks the server for a slot BEFORE opening
-  // the OS screen picker at all, so a denial (room already at
-  // MAX_SCREEN_SHARES_PER_ROOM) never even prompts for screen-capture
-  // permission. socket.once (not .on) — this is a one-shot request/response,
-  // not an ongoing subscription; a stray timeout-path response arriving
-  // late must not leak a listener that fires again on some later unrelated
-  // grant/deny. The 4s timeout is a pure safety net (server unreachable,
-  // request dropped) — treated as "granted" so a socket hiccup can
-  // never permanently block a legitimate share, matching this app's
-  // existing "a check that can't be verified fails open, not closed"
-  // posture elsewhere (see roomHandler.ts's own approval-gate comments).
+  // QA (Load checklist item 3) — the AUTHORITATIVE slot check, run against
+  // the server. No longer gates the OS picker (see startScreenShare for why
+  // that ordering was the bug); it now runs after capture has already
+  // started, and a denial tears that capture back down.
+  //
+  // socket.once (not .on) — one-shot request/response, not an ongoing
+  // subscription; a stray timeout-path response arriving late must not leak
+  // a listener that fires again on some later unrelated grant/deny.
+  //
+  // The timeout is a pure safety net (server unreachable, request dropped),
+  // treated as "granted" so a socket hiccup can never permanently block a
+  // legitimate share — matching this app's existing "a check that can't be
+  // verified fails open, not closed" posture (see roomHandler.ts's approval-
+  // gate comments). It was 4000ms, which was catastrophic while this call
+  // still blocked the picker: the server had a path that replied nothing at
+  // all, so the user simply watched a dead button for four seconds. That
+  // silent path is fixed server-side (rtcHandler.ts always answers now), and
+  // this is 1500ms because nothing is waiting on the picker any more — the
+  // only cost of the timeout now is how long a genuinely unreachable server
+  // delays the confirmation of a share that has already started.
   private requestScreenShareSlot(): Promise<{ granted: boolean; reason?: string }> {
     return new Promise((resolve) => {
       const socket = this.socket;
@@ -1575,7 +1679,7 @@ class WebRTCService {
         socket.off(SocketEvents.RTC_SCREEN_SHARE_GRANTED, onGranted);
         socket.off(SocketEvents.RTC_SCREEN_SHARE_DENIED, onDenied);
         resolve({ granted: true });
-      }, 4000);
+      }, 1500);
       const onGranted = () => { clearTimeout(timer); socket.off(SocketEvents.RTC_SCREEN_SHARE_DENIED, onDenied); resolve({ granted: true }); };
       const onDenied = (data: { reason?: string }) => { clearTimeout(timer); socket.off(SocketEvents.RTC_SCREEN_SHARE_GRANTED, onGranted); resolve({ granted: false, reason: data?.reason }); };
       socket.once(SocketEvents.RTC_SCREEN_SHARE_GRANTED, onGranted);
@@ -1607,32 +1711,90 @@ class WebRTCService {
   // replaceTrack()-ing the camera sender — camera and screen now travel as
   // 2 independent tracks so both render as separate boxes simultaneously,
   // instead of screen share replacing the camera view entirely.
+  // Ordering here is load-bearing, and getting it wrong is what made the
+  // button feel broken. getDisplayMedia() requires TRANSIENT USER ACTIVATION,
+  // which browsers expire a few seconds after the click (5s in Chrome). This
+  // used to await a socket round-trip for a slot FIRST, which meant:
+  //   - the OS picker could not appear until the server answered, so every
+  //     share cost a round-trip of dead air, and a slow/silent answer cost
+  //     the whole safety-net timeout; and
+  //   - that wait spent the activation budget, so a slow answer made
+  //     getDisplayMedia throw NotAllowedError — reported to the user as
+  //     "permission denied" for a prompt they were never shown.
+  // So capture goes FIRST, on the still-fresh activation, and the server
+  // check follows. The original intent of the pre-check (don't prompt for
+  // screen capture just to refuse the share) is kept by the local screen
+  // below, which needs no round-trip at all.
   async startScreenShare(): Promise<{ success: boolean; error?: string }> {
-    const slot = await this.requestScreenShareSlot();
-    if (!slot.granted) {
-      return { success: false, error: slot.reason || 'Room ini sudah penuh yang share layar.' };
+    // Local, synchronous, zero-latency pre-screen. announcedScreens is
+    // already maintained off the room-wide RTC_SCREEN_SHARE broadcast (see
+    // setupSignaling), so the count is free — no request, no waiting, no
+    // activation spent. It can UNDER-count (it only sees peers this client
+    // has connected to — proximity-gated), never over-count, which is
+    // exactly the right direction to be wrong in: a false "room is full"
+    // would block a legitimate share, while a miss just falls through to
+    // the authoritative server check below.
+    if (this.announcedScreens.size >= MAX_SCREEN_SHARES_PER_ROOM) {
+      return {
+        success: false,
+        error: `Sudah ada ${this.announcedScreens.size} orang share layar di room ini (maks ${MAX_SCREEN_SHARES_PER_ROOM}). Coba lagi setelah salah satu berhenti.`,
+      };
     }
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: SCREEN_SHARE_CONSTRAINTS });
-      this.screenStream = stream;
-      const screenTrack = stream.getVideoTracks()[0];
-      screenTrack.onended = () => this.stopScreenShare();
-      // Announce BEFORE adding the track, so the id is already known by the
-      // time the renegotiated track shows up at the other end and there is no
-      // window where it has to be guessed at.
-      this.socket?.emit(SocketEvents.RTC_SCREEN_SHARE, { streamId: stream.id });
 
-      for (const peer of this.peers.values()) {
-        peer.screenSender = this.capScreenShareBitrate(peer.pc.addTrack(screenTrack, stream));
-      }
-      return { success: true };
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: SCREEN_SHARE_CONSTRAINTS });
     } catch (err: unknown) {
-      const message = err instanceof DOMException && err.name === 'NotAllowedError'
-        ? 'Screen share permission denied'
-        : 'Failed to start screen share';
-      console.warn('[webrtc]', message);
+      // Now that capture runs first on a fresh gesture, NotAllowedError
+      // really does mean the user dismissed the picker — it is no longer
+      // the ambiguous "or the activation expired while we waited" it was
+      // before. NotFoundError/NotReadableError are a genuinely different
+      // failure (no capturable surface, or the OS refused to hand it over)
+      // and used to be flattened into one unhelpful message.
+      const name = err instanceof DOMException ? err.name : '';
+      const message =
+        name === 'NotAllowedError' ? 'Share layar dibatalkan.'
+        : name === 'NotFoundError' || name === 'NotReadableError' ? 'Tidak ada layar yang bisa dibagikan.'
+        : 'Gagal memulai share layar.';
+      console.warn('[webrtc] getDisplayMedia failed:', name || err);
       return { success: false, error: message };
     }
+
+    // Authoritative check, now that capture is already running. On a denial
+    // the capture we just started has to be torn back down — the user picked
+    // a surface for a share that isn't going to happen.
+    const slot = await this.requestScreenShareSlot();
+    if (!slot.granted) {
+      stream.getTracks().forEach((t) => t.stop());
+      return { success: false, error: slot.reason || 'Room ini sudah penuh yang share layar.' };
+    }
+
+    // stopScreenShare() may have run while we were awaiting the slot (the
+    // user hit the button again, or the share ended some other way). Adopting
+    // this stream now would resurrect a share that was already cancelled and
+    // leave a track nothing ever stops.
+    if (this.screenStream) {
+      stream.getTracks().forEach((t) => t.stop());
+      return { success: false, error: 'Share layar dibatalkan.' };
+    }
+
+    this.screenStream = stream;
+    const screenTrack = stream.getVideoTracks()[0];
+    screenTrack.onended = () => this.stopScreenShare();
+    // Announce BEFORE adding the track, so the id is already known by the
+    // time the renegotiated track shows up at the other end and there is no
+    // window where it has to be guessed at.
+    this.socket?.emit(SocketEvents.RTC_SCREEN_SHARE, { streamId: stream.id });
+
+    for (const peer of this.peers.values()) {
+      // addTrack() below fires onnegotiationneeded synchronously — its own
+      // handler (see createPeer) already defers via pendingRenegotiation
+      // when this peer's initial offer/answer is still in flight, or when
+      // the connection isn't 'stable' yet, and replays it once ready. No
+      // extra bookkeeping needed here.
+      peer.screenSender = this.capScreenShareBitrate(peer.pc.addTrack(screenTrack, stream));
+    }
+    return { success: true };
   }
 
   stopScreenShare() {
@@ -1658,6 +1820,7 @@ class WebRTCService {
     // the room is the point at which none of it is true any more.
     this.announcedScreens.clear();
     if (this.analyserInterval) clearInterval(this.analyserInterval);
+    if (this.volumeRampInterval) { clearInterval(this.volumeRampInterval); this.volumeRampInterval = null; }
     this.localStream?.getTracks().forEach((t) => t.stop());
     this.screenStream?.getTracks().forEach((t) => t.stop());
     this.screenStream = null;
@@ -1742,6 +1905,8 @@ class WebRTCService {
     // flapping.
     const QUIET_TICKS_TO_STOP = 6; // ~600ms at the 100ms interval below
     const quiet = new Map<string, number>();
+    // Scratch buffer shared by every peer's loudness read — see the loop.
+    let peerBuf = new Uint8Array(0);
 
     this.analyserInterval = setInterval(() => {
       if (this.analyserNode) {
@@ -1766,7 +1931,16 @@ class WebRTCService {
       // analyser's doc comment on PeerConnection.
       for (const [id, peer] of this.peers) {
         if (!peer.analyser) continue;
-        const buf = new Uint8Array(peer.analyser.frequencyBinCount);
+        // Reuse one buffer across peers and ticks. This used to allocate a
+        // fresh ~1KB Uint8Array per peer per tick — at 10 ticks/sec with a
+        // full mesh that is ~80KB/sec of pure garbage, purely to be read
+        // once and thrown away. Every analyser here is created with the same
+        // fftSize, so one buffer sized to the largest seen fits them all;
+        // getByteTimeDomainData fills only as much as it needs.
+        if (peerBuf.length < peer.analyser.frequencyBinCount) {
+          peerBuf = new Uint8Array(peer.analyser.frequencyBinCount);
+        }
+        const buf = peerBuf;
         const loud = WebRTCService.loudness(peer.analyser, buf) > SPEAKING_THRESHOLD;
 
         if (loud) {
@@ -1795,11 +1969,9 @@ export const webrtcService = new WebRTCService();
 // (`webrtcDiag()` in the console) for checking a specific moment — e.g.
 // right while the other person is speaking.
 if (typeof window !== 'undefined') {
-  // Printed once at load so "did my .env.local actually get picked up?" is
-  // answerable without guessing — the URL is shown, the credential never is.
-  console.log('[webrtc-diag] TURN configured:', !!(TURN_URL && TURN_USERNAME && TURN_CREDENTIAL), TURN_URL ? `(${TURN_URL})` : '(STUN only)');
-  (window as unknown as { webrtcDiag: () => void }).webrtcDiag = () => { void webrtcService.reportStats(); };
-  setInterval(() => { void webrtcService.reportStats(); }, 5000);
+  // Always available, flag or not — a snapshot on demand costs nothing until
+  // someone actually asks for it.
+  (window as unknown as { webrtcDiag: () => void }).webrtcDiag = () => { void webrtcService.reportStats(true); };
   // [webrtc-diag] For someone reproducing the bug who isn't going to
   // manually scroll/select console output mid-meeting: run
   // webrtcDiagExport() in the console once, and the whole session's log
@@ -1815,4 +1987,12 @@ if (typeof window !== 'undefined') {
     );
     return text;
   };
+  if (DIAG_ENABLED) {
+    // Printed once at load so "did my .env.local actually get picked up?" is
+    // answerable without guessing — the URL is shown, the credential never is.
+    console.log('[webrtc-diag] TURN configured:', !!(TURN_URL && TURN_USERNAME && TURN_CREDENTIAL), TURN_URL ? `(${TURN_URL})` : '(STUN only)');
+    // The polling half is the expensive part, so it only exists when the
+    // flag is on.
+    setInterval(() => { void webrtcService.reportStats(); }, 5000);
+  }
 }

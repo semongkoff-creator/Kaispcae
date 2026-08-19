@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, RtcSignal } from '@kaispace/shared';
+import { SocketEvents, RtcSignal, MAX_SCREEN_SHARES_PER_ROOM } from '@kaispace/shared';
 
 
 // A socket joins the room slug (roomHandler.ts's JOIN_ROOM) plus several
@@ -36,11 +36,31 @@ function getSocketRoom(socket: Socket): string | undefined {
 // disconnect (implicit stop — see below); never persisted, purely
 // in-memory bookkeeping like roomHandler.ts's own per-room maps.
 const activeScreeners = new Map<string, Set<string>>();
-const MAX_SCREEN_SHARES_PER_ROOM = 4;
 
 function releaseScreenShareSlot(socket: Socket, room: string | undefined) {
   if (!room) return;
   activeScreeners.get(room)?.delete(socket.id);
+}
+
+// Frees this socket's screen-share slot AND tells the room the share ended.
+// Exported because the explicit-leave path can't be caught from inside this
+// module: roomHandler's handleLeave already called socket.leave(room) by the
+// time any listener registered here would run (registerRoomHandlers runs
+// first — see index.ts), so socket.rooms reads back empty and the room can
+// no longer be derived. handleLeave calls this directly instead, passing the
+// room it still knows about.
+//
+// Both halves matter. Dropping only the slot leaves the SERVER's count right
+// while every other client keeps a ghost entry in its own `announcedScreens`
+// for a share that ended — see the 'disconnecting' handler below for why
+// that is no longer merely cosmetic.
+export function releaseScreenShareOnLeave(socket: Socket, room: string | undefined) {
+  if (!room) return;
+  const wasScreening = !!activeScreeners.get(room)?.has(socket.id);
+  releaseScreenShareSlot(socket, room);
+  if (wasScreening) {
+    socket.to(room).emit(SocketEvents.RTC_SCREEN_SHARE, { fromId: socket.id, streamId: null });
+  }
 }
 
 // QA (Stabilitas checklist item 12, "Kuota biaya API") — a rough, workspace-
@@ -103,12 +123,30 @@ export function registerRtcHandlers(io: Server, socket: Socket) {
     socket.to(room).emit(SocketEvents.RTC_SCREEN_SHARE, { fromId: socket.id, streamId });
   });
 
-  // The actual gate — asked BEFORE the client opens getDisplayMedia's OS
-  // picker, so a denial never even prompts for screen-capture permission.
-  // Answered directly to the requester only (never broadcast).
+  // The authoritative gate. Answered directly to the requester only (never
+  // broadcast).
+  //
+  // This handler MUST reply on every path — that is the whole fix here.
+  // It used to `return` silently when the socket wasn't in a room yet, and
+  // since the client blocks on this reply before it can act, "no reply"
+  // meant the client sat on its full safety-net timeout every single time.
+  // The window is not hypothetical: a socket.io reconnect issues a NEW
+  // socket id whose `rooms` set is empty until the client's own CONNECT
+  // handler re-emits JOIN_ROOM, so any share attempted in that gap stalled
+  // for the entire timeout. Silence is never a valid answer to a
+  // request/response event that something is waiting on.
   socket.on(SocketEvents.RTC_SCREEN_SHARE_REQUEST, () => {
     const room = getSocketRoom(socket);
-    if (!room) return;
+    if (!room) {
+      // Fail OPEN, matching this app's existing "a check that can't be
+      // verified fails open, not closed" posture (see roomHandler.ts's
+      // approval-gate comments). Not being in a room yet is a race, not an
+      // abuse signal — and the cap still holds, because the RTC_SCREEN_SHARE
+      // announce below is what actually records the slot, and that one
+      // genuinely does need a room.
+      socket.emit(SocketEvents.RTC_SCREEN_SHARE_GRANTED);
+      return;
+    }
     const current = activeScreeners.get(room)?.size ?? 0;
     if (current >= MAX_SCREEN_SHARES_PER_ROOM) {
       socket.emit(SocketEvents.RTC_SCREEN_SHARE_DENIED, {
@@ -140,5 +178,16 @@ export function registerRtcHandlers(io: Server, socket: Socket) {
   // BEFORE 'disconnect' fires, so getSocketRoom(socket) would already read
   // back empty by then and this cleanup would silently no-op every time.
   // 'disconnecting' fires first, while socket.rooms is still populated.
-  socket.on('disconnecting', () => releaseScreenShareSlot(socket, getSocketRoom(socket)));
+  //
+  // The broadcast matters as much as the bookkeeping. Freeing the slot only
+  // fixes the SERVER's count; every other client learns a screen share
+  // stopped solely from an RTC_SCREEN_SHARE(streamId:null) announcement,
+  // which a crashed presenter never sends. Without this, their entry sat in
+  // every peer's `announcedScreens` until that peer left the room — a ghost
+  // marker for a share nobody is doing. That was cosmetic while the cap was
+  // checked server-side only; it stops being cosmetic now that the client
+  // screens locally against this same map before opening the OS picker (see
+  // webrtcService.startScreenShare), because four stale entries would lock
+  // everyone out of sharing with no way back short of a reload.
+  socket.on('disconnecting', () => releaseScreenShareOnLeave(socket, getSocketRoom(socket)));
 }

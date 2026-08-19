@@ -1,6 +1,13 @@
 export interface MovementSnapshot {
   x: number;
   y: number;
+  // Point on the CLIENT's clock at which this position was true. Named for
+  // how it used to be produced (Date.now() when the packet landed), which
+  // let network jitter distort playback — it is now derived from the
+  // server's own send time via serverClock.ts, so successive snapshots are
+  // spaced the way the server actually spaced them. Kept as `receivedAt`
+  // because it is still a client-clock instant comparable with Date.now(),
+  // which is all any reader here assumes.
   receivedAt: number;
 }
 

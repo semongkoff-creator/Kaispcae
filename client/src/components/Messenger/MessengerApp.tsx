@@ -194,10 +194,26 @@ export function MessengerApp({
   // 1s tick so typing indicators lapse on their own — there's no explicit
   // "stopped typing" event, entries just pass their expiry.
   const [, setTick] = useState(0);
+  // Ticks ONLY while there is an unexpired typing entry to expire. It used
+  // to run unconditionally for as long as the surface was up, re-rendering
+  // this whole component once a second forever — and a chat surface is
+  // typically left open, so that was a permanent 1Hz render of one of the
+  // largest components in the app to do nothing at all. Someone starting to
+  // type changes typingByTarget, which restarts this effect; the tick that
+  // notices the last entry lapse stops it again.
+  const anyoneTyping = () =>
+    Object.values(useGameStore.getState().typingByTarget).some((byUser) =>
+      Object.values(byUser).some((expiresAt) => expiresAt > Date.now()),
+    );
   useEffect(() => {
-    const iv = setInterval(() => setTick((t) => t + 1), 1000);
+    if (!anyoneTyping()) return;
+    const iv = setInterval(() => {
+      setTick((t) => t + 1);
+      if (!anyoneTyping()) clearInterval(iv);
+    }, 1000);
     return () => clearInterval(iv);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typingByTarget]);
 
   const rows = useMemo<Row[]>(() => {
     const channelRows: Row[] = channels.map((c) => ({

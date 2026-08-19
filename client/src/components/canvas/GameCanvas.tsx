@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
+import { useRef, useEffect, useCallback, useState, useMemo, memo } from 'react';
 import {
   TILE_SIZE,
   MAP_WIDTH,
@@ -8,7 +8,6 @@ import {
   Furniture,
   RoomTile,
   Direction,
-  ProximityPlayer,
   PROXIMITY_THRESHOLD_PX,
   EMOTE_EMOJI,
   JUMP_DURATION_MS,
@@ -21,6 +20,8 @@ import {
   roleAtLeast,
 } from '@kaispace/shared';
 import { useGameStore, OVERVIEW_ZOOM_THRESHOLD } from '@/stores/gameStore';
+import { livePos } from '@/stores/livePosition';
+import { livePlayers, remotePos, getProximitySnapshot, interpolateRemotePositions } from '@/stores/remotePositions';
 import { useMovement } from '@/hooks/useMovement';
 import { drawAvatar } from './AvatarSprite';
 import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
@@ -161,7 +162,6 @@ interface GameCanvasProps {
   emitStop: (x: number, y: number, direction: string) => void;
   emitJump: () => void;
   emitNudge: (targetId: string) => void;
-  proximityData: ProximityPlayer[];
   micMuted: boolean;
   cameraOn: boolean;
   editorMode: boolean;
@@ -345,7 +345,7 @@ function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: numb
   return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, emitSeatClaimRequest, emitSeatClaimDecide, emitSeatClaimRequestCancel, onMediaOpen, onPlayerClick, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, onDoorAreaPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
+function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, emitSeatClaimRequest, emitSeatClaimDecide, emitSeatClaimRequestCancel, onMediaOpen, onPlayerClick, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, onDoorAreaPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -382,6 +382,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const doorAreaRects = useGameStore((s) => s.doorAreaRects);
   const unlockedDoorAreaIds = useGameStore((s) => s.unlockedDoorAreaIds);
   const localPlayer = useGameStore((s) => s.localPlayer);
+  const posEpoch = useGameStore((s) => s.posEpoch);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const theme = useGameStore((s) => s.theme);
   const followInfo = useGameStore((s) => s.followInfo);
@@ -605,9 +606,17 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     liveReferenceImageRef.current = liveReferenceImage;
     avatarScaleRef.current = avatarScale;
     activeZoneSessionsRef.current = useGameStore.getState().activeZoneSessions;
+    // Deliberately dependency-free: this mirrors ~30 store slices into refs
+    // for the render loop, and every one of them is already a reactive
+    // subscription above, so the component only re-renders when at least one
+    // of them actually changed. Listing them as deps would duplicate that
+    // set with no benefit and one more place to forget to update.
   });
 
-  const proximityRef = useRef(proximityData); proximityRef.current = proximityData;
+  // Read from the module mirror rather than a prop — see
+  // remotePositions.ts's setProximitySnapshot. The draw loop pulls the
+  // current value per frame, so there is nothing to keep in sync here.
+  const proximityRef = { get current() { return getProximitySnapshot(); } };
   const lowSpecModeRef = useRef(lowSpecMode); lowSpecModeRef.current = lowSpecMode;
   const lastDrawTimeRef = useRef(0);
   const micMutedRef = useRef(micMuted); micMutedRef.current = micMuted;
@@ -664,8 +673,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     return isDoorTile(t, tileX, tileY);
   }, []);
 
-  const onMoveRef = useRef((x: number, y: number, direction: Direction) => {
-    useGameStore.getState().setLocalPlayer({ x, y, direction, isMoving: true });
+  const onMoveRef = useRef((x: number, y: number, direction: Direction, isRunning = false) => {
+    // livePos every frame, store at most every LOCAL_PLAYER_STORE_INTERVAL_MS
+    // — see livePosition.ts. This used to call setLocalPlayer directly, which
+    // handed React a new localPlayer object 60x/sec and re-rendered App.tsx's
+    // entire tree along with it.
+    useGameStore.getState().setLocalPlayerMoving(x, y, direction, isRunning);
   });
 
   // "Door Area" — client-side prediction only (the server independently
@@ -690,9 +703,17 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     getImpassableAreas: () => [...impassableAreaRectsRef.current, ...getLockedDoorAreas()],
   });
 
+  // Keyed on posEpoch, NOT on localPlayer.x/y. The store position now lags
+  // the real one by up to LOCAL_PLAYER_STORE_INTERVAL_MS while walking, so
+  // depending on x/y here would feed a stale position back into the movement
+  // system every throttle tick and yank the avatar backwards mid-stride.
+  // posEpoch only advances for genuinely external position changes —
+  // teleport, portal, sit/stand, server correction, restricted-zone bounce —
+  // which are exactly the ones that must override local movement.
   useEffect(() => {
-    setPosition(localPlayer.x, localPlayer.y);
-  }, [localPlayer.x, localPlayer.y, setPosition]);
+    const p = useGameStore.getState().localPlayer;
+    setPosition(p.x, p.y);
+  }, [posEpoch, setPosition]);
 
   // Click a non-blocked tile. Refs so the once-attached listener
   // always reads current values without re-binding.
@@ -750,8 +771,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   }, [isBlocked, getLockedDoorAreas]);
 
   const computeWalkWaypoints = useCallback((targetTileX: number, targetTileY: number) => {
-    const startTileX = Math.floor(localPlayerRef.current.x / TILE_SIZE);
-    const startTileY = Math.floor(localPlayerRef.current.y / TILE_SIZE);
+    // livePos — a click-to-move issued mid-stride must path from where the
+    // avatar IS. The throttled store position can be most of a tile behind
+    // at run speed, which is enough to start the route on the wrong tile.
+    const startTileX = Math.floor(livePos.x / TILE_SIZE);
+    const startTileY = Math.floor(livePos.y / TILE_SIZE);
     // QA follow-up — MAP_WIDTH/MAP_HEIGHT are only the default grid size; a
     // resized room (Room Editor's Resize tool, up to 200x200) is bigger than
     // that, so bounding the pathfind to the fixed constants made any
@@ -900,9 +924,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // Refuse if another player is already seated on this exact tile —
     // without this check, two players could both sit at the same spot and
     // their avatars would render fully overlapping each other.
-    const occupied = Object.values(playerRecordsRef.current).some(
-      (p) => p.isSitting && (p.seatFurnitureId === seatId || (p.x === chairCenterX && p.y === chairCenterY)),
-    );
+    const occupied = Object.values(playerRecordsRef.current).some((p) => {
+      if (!p.isSitting) return false;
+      if (p.seatFurnitureId === seatId) return true;
+      const pos = remotePos(p);
+      return pos.x === chairCenterX && pos.y === chairCenterY;
+    });
     if (occupied) {
       // Was a silent no-op before — say why, so a taken seat doesn't read as
       // "sit is broken". Transient banner, same pattern as other HUD notices.
@@ -948,7 +975,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // them, so the direction check silently found no target every time.
   // Plain nearest-within-range matches how "senggol" actually gets used.
   const performNudge = useCallback(() => {
-    const player = localPlayerRef.current;
+    // livePos, not the store: with the store position throttled, a nudge
+    // fired mid-stride would measure range from where the avatar was up to
+    // LOCAL_PLAYER_STORE_INTERVAL_MS ago — enough at run speed to miss
+    // someone standing right next to you.
+    const player = livePos;
     // Matches the visible white "Proximity ring" (PROXIMITY_THRESHOLD_PX,
     // shared/types/index.ts) instead of its own separate, tighter radius
     // (was TILE_SIZE * 1.5 = 72px, exactly half the 144px ring) — someone
@@ -962,7 +993,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     let target: Avatar | null = null;
     let bestDist = Infinity;
     for (const p of Object.values(playerRecordsRef.current)) {
-      const dist = Math.hypot(p.x - player.x, p.y - player.y);
+      const pos = remotePos(p);
+      const dist = Math.hypot(pos.x - player.x, pos.y - player.y);
       if (dist > NUDGE_RANGE_PX) continue;
       if (dist < bestDist) { bestDist = dist; target = p; }
     }
@@ -973,8 +1005,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const performStandUp = useCallback(() => {
     const state = useGameStore.getState();
     const returnPos = state.sitReturnPos;
-    const x = returnPos?.x ?? state.localPlayer.x;
-    const y = returnPos?.y ?? state.localPlayer.y;
+    const x = returnPos?.x ?? livePos.x;
+    const y = returnPos?.y ?? livePos.y;
     const direction = state.localPlayer.direction;
     state.setLocalPlayer({ x, y, isSitting: false, seatFurnitureId: undefined });
     state.setSittingFurnitureId(null);
@@ -1210,6 +1242,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const worldViewW = logicalW / zoom;
     const worldViewH = logicalH / zoom;
 
+    // Advance everyone else's interpolated positions for THIS frame before
+    // anything reads them (see remotePositions.ts). Used to run on its own
+    // 16ms setInterval in useSocket, which both raced this loop and kept
+    // running while the tab was hidden.
+    interpolateRemotePositions((id) => id in playerRecordsRef.current);
+
     const moveResult = update(dt);
     let effectiveMoveResult = moveResult;
 
@@ -1233,11 +1271,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         if (targetPlayer) {
           const cols = tilesRef.current[0]?.length || MAP_WIDTH;
           const rows = tilesRef.current.length || MAP_HEIGHT;
+          const targetPos = remotePos(targetPlayer);
           const routeTarget = findFollowRouteTarget({
             currentX: effectiveMoveResult.x,
             currentY: effectiveMoveResult.y,
-            targetX: targetPlayer.x,
-            targetY: targetPlayer.y,
+            targetX: targetPos.x,
+            targetY: targetPos.y,
             targetDirection: targetPlayer.direction,
             blocked: pathBlocked,
             cols,
@@ -1285,8 +1324,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       handledLocateRequestIdRef.current = lr.requestId;
       const target = playerRecordsRef.current[lr.playerId];
       if (target) {
-        const targetTileX = Math.floor(target.x / TILE_SIZE);
-        const targetTileY = Math.floor(target.y / TILE_SIZE);
+        const targetPos = remotePos(target);
+        const targetTileX = Math.floor(targetPos.x / TILE_SIZE);
+        const targetTileY = Math.floor(targetPos.y / TILE_SIZE);
         cancelActiveFollowForRoute();
         walkTargetRef.current = computeWalkWaypoints(targetTileX, targetTileY);
         locateHighlightRef.current = { playerId: lr.playerId, start: performance.now() };
@@ -1329,7 +1369,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       wasMovingRef.current = true;
     } else if (wasMovingRef.current) {
       emitStopRef.current(effectiveMoveResult.x, effectiveMoveResult.y, effectiveMoveResult.direction);
-      useGameStore.getState().setLocalPlayer({ isMoving: false });
+      // Carries x/y, unlike the bare { isMoving: false } this used to send:
+      // with the position now throttled, the last frame's exact resting spot
+      // would otherwise never reach the store, leaving it up to one interval
+      // behind wherever the player actually stopped.
+      useGameStore.getState().stopLocalPlayer(
+        effectiveMoveResult.x,
+        effectiveMoveResult.y,
+        effectiveMoveResult.direction,
+      );
       wasMovingRef.current = false;
     }
 
@@ -1808,10 +1856,17 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // a couple hundred ms means it sits at partial opacity for a few frames
     // right as the avatar reaches it, which reads as the head rendering
     // "half, then filling in" rather than a clean disappearance.
+    // Built ONCE per frame, not once per label. This list used to be
+    // rebuilt inside the check below, which runs for every zone banner and
+    // every banner furniture item — so a room with ten of each rebuilt it
+    // twenty times a frame, each time walking every player in the room.
+    // Live positions throughout: a throttled one would make labels flicker
+    // back on for a few frames as an avatar passes under them.
+    const labelOccluders: { x: number; y: number }[] = [livePos];
+    for (const p of Object.values(playerRecordsRef.current)) labelOccluders.push(remotePos(p));
+
     const isAvatarUnderLabel = (tileX: number, tileY: number, tilesW: number) => {
-      const local = localPlayerRef.current;
-      const avatars: { x: number; y: number }[] = [local, ...Object.values(playerRecordsRef.current)];
-      return avatars.some((a) => {
+      return labelOccluders.some((a) => {
         const row = Math.floor(a.y / TILE_SIZE);
         const col = Math.floor(a.x / TILE_SIZE);
         return row >= tileY && row <= tileY + 1 && col >= tileX - 1 && col <= tileX + tilesW;
@@ -2013,7 +2068,14 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       id: localPlayerId,
       isRunning: effectiveMoveResult.isMoving && effectiveMoveResult.isRunning,
     };
-    const remoteAvatars = Object.values(playerRecords).filter((p) => p.id !== localPlayerId);
+    // Positions come from the interpolation overlay, everything else from
+    // the record — see remotePositions.ts.
+    const remoteAvatars = Object.values(playerRecords)
+      .filter((p) => p.id !== localPlayerId)
+      .map((p) => {
+        const live = livePlayers.get(p.id);
+        return live ? { ...p, x: live.x, y: live.y } : p;
+      });
     const allAvatars: Avatar[] = [localAvatar, ...remoteAvatars];
     // "Hide myself" (Avatar.hidden) — admin+ sees a hidden avatar regardless;
     // everyone else, including anyone who just hasn't toggled it themselves,
@@ -2555,8 +2617,13 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const records = playerRecordsRef.current;
       const p = pid === localPlayerId ? localPlayerRef.current : records[pid];
       if (!p) continue;
-      const bsx = p.x - cameraX;
-      const bsy = p.y - cameraY;
+      // Own bubble follows THIS frame's position, not the throttled store
+      // copy — otherwise it visibly trails the avatar while walking.
+      const remote = remotePos(p);
+      const px = pid === localPlayerId ? playerX : remote.x;
+      const py = pid === localPlayerId ? playerY : remote.y;
+      const bsx = px - cameraX;
+      const bsy = py - cameraY;
       const alpha = Math.max(0, 1 - (now - bubble.expireAt + 1000) / 1000);
       ctx.save(); ctx.globalAlpha = alpha;
       // Bug fix — ctx.font used to still be whatever was last set earlier
@@ -3231,3 +3298,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     </div>
   );
 }
+
+// memo matters here specifically: App re-renders whenever the throttled local
+// position lands (~10/sec while walking), and this is by far the heaviest
+// child it has. Every remaining prop is either a primitive or a useCallback,
+// so the default shallow compare is enough — proximityData, the one prop that
+// was a fresh array each time, now travels outside React entirely.
+export const GameCanvas = memo(GameCanvasImpl);
