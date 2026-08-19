@@ -281,6 +281,12 @@ const ANIMATION_FRAME_MS = 120;
 // two tiles away. Media keeps the wider radius — X isn't overloaded.
 const SIT_TILE_RADIUS = 1;
 
+// How long a player has to stand still on a claimable seat's own tile
+// before the claim/request popup offers itself automatically — long enough
+// that just walking through the tile on the way somewhere else never
+// triggers it, per the room admin.
+const SEAT_AUTO_PROMPT_DELAY_MS = 1000;
+
 // Hand gesture shown on the NUDGER's own body (not the target) — a fist
 // bump reads as the closest match to "senggol" itself, and deliberately
 // isn't a single-finger pointing hand (👉).
@@ -501,6 +507,21 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // click. Null = no popup showing. ownerName is only set for the
   // "already taken" wording; a free-looking seat gets the plain variant.
   const [pendingSeatClaim, setPendingSeatClaim] = useState<{ seatId: string; ownerName: string | null } | null>(null);
+  // The draw() loop below is memoized once (empty deps) so it can't close
+  // over pendingSeatClaim's latest value directly — mirrored into a ref the
+  // same way emitSitRef etc. already do, so the auto-prompt check (added
+  // below) knows not to pop a second dialog while one's already open.
+  const pendingSeatClaimRef = useRef(pendingSeatClaim); pendingSeatClaimRef.current = pendingSeatClaim;
+  // Bug fix — claiming used to require a precise click on the seat's small
+  // marker; per the room admin, standing on the seat's own tile should
+  // offer it automatically instead. Debounced (SEAT_AUTO_PROMPT_DELAY_MS)
+  // so just walking THROUGH a seat tile on the way somewhere else doesn't
+  // interrupt movement with a popup — only actually stopping there does.
+  // Tracks the tile currently stood on, when it was entered, and whether
+  // this stay already triggered a prompt (so dismissing it while still
+  // standing there doesn't immediately reopen it — leaving and coming back
+  // resets this).
+  const seatProximityRef = useRef<{ seatId: string; enteredAt: number; prompted: boolean } | null>(null);
   // Live ownership — reactive (not just .getState()) so a marker's label/
   // click-behavior updates the instant someone else claims or releases it.
   const seatClaims = useGameStore((s) => s.seatClaims);
@@ -1948,6 +1969,37 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const localPlayerId = localPlayerIdRef.current;
     const localPlayer = localPlayerRef.current;
     const now = Date.now();
+
+    // Bug fix — claimable-seat auto-prompt: stand on the seat's own tile
+    // for SEAT_AUTO_PROMPT_DELAY_MS and the claim/request popup offers
+    // itself, no click needed (see seatProximityRef's own doc comment
+    // above). Only for seats that AREN'T already ours — walking onto your
+    // own claimed seat still just needs the normal click to sit, unchanged.
+    // Reads seatClaims/localUserId/pendingSeatClaimRequest fresh via
+    // getState() rather than the closed-over reactive values: this draw()
+    // callback is memoized once (empty deps), so those would otherwise be
+    // stuck at whatever they were on first render.
+    {
+      const playerTileX = Math.floor(playerX / TILE_SIZE);
+      const playerTileY = Math.floor(playerY / TILE_SIZE);
+      const standingSeat = claimableSeatsRef.current.find((s) => s.x === playerTileX && s.y === playerTileY);
+      if (standingSeat) {
+        if (seatProximityRef.current?.seatId !== standingSeat.id) {
+          seatProximityRef.current = { seatId: standingSeat.id, enteredAt: now, prompted: false };
+        } else if (!seatProximityRef.current.prompted && now - seatProximityRef.current.enteredAt >= SEAT_AUTO_PROMPT_DELAY_MS) {
+          seatProximityRef.current.prompted = true;
+          const state = useGameStore.getState();
+          const owner = state.seatClaims[standingSeat.id];
+          const isMine = !!owner && owner.userId === state.localUserId;
+          if (!isMine && !pendingSeatClaimRef.current && !state.pendingSeatClaimRequest) {
+            setPendingSeatClaim({ seatId: standingSeat.id, ownerName: owner?.name ?? null });
+          }
+        }
+      } else {
+        seatProximityRef.current = null;
+      }
+    }
+
     const walkOffset = effectiveMoveResult.isMoving ? Math.sin(timestamp * 0.008) * 2 : 0;
     const localAvatar: Avatar = {
       ...localPlayer, x: playerX, y: playerY, isMoving: effectiveMoveResult.isMoving,
@@ -3079,51 +3131,48 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         })}
       </div>
 
+      {/* Bug fix — this used to be a full-screen dark-backdrop modal, the
+          same "block everything until decided" treatment the admin
+          guest-approval popup uses. Per the room admin that read as too
+          heavy for something that can now trigger just from standing on a
+          tile (see seatProximityRef above) rather than a deliberate click —
+          a small floating card, same non-blocking style as the incoming-
+          request card below, fits an offer you can just as easily ignore
+          and keep walking. */}
       {pendingSeatClaim && (
-        <div
-          className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-auto"
-          onClick={() => setPendingSeatClaim(null)}
-        >
-          <div
-            className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs"
-            onClick={(e) => e.stopPropagation()}
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-40 pointer-events-auto bg-white dark:bg-gray-900 rounded-lg px-4 py-2.5 shadow-xl border border-purple-100 dark:border-gray-700 flex items-center gap-3 text-sm">
+          <span className="text-gray-900 dark:text-gray-100">
+            {pendingSeatClaim.ownerName
+              ? <>Kursi ini sudah diklaim <span className="font-semibold">{pendingSeatClaim.ownerName}</span>. Minta kursi ini?</>
+              : 'Klaim kursi ini sebagai milikmu?'}
+          </span>
+          <button
+            onClick={() => setPendingSeatClaim(null)}
+            className="px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 text-xs cursor-pointer whitespace-nowrap"
           >
-            <p className="text-gray-900 dark:text-gray-100 text-sm mb-4">
-              {pendingSeatClaim.ownerName
-                ? <>Kursi ini sudah diklaim <span className="font-semibold">{pendingSeatClaim.ownerName}</span>. Minta kursi ini ke pemiliknya?</>
-                : 'Klaim kursi ini sebagai milikmu?'}
-            </p>
-            <div className="flex gap-3 justify-center">
-              <button
-                onClick={() => setPendingSeatClaim(null)}
-                className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 text-sm cursor-pointer"
-              >
-                Batal
-              </button>
-              <button
-                onClick={() => {
-                  // Bug fix — taking over an already-claimed seat used to
-                  // just call emitClaimSeat here, which the server silently
-                  // resolved by bumping the requester to the nearest free
-                  // desk without ever telling the current owner anything
-                  // was asked. Now it's a real request the owner has to
-                  // approve — same shape as ZONE_KNOCK's keyholder-decides
-                  // flow — and only a genuinely free seat still claims
-                  // instantly below.
-                  if (pendingSeatClaim.ownerName) {
-                    emitSeatClaimRequest(pendingSeatClaim.seatId);
-                    setPendingSeatClaimRequest({ seatId: pendingSeatClaim.seatId, ownerName: pendingSeatClaim.ownerName });
-                  } else {
-                    emitClaimSeat(pendingSeatClaim.seatId);
-                  }
-                  setPendingSeatClaim(null);
-                }}
-                className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm cursor-pointer"
-              >
-                {pendingSeatClaim.ownerName ? 'Minta Kursi' : 'Konfirmasi'}
-              </button>
-            </div>
-          </div>
+            Batal
+          </button>
+          <button
+            onClick={() => {
+              // Bug fix — taking over an already-claimed seat used to just
+              // call emitClaimSeat here, which the server silently resolved
+              // by bumping the requester to the nearest free desk without
+              // ever telling the current owner anything was asked. Now it's
+              // a real request the owner has to approve — same shape as
+              // ZONE_KNOCK's keyholder-decides flow — and only a genuinely
+              // free seat still claims instantly below.
+              if (pendingSeatClaim.ownerName) {
+                emitSeatClaimRequest(pendingSeatClaim.seatId);
+                setPendingSeatClaimRequest({ seatId: pendingSeatClaim.seatId, ownerName: pendingSeatClaim.ownerName });
+              } else {
+                emitClaimSeat(pendingSeatClaim.seatId);
+              }
+              setPendingSeatClaim(null);
+            }}
+            className="px-2.5 py-1 rounded-md bg-purple-600 hover:bg-purple-700 text-white text-xs cursor-pointer whitespace-nowrap"
+          >
+            {pendingSeatClaim.ownerName ? 'Minta Kursi' : 'Klaim'}
+          </button>
         </div>
       )}
 
