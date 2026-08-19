@@ -20,7 +20,7 @@ export function MapZoomControl() {
 
   return (
     <div className="flex items-center gap-0.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-100 dark:border-gray-700 shadow-sm rounded-lg px-1.5 py-2">
-      <Tooltip label="Perkecil Peta" detail="Atur seberapa dekat tampilan peta.">
+      <Tooltip label="Perkecil Peta" detail="Atur seberapa dekat tampilan peta." side="bottom">
         <button
           onClick={() => stepMapZoom(-1)}
           disabled={zoom <= effectiveMinZoom}
@@ -29,7 +29,7 @@ export function MapZoomControl() {
           −
         </button>
       </Tooltip>
-      <Tooltip label="Ukuran 100%" detail="Kembalikan tampilan peta ke ukuran normal.">
+      <Tooltip label="Ukuran 100%" detail="Kembalikan tampilan peta ke ukuran normal." side="bottom">
         <button
           onClick={() => setMapZoom(1)}
           className="text-[10px] text-gray-600 dark:text-gray-300 w-8 text-center tabular-nums cursor-pointer hover:underline"
@@ -37,7 +37,7 @@ export function MapZoomControl() {
           {Math.round(zoom * 100)}%
         </button>
       </Tooltip>
-      <Tooltip label="Perbesar Peta" detail="Atur seberapa dekat tampilan peta.">
+      <Tooltip label="Perbesar Peta" detail="Atur seberapa dekat tampilan peta." side="bottom">
         <button
           onClick={() => stepMapZoom(1)}
           disabled={zoom >= MAX_MAP_ZOOM}

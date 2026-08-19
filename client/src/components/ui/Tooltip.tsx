@@ -19,8 +19,11 @@ interface TooltipProps {
   // tooltip up above them). 'right' is for the left Sidebar's narrow icon
   // rail, where popping upward would overlap the row above/below in a
   // tightly-stacked vertical list — same problem a VS Code/Slack-style icon
-  // rail solves by opening its labels sideways instead.
-  side?: 'top' | 'right';
+  // rail solves by opening its labels sideways instead. 'bottom' is for a
+  // trigger that already sits at/near the top edge of the viewport (e.g.
+  // MapZoomControl) — opening 'top' there gets clamped against the edge and
+  // ends up overlapping the trigger's own buttons instead of clearing them.
+  side?: 'top' | 'right' | 'bottom';
   // Extra classes for the wrapper div — needed when the trigger itself is
   // `w-full`/block-level (e.g. a full-width menu row): the wrapper defaults
   // to `inline-flex`, which shrinks to content width and would otherwise
@@ -82,7 +85,7 @@ export function Tooltip({ label, detail, children, align = 'center', side = 'top
         top = rect.top + rect.height / 2 - tipRect.height / 2;
       } else {
         left = align === 'end' ? rect.right - tipRect.width : rect.left + rect.width / 2 - tipRect.width / 2;
-        top = rect.top - TOOLTIP_MARGIN - tipRect.height;
+        top = side === 'bottom' ? rect.bottom + TOOLTIP_MARGIN : rect.top - TOOLTIP_MARGIN - tipRect.height;
       }
 
       // Clamp into the viewport on both axes — an edge-hugging trigger
