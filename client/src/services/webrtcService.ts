@@ -1,5 +1,6 @@
 import { Socket } from 'socket.io-client';
 import { SocketEvents, MAX_SCREEN_SHARES_PER_ROOM } from '@kaispace/shared';
+import { isPeerNegotiationStuck, NEGOTIATION_TIMEOUT_MS } from './peerHealth';
 
 // STUN alone only tells a peer its public address — it can't help when the
 // network refuses direct peer-to-peer traffic at all, which is the norm on
@@ -260,6 +261,9 @@ interface PeerConnection {
   // 'failed' one, and lets disconnectFromPlayer cancel it so a stale timer
   // never fires against a peer that's already gone.
   disconnectedTimer: ReturnType<typeof setTimeout> | null;
+  // Watchdog for a negotiation that never completes — see peerHealth.ts for
+  // the full failure shape and why ICE's own recovery cannot cover it.
+  negotiationTimer: ReturnType<typeof setTimeout> | null;
   // Guards onnegotiationneeded (see createPeer) — addTrack() during
   // createPeer's initial setup fires it immediately on both sides, but the
   // very first offer/answer is already handled manually below (to preserve
@@ -1028,6 +1032,15 @@ class WebRTCService {
     return combined;
   }
 
+  /** Whether a peer connection currently exists for this id — the service's
+   *  own map is the only truth about that, and callers who track "connected"
+   *  separately (useWebRTC) need to be able to reconcile against it: a peer
+   *  the service has given up on (negotiation watchdog, exhausted retry)
+   *  must not keep looking connected to them forever. */
+  hasPeer(id: string): boolean {
+    return this.peers.has(id);
+  }
+
   getSocketId(): string | undefined {
     return this.socket?.id;
   }
@@ -1062,8 +1075,27 @@ class WebRTCService {
       initialNegotiationDone: false,
       pendingRenegotiation: false,
       disconnectedTimer: null,
+      negotiationTimer: null,
       screenStalled: false,
     };
+
+    // Negotiation watchdog. Not cancelled on success — it re-checks the peer
+    // when it fires and no-ops for a healthy one, which is one fewer place
+    // that has to remember to clear a timer correctly.
+    peer.negotiationTimer = setTimeout(() => {
+      peer.negotiationTimer = null;
+      // A peer torn down and rebuilt under the same id has a NEW object in
+      // the map; this timer belongs to the old one and must not tear down its
+      // replacement.
+      if (this.peers.get(remoteId) !== peer) return;
+      if (!isPeerNegotiationStuck({ iceConnectionState: pc.iceConnectionState, remoteDescSet: peer.remoteDescSet })) return;
+      console.warn('[webrtc] negotiation never completed for', remoteId, '— tearing down so it can be retried');
+      diag('negotiation watchdog tearing down', { peer: remoteId, ice: pc.iceConnectionState, signalingState: pc.signalingState });
+      // Frees the MAX_TOTAL_PEERS slot as well as the connection itself.
+      // useWebRTC notices the peer is gone on its next proximity tick and
+      // starts a fresh attempt (see its reconciliation against hasPeer).
+      this.disconnectFromPlayer(remoteId);
+    }, NEGOTIATION_TIMEOUT_MS);
 
     if (this.localStream) {
       const audioTrack = this.localStream.getAudioTracks()[0];
@@ -1621,6 +1653,13 @@ class WebRTCService {
       if (peer.disconnectedTimer) {
         clearTimeout(peer.disconnectedTimer);
         peer.disconnectedTimer = null;
+      }
+      // Same reasoning for the negotiation watchdog: a timer left running
+      // against a closed peer would fire after a replacement had been
+      // created under the same id.
+      if (peer.negotiationTimer) {
+        clearTimeout(peer.negotiationTimer);
+        peer.negotiationTimer = null;
       }
       // Detach before dropping the reference — an <audio> still holding a
       // srcObject keeps the stream (and its decoder) alive after the peer

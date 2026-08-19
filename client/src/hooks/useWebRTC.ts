@@ -172,6 +172,18 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     const inRangeIds = new Set(visible.map((p) => p.id));
     const connectedIds = connectedRef.current;
 
+    // Reconcile against what the service ACTUALLY holds. A peer it has given
+    // up on — the negotiation watchdog tore it down, or its one automatic
+    // retry was refused because local media or a peer slot wasn't available
+    // at that moment — is gone from its map, but stayed listed here forever,
+    // and this set is the only thing deciding whether to try again. That left
+    // the pair silent both ways for the rest of the session with nothing
+    // anywhere reporting a problem. Dropping it here puts them back on the
+    // normal "not connected yet" path, which retries every tick.
+    for (const id of connectedIds) {
+      if (!webrtcService.hasPeer(id)) connectedIds.delete(id);
+    }
+
     // Anyone no longer in range forfeits their accumulated dwell (see the
     // dwell gate below) — and this is also what keeps the map from growing
     // for the lifetime of the session as people come and go.
