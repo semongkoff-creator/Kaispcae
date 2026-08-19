@@ -907,13 +907,20 @@ export const VideoTile = memo(function VideoTile({
 
   return (
     <div
-      // Speaking ring: a coloured border plus a soft outer glow, in the same
-      // purple the rest of the HUD uses for "active". Drawn with ring/border
-      // colour rather than an extra element so it can't shift the tile's size
-      // and nudge its neighbours every time someone starts talking. The
-      // pulsing GLOW itself lives on a separate overlay now — see the
-      // .speaking-glow span right below — not this div; see its own comment
-      // for why.
+      // Speaking ring: a coloured border plus a soft outer glow. Deliberately
+      // green rather than the HUD's usual purple — this app's chrome (badges,
+      // buttons, the default tile border itself) is purple almost everywhere,
+      // so a purple speaking indicator barely read as distinct; green is also
+      // the near-universal "active mic" convention elsewhere (Meet/Zoom/
+      // Discord). Border width is now a constant border-2 (was border, 1px)
+      // for EVERY tile, speaking or not — bumping it only while speaking
+      // would resize the tile and nudge its neighbours every time someone
+      // starts talking, the exact shift this ring/border-colour (not an
+      // extra element) approach exists to avoid; a permanently thicker
+      // border sidesteps that while still reading as more solid than
+      // before. The pulsing GLOW itself lives on a separate overlay now —
+      // see the .speaking-glow span right below — not this div; see its own
+      // comment for why.
       // h-full flex flex-col on the large path: the tile fills the grid cell
       // it was given, and the video area (flex-1 min-h-0, the only flow
       // child) takes 100% of it — the name tag is an absolute overlay now
@@ -923,8 +930,8 @@ export const VideoTile = memo(function VideoTile({
       // instantly rather than being interpolated; only the border color
       // fades. Narrows what changes when speaking starts, same spirit as
       // moving the glow out below.
-      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border shadow-lg transition-colors duration-300 animate-fade-in group relative ${large ? 'w-full h-full flex flex-col' : 'w-24'} ${
-        speaking ? 'border-purple-500 ring-2 ring-purple-400/60' : 'border-purple-200'
+      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border-2 shadow-lg transition-colors duration-300 animate-fade-in group relative ${large ? 'w-full h-full flex flex-col' : 'w-24'} ${
+        speaking ? 'border-green-500 ring-2 ring-green-400/60' : 'border-purple-200'
       }`}
       style={{ opacity: translucent ? 0.5 : 1 }}
     >
@@ -1119,9 +1126,9 @@ export const VideoTile = memo(function VideoTile({
         )}
         {speaking && (
           <span className={`flex items-end gap-px shrink-0 ${large ? 'h-2.5' : 'h-1.5'}`}>
-            <span className="w-0.5 h-full bg-purple-400 rounded-full animate-wave-bar" style={{ animationDelay: '0ms' }} />
-            <span className="w-0.5 h-full bg-purple-400 rounded-full animate-wave-bar" style={{ animationDelay: '150ms' }} />
-            <span className="w-0.5 h-full bg-purple-400 rounded-full animate-wave-bar" style={{ animationDelay: '300ms' }} />
+            <span className="w-0.5 h-full bg-green-400 rounded-full animate-wave-bar" style={{ animationDelay: '0ms' }} />
+            <span className="w-0.5 h-full bg-green-400 rounded-full animate-wave-bar" style={{ animationDelay: '150ms' }} />
+            <span className="w-0.5 h-full bg-green-400 rounded-full animate-wave-bar" style={{ animationDelay: '300ms' }} />
           </span>
         )}
       </span>

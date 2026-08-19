@@ -88,9 +88,11 @@ canvas {
 }
 
 /* "Ethereal Collaboration" — the speaking indicator's pulsing glow (spec:
-   "ring 2px #A855F7 + spread-shadow 8px, efek berdenyut"). The ring itself is
-   still a plain Tailwind `ring-2 ring-purple-400/60` on the tile (see
-   VideoGrid.tsx). This used to animate the box-shadow's own blur/spread
+   "ring 2px #A855F7 + spread-shadow 8px, efek berdenyut" — since recolored
+   green per feedback that purple barely read as distinct against this app's
+   otherwise-purple chrome). The ring itself is still a plain Tailwind
+   `ring-2 ring-green-400/60` on the tile (see VideoGrid.tsx). This used to
+   animate the box-shadow's own blur/spread
    directly — measured (tile flicker diagnosis) to briefly inflate an
    ancestor scroll container's scrollHeight every time it started, even
    with contain:paint on that ancestor: Chromium's paint-containment
@@ -109,7 +111,7 @@ canvas {
   50%      { opacity: 1; }
 }
 .speaking-glow {
-  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.65), 0 0 16px 6px rgba(168, 85, 247, 0.5);
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.65), 0 0 16px 6px rgba(34, 197, 94, 0.5);
 }
 .animate-speaking-glow {
   animation: speaking-glow-pulse 1.6s ease-in-out infinite;
