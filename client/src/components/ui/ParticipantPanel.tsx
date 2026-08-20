@@ -206,7 +206,7 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollo
             </div>
           </div>
 
-          {remotePlayers.length > 0 && (
+          {(remotePlayers.length > 0 || offlineMembers.length > 0) && (
             <div className="px-3 pt-2 pb-1 relative">
               <Search size={11} className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               <input
