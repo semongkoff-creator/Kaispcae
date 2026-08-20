@@ -203,6 +203,29 @@ test('the minimap redraws player dots without rebuilding the floor plan', () => 
   );
 });
 
+test('every prop crossing GameCanvas\'s memo barrier is stable', () => {
+  // GameCanvas is memo()'d on purpose: 3490 lines, 127 hooks, and its JSX
+  // carries every DOM overlay in the room. One prop built inline — a single
+  // arrow function among 35 — defeated that comparison on EVERY App render,
+  // and App re-renders several times a second whenever anyone nearby moves.
+  // A memo barrier is only a barrier if nothing unstable crosses it.
+  const app = readFileSync(resolve('client/src/App.tsx'), 'utf8').split('\n');
+  const start = app.findIndex((l) => l.includes('<GameCanvas'));
+  assert.notEqual(start, -1, 'expected GameCanvas to be rendered from App');
+  let end = start;
+  for (let i = start; i < app.length; i++) {
+    if (app[i].includes('/>')) { end = i; break; }
+  }
+  const props = app.slice(start, end + 1);
+  const unstable = props.filter((l) => /=\{(\(|\[|\{|new |Object\.)/.test(l)).map((l) => l.trim());
+  assert.deepEqual(unstable, [],
+    `build these with useCallback/useMemo instead: ${unstable.join(' | ')}`);
+  assert.ok(
+    readFileSync(resolve('client/src/components/canvas/GameCanvas.tsx'), 'utf8').includes('memo(GameCanvasImpl)'),
+    'and the barrier itself must stay in place',
+  );
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

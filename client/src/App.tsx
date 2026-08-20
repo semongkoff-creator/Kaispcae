@@ -984,6 +984,23 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // its fields together and the record is already fully in hand at click
   // time — no extra store lookup needed.
   const [playerCardTarget, setPlayerCardTarget] = useState<{ player: Avatar; x: number; y: number } | null>(null);
+  // Stable identity, and that is the entire point.
+  //
+  // GameCanvas is memo()'d deliberately — it is the heaviest component in the
+  // app (3490 lines, 127 hooks) and its JSX carries every DOM overlay in the
+  // room: zone banners, media markers, note markers, seat markers. It receives
+  // 35 props, and this was the ONLY one built inline, so its identity changed
+  // on every single App render and the memo comparison failed every time.
+  //
+  // App re-renders several times a second whenever anyone nearby moves (the
+  // proximity tick), so that one arrow function was re-rendering and
+  // reconciling all of that at gameplay rate — the shape of the ~200ms
+  // presentation delay that survived every other fix. A memo barrier is only
+  // a barrier if every prop crossing it is stable.
+  const handlePlayerClick = useCallback(
+    (player: Avatar, x: number, y: number) => setPlayerCardTarget({ player, x, y }),
+    [],
+  );
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
@@ -1665,7 +1682,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         emitSeatClaimDecide={emitSeatClaimDecide}
         emitSeatClaimRequestCancel={emitSeatClaimRequestCancel}
         onMediaOpen={setViewingMediaId}
-        onPlayerClick={(player, x, y) => setPlayerCardTarget({ player, x, y })}
+        onPlayerClick={handlePlayerClick}
         onInteractiveTrigger={handleInteractiveTrigger}
         onNoteOpen={setNoteEditingId}
         onDoorPasswordTrigger={handleDoorPasswordTrigger}
