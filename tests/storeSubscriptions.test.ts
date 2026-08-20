@@ -128,6 +128,19 @@ test('the proximity result is subscribed to, not passed down from App', () => {
   }
 });
 
+test('WebRTC proximity side effects still run when the rendered snapshot is unchanged', () => {
+  const app = readFileSync(resolve('client/src/App.tsx'), 'utf8');
+  const sideEffectAt = app.indexOf('updateProximityRef.current(next)');
+  const earlyReturnAt = app.indexOf('if (proximityUnchanged(previousProximityRef.current, next)) return;');
+
+  assert.ok(sideEffectAt >= 0, 'the proximity tick must still drive the WebRTC state machine');
+  assert.ok(earlyReturnAt >= 0, 'render/subscriber work should still keep its unchanged fast path');
+  assert.ok(
+    sideEffectAt < earlyReturnAt,
+    'dwell timers, debounced disconnects, and resync-grace expiry are time-based; they must run even when React subscribers do not wake',
+  );
+});
+
 test('the architecture rule is written down where the next person will look', () => {
   const doc = readFileSync(resolve('project.md'), 'utf8');
   // Six separate stutter causes came from this one rule being unwritten.

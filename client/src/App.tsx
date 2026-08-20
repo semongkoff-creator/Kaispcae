@@ -402,6 +402,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       // 0.01 tile stale for no benefit.
       setProximitySnapshot(next);
 
+      // WebRTC and soundboard volume are not render work. They contain
+      // time-based state machines (dwell before connect, debounced
+      // disconnect, resync-grace expiry), so they must tick even when the
+      // rendered proximity snapshot is unchanged.
+      updateProximityRef.current(next);
+      updateSoundboardVolumes(next);
+
       // Everything below is the "something actually changed" path, which used
       // to be a React state update plus an effect keyed on it. Doing it here
       // is both cheaper and clearer: the work belongs to the tick that
@@ -409,8 +416,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       if (proximityUnchanged(previousProximityRef.current, next)) return;
       previousProximityRef.current = next;
       notifyProximityChanged();
-      updateProximityRef.current(next);
-      updateSoundboardVolumes(next);
       const talking = next.some((p) => p.visibility === 'full_visible');
       setInConversation((was) => (was === talking ? was : talking));
     };
