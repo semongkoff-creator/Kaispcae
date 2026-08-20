@@ -19,6 +19,7 @@ import { refreshManagerCache, broadcastAnalyticsActivity } from './analyticsFeed
 import { socketRateLimit } from '../middleware/rateLimit';
 import { redactInteractiveSecrets, redactDoorPasswords, redactDoorAreaPasswords } from '../lib/redactFurniture';
 import { unlockDoor, unlockDoorArea, clearUnlockedDoorsForRoom } from './doorLock';
+import { recordSupersede } from './sessionFlap';
 import { getNearbyRecipients } from './proximityBroadcast';
 import { releaseScreenShareOnLeave } from './rtcHandler';
 import { sanitizeChat } from '../middleware/validate';
@@ -886,6 +887,28 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     if (previousSocketId && previousSocketId !== socket.id) {
       const previousSocket = io.sockets.sockets.get(previousSocketId);
       if (previousSocket) {
+        // Two live sockets for one account trading the takeover back and forth
+        // costs the WHOLE ROOM a join and a leave per round (see
+        // sessionFlap.ts). The client half of that is fixed — a superseded
+        // socket stops reconnecting — but only for clients that have loaded
+        // the fix, and one person on a stale tab is enough to keep every other
+        // client churning. So past a threshold the server stops honouring the
+        // takeover: the incumbent keeps the account and the newcomer is turned
+        // away, which is the choice that broadcasts NOTHING to the room.
+        if (recordSupersede(uid)) {
+          console.warn('[room] session flapping for uid', uid, '— refusing the newcomer, keeping the live socket');
+          // Undo the little this handler has already done for the newcomer so
+          // its DISCONNECT is a no-op: the handler bails on `!room`, so
+          // clearing currentRoom is what keeps a leave from being broadcast
+          // for a player who was never announced in the first place.
+          playerNames.delete(socket.id);
+          playerColors.delete(socket.id);
+          socket.leave(room);
+          currentRoom = null;
+          socket.emit(SocketEvents.SESSION_TAKEN_OVER);
+          socket.disconnect(true);
+          return;
+        }
         previousSocket.data.supersededByNewerTab = true;
         previousSocket.emit(SocketEvents.SESSION_TAKEN_OVER);
         previousSocket.disconnect(true);
