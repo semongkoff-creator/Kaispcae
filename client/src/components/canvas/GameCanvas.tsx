@@ -1210,7 +1210,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     }
   }, []);
 
-  const draw = useCallback((timestamp: number) => {
+  const drawFrame = useCallback((timestamp: number) => {
     // QA (Kompat checklist item 7, "Low-spec") — this callback is PURE
     // rendering (movement/input each run their own independent loop
     // elsewhere — useMovement.ts, keyboard handlers — so skipping a draw
@@ -1222,7 +1222,6 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     // reschedules the SAME rAF loop either way, just returns before doing
     // any actual drawing work on a skipped frame.
     if (lowSpecModeRef.current && timestamp - lastDrawTimeRef.current < LOW_SPEC_FRAME_INTERVAL_MS) {
-      rafRef.current = requestAnimationFrame(draw);
       return;
     }
     lastDrawTimeRef.current = timestamp;
@@ -2779,8 +2778,37 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       ctx.restore();
     }
 
-    rafRef.current = requestAnimationFrame(draw);
   }, []);
+
+  // The rAF loop proper: draws ONE frame, then schedules the next — and the
+  // scheduling lives in a `finally` so that a throw inside the frame cannot
+  // stop it.
+  //
+  // It used to be the last statement of the frame body itself, which made any
+  // exception in ~1700 lines of drawing permanently fatal: the throw skipped
+  // the reschedule, no further frame was ever requested, and the canvas froze
+  // for the rest of the session with no way back short of a reload. That is
+  // what "the app crashed" actually was — one nameless avatar record
+  // (truncateName on an undefined name, see gameStore's upsertPlayer) killed
+  // the entire render loop. Two independent fixes for one bug: don't produce
+  // the bad record, and don't let a bad frame be terminal.
+  //
+  // Errors are logged once rather than every frame — at 60fps a recurring
+  // fault would otherwise write 3600 lines a minute and make DevTools itself
+  // the next problem.
+  const drawErrorLoggedRef = useRef(false);
+  const draw = useCallback((timestamp: number) => {
+    try {
+      drawFrame(timestamp);
+    } catch (err) {
+      if (!drawErrorLoggedRef.current) {
+        drawErrorLoggedRef.current = true;
+        console.error('[canvas] render frame threw — the loop keeps running, this is logged once:', err);
+      }
+    } finally {
+      rafRef.current = requestAnimationFrame(draw);
+    }
+  }, [drawFrame]);
 
   // Editor mouse handlers
   const getTileFromMouse = useCallback((clientX: number, clientY: number) => {

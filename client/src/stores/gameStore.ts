@@ -970,6 +970,22 @@ export const useGameStore = create<GameState>((set, get) => ({
   upsertPlayer: (player) =>
     set((state) => {
       const existing = state.playerRecords[player.id];
+      // A status-only update for someone we have no record of yet is dropped,
+      // NOT used to conjure one.
+      //
+      // PLAYER_MOVED/PLAYER_STOPPED both call this with just
+      // {id, direction, isMoving, isRunning} cast `as Avatar` — a cast, so
+      // nothing type-checked it — and a movement packet routinely arrives
+      // before the join that describes who moved (the server broadcasts
+      // movement to the whole room, and a room-state/join payload is a
+      // separate, larger message). Spreading that over `undefined` produced a
+      // record with no name, no avatarConfig, no userId; the render loop then
+      // drew it, and truncateName(undefined) threw inside requestAnimationFrame
+      // — which killed the whole canvas, permanently, since the throw skipped
+      // the loop's own reschedule. Nothing is lost by waiting: the position is
+      // already buffered outside the store (see remotePositions.ts), and the
+      // real record lands a moment later with everything in it.
+      if (!existing && !player.name) return state;
       const nextPlayer = { ...existing, ...player };
       if (nextPlayer.isMoving !== true) nextPlayer.isRunning = false;
 
