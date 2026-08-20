@@ -200,6 +200,8 @@ export interface RoomInfo {
   coverImage?: string | null;
 }
 
+export interface OrgMember { id: string; displayName: string; workspaceRole: 'admin' | 'member' }
+
 export const api = {
   register: (email: string, password: string, displayName: string) =>
     request<{ user: UserProfile; token: string }>('/auth/register', {
@@ -642,4 +644,6 @@ export const api = {
 
   getDMMessages: (conversationId: string, before?: string) =>
     request<{ messages: ChannelMessage[] }>(`/dms/${conversationId}/messages${before ? `?before=${before}` : ''}`),
+
+  getOrgMembers: () => request<{ members: OrgMember[] }>('/org/members'),
 };
