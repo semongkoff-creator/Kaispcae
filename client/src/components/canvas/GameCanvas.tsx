@@ -556,6 +556,16 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
   // click-behavior updates the instant someone else claims or releases it.
   const seatClaims = useGameStore((s) => s.seatClaims);
   const localUserId = useGameStore((s) => s.localUserId);
+  // Bug fix — a claimed seat's marker used to stay at full opacity even
+  // while its owner was actually online (often sitting right there,
+  // overlapping their own avatar/nametag and the desk furniture under it —
+  // reported as visual clutter). Faded to under 50% once the owner is
+  // actually present; full opacity again once they're the only ones who'd
+  // need the reminder (offline, so the marker is the sole "whose seat is
+  // this" cue left). Reactive subscription (not playerRecordsRef, which
+  // only the imperative draw loop reads) so this updates the instant
+  // someone joins/leaves.
+  const playerRecords = useGameStore((s) => s.playerRecords);
   // Incoming requests to take over a seat WE own (Izinkan/Tolak cards) and
   // our own outstanding request on someone else's seat ("menunggu
   // persetujuan..." card) — see seatClaim.ts's SEAT_CLAIM_REQUEST flow.
@@ -3209,6 +3219,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
         {claimableSeats.map((seat) => {
           const owner = seatClaims[seat.id];
           const isMine = !!owner && owner.userId === localUserId;
+          const ownerOnline = !!owner && Object.values(playerRecords).some((p) => p.userId === owner.userId);
           return (
             <div
               key={seat.id}
@@ -3216,7 +3227,9 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
                 if (el) claimSeatMarkerRefs.current.set(seat.id, el);
                 else claimSeatMarkerRefs.current.delete(seat.id);
               }}
-              className="absolute top-0 left-0 will-change-transform origin-top-left pointer-events-auto flex flex-col items-center -mt-3.5 -ml-3.5 group"
+              className={`absolute top-0 left-0 will-change-transform origin-top-left pointer-events-auto flex flex-col items-center -mt-3.5 -ml-3.5 group transition-opacity ${
+                ownerOnline ? 'opacity-40 hover:opacity-100' : ''
+              }`}
             >
               <button
                 data-seat-id={seat.id}
