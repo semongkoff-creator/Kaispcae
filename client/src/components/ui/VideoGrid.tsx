@@ -5,6 +5,7 @@ import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { ChatAvatar, avatarColor } from './ChatAvatar';
+import { useProximitySnapshot } from '@/hooks/useProximitySnapshot';
 
 // autoPictureInPicture (part of the Picture-in-Picture spec — tells the
 // browser to auto-float this element into native PiP when the tab/app is
@@ -53,7 +54,6 @@ export function latestReaction(
 }
 
 interface VideoGridProps {
-  nearby: ProximityPlayer[];
   localStream: MediaStream | null;
   localScreenStream: MediaStream | null;
   remoteStreams: Map<string, MediaStream>;
@@ -470,7 +470,11 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
   );
 }
 
-export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds, screenStalledPeerIds, onToggleMeetingView, onScreenShareMaximizedChange }: VideoGridProps) {
+export function VideoGrid({ localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds, screenStalledPeerIds, onToggleMeetingView, onScreenShareMaximizedChange }: VideoGridProps) {
+  // Subscribed here rather than received as a prop: App used to hold this
+  // in state, so the proximity tick re-rendered its whole tree several
+  // times a second to deliver a value only this kind of component reads.
+  const nearby = useProximitySnapshot();
   const playerRecords = useGameStore((s) => s.playerRecords);
   // Per-field selectors — see ParticipantPanel's note. Subscribing to the whole
   // localPlayer object re-rendered the entire video grid at 10Hz while walking.

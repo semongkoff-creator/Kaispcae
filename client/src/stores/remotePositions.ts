@@ -194,6 +194,33 @@ export function pendingSnapshotCount(): number {
 // grid, the meeting view — keep using the state copy in App.
 let proximity: import('@virtualmeet/shared').ProximityPlayer[] = [];
 
+// React consumers of the snapshot (the video grid, the meeting view, PiP).
+//
+// This used to be App state, which meant the proximity tick re-rendered App —
+// and therefore App's whole tree — several times a second, because distances
+// change constantly whenever anyone nearby moves. Nothing about that data
+// belongs to App: it just happened to be the component that computed it.
+// Publishing it here and letting the three consumers subscribe means a
+// proximity change re-renders those three and nobody else.
+const proximityListeners = new Set<() => void>();
+
+export function subscribeProximity(listener: () => void): () => void {
+  proximityListeners.add(listener);
+  return () => { proximityListeners.delete(listener); };
+}
+
+/**
+ * Wakes the subscribers above. Called by the proximity tick ONLY when the
+ * result meaningfully changed.
+ *
+ * The "did it change" comparison deliberately stays at the call site rather
+ * than living here: the comparator (proximityUnchanged) is in the hooks layer,
+ * which already imports this module, and importing it back would be a cycle.
+ */
+export function notifyProximityChanged(): void {
+  for (const listener of proximityListeners) listener();
+}
+
 export function setProximitySnapshot(next: import('@virtualmeet/shared').ProximityPlayer[]): void {
   proximity = next;
 }

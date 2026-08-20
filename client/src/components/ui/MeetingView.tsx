@@ -5,9 +5,9 @@ import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { getVideoTiles, VideoTile, latestReaction } from './VideoGrid';
+import { useProximitySnapshot } from '@/hooks/useProximitySnapshot';
 
 interface MeetingViewProps {
-  nearby: ProximityPlayer[];
   localStream: MediaStream | null;
   localScreenStream: MediaStream | null;
   remoteStreams: Map<string, MediaStream>;
@@ -75,9 +75,13 @@ interface MTile {
 // (unchanged); this is purely a layout/view mode — no WebRTC changes, and
 // leaving it drops you right back onto the map where you already are.
 export function MeetingView({
-  nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams,
+  localStream, localScreenStream, remoteStreams, remoteScreenStreams,
   micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, onClose, onEmote, failedPeerIds, screenStalledPeerIds, showReactions,
 }: MeetingViewProps) {
+  // Subscribed here rather than received as a prop: App used to hold this
+  // in state, so the proximity tick re-rendered its whole tree several
+  // times a second to deliver a value only this kind of component reads.
+  const nearby = useProximitySnapshot();
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localHandRaised = useGameStore((s) => s.localPlayer.handRaised);
   const localPlayerId = useGameStore((s) => s.localPlayerId);

@@ -111,6 +111,30 @@ test('GameCanvas keeps its localPlayer ref fresh without subscribing', () => {
   );
 });
 
+test('the proximity result is subscribed to, not passed down from App', () => {
+  const app = readFileSync(resolve('client/src/App.tsx'), 'utf8');
+  // Holding this in App state meant the proximity tick — which fires whenever
+  // anyone nearby moves, several times a second — re-rendered App's entire
+  // tree to deliver a value only three components read.
+  assert.equal(/const \[nearby, setNearby\]/.test(app), false,
+    'the proximity result must not live in App state');
+  assert.equal(app.includes('nearby={nearby}'), false,
+    'nor be threaded through props');
+  assert.ok(app.includes('notifyProximityChanged()'), 'the tick should wake subscribers directly');
+
+  for (const file of ['MiniMode', 'MeetingView', 'VideoGrid']) {
+    const source = readFileSync(resolve(`client/src/components/ui/${file}.tsx`), 'utf8');
+    assert.ok(source.includes('useProximitySnapshot()'), `${file} should subscribe for itself`);
+  }
+});
+
+test('the architecture rule is written down where the next person will look', () => {
+  const doc = readFileSync(resolve('project.md'), 'utf8');
+  // Six separate stutter causes came from this one rule being unwritten.
+  assert.ok(doc.includes('Batas React ↔ game loop'), 'project.md should carry the boundary rule');
+  assert.ok(/2x per detik/.test(doc), 'including the concrete threshold, not just a principle');
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

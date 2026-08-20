@@ -104,7 +104,7 @@ import { ZoneWatcher } from './components/ZoneWatcher';
 import { AnnouncementTicker } from './components/ui/AnnouncementTicker';
 import { BroadcastComposer } from './components/ui/BroadcastComposer';
 import { livePos } from '@/stores/livePosition';
-import { setProximitySnapshot, interpolateRemotePositions } from '@/stores/remotePositions';
+import { setProximitySnapshot, notifyProximityChanged, interpolateRemotePositions } from '@/stores/remotePositions';
 
 // How often proximity is recomputed. Crossing one tile takes ~170ms at
 // walking speed and ~116ms running, so 200ms still catches every
@@ -360,7 +360,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // — ran 60x/sec. 5/sec is still far quicker than anyone can cross the
   // proximity radius, and an unchanged result skips the state update
   // entirely, so standing still costs nothing at all.
-  const [nearby, setNearby] = useState<ProximityPlayer[]>([]);
+  // No longer App state — see useProximitySnapshot. What App still needs is
+  // the previous result (to decide whether anything changed) and ONE
+  // quantised boolean for the background music, which flips rarely instead of
+  // several times a second.
+  const previousProximityRef = useRef<ProximityPlayer[]>([]);
+  // The tick's effect has empty deps, so it must not capture updateProximity
+  // directly — a ref keeps it correct even if that callback is ever recreated.
+  const updateProximityRef = useRef(updateProximity);
+  updateProximityRef.current = updateProximity;
+  const [inConversation, setInConversation] = useState(false);
   useEffect(() => {
     const tick = () => {
       const s = useGameStore.getState();
@@ -392,7 +401,18 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       // result is 'unchanged' would leave the canvas on a value up to
       // 0.01 tile stale for no benefit.
       setProximitySnapshot(next);
-      setNearby((prev) => (proximityUnchanged(prev, next) ? prev : next));
+
+      // Everything below is the "something actually changed" path, which used
+      // to be a React state update plus an effect keyed on it. Doing it here
+      // is both cheaper and clearer: the work belongs to the tick that
+      // produced the data, not to a re-render triggered by it.
+      if (proximityUnchanged(previousProximityRef.current, next)) return;
+      previousProximityRef.current = next;
+      notifyProximityChanged();
+      updateProximityRef.current(next);
+      updateSoundboardVolumes(next);
+      const talking = next.some((p) => p.visibility === 'full_visible');
+      setInConversation((was) => (was === talking ? was : talking));
     };
     tick();
     const id = setInterval(tick, PROXIMITY_TICK_MS);
@@ -401,13 +421,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
   // Potong 6 — area background music. Conversation (any full-connected peer)
   // always takes priority: the hook pauses the music while one is active.
-  const bgm = useBgm(nearby.some((p) => p.visibility === 'full_visible'));
-
-  // Update WebRTC connections based on proximity
-  useEffect(() => {
-    updateProximity(nearby);
-    updateSoundboardVolumes(nearby);
-  }, [nearby, updateProximity]);
+  const bgm = useBgm(inConversation);
 
   // Meeting-zone and presence detection moved into <ZoneWatcher/> below, so
   // App no longer subscribes to the local position at all. Only the RESULT
@@ -1740,7 +1754,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {miniModeWindow && (
         <MiniMode
           pipWindow={miniModeWindow}
-          nearby={nearby}
           localStream={webrtcService.getLocalStream()}
           remoteStreams={remoteStreams}
           remoteScreenStreams={remoteScreenStreams}
@@ -2347,7 +2360,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
       {meetingViewActive ? (
         <MeetingView
-          nearby={nearby}
           localStream={webrtcService.getLocalStream()}
           localScreenStream={isScreenSharing ? webrtcService.getScreenStream() : null}
           remoteStreams={remoteStreams}
@@ -2366,7 +2378,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       ) : (
         <>
           <VideoGrid
-            nearby={nearby}
             localStream={webrtcService.getLocalStream()}
             localScreenStream={isScreenSharing ? webrtcService.getScreenStream() : null}
             remoteStreams={remoteStreams}
