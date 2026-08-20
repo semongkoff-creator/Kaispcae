@@ -411,7 +411,16 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
   // (tile-based) just below.
   const doorAreaRects = useGameStore((s) => s.doorAreaRects);
   const unlockedDoorAreaIds = useGameStore((s) => s.unlockedDoorAreaIds);
-  const localPlayer = useGameStore((s) => s.localPlayer);
+  // NOT subscribed reactively. setLocalPlayerMoving writes a brand-new
+  // localPlayer object every 100ms while the local player walks (see
+  // gameStore.ts), and this component's only use for the value is keeping
+  // localPlayerRef fresh — so a reactive selector here re-rendered the single
+  // heaviest component in the app ten times a second, purely to copy a value
+  // into a ref. Re-rendering GameCanvas re-evaluates every hook in it and
+  // rebuilds every callback; measured against the deployed build, keyboard
+  // interactions were taking 250-470ms (INP 512ms, "poor") the entire time
+  // anyone was walking. The subscription below keeps the ref exactly as fresh
+  // with no render at all.
   const posEpoch = useGameStore((s) => s.posEpoch);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const theme = useGameStore((s) => s.theme);
@@ -469,7 +478,10 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
   // gameplay effect.
   const locateHighlightRef = useRef<{ playerId: string; start: number } | null>(null);
   const playerRecordsRef = useRef(useGameStore.getState().playerRecords);
-  const localPlayerRef = useRef(localPlayer);
+  const localPlayerRef = useRef(useGameStore.getState().localPlayer);
+  // Imperative, so a position write costs no render. Registered once; zustand's
+  // subscribe returns its own unsubscribe, which is the effect's cleanup.
+  useEffect(() => useGameStore.subscribe((s) => { localPlayerRef.current = s.localPlayer; }), []);
   const localPlayerIdRef = useRef(localPlayerId);
   const bubblesRef = useRef(speechBubbles);
   // Fitur 15B — momentary display Interactive Object reveals ('show_name',
@@ -628,7 +640,6 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     followInfoRef.current = followInfo;
     locateRequestRef.current = locateRequest;
     playerRecordsRef.current = useGameStore.getState().playerRecords;
-    localPlayerRef.current = localPlayer;
     localPlayerIdRef.current = localPlayerId;
     bubblesRef.current = speechBubbles;
     momentaryRevealsRef.current = useGameStore.getState().momentaryReveals;

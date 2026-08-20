@@ -107,7 +107,16 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollo
   }, [meetingViewActive, open, onClose]);
 
   const playerRecords = useGameStore((s) => s.playerRecords);
-  const localPlayer = useGameStore((s) => s.localPlayer);
+  // Per-field selectors, not the whole object. gameStore's
+  // setLocalPlayerMoving replaces localPlayer every 100ms while walking, so
+  // subscribing to the object re-rendered this panel — one row per person in
+  // the room — ten times a second, for six fields that walking cannot change.
+  const localName = useGameStore((s) => s.localPlayer.name);
+  const localColor = useGameStore((s) => s.localPlayer.color);
+  const localHandRaised = useGameStore((s) => s.localPlayer.handRaised);
+  const localWorkMode = useGameStore((s) => s.localPlayer.workMode);
+  const localAwayReason = useGameStore((s) => s.localPlayer.awayReason);
+  const localSpotlightActive = useGameStore((s) => s.localPlayer.spotlightActive);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const followInfo = useGameStore((s) => s.followInfo);
   const followerUserIds = useGameStore((s) => s.followerUserIds);
@@ -225,12 +234,12 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollo
 
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             <ParticipantRow
-              name={localPlayer.name}
-              color={localPlayer.color}
-              handRaised={localPlayer.handRaised}
-              workMode={localPlayer.workMode}
-              awayReason={localPlayer.awayReason}
-              spotlightActive={localPlayer.spotlightActive}
+              name={localName}
+              color={localColor}
+              handRaised={localHandRaised}
+              workMode={localWorkMode}
+              awayReason={localAwayReason}
+              spotlightActive={localSpotlightActive}
               micMuted={isMicMuted}
               speaking={localSpeaking}
               role={localRole}

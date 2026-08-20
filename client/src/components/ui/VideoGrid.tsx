@@ -472,8 +472,10 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
 
 export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds, screenStalledPeerIds, onToggleMeetingView, onScreenShareMaximizedChange }: VideoGridProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
-  const localPlayer = useGameStore((s) => s.localPlayer);
-  const localHandRaised = localPlayer.handRaised;
+  // Per-field selectors — see ParticipantPanel's note. Subscribing to the whole
+  // localPlayer object re-rendered the entire video grid at 10Hz while walking.
+  const localHandRaised = useGameStore((s) => s.localPlayer.handRaised);
+  const localName = useGameStore((s) => s.localPlayer.name);
   // Speaking state (same source GameCanvas uses to ring an avatar on the
   // map) is deliberately NOT read here any more — VideoTile now selects its
   // own speakingId/isLocal slice directly (see its doc comment), so this
@@ -616,7 +618,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   const cameraTiles = (
     <>
       {localStream && (
-        <VideoTile name="You" avatarName={profiles.get(localUserId)?.name || localPlayer.name} photoUrl={profiles.get(localUserId)?.photo ?? undefined} stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} onEnlarge={() => setFeaturedKey('local-camera')} />
+        <VideoTile name="You" avatarName={profiles.get(localUserId)?.name || localName} photoUrl={profiles.get(localUserId)?.photo ?? undefined} stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} onEnlarge={() => setFeaturedKey('local-camera')} />
       )}
       {videoTiles.map((tile) => {
         const uid = playerRecords[tile.id]?.userId;
