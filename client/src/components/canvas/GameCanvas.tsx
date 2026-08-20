@@ -990,22 +990,32 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     emitSitRef.current(true, chairCenterX, chairCenterY, sitDirection, seatId);
   }, []);
 
-  // Nudge ("senggol", Z key) — finds whoever's closest to the local player
-  // and asks the server to relay a nudge at them. No local trigger here:
-  // unlike Jump (which animates the presser's own avatar and so needs
-  // zero-latency local feedback), the visual effect lands on the TARGET, so
-  // waiting for the server's broadcast — which reaches the nudger too, see
-  // movementHandler.ts's io.to() — is both simpler (one code path drives
-  // the animation for everyone, including the nudger) and in practice
-  // instant on a same-room socket round trip.
+  // Facing-direction unit vectors — used by performNudge below to tell
+  // "in front of me" from "beside/behind me".
+  const NUDGE_DIRECTION_VECTOR: Record<Avatar['direction'], { x: number; y: number }> = {
+    up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 },
+  };
+
+  // Nudge ("senggol", Z key) — asks the server to relay a nudge at whoever's
+  // in range. No local trigger here: unlike Jump (which animates the
+  // presser's own avatar and so needs zero-latency local feedback), the
+  // visual effect lands on the TARGET, so waiting for the server's
+  // broadcast — which reaches the nudger too, see movementHandler.ts's
+  // io.to() — is both simpler (one code path drives the animation for
+  // everyone, including the nudger) and in practice instant on a same-room
+  // socket round trip.
   //
-  // Deliberately NOT direction-gated: an earlier version only counted
-  // someone standing strictly ahead of the local player's facing direction,
-  // but two people who've walked up to chat almost always end up standing
-  // SIDE BY SIDE facing the same way (e.g. both facing the camera), not one
-  // behind the other — that layout has zero "forward" distance between
-  // them, so the direction check silently found no target every time.
-  // Plain nearest-within-range matches how "senggol" actually gets used.
+  // Facing-direction is now a PREFERENCE, not a hard gate. An earlier
+  // version only counted someone standing strictly ahead of the local
+  // player's facing direction, full stop — but two people who've walked up
+  // to chat almost always end up standing SIDE BY SIDE facing the same way
+  // (e.g. both facing the camera), not one behind the other, so a hard
+  // direction gate silently found no target every time in that (extremely
+  // common) layout. This picks whoever's most in front (within a 90° cone
+  // of the facing direction) among in-range players when there is one, and
+  // only falls back to plain nearest-in-range when nobody qualifies as
+  // "in front" — so a deliberate poke at someone you're facing is no
+  // longer just luck-of-the-radius against a bystander standing closer.
   const performNudge = useCallback(() => {
     // livePos, not the store: with the store position throttled, a nudge
     // fired mid-stride would measure range from where the avatar was up to
@@ -1022,15 +1032,31 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     // outside nudge range even though the ring itself suggests they're
     // "in range" — accepted deliberately this time, not the same drift bug.
     const NUDGE_RANGE_PX = TILE_SIZE * 1.5;
+    const fwd = NUDGE_DIRECTION_VECTOR[player.direction];
 
-    let target: Avatar | null = null;
-    let bestDist = Infinity;
+    let nearest: Avatar | null = null;
+    let nearestDist = Infinity;
+    let inFront: Avatar | null = null;
+    let inFrontDist = Infinity;
     for (const p of Object.values(playerRecordsRef.current)) {
       const pos = remotePos(p);
-      const dist = Math.hypot(pos.x - player.x, pos.y - player.y);
+      const dx = pos.x - player.x;
+      const dy = pos.y - player.y;
+      const dist = Math.hypot(dx, dy);
       if (dist > NUDGE_RANGE_PX) continue;
-      if (dist < bestDist) { bestDist = dist; target = p; }
+      if (dist < nearestDist) { nearestDist = dist; nearest = p; }
+
+      // Projection onto the facing vector (how far ahead) vs. onto its
+      // perpendicular (how far to the side) — "in front" means more ahead
+      // than sideways, i.e. within a 90° cone centered on facing direction.
+      const forward = dx * fwd.x + dy * fwd.y;
+      const lateral = dx * -fwd.y + dy * fwd.x;
+      if (forward > 0 && forward >= Math.abs(lateral) && dist < inFrontDist) {
+        inFrontDist = dist;
+        inFront = p;
+      }
     }
+    const target = inFront ?? nearest;
     if (!target) return;
     emitNudgeRef.current(target.id);
   }, []);
