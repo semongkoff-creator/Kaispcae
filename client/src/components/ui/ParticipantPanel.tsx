@@ -475,9 +475,15 @@ function ParticipantRow({
         {spotlightActive && <MegaphoneFill title="Spotlight aktif — terdengar/terlihat seluruh room" size={11} className="text-amber-500 shrink-0" />}
         {handRaised && <img src="/assets/img/raise-hand-icon.png" alt="" title="Hand raised" className="w-3 h-2.5 animate-bounce shrink-0" />}
         {workMode === 'focus' && <Headphones title="Fokus (jangan diganggu)" size={12} className="text-purple-500 shrink-0" />}
-        {workMode && workMode !== 'focus' && (
-          <span title={PRESENCE_LABEL[workMode]} className="text-[11px] leading-none shrink-0">
-            {workMode === 'available' ? '' : PRESENCE_EMOJI[workMode]}
+        {workMode && workMode !== 'focus' && workMode !== 'available' && (
+          // Bug fix — this used to render the emoji alone (label only
+          // reachable by hovering the title attribute), so a status
+          // like "In a meeting" was just a bare 🎥 with no text anyone
+          // glancing at the list would recognize. Now matches the
+          // emoji+label pairing already used above the avatar (see
+          // AvatarSprite.ts's presence pill).
+          <span title={PRESENCE_LABEL[workMode]} className="text-[9px] font-semibold px-1 py-px rounded bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300 shrink-0 whitespace-nowrap">
+            {PRESENCE_EMOJI[workMode]} {PRESENCE_LABEL[workMode]}
           </span>
         )}
         {speaking && <span title="Speaking" className="text-[11px] leading-none animate-pulse">🔊</span>}
