@@ -38,6 +38,49 @@ test('walking replaces the localPlayer object, so whole-object selectors re-rend
   assert.equal(after.name, before.name, 'while the fields a panel actually reads are unchanged');
 });
 
+test('another player merely walking does not replace playerRecords', () => {
+  // Every PLAYER_MOVED packet carries direction/isMoving. With twenty people
+  // walking that is many times a second, and replacing the map for it
+  // re-rendered App itself — the whole tree — along with the participant
+  // panel, the video grid and GameCanvas.
+  const store = useGameStore.getState();
+  store.setPlayerRecords({});
+  store.upsertPlayer({ id: 'p1', name: 'Ravka', direction: 'down', isMoving: false } as Avatar);
+  const before = useGameStore.getState().playerRecords;
+
+  store.upsertPlayer({ id: 'p1', direction: 'left', isMoving: true, isRunning: true } as Avatar);
+  const after = useGameStore.getState().playerRecords;
+
+  assert.equal(before, after, 'the map identity must survive a movement-only update');
+  // ...while the canvas, which reads the record imperatively, still sees it.
+  assert.equal(after.p1.direction, 'left');
+  assert.equal(after.p1.isMoving, true);
+  assert.equal(after.p1.isRunning, true);
+});
+
+test('a change anyone actually renders still replaces the map', () => {
+  const store = useGameStore.getState();
+  store.setPlayerRecords({});
+  store.upsertPlayer({ id: 'p1', name: 'Ravka', direction: 'down', isMoving: false } as Avatar);
+  const before = useGameStore.getState().playerRecords;
+
+  store.upsertPlayer({ id: 'p1', name: 'Ravka', speaking: true } as Avatar);
+  assert.notEqual(useGameStore.getState().playerRecords, before,
+    'speaking is rendered, so subscribers must be told');
+  assert.equal(useGameStore.getState().playerRecords.p1.speaking, true);
+});
+
+test('movement mixed with a rendered change takes the normal path', () => {
+  const store = useGameStore.getState();
+  store.setPlayerRecords({});
+  store.upsertPlayer({ id: 'p1', name: 'Ravka', direction: 'down', isMoving: false } as Avatar);
+  const before = useGameStore.getState().playerRecords;
+
+  store.upsertPlayer({ id: 'p1', name: 'Ravka', direction: 'up', isMoving: true, isSitting: true } as Avatar);
+  assert.notEqual(useGameStore.getState().playerRecords, before, 'isSitting is rendered — this is not movement-only');
+  assert.equal(useGameStore.getState().playerRecords.p1.direction, 'up');
+});
+
 test('heavy components select localPlayer fields, never the whole object', () => {
   // Only components that genuinely track POSITION may take the whole object;
   // for everyone else it means re-rendering ten times a second while any

@@ -171,6 +171,22 @@ function hasAvatarChanges(existing: Avatar, next: Avatar): boolean {
   return false;
 }
 
+// Fields that describe how an avatar is MOVING right now, as opposed to who
+// they are. Nothing outside the canvas reads them, and the canvas reads them
+// imperatively from a ref every frame — see upsertPlayer.
+const MOVEMENT_FIELDS = ['direction', 'isMoving', 'isRunning'] as const;
+
+/** True when `next` differs from `existing` ONLY in movement fields. */
+function onlyMovementChanged(existing: Avatar, next: Avatar): boolean {
+  let sawMovementChange = false;
+  for (const key of Object.keys(next) as (keyof Avatar)[]) {
+    if (Object.is(existing[key], next[key])) continue;
+    if ((MOVEMENT_FIELDS as readonly string[]).includes(key as string)) sawMovementChange = true;
+    else return false;
+  }
+  return sawMovementChange;
+}
+
 export interface GameState {
   localPlayerId: string;
   setLocalPlayerId: (id: string) => void;
@@ -998,6 +1014,32 @@ export const useGameStore = create<GameState>((set, get) => ({
       // come through here (see setPlayerTarget / livePlayers), so this is
       // purely status.
       if (existing && !hasAvatarChanges(existing, nextPlayer)) return state;
+
+      // Movement-only change: update the record IN PLACE and leave the map's
+      // identity alone.
+      //
+      // Direction and isMoving change constantly — every PLAYER_MOVED packet
+      // carries them, and in a room of twenty walking people that is many
+      // times a second. Replacing the map for those handed React a new
+      // playerRecords object each time, re-rendering every subscriber: App
+      // itself (so the entire tree), the participant panel, the video grid,
+      // GameCanvas. That measured as ~200ms of input delay plus ~200ms of
+      // presentation delay on every keypress (INP 336ms, with processing
+      // duration 0 — the keyboard handlers were innocent, the thread was
+      // simply never free).
+      //
+      // Mutating state is unidiomatic and deliberate here: NOTHING outside the
+      // canvas reads these three fields, and the canvas reads them
+      // imperatively from playerRecordsRef every frame, so there is no
+      // rendered value to keep in sync and nothing for React to miss. A field
+      // that anyone renders — name, speaking, sitting, hidden, workMode — still
+      // goes through the normal replace-the-map path below.
+      if (existing && onlyMovementChanged(existing, nextPlayer)) {
+        existing.direction = nextPlayer.direction;
+        existing.isMoving = nextPlayer.isMoving;
+        existing.isRunning = nextPlayer.isRunning;
+        return state;
+      }
 
       return { playerRecords: { ...state.playerRecords, [player.id]: nextPlayer } };
     }),
