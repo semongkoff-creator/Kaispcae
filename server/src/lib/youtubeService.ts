@@ -110,8 +110,13 @@ export async function getVideoDurationSec(videoId: string): Promise<number | nul
       return null;
     }
     const iso = body?.items?.[0]?.contentDetails?.duration;
-    if (typeof iso !== 'string') return null;
-    return parseIso8601Duration(iso);
+    if (typeof iso !== 'string') {
+      console.log(`[youtube-diag] ${videoId} — no contentDetails.duration in response`);
+      return null;
+    }
+    const parsed = parseIso8601Duration(iso);
+    console.log(`[youtube-diag] ${videoId} — duration "${iso}" parsed as ${parsed}s`);
+    return parsed;
   } catch (e) {
     console.error('[youtube] duration lookup error:', e);
     return null;
@@ -119,9 +124,15 @@ export async function getVideoDurationSec(videoId: string): Promise<number | nul
 }
 
 // YouTube's contentDetails.duration is ISO 8601 ("PT3M33S", "PT1H2M", "PT45S").
-function parseIso8601Duration(iso: string): number {
+// Bug fix — an unparseable string (e.g. "P0D" for a livestream, which has no
+// "T" time component at all) used to return 0 here, and getVideoDurationSec's
+// `?? FALLBACK_DURATION_SEC` never caught it since 0 isn't nullish — the
+// caller then scheduled the auto-advance timer to fire almost immediately
+// instead of falling back to the 4-minute default. Returns null on a genuine
+// parse failure now so the fallback actually applies.
+function parseIso8601Duration(iso: string): number | null {
   const m = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso);
-  if (!m) return 0;
+  if (!m) return null;
   const hours = parseInt(m[1] ?? '0', 10);
   const minutes = parseInt(m[2] ?? '0', 10);
   const seconds = parseInt(m[3] ?? '0', 10);
