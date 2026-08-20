@@ -178,6 +178,31 @@ test('canvas overlays are positioned through the culling/dedup helpers', () => {
   assert.equal(source.includes('ctx.measureText('), false, 'label widths should come from the cached measurer');
 });
 
+test('the minimap redraws player dots without rebuilding the floor plan', () => {
+  const source = readFileSync(resolve('client/src/components/hud/Minimap.tsx'), 'utf8');
+  // The floor plan pass loops every tile in the room. It used to share one
+  // effect with the player dots, whose deps include `players` — an array App
+  // rebuilds on every render, up to five times a second from the proximity
+  // tick alone. So anyone moving nearby rebuilt the whole map.
+  assert.ok(source.includes('staticLayerRef'), 'the floor plan should be cached off-screen');
+  assert.ok(source.includes('ctx.drawImage(floorPlan, 0, 0, MM_W, MM_H)'), 'the dot pass should blit it, not redraw it');
+
+  const dotDeps = source.slice(source.lastIndexOf('}, ['));
+  for (const churny of ['tiles', 'furniture', 'wallAreaRects', 'zones']) {
+    assert.equal(
+      dotDeps.includes(churny), false,
+      `the dot pass must not depend on ${churny} — that is what made it redraw the map`,
+    );
+  }
+
+  // Assigning canvas.width reallocates and clears the backing store; the dot
+  // pass runs whenever anyone moves, so it must only resize on a real change.
+  assert.ok(
+    /if \(canvas\.width !== MM_W \* dpr \|\| canvas\.height !== MM_H \* dpr\) \{/.test(source),
+    'the canvas should only be resized when its size actually changed',
+  );
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

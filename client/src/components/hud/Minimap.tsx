@@ -15,6 +15,20 @@ const MM_H = 100;
 
 export function Minimap({ players, localPlayerId, onTeleport, visible }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // The floor plan, rendered ONCE per map change into an offscreen canvas.
+  //
+  // This all used to live in a single effect whose deps included `players` —
+  // and `players` arrives from App as Object.values(allPlayers), a brand-new
+  // array on every App render. App re-renders up to five times a second from
+  // the proximity tick alone (anyone moving near you changes it), so the
+  // ENTIRE minimap was being rebuilt at that rate: the canvas backing store
+  // reallocated, every zone filled, every furniture piece filled, and a nested
+  // loop over EVERY TILE IN THE ROOM — tens of thousands of fills in a large
+  // office. Redrawing player dots must not cost the floor plan they sit on.
+  const staticLayerRef = useRef<HTMLCanvasElement | null>(null);
+  // Bumped when the floor plan is rebuilt, purely so the dot pass below runs
+  // again against the new layer instead of blitting a stale one.
+  const [staticVersion, setStaticVersion] = useState(0);
   const tiles = useGameStore((s) => s.tiles);
   const furniture = useGameStore((s) => s.furniture);
   const wallAreaRects = useGameStore((s) => s.wallAreaRects);
@@ -37,17 +51,15 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
   // reads as visual clutter once you're not actively using it to navigate.
   const [isHovered, setIsHovered] = useState(false);
 
+  // ── Floor plan: rebuilt only when the ROOM changes ────────────────────
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = MM_W * dpr;
-    canvas.height = MM_H * dpr;
-    canvas.style.width = `${MM_W}px`;
-    canvas.style.height = `${MM_H}px`;
+    const off = staticLayerRef.current ?? document.createElement('canvas');
+    staticLayerRef.current = off;
+    off.width = MM_W * dpr;
+    off.height = MM_H * dpr;
+    const ctx = off.getContext('2d');
+    if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     // A near-white 0.85-alpha fill reads as "blank/broken box" rather than
@@ -104,6 +116,34 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
     ctx.lineWidth = 1;
     ctx.strokeRect(1, 1, MM_W - 2, MM_H - 2);
 
+    setStaticVersion((v) => v + 1);
+    // Deliberately NOT depending on `players` (or anything derived from an App
+    // render) — see staticLayerRef's comment.
+  }, [tiles, furniture, wallAreaRects, zones, mapCols, mapRows, scaleX, scaleY]);
+
+  // ── Player dots: the only thing that redraws when people move ─────────
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    // Assigning canvas.width reallocates the backing store and clears it, so
+    // it must only happen when the size actually changed — this pass runs
+    // every time anyone moves.
+    if (canvas.width !== MM_W * dpr || canvas.height !== MM_H * dpr) {
+      canvas.width = MM_W * dpr;
+      canvas.height = MM_H * dpr;
+      canvas.style.width = `${MM_W}px`;
+      canvas.style.height = `${MM_H}px`;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const floorPlan = staticLayerRef.current;
+    if (floorPlan) ctx.drawImage(floorPlan, 0, 0, MM_W, MM_H);
+    else ctx.clearRect(0, 0, MM_W, MM_H);
+
     // "Hide myself" (Avatar.hidden) — same rule as GameCanvas.tsx's own
     // avatar draw loop: admin+ still sees the dot, everyone else doesn't.
     const canSeeHidden = roleAtLeast(localRole, 'admin');
@@ -123,7 +163,8 @@ export function Minimap({ players, localPlayerId, onTeleport, visible }: Minimap
         ctx.stroke();
       }
     }
-  }, [players, localPlayerId, tiles, furniture, wallAreaRects, zones, localRole, mapCols, mapRows, scaleX, scaleY]);
+    // A blit plus one arc per player — the floor plan underneath is reused.
+  }, [players, localPlayerId, localRole, scaleX, scaleY, staticVersion]);
 
   const handleClick = (e: React.MouseEvent) => {
     // Belt-and-suspenders — you can't actually click this without the mouse
