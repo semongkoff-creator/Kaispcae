@@ -41,6 +41,7 @@ import { drawTile, drawFloorTile, drawWallTile, drawFurnitureLayer, TILE_COLORS 
 import { drawMiniTileType, drawMiniZoneBackground, MINI_FURNITURE, MINI_WALL_AREA, MINI_DOOR } from './miniRender';
 import { measureTextCached } from './textMetrics';
 import { cullOverlay, setOverlayStyle } from './overlayStyle';
+import { recordFrame } from '@/utils/frameDiag';
 
 // Kept proportional to TILE_SIZE (same ratio as AvatarSprite.ts's own copy of
 // this constant) so decorations positioned relative to it — crown, speaker
@@ -2798,8 +2799,13 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
   // the next problem.
   const drawErrorLoggedRef = useRef(false);
   const draw = useCallback((timestamp: number) => {
+    const startedAt = performance.now();
     try {
       drawFrame(timestamp);
+      // Only the drawing is timed here — the gap BETWEEN frames is measured
+      // inside recordFrame. Comparing the two is what tells a slow canvas
+      // apart from a blocked main thread (see frameDiag.ts).
+      recordFrame(performance.now() - startedAt);
     } catch (err) {
       if (!drawErrorLoggedRef.current) {
         drawErrorLoggedRef.current = true;
