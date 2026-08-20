@@ -9,19 +9,33 @@ const AUTO_DISMISS_MS = 5000;
 // notifyNewMessage, which pushes here instead of showing nothing at all in
 // that case (a native popup's own chrome is 100% OS-controlled and can't be
 // restyled, so there was never a way to make THAT nicer). Native
-// notifications are unchanged for a backgrounded tab. A nudge tried this
-// same toast path too (with a top-center purple variant) and was reverted —
-// see notifyNudge's own comment for why.
+// notifications are unchanged for a backgrounded tab.
 export function InAppToastStack() {
   const toasts = useGameStore((s) => s.inAppToasts);
   const dismiss = useGameStore((s) => s.dismissInAppToast);
 
+  const nudges = toasts.filter((t) => t.variant === 'nudge');
+  const defaults = toasts.filter((t) => t.variant !== 'nudge');
+
   return (
-    <div className="fixed top-4 right-4 z-[200] flex flex-col gap-2 pointer-events-none w-72">
-      {toasts.map((t) => (
-        <Toast key={t.id} icon={t.icon} title={t.title} text={t.text} onDismiss={() => dismiss(t.id)} />
-      ))}
-    </div>
+    <>
+      <div className="fixed top-4 right-4 z-[200] flex flex-col gap-2 pointer-events-none w-72">
+        {defaults.map((t) => (
+          <Toast key={t.id} icon={t.icon} title={t.title} text={t.text} onDismiss={() => dismiss(t.id)} />
+        ))}
+      </div>
+      {/* Nudge toast — bottom-right, separate from the chat/system stack
+          above. A first attempt lived top-center with a repeated 3x burst
+          and purple styling and got reverted for reading as spammy; this is
+          a deliberately plainer second pass — one toast per nudge, same
+          quiet styling as every other toast, just placed somewhere that
+          doesn't compete with the top-right stack. */}
+      <div className="fixed bottom-4 right-4 z-[200] flex flex-col-reverse gap-2 pointer-events-none w-72">
+        {nudges.map((t) => (
+          <Toast key={t.id} icon={t.icon} title={t.title} text={t.text} onDismiss={() => dismiss(t.id)} />
+        ))}
+      </div>
+    </>
   );
 }
 

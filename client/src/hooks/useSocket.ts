@@ -858,19 +858,22 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
         if (state.isNotifKindEnabled('nudge')) playNudgeSound(isMe);
         if (isMe) {
           const nudgerName = state.playerRecords[event.fromId]?.name ?? 'Seseorang';
-          // In-app toast — shows even while the tab is focused, which the
-          // OS-level notification below deliberately does not (it only fires
-          // when the tab is in the background, to avoid double-pinging someone
-          // already looking at the screen).
-          // A single toast/native popup was easy to miss entirely, so one
-          // nudge now lands as a short burst instead of a one-shot alert —
-          // each pulse still respects the visible-tab/hidden-tab split
-          // inside notifyNudge itself (toast vs. native+tab-flash).
           if (state.isNotifKindEnabled('nudge')) {
-            const NUDGE_BURST_COUNT = 3;
-            const NUDGE_BURST_INTERVAL_MS = 450;
-            for (let i = 0; i < NUDGE_BURST_COUNT; i++) {
-              setTimeout(() => notifyNudge(nudgerName), i * NUDGE_BURST_INTERVAL_MS);
+            if (document.visibilityState === 'visible') {
+              // Tab is already in view — a single bottom-right toast is
+              // enough (see InAppToastStack's own comment on why this isn't
+              // the earlier repeated/top-center version anymore).
+              state.pushInAppToast('👋', 'Disenggol!', `${nudgerName} menyenggolmu`, 'nudge');
+            } else {
+              // Backgrounded — a single native popup was easy to miss
+              // entirely, so this lands as a short burst instead of a
+              // one-shot alert (native notification + tab-title flash, see
+              // notifyNudge).
+              const NUDGE_BURST_COUNT = 3;
+              const NUDGE_BURST_INTERVAL_MS = 450;
+              for (let i = 0; i < NUDGE_BURST_COUNT; i++) {
+                setTimeout(() => notifyNudge(nudgerName), i * NUDGE_BURST_INTERVAL_MS);
+              }
             }
           }
         }
