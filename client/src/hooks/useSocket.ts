@@ -985,6 +985,25 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // is shared across every tab of this origin.
     socket.on(SocketEvents.SESSION_TAKEN_OVER, () => {
       console.warn('[socket] session taken over by a newer tab/connection');
+      // Stop reconnecting, and stop it BEFORE anything else here.
+      //
+      // The server has already force-disconnected this socket, and socket.io
+      // reconnects by default — landing in the 'connect' handler above, which
+      // re-emits JOIN_ROOM on every connect, not just the first. That JOIN_ROOM
+      // then supersedes the connection that just took over from us, which
+      // reconnects and supersedes us straight back: a ping-pong between two
+      // tabs of one account, where EVERY round broadcasts a join and a leave to
+      // every other client in the room. Each of those makes all of them drop a
+      // player record, build a new one under a fresh socket id, fetch a profile
+      // photo, and tear down and rebuild a peer connection — so two tabs
+      // belonging to one person generated continuous churn for everyone, which
+      // is what the room was actually suffering from (constant
+      // "player joined/left" in every console, movement stuttering for people
+      // who were standing still).
+      //
+      // This socket has been replaced and is not meant to come back. Say so.
+      socket.io.reconnection(false);
+      socket.disconnect();
       useGameStore.getState().setSessionTakenOverNotice('Sesi ini diambil alih oleh tab atau perangkat lain.');
     });
 
@@ -1116,6 +1135,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // Bug 1 — server-initiated kick when a NEW login supersedes this live
     // socket (emitted just before the forced disconnect, see lib/sessionKick).
     socket.on('SESSION_SUPERSEDED', (d: { message?: string }) => {
+      // Same reasoning as SESSION_TAKEN_OVER above: this session is finished,
+      // so retrying the handshake forever achieves nothing except noise (here
+      // the token is cleared too, so every retry would be rejected anyway).
+      socket.io.reconnection(false);
+      socket.disconnect();
       window.dispatchEvent(new CustomEvent('vm-session-superseded', { detail: d?.message }));
     });
 
