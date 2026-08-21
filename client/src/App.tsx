@@ -8,7 +8,6 @@ import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
 import { Tooltip } from './components/ui/Tooltip';
 import { MapZoomControl } from './components/ui/MapZoomControl';
 import { MobileControls } from './components/hud/MobileControls';
-import { NameModal } from './components/ui/NameModal';
 import { AvatarSetup } from './components/avatar/AvatarSetup';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
@@ -3029,34 +3028,23 @@ function MainApp() {
     if (roomSlug) localStorage.setItem('vm_last_room_slug', roomSlug);
   }, [roomSlug]);
   const [playerName, setPlayerName] = useState<string | null>(null);
-  // specs/2026-08-21-room-entry-name-prompt-design.md — which roomSlug the
-  // CURRENT playerName was confirmed for. null until the modal is first
-  // submitted. Compared against the live roomSlug below: `<Game
-  // key={roomSlug}>` already remounts on every new room entry (lobby->room
-  // AND portal travel), so re-showing the modal whenever roomSlug !==
-  // roomNameConfirmedFor gives "every room entry" for free, with no new
-  // wiring into useSocket.ts's reconnect path (reconnects don't change
-  // roomSlug, so they never touch this).
-  const [roomNameConfirmedFor, setRoomNameConfirmedFor] = useState<string | null>(null);
   const [showAvatarSetup, setShowAvatarSetup] = useState(false);
   const [isRoomReady, setIsRoomReady] = useState(false);
   const setRoomState = useGameStore((s) => s.setRoomState);
   const setLocalPlayer = useGameStore((s) => s.setLocalPlayer);
 
-  // specs/2026-08-21-room-entry-name-prompt-design.md — final-review fix:
-  // logout() (useAuth.ts) doesn't reload the page, so this component never
-  // unmounts across a same-tab account switch — without this, a second
-  // user logging in after a first would inherit the first user's
-  // playerName/roomNameConfirmedFor untouched (the seeding effect below
-  // only fires when playerName is still null, which it never is after the
-  // first login), silently entering rooms under the PREVIOUS account's
-  // chosen name with no prompt at all.
+  // specs/2026-08-21-nametag-displayname-sync-design.md — logout()
+  // (useAuth.ts) doesn't reload the page, so this component never unmounts
+  // across a same-tab account switch — without this, a second user logging
+  // in after a first would inherit the first user's playerName untouched
+  // (the seeding effect below only fires when playerName is still null,
+  // which it never is after the first login), silently entering rooms
+  // under the PREVIOUS account's name.
   const prevUserIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (user && user.id !== prevUserIdRef.current) {
       prevUserIdRef.current = user.id;
       setPlayerName(null);
-      setRoomNameConfirmedFor(null);
     } else if (!user) {
       prevUserIdRef.current = null;
     }
@@ -3067,25 +3055,33 @@ function MainApp() {
   // loadAvatarConfig()'s defaults (sprite mode etc.) instead of leaving it
   // undefined, which would silently drop back to the legacy shape avatar.
   useEffect(() => {
-    // specs/2026-08-21-room-entry-name-prompt-design.md — guarded on
+    // specs/2026-08-21-nametag-displayname-sync-design.md — guarded on
     // playerName still being null so this only ever seeds ONCE per login,
     // not every time the `user` object gets a new reference (e.g.
     // markTutorialSeen/updatePreferences below both call setUser with a
-    // fresh object for an unrelated field). Without the guard, any such
-    // unrelated update mid-session would silently overwrite whatever name
-    // the user had just confirmed for their CURRENT room with the
-    // account's login-time default — a local-only visual glitch (this
-    // effect only touches the Zustand store, not the server-authoritative
-    // JOIN_ROOM name), but a confusing one.
+    // fresh object for an unrelated field). The nametag always follows
+    // user.displayName directly now — no separate room-entry nickname to
+    // fall back to (removed; see specs/2026-08-21-room-entry-name-prompt-
+    // design.md, the feature that originally added it).
     if (user && playerName === null) {
       const config = user.avatarConfig || loadAvatarConfig();
-      const initialName = user.roomDisplayName || user.displayName;
-      setPlayerName(initialName);
+      setPlayerName(user.displayName);
       setLocalPlayer({
-        name: initialName,
+        name: user.displayName,
         color: config.color,
         avatarConfig: config,
       });
+      // specs/2026-08-21-room-entry-name-prompt-design.md originally
+      // triggered Avatar Setup from inside the now-removed name-prompt's
+      // submit handler, guarded on `savedConfig.bodyShape &&
+      // savedConfig.name` (both being set meant "already fully onboarded").
+      // The `name` half of that check no longer means anything distinct
+      // now that there's no separate name-collection step — bodyShape
+      // alone is the real signal of "has this account ever completed
+      // avatar customization."
+      if (!config.bodyShape) {
+        setShowAvatarSetup(true);
+      }
     }
   }, [user, setLocalPlayer, playerName]);
 
@@ -3102,26 +3098,6 @@ function MainApp() {
       api.saveAvatar(config).catch(() => {});
     }
   }, [user]);
-
-  const handleNameSubmit = useCallback((name: string) => {
-    setPlayerName(name);
-    // specs/2026-08-21-room-entry-name-prompt-design.md — marks THIS room
-    // as confirmed so the gate below (Step 5) stops showing the modal for
-    // it; persists the name server-side as the new default for whichever
-    // room is entered next (fire-and-forget — a save failure must never
-    // block entering the room, same posture as persistAvatar elsewhere in
-    // this file).
-    setRoomNameConfirmedFor(roomSlug);
-    api.saveRoomDisplayName(name).catch(() => {});
-    const savedConfig = loadAvatarConfig();
-    if (savedConfig.bodyShape && savedConfig.name) {
-      savedConfig.name = name;
-      saveAvatarConfig(savedConfig);
-      setLocalPlayer({ name, color: savedConfig.color, avatarConfig: savedConfig });
-    } else {
-      setShowAvatarSetup(true);
-    }
-  }, [setLocalPlayer, roomSlug]);
 
   const handleAvatarSave = useCallback((config: AvatarConfig) => {
     saveAvatarConfig(config);
@@ -3265,14 +3241,6 @@ function MainApp() {
     return <TutorialModal onFinish={markTutorialSeen} />;
   }
 
-  // Room — specs/2026-08-21-room-entry-name-prompt-design.md: shows once
-  // per NEW roomSlug (fresh entry from Lobby, or portal travel — both
-  // already remount <Game key={roomSlug}> below), never on a reconnect
-  // within the same room visit (reconnects don't change roomSlug).
-  if (roomSlug !== roomNameConfirmedFor) {
-    return <NameModal initialName={playerName || user.displayName} onSubmit={handleNameSubmit} />;
-  }
-
   if (showAvatarSetup) {
     return (
       <AvatarSetup
@@ -3307,13 +3275,11 @@ function MainApp() {
   // window still open, with no signal anything changed underneath. Forcing
   // a remount on room change gives every room a clean slate, matching what
   // already happens when leaving to the Lobby and rejoining.
-  // specs/2026-08-21-room-entry-name-prompt-design.md — final-review fix:
-  // authDisplayName must be the room-entry-confirmed name, not the raw
-  // account name, or the whole point of the feature (an avatar nametag
-  // OTHER people see) never reaches anyone but the user's own client. Falls
-  // back to user.displayName for the one-tick window before the seeding
-  // effect first runs, same pattern already used at the NameModal call site.
-  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => { setRoomSlug(null); setRoomNameConfirmedFor(null); }} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={playerName || user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} onUpdatePreferences={updatePreferences} />;
+  // specs/2026-08-21-nametag-displayname-sync-design.md — authDisplayName
+  // falls back to user.displayName for the one-tick window before the
+  // seeding effect first runs, same fallback pattern used above at
+  // AvatarSetup's initialConfig.
+  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => { setRoomSlug(null); }} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={playerName || user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} onUpdatePreferences={updatePreferences} />;
 }
 
 // ZEP Room Editor opens in its own tab as /?roomEditor=<slug> (a query param on
