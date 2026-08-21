@@ -6,6 +6,7 @@ import { useGameStore } from '@/stores/gameStore';
 import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { showConfirm } from '@/stores/modalStore';
+import { api, OrgMember } from '@/services/api';
 
 // One labelled row inside a participant's action menu. Icon plus wording,
 // because five bare icons crowded into a row said nothing until you hovered
@@ -33,6 +34,11 @@ function MenuItem({ icon, label, onClick, danger, detail }: { icon: React.ReactN
 
 interface ParticipantPanelProps {
   remoteStreams: Map<string, MediaStream>;
+  // specs/2026-08-21-room-scoped-participants-design.md — the room this
+  // panel is showing participants FOR. Threaded through to
+  // api.getRoomParticipants so the "Offline" section only shows members who
+  // have actually been active in THIS room before, not the whole organization.
+  roomSlug: string;
   // Local mic state lives in useWebRTC (isMicMuted), not on the local
   // player's own record — the PLAYER_MIC_UPDATED listener deliberately
   // skips writing back to yourself (see useSocket.ts), so it's passed
@@ -92,7 +98,7 @@ interface ParticipantPanelProps {
 
 const MAX_VIDEO_THUMBS = 3;
 
-export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, localAccountName, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, onReport, emitKick, emitForceMute, emitForcePull, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
+export function ParticipantPanel({ remoteStreams, roomSlug, isMicMuted, isGuest, localAccountName, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, onReport, emitKick, emitForceMute, emitForcePull, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
   // Drawer side follows the same flag App.tsx uses to switch between
   // VideoGrid (map HUD) and MeetingView (App.tsx:1119) — read directly
   // rather than threaded as a prop, same as the other store slices below.
@@ -135,6 +141,16 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, localAcco
   const muteUser = useGameStore((s) => s.muteUser);
   const unmuteUser = useGameStore((s) => s.unmuteUser);
 
+  const localUserId = useGameStore((s) => s.localUserId);
+
+  // Org roster for the Offline section — fetched once per panel-open, not
+  // polled.
+  const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    api.getRoomParticipants(roomSlug).then((r) => setOrgMembers(r.members)).catch(() => {});
+  }, [open, roomSlug]);
+
   // A player's live room role (see gameStore's applyAdminChanged) — keyed by
   // account id, the authoritative source, rather than the per-record isAdmin
   // flag which isn't refreshed on movement upserts.
@@ -159,6 +175,12 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, localAcco
   const canSeeHidden = roleAtLeast(localRole, 'admin');
   const remotePlayers = Object.values(playerRecords).filter((p) => !p.hidden || canSeeHidden);
   const totalOnline = remotePlayers.length + 1;
+
+  // Offline section — every org member NOT currently connected (by userId).
+  const onlineUserIds = new Set<string>();
+  if (localUserId) onlineUserIds.add(localUserId);
+  for (const p of remotePlayers) if (p.userId) onlineUserIds.add(p.userId);
+  const offlineMembers = orgMembers.filter((m) => !onlineUserIds.has(m.id));
 
   // Locate ("Temukan") — search by name, then walk the local player toward
   // them (real A* pathfinding, see GameCanvas.tsx's locateRequestRef).

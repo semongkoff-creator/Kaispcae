@@ -663,5 +663,5 @@ export const api = {
   getDMMessages: (conversationId: string, before?: string) =>
     request<{ messages: ChannelMessage[] }>(`/dms/${conversationId}/messages${before ? `?before=${before}` : ''}`),
 
-  getOrgMembers: () => request<{ members: OrgMember[] }>('/org/members'),
+  getRoomParticipants: (roomSlug: string) => request<{ members: OrgMember[] }>(`/rooms/${roomSlug}/participants`),
 };

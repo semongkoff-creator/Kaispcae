@@ -2446,7 +2446,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             Settings moved to Sidebar.tsx (no longer in this bar) —
             Soundboard/ActivityFeed's own top-left panel spot is untouched,
             see the top-14 left-16 block above. */}
-        <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} isGuest={isGuest} localAccountName={currentUser.name} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} onReport={(userId, name) => setReportTarget({ userId, name })} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
+        <ParticipantPanel remoteStreams={remoteStreams} roomSlug={roomSlug} isMicMuted={isMicMuted} isGuest={isGuest} localAccountName={currentUser.name} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} onReport={(userId, name) => setReportTarget({ userId, name })} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
         {/* Fixed dead-centre, always — Messenger/Chat (see MessengerApp.tsx)
             is a pure `position: absolute` overlay docked to the left half of
             the screen; it never participates in layout flow, so it can't
