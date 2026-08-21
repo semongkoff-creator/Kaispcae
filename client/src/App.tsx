@@ -2250,7 +2250,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {calendarViewActive && (
         <Suspense fallback={null}>
         <CalendarApp
-          currentUser={{ id: authUserId, name: authDisplayName, timezone: currentUser.timezone }}
+          currentUser={{ id: authUserId, name: currentUser.name, timezone: currentUser.timezone }}
           onClose={closePanel}
           onStartMeeting={(slug) => { closePanel(); onPortalTravel(slug); }}
         />

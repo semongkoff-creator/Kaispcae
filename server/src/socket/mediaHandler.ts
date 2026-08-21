@@ -126,6 +126,12 @@ export function registerMediaHandlers(io: Server, socket: Socket): void {
       // client, so every listener agrees on the same origin regardless of
       // their own clock being off.
       const payload = data.type === 'bgm' ? { ...(data.payload ?? {}), startedAt: Date.now() } : (data.payload ?? {});
+      // specs/2026-08-21-room-entry-name-prompt-design.md — final-review
+      // fix (round 2): createdByName is a persisted, DB-visible attribution
+      // — same reasoning as noteHandler.ts's authorName fix, see there for
+      // the full explanation. Falls back to getPlayerName only if the DB
+      // lookup fails.
+      const creatorUser = await prisma.user.findUnique({ where: { id: uid }, select: { displayName: true } });
       const row = await prisma.mapMediaObject.create({
         data: {
           roomId: dbRoom.id,
@@ -133,7 +139,7 @@ export function registerMediaHandlers(io: Server, socket: Socket): void {
           x: Math.round(data.x),
           y: Math.round(data.y),
           createdBy: uid,
-          createdByName: getPlayerName(socket.id),
+          createdByName: creatorUser?.displayName || getPlayerName(socket.id),
           expiresAt: needsTtl ? new Date(Date.now() + IMAGE_FILE_TTL_MS) : null,
           payload: payload as object,
         },
