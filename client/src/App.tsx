@@ -174,7 +174,7 @@ const AFK_IDLE_MS = 120000; // 2 minutes
 // picked once per trigger (see handleInteractiveTrigger below).
 const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#ddd6fe'];
 
-function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest, onUpdatePreferences }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean; onUpdatePreferences?: (patch: UserPreferences) => void }) {
+function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest, onUpdatePreferences, onDisplayNameChange }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean; onUpdatePreferences?: (patch: UserPreferences) => void; onDisplayNameChange?: (name: string) => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
   const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, emitSeatClaimRequest, emitSeatClaimDecide, emitSeatClaimRequestCancel, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitRemoteHelpRequest, emitRemoteHelpRespond, emitRemoteHelpCredential, emitRemoteHelpEnd, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead }, currentUser.name);
@@ -1157,6 +1157,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       color: config.color,
       avatarConfig: config,
     });
+    // specs/2026-08-21-room-entry-name-prompt-v2-design.md — this is the
+    // Sidebar's mid-session Avatar Editor, which has no other way to reach
+    // MainApp's playerName/user.displayName. Without this, MainApp keeps
+    // pre-filling the room-entry NameModal (on the next portal travel or
+    // leave-and-rejoin) with the name from BEFORE this rename — and
+    // accepting that stale pre-fill silently reverts the rename on the
+    // server via handleNameSubmit's own api.saveAvatar call.
+    onDisplayNameChange?.(config.name);
     emitAvatarUpdate(config);
     // Chat's sender-name cache (useProfiles) resolves by userId and never
     // refetches once cached — AVATAR_UPDATED (above) excludes the sender's
@@ -1173,7 +1181,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     // reachable at all, so there's no logged-out case to gate this behind.
     api.saveAvatar(config).catch(() => {});
     if (useGameStore.getState().activePanel === 'avatarSetup') closePanel();
-  }, [emitAvatarUpdate, localUserId]);
+  }, [emitAvatarUpdate, localUserId, onDisplayNameChange]);
 
   // ─── AFK auto-away (ZEP/Gather-style) ────────────────────────────────
   // Fitur 3B — after AFK_IDLE_MS with no keyboard/pointer/touch input, show
@@ -3331,7 +3339,7 @@ function MainApp() {
   // falls back to user.displayName for the one-tick window before the
   // seeding effect first runs, same fallback pattern used above at
   // AvatarSetup's initialConfig.
-  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => { setRoomSlug(null); setRoomNameConfirmedFor(null); }} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={playerName || user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} onUpdatePreferences={updatePreferences} />;
+  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => { setRoomSlug(null); setRoomNameConfirmedFor(null); }} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={playerName || user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} onUpdatePreferences={updatePreferences} onDisplayNameChange={(n) => { setPlayerName(n); updateDisplayName(n); }} />;
 }
 
 // ZEP Room Editor opens in its own tab as /?roomEditor=<slug> (a query param on
