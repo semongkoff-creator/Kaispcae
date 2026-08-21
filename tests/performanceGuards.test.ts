@@ -178,6 +178,39 @@ test('canvas overlays are positioned through the culling/dedup helpers', () => {
   assert.equal(source.includes('ctx.measureText('), false, 'label widths should come from the cached measurer');
 });
 
+test('live reference images are cropped to the viewport before drawing', () => {
+  const source = readFileSync(resolve('client/src/components/canvas/GameCanvas.tsx'), 'utf8');
+  const start = source.indexOf('function drawLiveReferenceImage');
+  const end = source.indexOf('// ZEP-style spotlight');
+  assert.notEqual(start, -1, 'expected the live reference-image draw helper');
+  assert.notEqual(end, -1, 'expected the helper boundary comment');
+  const helper = source.slice(start, end);
+
+  assert.ok(helper.includes('viewW') && helper.includes('viewH'), 'the helper must know the visible viewport');
+  assert.ok(helper.includes('drawLeft') && helper.includes('sourceX'), 'it should derive a destination/source crop');
+  assert.equal(
+    helper.includes('img.naturalWidth, img.naturalHeight, ref.x - cameraX, ref.y - cameraY, ref.width, ref.height'),
+    false,
+    'drawing the whole uploaded floor-plan every frame is what made the static layer expensive',
+  );
+  assert.ok(
+    source.includes('drawLiveReferenceImage(ctx, liveReferenceImageRef.current, cameraX, cameraY, worldViewW, worldViewH)'),
+    'the call site must pass the current viewport bounds',
+  );
+  assert.ok(source.includes("mark('liveReferenceImage')"), 'reference-image cost must not be hidden under furnitureObject again');
+});
+
+test('layered avatars are composited once per animation frame instead of redrawing every layer', () => {
+  const source = readFileSync(resolve('client/src/components/canvas/AvatarSprite.ts'), 'utf8');
+  assert.ok(source.includes('layeredSpriteCache'), 'layered avatar frames should have a composed-frame cache');
+  assert.ok(source.includes('LAYERED_AVATAR_CACHE_LIMIT'), 'the cache must stay bounded');
+  assert.ok(source.includes('layeredAvatarCacheKey'), 'cache identity must include config, direction, frame, and display size');
+  assert.ok(
+    source.includes('ctx.drawImage(cached') || source.includes('ctx.drawImage(canvas'),
+    'hot frames should blit one composed sprite instead of every generator layer',
+  );
+});
+
 test('the minimap redraws player dots without rebuilding the floor plan', () => {
   const source = readFileSync(resolve('client/src/components/hud/Minimap.tsx'), 'utf8');
   // The floor plan pass loops every tile in the room. It used to share one

@@ -42,6 +42,7 @@ import { drawMiniTileType, drawMiniZoneBackground, MINI_FURNITURE, MINI_WALL_ARE
 import { measureTextCached } from './textMetrics';
 import { cullOverlay, setOverlayStyle } from './overlayStyle';
 import { recordFrame, recordPhases, recordSceneCounts } from '@/utils/frameDiag';
+import { getScaledImage } from '@/utils/scaledImage';
 
 // Kept proportional to TILE_SIZE (same ratio as AvatarSprite.ts's own copy of
 // this constant) so decorations positioned relative to it — crown, speaker
@@ -105,16 +106,56 @@ function computeSitFacingDirection(chair: Furniture): Direction {
 // meant to BE the visible map, not a translucent trace guide like in the
 // editor. Drawn on top of the floor/wall tiles (which are fully opaque and
 // would otherwise hide it) but BELOW furniture/avatars, so any real
-// interactive objects or players placed on top stay visible. Camera-offset
-// manually since GameCanvas never uses ctx.translate for panning (unlike
-// RoomEditorPage.tsx's version of this same helper).
-function drawLiveReferenceImage(ctx: CanvasRenderingContext2D, ref: ReferenceImageData | null, cameraX: number, cameraY: number) {
-  if (!ref || !ref.visible) return;
-  const img = getSpriteImage(ref.url);
-  if (!img) return;
+// interactive objects or players placed on top stay visible. Cropped to the
+// viewport: uploaded floor-plan photos can be map-sized bitmaps, so even a
+// pre-scaled copy should not be drawn in full when only one viewport is visible.
+function drawLiveReferenceImage(
+  ctx: CanvasRenderingContext2D,
+  ref: ReferenceImageData | null,
+  cameraX: number,
+  cameraY: number,
+  viewW: number,
+  viewH: number,
+) {
+  if (!ref || !ref.visible || ref.opacity <= 0 || ref.width <= 0 || ref.height <= 0) return;
+  // Pre-scaled if one is ready, the original otherwise (see scaledImage.ts).
+  // A room built from an uploaded floor plan draws this every single frame, and
+  // the source is a photo — thousands of pixels square — being squeezed down to
+  // the map's on-screen size. Doing that per frame was the single most
+  // expensive thing in the render loop, and it dragged the avatar pass down
+  // with it by evicting the character spritesheets from the texture cache.
+  const scaled = getScaledImage(ref.url, ref.width, ref.height);
+  let source: CanvasImageSource | null = scaled;
+  let sourceWidth = scaled?.width ?? 0;
+  let sourceHeight = scaled?.height ?? 0;
+  if (!source) {
+    const img = getSpriteImage(ref.url);
+    if (!img) return;
+    source = img;
+    sourceWidth = img.naturalWidth;
+    sourceHeight = img.naturalHeight;
+  }
+
+  const refLeft = ref.x - cameraX;
+  const refTop = ref.y - cameraY;
+  const refRight = refLeft + ref.width;
+  const refBottom = refTop + ref.height;
+  const drawLeft = Math.max(0, refLeft);
+  const drawTop = Math.max(0, refTop);
+  const drawRight = Math.min(viewW, refRight);
+  const drawBottom = Math.min(viewH, refBottom);
+  if (drawRight <= drawLeft || drawBottom <= drawTop) return;
+
+  const drawW = drawRight - drawLeft;
+  const drawH = drawBottom - drawTop;
+  const sourceX = ((drawLeft - refLeft) / ref.width) * sourceWidth;
+  const sourceY = ((drawTop - refTop) / ref.height) * sourceHeight;
+  const sourceW = (drawW / ref.width) * sourceWidth;
+  const sourceH = (drawH / ref.height) * sourceHeight;
+
   ctx.save();
   ctx.globalAlpha = ref.opacity;
-  ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, ref.x - cameraX, ref.y - cameraY, ref.width, ref.height);
+  ctx.drawImage(source, sourceX, sourceY, sourceW, sourceH, drawLeft, drawTop, drawW, drawH);
   ctx.restore();
 }
 
@@ -1844,7 +1885,8 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       }
 
       mark('areaRects');
-      drawLiveReferenceImage(ctx, liveReferenceImageRef.current, cameraX, cameraY);
+      drawLiveReferenceImage(ctx, liveReferenceImageRef.current, cameraX, cameraY, worldViewW, worldViewH);
+      mark('liveReferenceImage');
 
       // Furniture — object layer (base row, drawn before avatars). Banners
       // are DOM overlays (see bannerRefs below), not tileset sprites.
@@ -2214,6 +2256,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     // mid-frame.
     const canSeeHidden = roleAtLeast(useGameStore.getState().localRole, 'admin');
 
+    mark('avatarPrep');
     for (const avatar of allAvatars) {
       if (avatar.hidden && avatar.id !== localPlayerId && !canSeeHidden) continue;
       const sx = avatar.x - cameraX;
@@ -2816,6 +2859,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       mapCols,
       mapRows,
       furniture: furnitureList.length,
+      referenceImage: liveReferenceImageRef.current?.visible ? 1 : 0,
       zones: zonesRef.current.length,
       wallAreaRects: wallAreaRectsRef.current.length,
       doorAreaRects: doorAreaRectsRef.current.length,

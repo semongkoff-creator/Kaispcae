@@ -277,6 +277,85 @@ function spriteFrameCoords(direction: Direction, isMoving: boolean, timestamp: n
   return { col, row, flipX: false };
 }
 
+// Composed avatar frames, cached.
+//
+// A generator avatar is built from one sprite per layer — body, outfit, hair,
+// accessory and so on — each from its OWN spritesheet file. Drawing it meant a
+// drawImage per layer per avatar per frame: with eighteen people on screen that
+// is a hundred-odd draws touching a handful of large, distinct textures, sixty
+// times a second.
+//
+// Measured, that pass averaged 25ms per frame, and it spiked in lockstep with
+// the floor-plan reference image — the tell for texture-cache thrashing rather
+// than pixel work (frame times were bimodal, p50 2.7ms / p95 250ms: some frames
+// found every sheet resident, others re-uploaded them).
+//
+// So compose once and blit thereafter. The cache key is the whole visual
+// identity of the frame — every layer filename, the source cell (which encodes
+// direction and animation frame) and the raster size — so a hit is
+// pixel-identical to composing again. Eighteen players share very few distinct
+// keys: a handful of outfits x four directions x a few walk frames.
+const LAYERED_AVATAR_CACHE_LIMIT = 240;
+const layeredSpriteCache = new Map<string, HTMLCanvasElement>();
+
+function layeredAvatarCacheKey(
+  config: NonNullable<Avatar['avatarConfig']>,
+  srcX: number,
+  srcY: number,
+  rasterW: number,
+  rasterH: number,
+): string {
+  let key = `${srcX},${srcY},${rasterW}x${rasterH}`;
+  for (const [, field] of LAYER_CATEGORIES) key += `|${(config[field] as string | undefined) ?? ''}`;
+  return key;
+}
+
+/** One composed frame, from cache when possible. Null while its layers are
+ *  still loading, so the caller can report "nothing drawn" and try again. */
+function composedLayeredFrame(
+  config: NonNullable<Avatar['avatarConfig']>,
+  srcX: number,
+  srcY: number,
+  rasterW: number,
+  rasterH: number,
+): HTMLCanvasElement | null {
+  const key = layeredAvatarCacheKey(config, srcX, srcY, rasterW, rasterH);
+  const hit = layeredSpriteCache.get(key);
+  if (hit) return hit;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = rasterW;
+  canvas.height = rasterH;
+  const cctx = canvas.getContext('2d');
+  if (!cctx) return null;
+  cctx.imageSmoothingEnabled = false;
+
+  let expected = 0;
+  let drawn = 0;
+  for (const [category, field] of LAYER_CATEGORIES) {
+    const fileName = config[field] as string | undefined;
+    if (!fileName) continue;
+    expected++;
+    if (drawSpriteFrame(cctx, `${GENERATOR_BASE}/${category}/${fileName}`, {
+      srcX, srcY, cellWidth: FRAME_SIZE, cellHeight: FRAME_VISUAL_HEIGHT,
+      dx: 0, dy: 0, dWidth: rasterW, dHeight: rasterH,
+    })) drawn++;
+  }
+  if (!drawn) return null;
+
+  // Only cache a COMPLETE composite. A frame missing a layer whose sheet has
+  // not decoded yet would otherwise be cached with that layer permanently
+  // absent — an avatar with no hair for the rest of the session.
+  if (drawn === expected) {
+    if (layeredSpriteCache.size >= LAYERED_AVATAR_CACHE_LIMIT) {
+      const oldest = layeredSpriteCache.keys().next().value;
+      if (oldest !== undefined) layeredSpriteCache.delete(oldest);
+    }
+    layeredSpriteCache.set(key, canvas);
+  }
+  return canvas;
+}
+
 function drawLayeredAvatar(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -317,18 +396,17 @@ function drawLayeredAvatar(
   // first place (only visible on the sit+face-left pose).
   if (flipX) { const pivotX = dx + displaySize / 2; ctx.save(); ctx.translate(pivotX, 0); ctx.scale(-1, 1); ctx.translate(-pivotX, 0); }
 
-  let drewAny = false;
-  for (const [category, field] of LAYER_CATEGORIES) {
-    const fileName = config[field] as string | undefined;
-    if (!fileName) continue;
-    const drew = drawSpriteFrame(ctx, `${GENERATOR_BASE}/${category}/${fileName}`, {
-      srcX, srcY, cellWidth: FRAME_SIZE, cellHeight: FRAME_VISUAL_HEIGHT,
-      dx, dy, dWidth: displaySize, dHeight: displayHeight,
-    });
-    drewAny = drewAny || drew;
-  }
+  // Composed at the RASTER size the destination will occupy, so the blit is
+  // 1:1 and pixel art stays as crisp as drawing each layer directly did. The
+  // transform already carries zoom x dpr; reading it is what keeps the cache
+  // key honest about size.
+  const rasterScale = typeof ctx.getTransform === 'function' ? Math.abs(ctx.getTransform().a) || 1 : 1;
+  const rasterW = Math.max(1, Math.round(displaySize * rasterScale));
+  const rasterH = Math.max(1, Math.round(displayHeight * rasterScale));
+  const cached = composedLayeredFrame(config, srcX, srcY, rasterW, rasterH);
+  if (cached) ctx.drawImage(cached, 0, 0, cached.width, cached.height, dx, dy, displaySize, displayHeight);
   if (flipX) ctx.restore();
-  return drewAny;
+  return !!cached;
 }
 
 function drawPremadeAvatar(
