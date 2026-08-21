@@ -1510,6 +1510,7 @@ model StatusInterval {
 
   @@index([userId, startedAt])
   @@index([userId, endedAt])
+  @@index([roomSlug, userId])
 }
 
 // Server-detected proximity ("Connections" in the brief) — deliberately NOT
