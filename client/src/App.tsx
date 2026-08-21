@@ -1227,13 +1227,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // the editor's own live preview. Seed it with the real account name so
   // opening the editor and saving without touching the name field doesn't
   // broadcast "You" to every other player in the room.
-  // specs/2026-08-21-room-entry-name-prompt-design.md — final-review fix:
-  // seed from the REAL account name (currentUser.name, immune to the
-  // room-entry nametag), not `playerName` — Avatar Setup's save path
-  // writes this field straight into User.displayName when non-empty (see
-  // routes/rooms.ts's PUT /users/me/avatar), so seeding from the room name
-  // would silently rename the account the moment someone opens this panel
-  // and saves without touching the name field.
+  // Specifically `currentUser.name`, not `playerName` — Avatar Setup's
+  // save path writes this field straight into User.displayName when
+  // non-empty (see routes/rooms.ts's PUT /users/me/avatar), and
+  // `playerName` (Zustand's localPlayer.name) is exactly the value that
+  // same save path last wrote there. Seeding from it would make this
+  // panel's initial name come from its own previous save instead of the
+  // account's actual name of record.
   const savedConfig = { ...loadAvatarConfig(), name: currentUser.name || loadAvatarConfig().name };
 
   // Player card's "Copy Outfit" — reuses handleAvatarSave verbatim (same
@@ -3232,11 +3232,10 @@ function MainApp() {
   // QA #1/#6 — "next-next sebelum masuk": a real account with a null
   // `tutorialCompletedAt` (brand-new, or any pre-existing account from
   // before this feature shipped) sees the walkthrough exactly once, gating
-  // <Game> itself rather than overlaying on top of it. specs/2026-08-21-
-  // room-entry-name-prompt-design.md final-review fix — moved ahead of the
-  // room-entry name prompt below: a brand-new account should meet the
-  // walkthrough first, not "enter your name" then "Welcome to KaiSpace"
-  // back to back (explicit user decision during final review).
+  // <Game> itself rather than overlaying on top of it. Deliberately ahead
+  // of Avatar Setup and the daily status picker below: a brand-new account
+  // should meet the walkthrough first, not "customize your avatar" or
+  // "pick a status" before ever seeing "Welcome to KaiSpace".
   if (!user.tutorialCompletedAt) {
     return <TutorialModal onFinish={markTutorialSeen} />;
   }

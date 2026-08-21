@@ -114,7 +114,6 @@ meetkai/
 │   │   │   │   ├── EmoteWheel.tsx
 │   │   │   │   ├── AdminPanel.tsx
 │   │   │   │   ├── ParticipantPanel.tsx    # Panel kolaps: daftar peserta + status + thumbnail video (reuse remoteStreams)
-│   │   │   │   ├── NameModal.tsx
 │   │   │   │   └── ConnectionIndicator.tsx
 │   │   │   └── hud/
 │   │   │       ├── MicButton.tsx
