@@ -3134,7 +3134,15 @@ function MainApp() {
     setRoomNameConfirmedFor(roomSlug);
     updateDisplayName(config.name);
     persistAvatar(config);
-  }, [setLocalPlayer, persistAvatar, roomSlug, updateDisplayName]);
+    // Finding 2 (4th-round final review) — this is the first-time-onboarding
+    // Avatar Setup path (distinct from the Game-scoped Sidebar avatar editor's
+    // own handleAvatarSave, which already does this). Without it, chat
+    // bubbles (ChatPanel.tsx) and video tile labels (VideoGrid.tsx,
+    // MeetingView.tsx) keep showing the pre-onboarding name for the rest of
+    // the session — useProfiles' cache is a module-level store separate from
+    // both Zustand's localPlayer/playerName and useAuth's cached user object.
+    if (user && config.name) setProfileName(user.id, config.name);
+  }, [setLocalPlayer, persistAvatar, roomSlug, updateDisplayName, user]);
 
   // specs/2026-08-21-room-entry-name-prompt-v2-design.md — unlike the
   // original (removed) version of this flow, there is no separate
@@ -3154,7 +3162,13 @@ function MainApp() {
     setLocalPlayer({ name, color: merged.color, avatarConfig: merged });
     updateDisplayName(name);
     api.saveAvatar(merged).catch(() => {});
-  }, [setLocalPlayer, roomSlug, updateDisplayName]);
+    // Finding 2 (4th-round final review) — same gap as handleAvatarSave
+    // above: without this, this room-entry popup's rename never reaches
+    // useProfiles' cache, so this user's own chat bubbles and video tile
+    // keep showing the old name for the rest of the session even though
+    // playerName/localPlayer (and the nametag) updated live.
+    if (user) setProfileName(user.id, name);
+  }, [setLocalPlayer, roomSlug, updateDisplayName, user]);
 
   // Ask before entering. A room that takes walk-ins answers immediately and
   // this is one extra request; a gated one is caught here instead of at the

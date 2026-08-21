@@ -44,6 +44,15 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   const lastEmitRef = useRef<number>(0);
   const moveSeqRef = useRef<number>(0);
   const lastRemoteMoveSeqRef = useRef<Map<string, number>>(new Map());
+  // Finding 1 (4th-round final review) — authUserName must be readable from
+  // inside the main effect below WITHOUT being one of its dependencies: a
+  // mid-session rename (now live via Game's authDisplayName prop) must not
+  // itself be treated as a reason to tear down and rebuild the whole socket
+  // connection (see that effect's own dependency array for the full story).
+  // This ref is what lets the effect read whatever the CURRENT name is at
+  // the moment it actually (re)connects for some OTHER real reason, without
+  // reacting to the name by itself.
+  const authUserNameRef = useRef(authUserName);
 
   const setConnected = useGameStore((s) => s.setConnected);
   const setLocalPlayerId = useGameStore((s) => s.setLocalPlayerId);
@@ -67,6 +76,14 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   const removeMediaObject = useGameStore((s) => s.removeMediaObject);
   const appendWhiteboardStroke = useGameStore((s) => s.appendWhiteboardStroke);
   const clearWhiteboardStrokes = useGameStore((s) => s.clearWhiteboardStrokes);
+
+  // Keep authUserNameRef current every render — deliberately separate from
+  // the main effect below so this never needs authUserName in ITS OWN
+  // dependency array to matter; only the ref's .current value is ever read
+  // from inside that effect.
+  useEffect(() => {
+    authUserNameRef.current = authUserName;
+  }, [authUserName]);
 
   // Identify this player by their real authenticated account id whenever one
   // is available, so admin/ownership checks (which compare against
@@ -146,7 +163,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
       const config = loadAvatarConfig();
       const uid = authUserId || localStorage.getItem('vm_userId') || socket.id;
-      const displayName = authUserName || config.name || 'Player';
+      const displayName = authUserNameRef.current || config.name || 'Player';
       socket.emit(SocketEvents.JOIN_ROOM, roomSlug, displayName, config, uid);
     });
 
@@ -1077,7 +1094,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socket.on(SocketEvents.GUEST_JOIN_ADMITTED, () => {
       console.log('[socket] guest admitted — rejoining');
       const config = loadAvatarConfig();
-      socket.emit(SocketEvents.JOIN_ROOM, roomSlug, authUserName, config, authUserId);
+      socket.emit(SocketEvents.JOIN_ROOM, roomSlug, authUserNameRef.current, config, authUserId);
       useGameStore.getState().setGuestWaitState('admitted');
     });
 
@@ -1182,7 +1199,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       socket.removeAllListeners();
       socket.disconnect();
     };
-  }, [authUserName, roomSlug, authUserId, guestToken]);
+  }, [roomSlug, authUserId, guestToken]);
 
   const emitMove = useCallback(
     (x: number, y: number, direction: string, isRunning?: boolean) => {
