@@ -18,7 +18,7 @@ import { setCachedTiles, setCachedImpassableAreas, setCachedDoorAreaRects, setCa
 function mediaShape(r: { id: string; roomId: string; type: string; x: number; y: number; createdBy: string; createdByName: string; createdAt: Date; expiresAt: Date | null; payload: unknown }) {
   return { id: r.id, roomId: r.roomId, type: r.type, x: r.x, y: r.y, createdBy: r.createdBy, createdByName: r.createdByName, createdAt: r.createdAt.toISOString(), expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null, payload: (r.payload as MediaPayload) ?? {} };
 }
-import { validate, createRoomSchema, renameRoomSchema, avatarUpdateSchema } from '../middleware/validate';
+import { validate, createRoomSchema, renameRoomSchema, avatarUpdateSchema, roomDisplayNameSchema } from '../middleware/validate';
 import { ensureGroupConversation } from '../lib/conversations';
 
 const rooms = Router();
@@ -866,6 +866,28 @@ rooms.put('/users/me/avatar', authenticateToken, validate(avatarUpdateSchema), a
   } catch (err) {
     console.error('[rooms] avatar save error:', err);
     return res.status(500).json({ error: 'Failed to save avatar' });
+  }
+});
+
+// PUT /api/users/me/room-display-name —
+// specs/2026-08-21-room-entry-name-prompt-design.md. Deliberately its OWN
+// route, not folded into PUT /users/me/avatar above: that route
+// intentionally also writes displayName when its own `name` field is
+// non-empty (see its comment) — reusing it here would silently rename the
+// account's real display name (and desync it from Lark's own SSO sync)
+// every time someone just changes their in-room nametag. This route
+// writes roomDisplayName and NOTHING else.
+rooms.put('/users/me/room-display-name', authenticateToken, validate(roomDisplayNameSchema), async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    await prisma.user.update({
+      where: { id: req.userId },
+      data: { roomDisplayName: req.body.name },
+    });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[rooms] room display name save error:', err);
+    return res.status(500).json({ error: 'Failed to save room display name' });
   }
 });
 
