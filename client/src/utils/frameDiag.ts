@@ -74,13 +74,29 @@ function percentile(sorted: number[], p: number): number {
 // each phase was asked to draw — because "slow" and "asked to draw 40,000
 // things" are different diagnoses with different fixes.
 const phaseTotals = new Map<string, number>();
+const phasePeaks = new Map<string, number>();
 let phaseFrames = 0;
 let sceneCounts: Record<string, number> = {};
+// The breakdown of the single most expensive frame seen. Means are the wrong
+// tool once the problem is EPISODIC: a phase that is 0.4ms on 97% of frames and
+// 200ms on the rest averages out to something unremarkable, and the average is
+// what hides it. This keeps the actual bad frame.
+let worstFramePhases: Record<string, number> | null = null;
+let worstFrameTotal = 0;
 
 export function recordPhases(phases: Record<string, number>): void {
   phaseFrames++;
+  let total = 0;
   for (const [name, ms] of Object.entries(phases)) {
     phaseTotals.set(name, (phaseTotals.get(name) ?? 0) + ms);
+    if (ms > (phasePeaks.get(name) ?? 0)) phasePeaks.set(name, ms);
+    total += ms;
+  }
+  if (total > worstFrameTotal) {
+    worstFrameTotal = total;
+    worstFramePhases = Object.fromEntries(
+      Object.entries(phases).map(([name, ms]) => [name, round(ms)]).sort((a, b) => (b[1] as number) - (a[1] as number)),
+    );
   }
 }
 
@@ -102,6 +118,12 @@ export interface FrameReport {
   longTasks: { durationMs: number; name: string; sinceStartMs: number }[];
   // Mean milliseconds per frame, per phase of the draw, worst first.
   phasesAvgMs: Record<string, number>;
+  // The WORST single frame each phase ever had. This is what identifies an
+  // episodic spike; the mean above dilutes it away.
+  phasesMaxMs: Record<string, number>;
+  // And the full breakdown of the one worst frame overall.
+  worstFrameTotalMs: number;
+  worstFramePhases: Record<string, number> | null;
   // What the last frame was asked to draw.
   scene: Record<string, number>;
 }
@@ -141,12 +163,20 @@ export function buildFrameReport(): FrameReport {
         .map(([name, total]) => [name, round(total / Math.max(1, phaseFrames))] as const)
         .sort((a, b) => (b[1] as number) - (a[1] as number)),
     ),
+    phasesMaxMs: Object.fromEntries(
+      [...phasePeaks.entries()].map(([n, v]) => [n, round(v)]).sort((a, b) => (b[1] as number) - (a[1] as number)),
+    ),
+    worstFrameTotalMs: round(worstFrameTotal),
+    worstFramePhases,
     scene: sceneCounts,
   };
 }
 
 export function resetFrameDiag(): void {
   phaseTotals.clear();
+  phasePeaks.clear();
+  worstFramePhases = null;
+  worstFrameTotal = 0;
   phaseFrames = 0;
   sceneCounts = {};
   intervals = [];
