@@ -9,6 +9,7 @@ import { Tooltip } from './components/ui/Tooltip';
 import { MapZoomControl } from './components/ui/MapZoomControl';
 import { MobileControls } from './components/hud/MobileControls';
 import { AvatarSetup } from './components/avatar/AvatarSetup';
+import { NameModal } from './components/ui/NameModal';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
 // QA (Kompat checklist item 7) — same reasoning as RoomEditorPage above:
@@ -3028,23 +3029,34 @@ function MainApp() {
     if (roomSlug) localStorage.setItem('vm_last_room_slug', roomSlug);
   }, [roomSlug]);
   const [playerName, setPlayerName] = useState<string | null>(null);
+  // specs/2026-08-21-room-entry-name-prompt-v2-design.md — which roomSlug
+  // the CURRENT playerName was confirmed for. null until the modal is
+  // first submitted for this room. Compared against the live roomSlug
+  // below: `<Game key={roomSlug}>` already remounts on every new room
+  // entry (lobby->room AND portal travel), so re-showing the modal
+  // whenever roomSlug !== roomNameConfirmedFor gives "every room entry"
+  // for free, with no new wiring into useSocket.ts's reconnect path
+  // (reconnects don't change roomSlug, so they never touch this).
+  const [roomNameConfirmedFor, setRoomNameConfirmedFor] = useState<string | null>(null);
   const [showAvatarSetup, setShowAvatarSetup] = useState(false);
   const [isRoomReady, setIsRoomReady] = useState(false);
   const setRoomState = useGameStore((s) => s.setRoomState);
   const setLocalPlayer = useGameStore((s) => s.setLocalPlayer);
 
-  // specs/2026-08-21-nametag-displayname-sync-design.md — logout()
+  // specs/2026-08-21-room-entry-name-prompt-v2-design.md — logout()
   // (useAuth.ts) doesn't reload the page, so this component never unmounts
   // across a same-tab account switch — without this, a second user logging
-  // in after a first would inherit the first user's playerName untouched
-  // (the seeding effect below only fires when playerName is still null,
-  // which it never is after the first login), silently entering rooms
-  // under the PREVIOUS account's name.
+  // in after a first would inherit the first user's
+  // playerName/roomNameConfirmedFor untouched (the seeding effect below
+  // only fires when playerName is still null, which it never is after the
+  // first login), silently entering rooms under the PREVIOUS account's
+  // name with no prompt at all.
   const prevUserIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (user && user.id !== prevUserIdRef.current) {
       prevUserIdRef.current = user.id;
       setPlayerName(null);
+      setRoomNameConfirmedFor(null);
     } else if (!user) {
       prevUserIdRef.current = null;
     }
@@ -3103,8 +3115,34 @@ function MainApp() {
     saveAvatarConfig(config);
     setLocalPlayer({ name: config.name, color: config.color, avatarConfig: config });
     setShowAvatarSetup(false);
+    // specs/2026-08-21-room-entry-name-prompt-v2-design.md — a user who
+    // just went through first-time Avatar Setup (which has its own Display
+    // Name field, see AvatarSetup.tsx) has already given their name for
+    // THIS room entry. Without this, the name-prompt gate below would
+    // immediately fire again right after, asking for a name they just gave
+    // a moment ago.
+    setRoomNameConfirmedFor(roomSlug);
     persistAvatar(config);
-  }, [setLocalPlayer, persistAvatar]);
+  }, [setLocalPlayer, persistAvatar, roomSlug]);
+
+  // specs/2026-08-21-room-entry-name-prompt-v2-design.md — unlike the
+  // original (removed) version of this flow, there is no separate
+  // roomDisplayName field to write: this merges the submitted name into
+  // whatever avatar config already exists and saves it through the SAME
+  // path AvatarSetup itself uses (api.saveAvatar), which already writes
+  // both avatarConfig AND displayName in one call (see rooms.ts's PUT
+  // /users/me/avatar). Sending the FULL merged config — not just {name} —
+  // is required: that route stores whatever it receives as the entire
+  // avatarConfig, with no server-side merge, so a name-only payload would
+  // silently erase the user's body/eyes/outfit selections.
+  const handleNameSubmit = useCallback((name: string) => {
+    const merged = { ...loadAvatarConfig(), name };
+    setRoomNameConfirmedFor(roomSlug);
+    setPlayerName(name);
+    saveAvatarConfig(merged);
+    setLocalPlayer({ name, color: merged.color, avatarConfig: merged });
+    api.saveAvatar(merged).catch(() => {});
+  }, [setLocalPlayer, roomSlug]);
 
   // Ask before entering. A room that takes walk-ins answers immediately and
   // this is one extra request; a gated one is caught here instead of at the
@@ -3247,6 +3285,17 @@ function MainApp() {
         onSave={handleAvatarSave}
       />
     );
+  }
+
+  // specs/2026-08-21-room-entry-name-prompt-v2-design.md — shows once per
+  // NEW roomSlug (fresh entry from Lobby, or portal travel — both already
+  // remount <Game key={roomSlug}> below), never on a reconnect within the
+  // same room visit (reconnects don't change roomSlug). Placed AFTER the
+  // showAvatarSetup check above: a never-configured account goes straight
+  // to Avatar Setup (which has its own Display Name field) instead of
+  // being asked for a name twice.
+  if (roomSlug !== roomNameConfirmedFor) {
+    return <NameModal initialName={playerName || user.displayName} onSubmit={handleNameSubmit} />;
   }
 
   if (!isRoomReady) {
