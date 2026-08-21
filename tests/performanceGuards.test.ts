@@ -259,6 +259,28 @@ test('every prop crossing GameCanvas\'s memo barrier is stable', () => {
   );
 });
 
+test('the avatar frame cache is bigger than its own working set', () => {
+  const source = readFileSync(resolve('client/src/components/canvas/AvatarSprite.ts'), 'utf8');
+  const framesPerDirection = Number(source.match(/const FRAMES_PER_DIRECTION = (\d+);/)?.[1]);
+  const limit = Number(source.match(/const LAYERED_AVATAR_CACHE_LIMIT = (\d+);/)?.[1]);
+  assert.ok(Number.isFinite(framesPerDirection) && Number.isFinite(limit));
+
+  // 4 directions x frames x 3 rows (idle, walk, sit) distinct frames per
+  // outfit, times a roomful of people in differing outfits. A cache smaller
+  // than its working set is worse than none: FIFO eviction throws entries out
+  // before reuse, so every avatar re-composites continuously and each
+  // re-composite touches all the layer spritesheets again. The first version
+  // capped at 240 against a working set of ~1300 and produced exactly the
+  // episodic 200-290ms frames it was added to remove.
+  const perOutfit = 4 * framesPerDirection * 3;
+  const roomful = perOutfit * 18;
+  assert.ok(limit >= roomful, `${limit} entries cannot hold ${roomful} (18 outfits x ${perOutfit} frames)`);
+
+  // Count alone is the wrong bound — an entry's size grows with zoom and dpr.
+  assert.ok(source.includes('LAYERED_AVATAR_CACHE_PIXEL_BUDGET'), 'memory needs its own bound');
+  assert.ok(source.includes('layeredSpriteCachePixels'), 'and that bound has to be tracked, not assumed');
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

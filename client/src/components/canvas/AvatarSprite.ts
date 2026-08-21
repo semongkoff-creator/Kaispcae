@@ -295,8 +295,25 @@ function spriteFrameCoords(direction: Direction, isMoving: boolean, timestamp: n
 // direction and animation frame) and the raster size — so a hit is
 // pixel-identical to composing again. Eighteen players share very few distinct
 // keys: a handful of outfits x four directions x a few walk frames.
-const LAYERED_AVATAR_CACHE_LIMIT = 240;
+// Sized against the actual working set, which is arithmetic rather than a
+// guess: FRAMES_PER_DIRECTION (6) x four directions x three rows (idle, walk,
+// sit) is 72 distinct frames per outfit, so eighteen people in differing
+// outfits reach ~1300 live entries. The first version of this capped at 240 —
+// five times too small — and a cache smaller than its working set does not
+// merely fail to help, it HURTS: FIFO eviction throws entries out before they
+// are reused, so avatars are re-composited continuously and every re-composite
+// touches all the layer spritesheets again. That is the episodic spike this was
+// supposed to remove (frames clustered at 200-290ms while several people walked
+// in different directions), caused by the cure rather than the disease.
+const LAYERED_AVATAR_CACHE_LIMIT = 2000;
+// And a second bound, because entry COUNT is not what costs memory: an entry is
+// rasterW x rasterH pixels, which grows with zoom and dpr. ~8M pixels is about
+// 32MB of canvas — at the common 48x66 frame that is ~2500 entries, and at 2x
+// zoom on a 2x display it falls to ~600, which is the correct direction for it
+// to move on its own.
+const LAYERED_AVATAR_CACHE_PIXEL_BUDGET = 8_000_000;
 const layeredSpriteCache = new Map<string, HTMLCanvasElement>();
+let layeredSpriteCachePixels = 0;
 
 function layeredAvatarCacheKey(
   config: NonNullable<Avatar['avatarConfig']>,
@@ -347,11 +364,23 @@ function composedLayeredFrame(
   // not decoded yet would otherwise be cached with that layer permanently
   // absent — an avatar with no hair for the rest of the session.
   if (drawn === expected) {
-    if (layeredSpriteCache.size >= LAYERED_AVATAR_CACHE_LIMIT) {
-      const oldest = layeredSpriteCache.keys().next().value;
-      if (oldest !== undefined) layeredSpriteCache.delete(oldest);
-    }
     layeredSpriteCache.set(key, canvas);
+    layeredSpriteCachePixels += rasterW * rasterH;
+    // Evict oldest-first until BOTH bounds hold. Map iteration order is
+    // insertion order, so this is FIFO — good enough here, because the working
+    // set is now expected to fit and eviction should be the exception rather
+    // than the steady state.
+    while (
+      layeredSpriteCache.size > LAYERED_AVATAR_CACHE_LIMIT ||
+      layeredSpriteCachePixels > LAYERED_AVATAR_CACHE_PIXEL_BUDGET
+    ) {
+      const oldestKey = layeredSpriteCache.keys().next().value;
+      if (oldestKey === undefined) break;
+      const evicted = layeredSpriteCache.get(oldestKey);
+      layeredSpriteCache.delete(oldestKey);
+      if (evicted) layeredSpriteCachePixels -= evicted.width * evicted.height;
+      if (oldestKey === key) break; // never evict what we just inserted
+    }
   }
   return canvas;
 }
