@@ -177,7 +177,7 @@ const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest, onUpdatePreferences }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean; onUpdatePreferences?: (patch: UserPreferences) => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
   const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, emitSeatClaimRequest, emitSeatClaimDecide, emitSeatClaimRequestCancel, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitRemoteHelpRequest, emitRemoteHelpRespond, emitRemoteHelpCredential, emitRemoteHelpEnd, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
-  const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
+  const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead }, currentUser.name);
   // ZEP-style User Guide — Sidebar's "Panduan" row (Room Features menu).
   // Independent of MainApp's own first-run TutorialModal gate (shown before
   // <Game> ever mounts, for new accounts/guests) — that one is untouched,
@@ -554,7 +554,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // people was only ever reachable by first spotlighting them; that feature
   // was removed in Bug 7, so the picker is now just this single entry.)
   const recordingTargets = [
-    { userId: localUserId, name: `${localPlayerName} (You)` },
+    { userId: localUserId, name: `${currentUser.name} (You)` },
   ];
 
   // Track which zone (if any) the local player is standing in — drives the
@@ -1228,7 +1228,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // the editor's own live preview. Seed it with the real account name so
   // opening the editor and saving without touching the name field doesn't
   // broadcast "You" to every other player in the room.
-  const savedConfig = { ...loadAvatarConfig(), name: playerName || loadAvatarConfig().name };
+  // specs/2026-08-21-room-entry-name-prompt-design.md — final-review fix:
+  // seed from the REAL account name (currentUser.name, immune to the
+  // room-entry nametag), not `playerName` — Avatar Setup's save path
+  // writes this field straight into User.displayName when non-empty (see
+  // routes/rooms.ts's PUT /users/me/avatar), so seeding from the room name
+  // would silently rename the account the moment someone opens this panel
+  // and saves without touching the name field.
+  const savedConfig = { ...loadAvatarConfig(), name: currentUser.name || loadAvatarConfig().name };
 
   // Player card's "Copy Outfit" — reuses handleAvatarSave verbatim (same
   // broadcast + persist path as the Avatar Setup panel), just with a
@@ -2169,7 +2176,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           {!sittingItem.assignedToUserId ? (
             <Tooltip label="Jadikan Kursi Saya" detail="Tandai kursi ini jadi kursi tetapmu — otomatis kamu duduk di sini tiap masuk room.">
               <button
-                onClick={() => emitFurnitureAssign(sittingItem.id, playerName)}
+                onClick={() => emitFurnitureAssign(sittingItem.id, currentUser.name)}
                 className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg cursor-pointer inline-flex items-center gap-1.5"
               >
                 🪑 Assign as My Seat
@@ -2258,6 +2265,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onRevokeStaff={(userId) => emitStaffRevoke(userId)}
           onGrantCeo={(userId) => emitCeoGrant(userId)}
           onRevokeCeo={(userId) => emitCeoRevoke(userId)}
+          localAccountName={currentUser.name}
         />
       )}
 
@@ -2436,7 +2444,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             Settings moved to Sidebar.tsx (no longer in this bar) —
             Soundboard/ActivityFeed's own top-left panel spot is untouched,
             see the top-14 left-16 block above. */}
-        <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} isGuest={isGuest} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} onReport={(userId, name) => setReportTarget({ userId, name })} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
+        <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} isGuest={isGuest} localAccountName={currentUser.name} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} onReport={(userId, name) => setReportTarget({ userId, name })} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
         {/* Fixed dead-centre, always — Messenger/Chat (see MessengerApp.tsx)
             is a pure `position: absolute` overlay docked to the left half of
             the screen; it never participates in layout flow, so it can't
@@ -3033,6 +3041,25 @@ function MainApp() {
   const setRoomState = useGameStore((s) => s.setRoomState);
   const setLocalPlayer = useGameStore((s) => s.setLocalPlayer);
 
+  // specs/2026-08-21-room-entry-name-prompt-design.md — final-review fix:
+  // logout() (useAuth.ts) doesn't reload the page, so this component never
+  // unmounts across a same-tab account switch — without this, a second
+  // user logging in after a first would inherit the first user's
+  // playerName/roomNameConfirmedFor untouched (the seeding effect below
+  // only fires when playerName is still null, which it never is after the
+  // first login), silently entering rooms under the PREVIOUS account's
+  // chosen name with no prompt at all.
+  const prevUserIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (user && user.id !== prevUserIdRef.current) {
+      prevUserIdRef.current = user.id;
+      setPlayerName(null);
+      setRoomNameConfirmedFor(null);
+    } else if (!user) {
+      prevUserIdRef.current = null;
+    }
+  }, [user]);
+
   // If authenticated, use user's displayName and avatarConfig. New accounts
   // have no avatarConfig saved yet (null from the DB) — fall back to
   // loadAvatarConfig()'s defaults (sprite mode etc.) instead of leaving it
@@ -3224,6 +3251,18 @@ function MainApp() {
   // `entryBlock` check above swaps it out for JoinGate on the next render,
   // cleanly disconnecting the socket via Game's own unmount cleanup.
 
+  // QA #1/#6 — "next-next sebelum masuk": a real account with a null
+  // `tutorialCompletedAt` (brand-new, or any pre-existing account from
+  // before this feature shipped) sees the walkthrough exactly once, gating
+  // <Game> itself rather than overlaying on top of it. specs/2026-08-21-
+  // room-entry-name-prompt-design.md final-review fix — moved ahead of the
+  // room-entry name prompt below: a brand-new account should meet the
+  // walkthrough first, not "enter your name" then "Welcome to KaiSpace"
+  // back to back (explicit user decision during final review).
+  if (!user.tutorialCompletedAt) {
+    return <TutorialModal onFinish={markTutorialSeen} />;
+  }
+
   // Room — specs/2026-08-21-room-entry-name-prompt-design.md: shows once
   // per NEW roomSlug (fresh entry from Lobby, or portal travel — both
   // already remount <Game key={roomSlug}> below), never on a reconnect
@@ -3249,21 +3288,11 @@ function MainApp() {
     );
   }
 
-  // QA #1/#6 — "next-next sebelum masuk": a real account with a null
-  // `tutorialCompletedAt` (brand-new, or any pre-existing account from
-  // before this feature shipped) sees the walkthrough exactly once, gating
-  // <Game> itself rather than overlaying on top of it.
-  if (!user.tutorialCompletedAt) {
-    return <TutorialModal onFinish={markTutorialSeen} />;
-  }
-
   // QA #1 — "set status saat login": re-asked once per calendar day (see
-  // todayKey/STATUS_PICKED_DATE_PREFIX above), after the tutorial gate so a
-  // brand-new account meets the walkthrough first. `statusPickedDate` starts
+  // todayKey/STATUS_PICKED_DATE_PREFIX above). `statusPickedDate` starts
   // null until the effect above resolves it from localStorage — treated as
   // "not picked yet today" rather than flashing the picker for a tick on
-  // every load, which is why this sits after (not before) the tutorial gate:
-  // by this point `user` has been stable for at least one render already.
+  // every load.
   if (statusPickedDate !== todayKey()) {
     return <StatusPickModal onPick={finishStatusPick} />;
   }
@@ -3276,7 +3305,13 @@ function MainApp() {
   // window still open, with no signal anything changed underneath. Forcing
   // a remount on room change gives every room a clean slate, matching what
   // already happens when leaving to the Lobby and rejoining.
-  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} onUpdatePreferences={updatePreferences} />;
+  // specs/2026-08-21-room-entry-name-prompt-design.md — final-review fix:
+  // authDisplayName must be the room-entry-confirmed name, not the raw
+  // account name, or the whole point of the feature (an avatar nametag
+  // OTHER people see) never reaches anyone but the user's own client. Falls
+  // back to user.displayName for the one-tick window before the seeding
+  // effect first runs, same pattern already used at the NameModal call site.
+  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => { setRoomSlug(null); setRoomNameConfirmedFor(null); }} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={playerName || user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} onUpdatePreferences={updatePreferences} />;
 }
 
 // ZEP Room Editor opens in its own tab as /?roomEditor=<slug> (a query param on

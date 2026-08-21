@@ -12,6 +12,9 @@ interface AdminPanelProps {
   // so this is a toggle alongside role, not a tier within it.
   onGrantCeo: (userId: string) => void;
   onRevokeCeo: (userId: string) => void;
+  // specs/2026-08-21-room-entry-name-prompt-design.md — final-review fix:
+  // same reasoning as ParticipantPanel — this is a "who's in the room" list.
+  localAccountName: string;
 }
 
 // Resolves a specific player's role from the room's raw admin/staff sets —
@@ -25,7 +28,7 @@ function resolveRole(uid: string, masterAdminUserId: string, adminIds: Set<strin
   return 'member';
 }
 
-export function AdminPanel({ onGrantAdmin, onRevokeAdmin, onGrantStaff, onRevokeStaff, onGrantCeo, onRevokeCeo }: AdminPanelProps) {
+export function AdminPanel({ onGrantAdmin, onRevokeAdmin, onGrantStaff, onRevokeStaff, onGrantCeo, onRevokeCeo, localAccountName }: AdminPanelProps) {
   const playerRecords = useGameStore((s) => s.playerRecords);
   const adminPlayerIds = useGameStore((s) => s.adminPlayerIds);
   const staffPlayerIds = useGameStore((s) => s.staffPlayerIds);
@@ -48,7 +51,7 @@ export function AdminPanel({ onGrantAdmin, onRevokeAdmin, onGrantStaff, onRevoke
       <div className="space-y-1.5 max-h-64 overflow-y-auto">
         {/* Local player */}
         <PlayerRow
-          name={useGameStore.getState().localPlayer.name}
+          name={localAccountName}
           color={useGameStore.getState().localPlayer.color}
           role={localRole}
           isCeo={localIsCeo}

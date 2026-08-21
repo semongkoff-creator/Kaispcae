@@ -37,7 +37,11 @@ function targetKey(target: { type: 'channel' | 'dm'; id: string }): string {
 // whichever target is currently open, and lazily fetches each target's
 // history the first time it's opened (messagesByTarget acts as a cache
 // keyed by "channel:<id>"/"dm:<id>", see gameStore.ts's doc comment).
-export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) {
+// specs/2026-08-21-room-entry-name-prompt-design.md — final-review fix:
+// localAccountName is the REAL account name (currentUser.name from
+// App.tsx's Game component), used ONLY for the optimistic pre-confirmation
+// echo's senderName below — chat must never show the room-entry nametag.
+export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters, localAccountName: string) {
   const channels = useGameStore((s) => s.channels);
   const setChannels = useGameStore((s) => s.setChannels);
   const dmConversations = useGameStore((s) => s.dmConversations);
@@ -186,7 +190,7 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
           channelId: activeChatTarget.type === 'channel' ? activeChatTarget.id : undefined,
           conversationId: activeChatTarget.type === 'dm' ? activeChatTarget.id : undefined,
           senderId: state.localUserId,
-          senderName: state.localPlayer.name,
+          senderName: localAccountName,
           text,
           createdAt: Date.now(),
           attachmentUrl: attachment?.url,
@@ -228,7 +232,7 @@ export function useChannelChat(roomSlug: string, emitters: ChannelChatEmitters) 
         channelId: activeChatTarget.type === 'channel' ? activeChatTarget.id : undefined,
         conversationId: activeChatTarget.type === 'dm' ? activeChatTarget.id : undefined,
         senderId: state.localUserId,
-        senderName: state.localPlayer.name,
+        senderName: localAccountName,
         text: '',
         createdAt: Date.now(),
         attachmentUrl: previewUrl,

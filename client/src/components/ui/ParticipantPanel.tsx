@@ -44,6 +44,11 @@ interface ParticipantPanelProps {
   // component to gate). Does NOT affect whether others can target a guest
   // with these — only what the guest viewing this panel can do.
   isGuest?: boolean;
+  // specs/2026-08-21-room-entry-name-prompt-design.md — final-review fix:
+  // the local user's OWN row must show their real account name, not
+  // whatever room-entry nametag they're currently using — participant
+  // lists are explicitly out of this feature's scope.
+  localAccountName: string;
   emitFollowRequest: (targetUserId: string) => void;
   emitFollowUnfollow: () => void;
   emitSummonUser: (nickname: string) => void;
@@ -87,7 +92,7 @@ interface ParticipantPanelProps {
 
 const MAX_VIDEO_THUMBS = 3;
 
-export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, onReport, emitKick, emitForceMute, emitForcePull, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
+export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, localAccountName, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, onReport, emitKick, emitForceMute, emitForcePull, emitSpotlight, open, onToggle, onClose }: ParticipantPanelProps) {
   // Drawer side follows the same flag App.tsx uses to switch between
   // VideoGrid (map HUD) and MeetingView (App.tsx:1119) — read directly
   // rather than threaded as a prop, same as the other store slices below.
@@ -234,7 +239,7 @@ export function ParticipantPanel({ remoteStreams, isMicMuted, isGuest, emitFollo
 
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             <ParticipantRow
-              name={localName}
+              name={localAccountName}
               color={localColor}
               handRaised={localHandRaised}
               workMode={localWorkMode}
