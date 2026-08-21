@@ -2089,6 +2089,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         localRole={localRole}
         manualStatus={manualStatus}
         onPickPresence={handlePresencePick}
+        statusPickerOpen={activePanel === 'status'}
+        onToggleStatusPicker={() => openPanel('status')}
         isAdmin={isAdmin}
         onOpenRoomEditor={() => window.open(`/?roomEditor=${encodeURIComponent(roomSlug)}`, '_blank', 'noopener')}
         canTeleport={roleAtLeast(localRole, 'member')}

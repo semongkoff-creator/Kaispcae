@@ -41,6 +41,13 @@ interface SidebarProps {
   // unlike the others.
   manualStatus: ManualStatus;
   onPickPresence: (status: ManualStatus) => void;
+  // Bug panel numpuk — same fix shape as roomFeaturesActive above: the
+  // Status dropdown (PresenceButton) is now one of the mutually-exclusive
+  // panels (activePanel === 'status') instead of its own independent
+  // useState, so it can never stay open behind/alongside Room Features (or
+  // vice versa).
+  statusPickerOpen: boolean;
+  onToggleStatusPicker: () => void;
 
   isAdmin: boolean;
   // ZEP Room Editor — opens the full-page editor in a new tab. The old overlay
@@ -207,6 +214,8 @@ export function Sidebar({
   localRole,
   manualStatus,
   onPickPresence,
+  statusPickerOpen,
+  onToggleStatusPicker,
   isAdmin,
   onOpenRoomEditor,
   canTeleport,
@@ -561,7 +570,7 @@ export function Sidebar({
           App.tsx's persistAvatar) since they have no User row to save to —
           offering the editor at all was misleading, not just extraneous. */}
       {!isGuest && <AvatarEditorButton onClick={onEditAvatar} variant="sidebar" />}
-      <PresenceButton manualStatus={manualStatus} onPick={onPickPresence} variant="sidebar" />
+      <PresenceButton manualStatus={manualStatus} onPick={onPickPresence} open={statusPickerOpen} onToggle={onToggleStatusPicker} variant="sidebar" />
 
       {/* Ghost mode + Notification Settings — moved here from the meeting
           toolbar (previously HiddenButton/NotificationSettings in App.tsx's

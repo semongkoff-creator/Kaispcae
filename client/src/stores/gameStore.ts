@@ -77,11 +77,14 @@ export interface ActivityEvent {
 }
 
 // Bug 12 — the set of mutually-exclusive main panels. Deliberately excludes
-// small HUD popovers (Presence, Notifications, Activity feed, Device menu,
-// Status, attachment menu), the avatar editor modal, the minimap/emote-wheel,
-// the mini-mode popout window, the file lightbox, toasts and confirm modals —
-// those are separate layers, not panels. Room-editor mode is tracked by
-// `editorMode`, coordinated to be exclusive with these without being one of them.
+// small HUD popovers (Notifications, Device menu, attachment menu), the
+// avatar editor modal, the minimap/emote-wheel, the mini-mode popout window,
+// the file lightbox, toasts and confirm modals — those are separate layers,
+// not panels. Room-editor mode is tracked by `editorMode`, coordinated to be
+// exclusive with these without being one of them. Activity feed and Status
+// used to be listed here too, until each was found stacking behind/alongside
+// a real panel with no way to close either from the other side — see the
+// 'activityFeed' and 'status' entries below for the fix history.
 export type PanelId =
   | 'chat'
   | 'participants'
@@ -130,7 +133,14 @@ export type PanelId =
   | 'userGuide'
   | 'memberList'
   | 'settings'
-  | 'bookingForm';
+  | 'bookingForm'
+  // Bug panel numpuk — the sidebar's manual-status dropdown (PresenceButton)
+  // used to own an independent useState(false), closed only by its own
+  // outside-click listener — confirmed live stacking behind/alongside
+  // Room Features (or any other panel): opening Room Features never closed
+  // Status, and opening Status never closed Room Features. Folded in here,
+  // same fix shape as 'activityFeed' above.
+  | 'status';
 
 // Keeps the feed skimmable and bounds its memory — old entries just fall
 // off the end rather than needing a separate pruning pass (see

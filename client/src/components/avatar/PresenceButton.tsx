@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { CircleFill } from 'react-bootstrap-icons';
 import { MANUAL_STATUSES, ManualStatus, PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
 
@@ -8,6 +8,16 @@ interface PresenceButtonProps {
   // applying immediately) — every other status applies straight away, no
   // reason needed (see App.tsx's handlePresencePick).
   onPick: (status: ManualStatus) => void;
+  // Bug panel numpuk — open/onToggle now come from the parent (App.tsx,
+  // backed by activePanel === 'status'), same controlled shape as
+  // ActivityFeed. This used to own an independent useState(false), closed
+  // only by its own outside-click listener below — confirmed live stacking
+  // behind/alongside Room Features (or any other panel): opening one never
+  // closed the other. onToggle is reused for the outside-click dismissal
+  // too (it's a toggle, and this dropdown is only ever mounted while it's
+  // already open, so calling it there always means "close").
+  open: boolean;
+  onToggle: () => void;
   variant?: 'sidebar';
 }
 
@@ -16,25 +26,24 @@ interface PresenceButtonProps {
 // avatar/participant-list badges, so every surface renders the same
 // label/emoji per status. Absorbed the old free-text Custom Status feature's
 // quick-pick presets (WFH/Focus/In a meeting/Break) as real entries here.
-export function PresenceButton({ manualStatus, onPick, variant = 'sidebar' }: PresenceButtonProps) {
-  const [open, setOpen] = useState(false);
+export function PresenceButton({ manualStatus, onPick, open, onToggle, variant = 'sidebar' }: PresenceButtonProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) onToggle();
     };
     document.addEventListener('mousedown', onDown, true);
     return () => document.removeEventListener('mousedown', onDown, true);
-  }, [open]);
+  }, [open, onToggle]);
 
   const isSidebar = variant === 'sidebar';
 
   return (
     <div ref={wrapRef} className={isSidebar ? 'relative' : ''}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
         title={PRESENCE_LABEL[manualStatus]}
         className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
           manualStatus !== 'available' ? 'bg-purple-50 dark:bg-gray-700' : 'hover:bg-purple-50 dark:hover:bg-gray-700'
@@ -52,7 +61,7 @@ export function PresenceButton({ manualStatus, onPick, variant = 'sidebar' }: Pr
           {MANUAL_STATUSES.map((s) => (
             <button
               key={s}
-              onClick={() => { onPick(s); setOpen(false); }}
+              onClick={() => { onPick(s); onToggle(); }}
               className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-left cursor-pointer ${
                 manualStatus === s ? 'bg-purple-600 text-white' : 'text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'
               }`}
