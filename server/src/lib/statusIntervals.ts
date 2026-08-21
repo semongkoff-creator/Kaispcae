@@ -41,6 +41,16 @@ export async function openStatusInterval(
 ): Promise<void> {
   await closeOpenStatusInterval(prisma, userId, at);
   await prisma.statusInterval.create({ data: { userId, roomSlug, status, startedAt: at, zoneId: zoneId ?? null } });
+  // specs/2026-08-21-first-seen-offline-members-design.md — set exactly
+  // once per user, the first time they're ever known to be active in a
+  // room (this function's own first-ever call for them, or the first call
+  // after a backfilled/already-set value). updateMany's own where clause
+  // re-checks firstSeenAt is still null AT WRITE TIME (not a separate
+  // read-then-write, which would race) — two concurrent room-joins for the
+  // same brand-new user can't both "win": whichever write actually reaches
+  // the database first sets it, the other's WHERE clause no longer matches
+  // and it becomes a no-op, never overwriting an already-set value.
+  await prisma.user.updateMany({ where: { id: userId, firstSeenAt: null }, data: { firstSeenAt: at } });
 }
 
 export async function closeOpenStatusInterval(
