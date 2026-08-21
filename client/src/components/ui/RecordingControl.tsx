@@ -1,9 +1,60 @@
-import { useState } from 'react';
+import { useState, useRef, useLayoutEffect, RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { RecordCircleFill, StopCircleFill, Download } from 'react-bootstrap-icons';
 import { Recording } from '@kaispace/shared';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { api, ApiError } from '@/services/api';
 import { showPrompt } from '@/stores/modalStore';
+
+const FLYOUT_MARGIN = 8;
+
+// Mirrors Tooltip.tsx's own portal-based fix for the identical bug: these
+// popovers only appear with variant="sidebar", where they're nested inside
+// Sidebar's "Room Features" menu (overflow-y-auto) — a plain `position:
+// absolute` popup trying to escape to the right gets clipped by that
+// ancestor's own scroll box instead of floating beside it (the browser then
+// grows a horizontal scrollbar to reach the clipped content, instead of
+// showing it as a floating overlay). A portal to document.body, positioned
+// from the trigger's real getBoundingClientRect, escapes that clip entirely.
+// The 'standalone' variant isn't nested inside any clipping ancestor, so it
+// keeps its original `absolute` positioning untouched.
+function useFlyoutPosition(triggerRef: RefObject<HTMLButtonElement>, open: boolean) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<{ top: number; left: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open) { setStyle(null); return; }
+
+    const reposition = () => {
+      const trigger = triggerRef.current;
+      const panel = panelRef.current;
+      if (!trigger || !panel) return;
+      const rect = trigger.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      const preferredLeft = rect.right + FLYOUT_MARGIN;
+      const overflowsRight = preferredLeft + panelRect.width > vw - FLYOUT_MARGIN;
+      let left = overflowsRight ? rect.left - FLYOUT_MARGIN - panelRect.width : preferredLeft;
+      let top = rect.top;
+
+      left = Math.min(Math.max(left, FLYOUT_MARGIN), vw - panelRect.width - FLYOUT_MARGIN);
+      top = Math.min(Math.max(top, FLYOUT_MARGIN), vh - panelRect.height - FLYOUT_MARGIN);
+      setStyle({ top, left });
+    };
+
+    reposition();
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }, [open, triggerRef]);
+
+  return { panelRef, style };
+}
 
 interface RecordingTarget {
   userId: string;
@@ -29,10 +80,15 @@ interface RecordingControlProps {
 // rule — not even another admin can stop someone else's recording), and a
 // small list of past recordings available to download.
 export function RecordingControl({ recordingTargets, activeRecording, isRecordingMine, uploading, roomSlug, onStart, onStop, variant = 'standalone' }: RecordingControlProps) {
+  const isSidebar = variant === 'sidebar';
   const [showPicker, setShowPicker] = useState(false);
   const [showList, setShowList] = useState(false);
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [error, setError] = useState('');
+  const recordButtonRef = useRef<HTMLButtonElement>(null);
+  const recordingsButtonRef = useRef<HTMLButtonElement>(null);
+  const picker = useFlyoutPosition(recordButtonRef, isSidebar && showPicker);
+  const list = useFlyoutPosition(recordingsButtonRef, isSidebar && showList);
 
   const startWithTarget = async (targetUserId: string) => {
     const title = await showPrompt('Judul rekaman:', 'Sesi Meeting');
@@ -69,8 +125,6 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
     }
   };
 
-  const isSidebar = variant === 'sidebar';
-
   const recordButton = isRecordingMine ? (
     <button
       onClick={onStop}
@@ -94,6 +148,7 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
     )
   ) : (
     <button
+      ref={recordButtonRef}
       onClick={handleRecordClick}
       disabled={recordingTargets.length === 0}
       title="Record"
@@ -107,6 +162,7 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
 
   const recordingsButton = (
     <button
+      ref={recordingsButtonRef}
       onClick={loadRecordings}
       title="Recordings"
       className={isSidebar
@@ -117,8 +173,8 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
     </button>
   );
 
-  const pickerPanel = showPicker && (
-    <div className={isSidebar ? 'absolute top-0 left-full ml-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50' : 'absolute bottom-full mb-1.5 left-0 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50'}>
+  const pickerContent = (
+    <>
       <p className="text-gray-400 dark:text-gray-500 text-[10px] mb-1 px-1">Pilih target rekaman:</p>
       {recordingTargets.map((p) => (
         <button
@@ -129,11 +185,28 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
           {p.name}
         </button>
       ))}
-    </div>
+    </>
   );
 
-  const listPanel = showList && (
-    <div className={isSidebar ? 'absolute top-0 left-full ml-2 w-64 max-h-64 overflow-y-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50' : 'absolute bottom-full mb-1.5 right-0 w-64 max-h-64 overflow-y-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50'}>
+  const pickerPanel = showPicker && (
+    isSidebar ? createPortal(
+      <div
+        ref={picker.panelRef}
+        style={picker.style ? { position: 'fixed', top: picker.style.top, left: picker.style.left } : { position: 'fixed', top: -9999, left: -9999 }}
+        className="w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-[9999]"
+      >
+        {pickerContent}
+      </div>,
+      document.body,
+    ) : (
+      <div className="absolute bottom-full mb-1.5 left-0 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50">
+        {pickerContent}
+      </div>
+    )
+  );
+
+  const listContent = (
+    <>
       <p className="text-gray-900 dark:text-gray-100 text-xs font-semibold mb-1.5 px-1">Recordings</p>
       {error && <p className="text-red-500 text-[10px] px-1 mb-1">{error}</p>}
       {recordings.length === 0 && <p className="text-gray-400 dark:text-gray-500 text-[10px] px-1">Belum ada rekaman.</p>}
@@ -158,7 +231,24 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
           )}
         </div>
       ))}
-    </div>
+    </>
+  );
+
+  const listPanel = showList && (
+    isSidebar ? createPortal(
+      <div
+        ref={list.panelRef}
+        style={list.style ? { position: 'fixed', top: list.style.top, left: list.style.left } : { position: 'fixed', top: -9999, left: -9999 }}
+        className="w-64 max-h-64 overflow-y-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-[9999]"
+      >
+        {listContent}
+      </div>,
+      document.body,
+    ) : (
+      <div className="absolute bottom-full mb-1.5 right-0 w-64 max-h-64 overflow-y-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50">
+        {listContent}
+      </div>
+    )
   );
 
   if (isSidebar) {
