@@ -204,7 +204,10 @@ export interface RoomInfo {
   coverImage?: string | null;
 }
 
-export interface OrgMember { id: string; displayName: string; workspaceRole: 'admin' | 'member' }
+// specs/2026-08-21-first-seen-offline-members-design.md — epoch
+// milliseconds (matching the server's explicit Date->getTime() conversion
+// in routes/orgMembers.ts), null meaning "has never joined a room".
+export interface OrgMember { id: string; displayName: string; workspaceRole: 'admin' | 'member'; firstSeenAt: number | null }
 
 export const api = {
   register: (email: string, password: string, displayName: string) =>
