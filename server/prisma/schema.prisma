@@ -61,11 +61,21 @@ model User {
   // specs/2026-08-21-first-seen-offline-members-design.md — the first time
   // this user ever actually joined a room (their earliest StatusInterval
   // row's startedAt), NOT when their account was created. Backfilled once
-  // for existing users (see this feature's own migration); set exactly
-  // once going forward by lib/statusIntervals.ts's openStatusInterval, the
-  // first time it ever runs for a user with no value here yet. Null means
-  // genuinely "has never joined a room" — never a stale/guessed value.
+  // for existing users (see that feature's own migration).
+  // DORMANT as of specs/2026-08-21-last-seen-offline-members-design.md — no
+  // longer written to or read anywhere; superseded by lastSeenAt below for
+  // the Offline list's actual use case. Left in place (not dropped) since
+  // its already-backfilled data isn't reproducible from anything else.
   firstSeenAt DateTime?
+  // specs/2026-08-21-last-seen-offline-members-design.md — the START time
+  // of this user's MOST RECENT StatusInterval row (i.e. the last time they
+  // joined a room or changed work-mode), NOT the moment they went offline.
+  // Backfilled once for existing users (see this feature's own migration);
+  // overwritten UNCONDITIONALLY every time lib/statusIntervals.ts's
+  // openStatusInterval runs for this user — unlike firstSeenAt above, there
+  // is no "only once" guard, the newest write always wins. Null means
+  // genuinely "has never joined a room" — never a stale/guessed value.
+  lastSeenAt DateTime?
   // Bug 1 — single active session. Random id minted at each successful login
   // and embedded in the JWT as a `sessionId` claim. Auth
   // (REST + socket) rejects a token whose sessionId != this, so logging in on a
