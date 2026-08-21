@@ -28,10 +28,9 @@ roomParticipants.get('/rooms/:slug/participants', authenticateToken, async (req:
       return res.status(403).json({ error: 'Not a member of this room' });
     }
 
-    const intervals = await prisma.statusInterval.findMany({
+    const intervals = await prisma.statusInterval.groupBy({
+      by: ['userId'],
       where: { roomSlug: room.slug },
-      select: { userId: true },
-      distinct: ['userId'],
     });
     const userIds = intervals.map((i) => i.userId);
     if (userIds.length === 0) return res.json({ members: [] });

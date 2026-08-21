@@ -143,8 +143,8 @@ export function ParticipantPanel({ remoteStreams, roomSlug, isMicMuted, isGuest,
 
   const localUserId = useGameStore((s) => s.localUserId);
 
-  // Org roster for the Offline section — fetched once per panel-open, not
-  // polled.
+  // Room roster (for the Offline section) — fetched once per panel-open,
+  // not polled.
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
   useEffect(() => {
     if (!open) return;

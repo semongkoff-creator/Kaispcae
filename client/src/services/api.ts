@@ -206,7 +206,7 @@ export interface RoomInfo {
 
 // specs/2026-08-21-last-seen-offline-members-design.md — epoch
 // milliseconds (matching the server's explicit Date->getTime() conversion
-// in routes/orgMembers.ts), null meaning "has never joined a room". Start
+// in routes/roomParticipants.ts), null meaning "has never joined a room". Start
 // time of the user's MOST RECENT room activity, not their first-ever join.
 export interface OrgMember { id: string; displayName: string; workspaceRole: 'admin' | 'member'; lastSeenAt: number | null }
 

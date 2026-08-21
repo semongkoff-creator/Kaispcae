@@ -3,6 +3,6 @@
 -- a StatusInterval row for this roomSlug." StatusInterval's two existing
 -- indexes are both keyed on userId first, so neither serves a WHERE roomSlug
 -- lookup — this index makes that query efficient, and also covers the
--- DISTINCT userId projection directly (no need to touch the base table rows).
+-- GROUP BY userId projection directly (no need to touch the base table rows).
 
 CREATE INDEX "StatusInterval_roomSlug_userId_idx" ON "StatusInterval"("roomSlug", "userId");
