@@ -41,7 +41,7 @@ import { drawTile, drawFloorTile, drawWallTile, drawFurnitureLayer, TILE_COLORS 
 import { drawMiniTileType, drawMiniZoneBackground, MINI_FURNITURE, MINI_WALL_AREA, MINI_DOOR } from './miniRender';
 import { measureTextCached } from './textMetrics';
 import { cullOverlay, setOverlayStyle } from './overlayStyle';
-import { recordFrame } from '@/utils/frameDiag';
+import { recordFrame, recordPhases, recordSceneCounts } from '@/utils/frameDiag';
 
 // Kept proportional to TILE_SIZE (same ratio as AvatarSprite.ts's own copy of
 // this constant) so decorations positioned relative to it — crown, speaker
@@ -1244,6 +1244,17 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     if (!ctx) return;
     disableImageSmoothing(ctx);
 
+    // Phase timing (see frameDiag.ts). Measured always: eight performance.now()
+    // calls per frame is nothing next to what they measure, and a 250ms frame
+    // is unattributable without them.
+    const phases: Record<string, number> = {};
+    let phaseAt = performance.now();
+    const mark = (name: string) => {
+      const now = performance.now();
+      phases[name] = (phases[name] ?? 0) + (now - phaseAt);
+      phaseAt = now;
+    };
+
     // Map zoom — read fresh via getState() every frame (like every other
     // fast-changing value in this loop) rather than as a reactive dependency,
     // so a zoom change takes effect on the very next animation frame with no
@@ -1668,6 +1679,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     // Same light-purple tint Minimap.tsx's own background uses (opaque here,
     // unlike the minimap's 0.9 alpha, since this fills the WHOLE screen and
     // has nothing behind it to blend with).
+    mark('sim');
     ctx.fillStyle = isOverview ? '#ede9fe' : '#1a1a2e';
     ctx.fillRect(0, 0, worldViewW, worldViewH);
 
@@ -1774,6 +1786,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
         }
       }
 
+      mark('tiles');
       // Room Editor's "Wall Area" tool — the one impassable-rect flavor that's
       // actually meant to be seen (a plain Impassable Area stays invisible on
       // purpose, see its own doc comment in shared/mapLayers.ts). Drawn here,
@@ -1830,6 +1843,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
         }
       }
 
+      mark('areaRects');
       drawLiveReferenceImage(ctx, liveReferenceImageRef.current, cameraX, cameraY);
 
       // Furniture — object layer (base row, drawn before avatars). Banners
@@ -1844,6 +1858,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       }
     }
 
+    mark('furnitureObject');
     // Editor overlay
     if (editorModeRef.current) {
       for (let row = startRow; row < endRow; row++) {
@@ -2106,6 +2121,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       setOverlayStyle(el, 'transform', `translate(${sx}px, ${sy}px) scale(${zoom})`);
     }
 
+    mark('domOverlays');
     // Zone draw preview (while dragging out a new zone rectangle)
     if (zoneDragStartRef.current && zoneDragCurrentRef.current) {
       const a = zoneDragStartRef.current;
@@ -2399,6 +2415,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
     }
 
     if (!isOverview) {
+      mark('avatars');
       // Furniture — overhead layer (drawn after avatars, so tall pieces let
       // players walk visually behind their upper portion)
       for (const item of furnitureList) {
@@ -2790,6 +2807,22 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
       ctx.restore();
     }
 
+    mark('effects');
+    recordPhases(phases);
+    // How much scenery this frame was asked for. "Slow" and "asked to draw
+    // forty thousand things" are different diagnoses.
+    recordSceneCounts({
+      visibleTiles: Math.max(0, (endCol - startCol) * (endRow - startRow)),
+      mapCols,
+      mapRows,
+      furniture: furnitureList.length,
+      zones: zonesRef.current.length,
+      wallAreaRects: wallAreaRectsRef.current.length,
+      doorAreaRects: doorAreaRectsRef.current.length,
+      players: Object.keys(playerRecordsRef.current).length,
+      zoom: Math.round(zoom * 100) / 100,
+      dpr,
+    });
   }, []);
 
   // The rAF loop proper: draws ONE frame, then schedules the next — and the

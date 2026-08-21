@@ -67,6 +67,27 @@ function percentile(sorted: number[], p: number): number {
   return round(sorted[i]);
 }
 
+// ── Phase breakdown ───────────────────────────────────────────────────────
+// A 250ms frame tells you the canvas is the problem; it does not tell you
+// WHICH of ~1700 lines of drawing spent it. These are cumulative per-phase
+// totals, reported as a mean per frame, plus a snapshot of how much scenery
+// each phase was asked to draw — because "slow" and "asked to draw 40,000
+// things" are different diagnoses with different fixes.
+const phaseTotals = new Map<string, number>();
+let phaseFrames = 0;
+let sceneCounts: Record<string, number> = {};
+
+export function recordPhases(phases: Record<string, number>): void {
+  phaseFrames++;
+  for (const [name, ms] of Object.entries(phases)) {
+    phaseTotals.set(name, (phaseTotals.get(name) ?? 0) + ms);
+  }
+}
+
+export function recordSceneCounts(counts: Record<string, number>): void {
+  sceneCounts = counts;
+}
+
 export interface FrameReport {
   seconds: number;
   frames: number;
@@ -79,6 +100,10 @@ export interface FrameReport {
   verdict: string;
   worstFrames: { gapMs: number; drawMs: number; sinceStartMs: number }[];
   longTasks: { durationMs: number; name: string; sinceStartMs: number }[];
+  // Mean milliseconds per frame, per phase of the draw, worst first.
+  phasesAvgMs: Record<string, number>;
+  // What the last frame was asked to draw.
+  scene: Record<string, number>;
 }
 
 export function buildFrameReport(): FrameReport {
@@ -111,10 +136,19 @@ export function buildFrameReport(): FrameReport {
     verdict,
     worstFrames: worst.slice(0, 10),
     longTasks: [...longTasks].sort((a, b) => b.durationMs - a.durationMs).slice(0, 10),
+    phasesAvgMs: Object.fromEntries(
+      [...phaseTotals.entries()]
+        .map(([name, total]) => [name, round(total / Math.max(1, phaseFrames))] as const)
+        .sort((a, b) => (b[1] as number) - (a[1] as number)),
+    ),
+    scene: sceneCounts,
   };
 }
 
 export function resetFrameDiag(): void {
+  phaseTotals.clear();
+  phaseFrames = 0;
+  sceneCounts = {};
   intervals = [];
   draws = [];
   worst = [];
