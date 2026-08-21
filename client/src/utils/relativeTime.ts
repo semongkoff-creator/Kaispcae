@@ -29,3 +29,18 @@ export function formatRelativeTimeId(timestamp: number): string {
   }
   return 'baru saja';
 }
+
+// Exact date+time alongside formatRelativeTimeId's vague "X yang lalu" —
+// requested after a "first seen" report showed relative-only text (e.g. "2
+// minggu yang lalu") with no way to see the actual date/time it refers to.
+const dateTimeFormatter = new Intl.DateTimeFormat('id-ID', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+export function formatExactDateTimeId(timestamp: number): string {
+  return dateTimeFormatter.format(new Date(timestamp));
+}
