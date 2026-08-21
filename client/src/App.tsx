@@ -3077,6 +3077,7 @@ function MainApp() {
     // design.md, the feature that originally added it).
     if (user && playerName === null) {
       const config = user.avatarConfig || loadAvatarConfig();
+      saveAvatarConfig(config);
       setPlayerName(user.displayName);
       setLocalPlayer({
         name: user.displayName,
@@ -3113,6 +3114,7 @@ function MainApp() {
 
   const handleAvatarSave = useCallback((config: AvatarConfig) => {
     saveAvatarConfig(config);
+    setPlayerName(config.name);
     setLocalPlayer({ name: config.name, color: config.color, avatarConfig: config });
     setShowAvatarSetup(false);
     // specs/2026-08-21-room-entry-name-prompt-v2-design.md — a user who
@@ -3122,8 +3124,9 @@ function MainApp() {
     // immediately fire again right after, asking for a name they just gave
     // a moment ago.
     setRoomNameConfirmedFor(roomSlug);
+    updateDisplayName(config.name);
     persistAvatar(config);
-  }, [setLocalPlayer, persistAvatar, roomSlug]);
+  }, [setLocalPlayer, persistAvatar, roomSlug, updateDisplayName]);
 
   // specs/2026-08-21-room-entry-name-prompt-v2-design.md — unlike the
   // original (removed) version of this flow, there is no separate
@@ -3136,14 +3139,14 @@ function MainApp() {
   // avatarConfig, with no server-side merge, so a name-only payload would
   // silently erase the user's body/eyes/outfit selections.
   const handleNameSubmit = useCallback((name: string) => {
-    const merged = { ...(user?.avatarConfig || loadAvatarConfig()), name };
+    const merged = { ...loadAvatarConfig(), name };
     setRoomNameConfirmedFor(roomSlug);
     setPlayerName(name);
     saveAvatarConfig(merged);
     setLocalPlayer({ name, color: merged.color, avatarConfig: merged });
     updateDisplayName(name);
     api.saveAvatar(merged).catch(() => {});
-  }, [setLocalPlayer, roomSlug, user, updateDisplayName]);
+  }, [setLocalPlayer, roomSlug, updateDisplayName]);
 
   // Ask before entering. A room that takes walk-ins answers immediately and
   // this is one extra request; a gated one is caught here instead of at the
@@ -3250,7 +3253,7 @@ function MainApp() {
       <JoinGate
         roomSlug={roomSlug}
         reason={entryBlock.reason}
-        onBack={() => { setEntryBlock(null); setRoomSlug(null); }}
+        onBack={() => { setEntryBlock(null); setRoomSlug(null); setRoomNameConfirmedFor(null); }}
         onAdmitted={() => setEntryBlock(null)}
       />
     );
