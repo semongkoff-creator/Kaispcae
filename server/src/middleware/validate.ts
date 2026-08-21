@@ -91,11 +91,3 @@ export const startDmSchema = z.object({
   otherUserId: z.string().min(1),
 });
 
-// specs/2026-08-21-room-entry-name-prompt-design.md — the room-entry
-// nametag save. Deliberately just one field, capped at the same 20 chars
-// as the client's own input maxLength — min(1) after Zod's own trim isn't
-// automatic, so the route handler trims before this schema sees it (see
-// routes/rooms.ts) to keep "   " (whitespace-only) from passing min(1).
-export const roomDisplayNameSchema = z.object({
-  name: z.string().min(1).max(20),
-});

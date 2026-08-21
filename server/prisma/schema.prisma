@@ -24,15 +24,6 @@ model User {
   password                String
   displayName             String
   avatarConfig            Json?
-  // The account's last-used AVATAR NAMETAG in a room — separate from
-  // displayName (which Lark SSO re-syncs on every login, see
-  // routes/lark.ts:214) and from avatarConfig.name (which the Avatar
-  // Setup screen's own save flow deliberately keeps in sync with
-  // displayName — see routes/rooms.ts's PUT /users/me/avatar). Set only by
-  // PUT /users/me/room-display-name — never read/written by anything else.
-  // Null for every account that hasn't used this feature yet; the client
-  // falls back to displayName in that case.
-  roomDisplayName         String?
   // Lightweight, cross-device UI preferences — e.g. { tooltipsEnabled, notifKinds }.
   // Server-synced by design (Settings feature) so they follow the user between
   // devices, unlike the browser-Notification-permission flag in

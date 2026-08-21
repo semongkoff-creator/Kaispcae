@@ -27,6 +27,6 @@ export function publicUser(user: PublicUserFields) {
   };
 }
 
-export function publicUserWithAvatar(user: PublicUserFields & Pick<User, 'avatarConfig' | 'roomDisplayName'>) {
-  return { ...publicUser(user), avatarConfig: user.avatarConfig, roomDisplayName: user.roomDisplayName };
+export function publicUserWithAvatar(user: PublicUserFields & Pick<User, 'avatarConfig'>) {
+  return { ...publicUser(user), avatarConfig: user.avatarConfig };
 }

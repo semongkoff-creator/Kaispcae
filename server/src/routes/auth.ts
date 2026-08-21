@@ -293,7 +293,6 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
       where: { id: req.userId },
       select: {
         id: true, email: true, displayName: true, avatarConfig: true, preferences: true,
-        roomDisplayName: true,
         accountRole: true, workspaceRole: true, timezone: true, active: true,
         // Bug 1 — needed to preserve / adopt the single-session id below.
         currentSessionId: true,
