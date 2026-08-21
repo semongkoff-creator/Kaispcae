@@ -58,6 +58,14 @@ model User {
   // PATCH /admin/members/:userId. Read by lib/roles.ts (REST) and
   // socket/roomHandler.ts (sockets) — the two must always agree.
   memberVerifiedAt        DateTime?
+  // specs/2026-08-21-first-seen-offline-members-design.md — the first time
+  // this user ever actually joined a room (their earliest StatusInterval
+  // row's startedAt), NOT when their account was created. Backfilled once
+  // for existing users (see this feature's own migration); set exactly
+  // once going forward by lib/statusIntervals.ts's openStatusInterval, the
+  // first time it ever runs for a user with no value here yet. Null means
+  // genuinely "has never joined a room" — never a stale/guessed value.
+  firstSeenAt DateTime?
   // Bug 1 — single active session. Random id minted at each successful login
   // and embedded in the JWT as a `sessionId` claim. Auth
   // (REST + socket) rejects a token whose sessionId != this, so logging in on a
