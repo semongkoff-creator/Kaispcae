@@ -3019,6 +3019,15 @@ function MainApp() {
     if (roomSlug) localStorage.setItem('vm_last_room_slug', roomSlug);
   }, [roomSlug]);
   const [playerName, setPlayerName] = useState<string | null>(null);
+  // specs/2026-08-21-room-entry-name-prompt-design.md — which roomSlug the
+  // CURRENT playerName was confirmed for. null until the modal is first
+  // submitted. Compared against the live roomSlug below: `<Game
+  // key={roomSlug}>` already remounts on every new room entry (lobby->room
+  // AND portal travel), so re-showing the modal whenever roomSlug !==
+  // roomNameConfirmedFor gives "every room entry" for free, with no new
+  // wiring into useSocket.ts's reconnect path (reconnects don't change
+  // roomSlug, so they never touch this).
+  const [roomNameConfirmedFor, setRoomNameConfirmedFor] = useState<string | null>(null);
   const [showAvatarSetup, setShowAvatarSetup] = useState(false);
   const [isRoomReady, setIsRoomReady] = useState(false);
   const setRoomState = useGameStore((s) => s.setRoomState);
@@ -3029,16 +3038,27 @@ function MainApp() {
   // loadAvatarConfig()'s defaults (sprite mode etc.) instead of leaving it
   // undefined, which would silently drop back to the legacy shape avatar.
   useEffect(() => {
-    if (user) {
+    // specs/2026-08-21-room-entry-name-prompt-design.md — guarded on
+    // playerName still being null so this only ever seeds ONCE per login,
+    // not every time the `user` object gets a new reference (e.g.
+    // markTutorialSeen/updatePreferences below both call setUser with a
+    // fresh object for an unrelated field). Without the guard, any such
+    // unrelated update mid-session would silently overwrite whatever name
+    // the user had just confirmed for their CURRENT room with the
+    // account's login-time default — a local-only visual glitch (this
+    // effect only touches the Zustand store, not the server-authoritative
+    // JOIN_ROOM name), but a confusing one.
+    if (user && playerName === null) {
       const config = user.avatarConfig || loadAvatarConfig();
-      setPlayerName(user.displayName);
+      const initialName = user.roomDisplayName || user.displayName;
+      setPlayerName(initialName);
       setLocalPlayer({
-        name: user.displayName,
+        name: initialName,
         color: config.color,
         avatarConfig: config,
       });
     }
-  }, [user, setLocalPlayer]);
+  }, [user, setLocalPlayer, playerName]);
 
   useEffect(() => {
     const room = createDefaultRoom('main-office', 'Main Office');
@@ -3056,6 +3076,14 @@ function MainApp() {
 
   const handleNameSubmit = useCallback((name: string) => {
     setPlayerName(name);
+    // specs/2026-08-21-room-entry-name-prompt-design.md — marks THIS room
+    // as confirmed so the gate below (Step 5) stops showing the modal for
+    // it; persists the name server-side as the new default for whichever
+    // room is entered next (fire-and-forget — a save failure must never
+    // block entering the room, same posture as persistAvatar elsewhere in
+    // this file).
+    setRoomNameConfirmedFor(roomSlug);
+    api.saveRoomDisplayName(name).catch(() => {});
     const savedConfig = loadAvatarConfig();
     if (savedConfig.bodyShape && savedConfig.name) {
       savedConfig.name = name;
@@ -3064,7 +3092,7 @@ function MainApp() {
     } else {
       setShowAvatarSetup(true);
     }
-  }, [setLocalPlayer]);
+  }, [setLocalPlayer, roomSlug]);
 
   const handleAvatarSave = useCallback((config: AvatarConfig) => {
     saveAvatarConfig(config);
@@ -3196,15 +3224,18 @@ function MainApp() {
   // `entryBlock` check above swaps it out for JoinGate on the next render,
   // cleanly disconnecting the socket via Game's own unmount cleanup.
 
-  // Room (existing flow)
-  if (!playerName) {
-    return <NameModal onSubmit={handleNameSubmit} />;
+  // Room — specs/2026-08-21-room-entry-name-prompt-design.md: shows once
+  // per NEW roomSlug (fresh entry from Lobby, or portal travel — both
+  // already remount <Game key={roomSlug}> below), never on a reconnect
+  // within the same room visit (reconnects don't change roomSlug).
+  if (roomSlug !== roomNameConfirmedFor) {
+    return <NameModal initialName={playerName || user.displayName} onSubmit={handleNameSubmit} />;
   }
 
   if (showAvatarSetup) {
     return (
       <AvatarSetup
-        initialConfig={{ ...loadAvatarConfig(), name: playerName }}
+        initialConfig={{ ...loadAvatarConfig(), name: playerName || user.displayName }}
         onSave={handleAvatarSave}
       />
     );
