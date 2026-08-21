@@ -2875,7 +2875,7 @@ function todayKey(): string {
 const STATUS_PICKED_PREFIX = 'vm_status_picked:';
 
 function MainApp() {
-  const { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, createOrganization, logout, markTutorialSeen, updatePreferences } = useAuth();
+  const { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, createOrganization, logout, markTutorialSeen, updatePreferences, updateDisplayName } = useAuth();
   const { theme, toggleTheme } = useTheme();
   // Settings feature — sync the store's live tooltipsEnabled/notifKinds
   // mirrors from the account's saved preferences as soon as they're known,
@@ -3091,7 +3091,7 @@ function MainApp() {
       // now that there's no separate name-collection step — bodyShape
       // alone is the real signal of "has this account ever completed
       // avatar customization."
-      if (!config.bodyShape) {
+      if (!user.avatarConfig?.bodyShape) {
         setShowAvatarSetup(true);
       }
     }
@@ -3136,13 +3136,14 @@ function MainApp() {
   // avatarConfig, with no server-side merge, so a name-only payload would
   // silently erase the user's body/eyes/outfit selections.
   const handleNameSubmit = useCallback((name: string) => {
-    const merged = { ...loadAvatarConfig(), name };
+    const merged = { ...(user?.avatarConfig || loadAvatarConfig()), name };
     setRoomNameConfirmedFor(roomSlug);
     setPlayerName(name);
     saveAvatarConfig(merged);
     setLocalPlayer({ name, color: merged.color, avatarConfig: merged });
+    updateDisplayName(name);
     api.saveAvatar(merged).catch(() => {});
-  }, [setLocalPlayer, roomSlug]);
+  }, [setLocalPlayer, roomSlug, user, updateDisplayName]);
 
   // Ask before entering. A room that takes walk-ins answers immediately and
   // this is one extra request; a gated one is caught here instead of at the
@@ -3327,7 +3328,7 @@ function MainApp() {
   // falls back to user.displayName for the one-tick window before the
   // seeding effect first runs, same fallback pattern used above at
   // AvatarSetup's initialConfig.
-  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => { setRoomSlug(null); }} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={playerName || user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} onUpdatePreferences={updatePreferences} />;
+  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => { setRoomSlug(null); setRoomNameConfirmedFor(null); }} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={playerName || user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} onUpdatePreferences={updatePreferences} />;
 }
 
 // ZEP Room Editor opens in its own tab as /?roomEditor=<slug> (a query param on

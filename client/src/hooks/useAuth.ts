@@ -170,6 +170,17 @@ export function useAuth() {
     api.updatePreferences(patch).catch(() => {});
   }, []);
 
+  // specs/2026-08-21-room-entry-name-prompt-v2-design.md — optimistic-update
+  // pattern matching markTutorialSeen/updatePreferences above: the caller
+  // (App.tsx's handleNameSubmit) already persists the new name server-side
+  // via api.saveAvatar, so this ONLY patches the cached `user` object
+  // locally — without it, `user.displayName` (and everything reading it,
+  // like the Participant Panel's own currentUser.name) stays stale for the
+  // rest of the session even though the nametag itself updates immediately.
+  const updateDisplayName = useCallback((name: string) => {
+    setUser((prev) => (prev ? { ...prev, displayName: name } : prev));
+  }, []);
+
   const logout = useCallback(() => {
     // Captured BEFORE removing it — the server needs the outgoing token to
     // know WHICH session to invalidate (see auth.ts's /logout), so it must
@@ -183,5 +194,5 @@ export function useAuth() {
     api.logout(token).catch(() => {});
   }, []);
 
-  return { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, createOrganization, logout, setError, markTutorialSeen, updatePreferences };
+  return { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, createOrganization, logout, setError, markTutorialSeen, updatePreferences, updateDisplayName };
 }
