@@ -162,6 +162,10 @@ export interface UserProfile {
   email: string;
   displayName: string;
   avatarConfig?: any;
+  // specs/2026-08-21-room-entry-name-prompt-design.md — the account's
+  // last-used room-entry nametag. Separate from displayName; only ever
+  // read as a pre-fill default, never shown anywhere by itself.
+  roomDisplayName?: string | null;
   preferences?: UserPreferences | null;
   // Global, account-level role (see shared/permissions.ts's AccountRole) —
   // 'admin' accounts can create rooms; everyone else can only join existing
@@ -474,6 +478,16 @@ export const api = {
     request<{ success: boolean }>('/users/me/avatar', {
       method: 'PUT',
       body: JSON.stringify(config),
+    }),
+
+  // specs/2026-08-21-room-entry-name-prompt-design.md — separate endpoint
+  // from saveAvatar above on purpose: saveAvatar's route also renames the
+  // account's real displayName when its own `name` field is non-empty,
+  // which must never happen just from changing an in-room nametag.
+  saveRoomDisplayName: (name: string) =>
+    request<{ success: boolean }>('/users/me/room-display-name', {
+      method: 'PUT',
+      body: JSON.stringify({ name }),
     }),
 
   // Partial update — merges server-side, so this only needs to send the
