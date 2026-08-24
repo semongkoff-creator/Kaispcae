@@ -362,7 +362,8 @@ function ParticipantRow({
   // ZEP-style Spotlight — broadcasts to everyone regardless of distance/
   // zone/DND while true (see shared/permissions.ts's 'presence:spotlight').
   // Shown on every row (including the local one) since it's meaningful
-  // whoever is spotlighted; only admins get the toggle action (onSpotlight).
+  // whoever is spotlighted; only admins get the toggle action (onSpotlight
+  // for a remote row, onToggleSpotlight below for the local row).
   spotlightActive?: boolean;
   // Mic mute badge — broadcast via PLAYER_MIC/PLAYER_MIC_UPDATED (see
   // Avatar.micMuted), so it's visible for every participant regardless of
@@ -517,7 +518,8 @@ function ParticipantRow({
             type="button"
             onClick={onToggleSpotlight}
             title={spotlightActive ? 'Matikan Spotlight' : 'Nyalakan Spotlight'}
-            className={`shrink-0 cursor-pointer transition-colors ${spotlightActive ? 'text-amber-500' : 'text-gray-300 dark:text-gray-600 hover:text-amber-400'}`}
+            aria-pressed={spotlightActive}
+            className={`shrink-0 cursor-pointer transition-colors ${spotlightActive ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500 hover:text-amber-400'}`}
           >
             <MegaphoneFill size={11} />
           </button>
