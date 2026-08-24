@@ -804,6 +804,15 @@ export interface GameState {
   // Called by the ticker when a message has finished its run.
   dismissCurrentBroadcast: () => void;
 
+  // "Someone just got spotlighted" notice (SpotlightNotice.tsx) — the
+  // single most-recent spotlight activation, not a queue like
+  // broadcastQueue above: a newer spotlight simply replaces whatever's
+  // showing. Cleared either by its own auto-dismiss timer, or immediately
+  // by useSocket.ts's SPOTLIGHT_CHANGED handler if THIS SAME target's
+  // spotlight turns back off first.
+  spotlightNotice: { id: string; name: string } | null;
+  setSpotlightNotice: (notice: { id: string; name: string } | null) => void;
+
   // Soundboard — this room's custom uploaded sounds (defaults live purely
   // client-side as SOUNDBOARD_DEFAULT_SOUNDS, no server round trip needed).
   // Synced from SOUNDBOARD_LIST on join, kept live via SOUNDBOARD_SOUND_ADDED.
@@ -1652,6 +1661,9 @@ export const useGameStore = create<GameState>((set, get) => ({
     set((state) => ({ broadcastQueue: [...state.broadcastQueue, broadcast] })),
   dismissCurrentBroadcast: () =>
     set((state) => (state.broadcastQueue.length === 0 ? state : { broadcastQueue: state.broadcastQueue.slice(1) })),
+
+  spotlightNotice: null,
+  setSpotlightNotice: (notice) => set({ spotlightNotice: notice }),
 
   soundboardSounds: [],
   setSoundboardSounds: (sounds) => set({ soundboardSounds: sounds }),

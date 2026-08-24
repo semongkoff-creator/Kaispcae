@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
-import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill, Display } from 'react-bootstrap-icons';
+import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill, Display, StarFill } from 'react-bootstrap-icons';
 import { Avatar, AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents, ProximityPlayer, doesRectOverlapImpassableArea, movementHitboxBounds, DOOR_HITBOX_HALF_PX } from '@kaispace/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
@@ -79,6 +79,7 @@ import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
 import { AwayReasonModal } from './components/ui/AwayReasonModal';
 import { ActivityFeed } from './components/ui/ActivityFeed';
 import { PendingRequestToast } from './components/ui/PendingRequestToast';
+import { SpotlightNotice } from './components/ui/SpotlightNotice';
 import { RemoteHelpBanner } from './components/ui/RemoteHelpBanner';
 import { RemoteHelpCredentialForm } from './components/ui/RemoteHelpCredentialForm';
 import { RustdeskSetupHint } from './components/ui/RustdeskSetupHint';
@@ -863,6 +864,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // requests auto-clear on the same clock the server uses to auto-decline
   // them (CONSENT_REQUEST_TIMEOUT_MS) so the toast never outlives a request
   // that's already dead server-side; result toasts are a one-off ping.
+  const spotlightNotice = useGameStore((s) => s.spotlightNotice);
   const incomingSummonRequest = useGameStore((s) => s.incomingSummonRequest);
   useEffect(() => {
     if (!incomingSummonRequest) return;
@@ -1879,6 +1881,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           during a presentation the card does overlap its title bar, which is
           the intended trade: a request waiting on you should interrupt. */}
       <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2">
+        {spotlightNotice && (
+          <SpotlightNotice
+            key={spotlightNotice.id}
+            icon={<StarFill size={13} className="text-amber-500" />}
+            message={<><span className="font-medium">{spotlightNotice.name}</span> sedang di-Spotlight ✨</>}
+          />
+        )}
         {incomingSummonRequest && (
           <PendingRequestToast
             icon={<MagnetFill size={13} className="text-amber-500" />}

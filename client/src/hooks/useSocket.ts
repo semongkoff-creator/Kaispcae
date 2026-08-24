@@ -332,13 +332,17 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       } else {
         upsertPlayer({ id: data.id, spotlightActive: data.active || undefined } as Avatar);
       }
-      // Announce via the same broadcast ticker admin messages use — only on
+      // "Someone got spotlighted" notice (SpotlightNotice.tsx) — only set on
       // activation (going dark isn't newsworthy the same way), reusing
       // playerRecords for the name since it's already keyed by player id
-      // for both self and others (see nudgerName above).
+      // for both self and others (see nudgerName above). Cleared right away
+      // on deactivation too, but only if THIS target is still the one
+      // showing — a newer spotlight may have already replaced it.
       if (data.active) {
         const spotlightName = state.playerRecords[data.id]?.name ?? 'Seseorang';
-        state.enqueueBroadcast({ text: 'sedang di-Spotlight ✨', senderName: spotlightName, sentAt: Date.now() });
+        state.setSpotlightNotice({ id: data.id, name: spotlightName });
+      } else if (state.spotlightNotice?.id === data.id) {
+        state.setSpotlightNotice(null);
       }
     });
 
