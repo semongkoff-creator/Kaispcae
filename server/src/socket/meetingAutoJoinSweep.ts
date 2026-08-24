@@ -1,7 +1,7 @@
 import { Server } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
 import { SocketEvents, expandOccurrences, findZoneEntryTile, TILE_SIZE, type Occurrence } from '@virtualmeet/shared';
-import { getPlayers, updatePlayerPosition, getCachedTiles } from '../store/roomStore';
+import { getPlayers, updatePlayerPosition, getCachedTiles, getCachedZones } from '../store/roomStore';
 import { isZoneLocked, admitUserToZone } from './zoneLock';
 
 // Calendar meeting auto-join. Structurally parallel to reminderSweep.ts (same
@@ -39,6 +39,7 @@ export function startMeetingAutoJoinSweep(io: Server, intervalMs = TICK_MS): voi
         select: {
           id: true, title: true, start: true, end: true, timezone: true, rrule: true, exdates: true,
           meetkaiRoomSlug: true, meetkaiZoneId: true, lastAutoJoinFiredFor: true,
+          organizerId: true,
           attendees: { select: { userId: true } },
         },
       });
@@ -71,40 +72,72 @@ export function startMeetingAutoJoinSweep(io: Server, intervalMs = TICK_MS): voi
 
           const players = await getPlayers(room);
           const tiles = getCachedTiles(room);
-          const landing = tiles && tiles.length > 0 ? await findZoneEntryTileForRoom(tiles, room, zoneId) : null;
+          // Zone geometry comes from the live in-memory cache, NOT a raw read
+          // of Room.zones: that legacy column is frozen for any room saved
+          // through the newer layered Room Editor (whose real zones live in
+          // layerData and are refreshed into this cache via setCachedZones),
+          // so reading it directly would land people on stale — or
+          // non-existent — coordinates. Returns [] (→ no landing tile, the
+          // player's own position is used instead) when the zone can no
+          // longer be found at all.
+          const zoneRect = getCachedZones(room).find((z) => z.id === zoneId) ?? null;
+          const landing = tiles && tiles.length > 0 && zoneRect ? findZoneEntryTile(tiles, zoneRect) : null;
 
-          // Tracks attendees ACTUALLY force-moved below (not just "found in
-          // the room's player list") — an attendee found in `players` but
+          // Everyone the meeting belongs to — the organizer PLUS the invited
+          // attendees, deduped. EventAttendee deliberately excludes the
+          // organizer (calendar.ts's create route filters `id !== req.userId`),
+          // so iterating attendees alone would leave the person who called the
+          // meeting behind. Same precedent reminderSweep.ts already sets for
+          // its own recipient set.
+          const participantIds = new Set<string>([ev.organizerId]);
+          for (const a of ev.attendees) participantIds.add(a.userId);
+
+          // Tracks participants ACTUALLY force-moved below (not just "found in
+          // the room's player list") — a participant found in `players` but
           // skipped for a stale socket must still fall through to the
           // notification loop, or they'd get neither a pull nor a notice.
           const pulledUserIds = new Set<string>();
-          for (const attendee of ev.attendees) {
-            const player = players.find((p) => p.userId === attendee.userId);
+          for (const userId of participantIds) {
+            const player = players.find((p) => p.userId === userId);
             if (!player) continue; // not online in this room right now — notified below instead
             const targetSocket = io.sockets.sockets.get(player.id);
             if (!targetSocket) continue; // stale Avatar record, socket already gone — notified below instead
 
-            if (isZoneLocked(room, zoneId)) admitUserToZone(room, zoneId, attendee.userId);
+            if (isZoneLocked(room, zoneId)) {
+              admitUserToZone(room, zoneId, userId);
+              // Tell the CLIENT it's been admitted too, or its own
+              // ZoneWatcher.tsx would bounce the freshly force-moved avatar
+              // straight back out (it mirrors the lock state locally and has
+              // no idea an admission was just granted server-side). Same
+              // pairing every other admitUserToZone caller uses — see
+              // roomHandler.ts's FORCE_PULL/SUMMON_RESPOND.
+              //
+              // Known gap (deliberately not handled): the equivalent for a
+              // restriction-bearing / CEO-queue zone, a much rarer
+              // combination that would need a real queue ticket, not a
+              // one-line notification.
+              targetSocket.emit(SocketEvents.ZONE_KNOCK_DECIDED, { zoneId, admitted: true, byName: ev.title });
+            }
 
             const landX = landing ? landing.x * TILE_SIZE + TILE_SIZE / 2 : player.x;
             const landY = landing ? landing.y * TILE_SIZE + TILE_SIZE / 2 : player.y;
             await updatePlayerPosition(room, targetSocket.id, landX, landY, 'down');
             io.to(room).emit(SocketEvents.PLAYER_TELEPORTED, { id: targetSocket.id, x: landX, y: landY, direction: 'down' });
             targetSocket.emit(SocketEvents.MEETING_AUTO_JOINED, { title: ev.title });
-            pulledUserIds.add(attendee.userId);
+            pulledUserIds.add(userId);
           }
 
-          // Attendees who weren't actually force-moved above (offline, online
-          // elsewhere, or a stale player record) get a plain in-app
+          // Participants who weren't actually force-moved above (offline,
+          // online elsewhere, or a stale player record) get a plain in-app
           // notification instead — same inline pattern reminderSweep.ts
           // already uses, not calendar.ts's local (non-exported) notify()
           // helper.
-          for (const attendee of ev.attendees) {
-            if (pulledUserIds.has(attendee.userId)) continue;
+          for (const userId of participantIds) {
+            if (pulledUserIds.has(userId)) continue;
             await prisma.notification.create({
-              data: { recipientId: attendee.userId, kind: 'workspace', body: `"${ev.title}" sudah dimulai.` },
+              data: { recipientId: userId, kind: 'workspace', body: `"${ev.title}" sudah dimulai.` },
             });
-            io.to(`user:${attendee.userId}`).emit('base:notif', {});
+            io.to(`user:${userId}`).emit('base:notif', {});
           }
 
           await prisma.calendarEvent.update({ where: { id: ev.id }, data: { lastAutoJoinFiredFor: due.start } });
@@ -136,23 +169,4 @@ export function startMeetingAutoJoinSweep(io: Server, intervalMs = TICK_MS): voi
       console.error('[meetingAutoJoin] sweep error:', e);
     }
   }, intervalMs);
-}
-
-// findZoneEntryTile needs the Zone's own x/y/width/height (from Room.zones),
-// not just its id — a small DB read, acceptable at this call frequency (once
-// per due occurrence, not per tick). Returns null if the zone can no longer
-// be found (deleted/renamed since the event was created) — the sweep still
-// fires (using the player's own current position as a no-op landing spot)
-// rather than skipping the attendee entirely.
-async function findZoneEntryTileForRoom(
-  tiles: import('@virtualmeet/shared').RoomTile[][],
-  room: string,
-  zoneId: string,
-): Promise<{ x: number; y: number } | null> {
-  const prisma = getPrisma();
-  const dbRoom = await prisma.room.findUnique({ where: { slug: room }, select: { zones: true } });
-  const zones = (Array.isArray(dbRoom?.zones) ? dbRoom!.zones : []) as unknown as { id: string; x: number; y: number; width: number; height: number }[];
-  const zone = zones.find((z) => z.id === zoneId);
-  if (!zone) return null;
-  return findZoneEntryTile(tiles, zone);
 }
