@@ -144,6 +144,31 @@ rooms.get('/rooms/:slug', authenticateToken, async (req: AuthRequest, res: Respo
   }
 });
 
+// GET /api/rooms/:slug/zones — lightweight, read-only list of this room's
+// 'meeting'-type Zones, for the Calendar event form's Meeting Area picker.
+// Deliberately NOT admin-gated like /rooms/:slug/editor-data (room:update) —
+// any org member scheduling a meeting needs to read this, not just admins.
+rooms.get('/rooms/:slug/zones', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({
+      where: { slug: req.params.slug },
+      select: { organizationId: true, zones: true },
+    });
+    if (!room || room.organizationId !== req.organizationId) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    const zones = (Array.isArray(room.zones) ? room.zones : []) as unknown as { id: string; name: string; type?: string }[];
+    return res.json({
+      zones: zones.filter((z) => z.type === 'meeting').map((z) => ({ id: z.id, name: z.name })),
+    });
+  } catch (err) {
+    console.error('[rooms] zones error:', err);
+    return res.status(500).json({ error: 'Failed to get zones' });
+  }
+});
+
 // PATCH /api/rooms/:slug/cover — { coverImage } set the Lobby card cover.
 // The actual file goes through the existing generic POST /api/uploads first
 // (client: api.uploadMedia, same call Room Editor's reference-image feature

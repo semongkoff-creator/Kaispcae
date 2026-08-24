@@ -108,6 +108,8 @@ interface EventRow {
   roomId: string | null; rrule: string | null; masterId: string | null;
   recurrenceId: Date | null; exdates: Date[]; organizerId: string; visibility: string;
   meetkaiRoomSlug: string | null;
+  meetkaiZoneId: string | null;
+  meetkaiPassword: string | null;
   attendees: { userId: string; rsvp: string; optional: boolean; user: { displayName: string } }[];
   room: { id: string; name: string } | null;
 }
@@ -146,6 +148,8 @@ function serialise(row: EventRow, occStart: Date, occEnd: Date, recurrenceId: Da
     roomName: row.room?.name ?? null,
     visibility: row.visibility,
     meetkaiRoomSlug: row.meetkaiRoomSlug,
+    meetkaiZoneId: row.meetkaiZoneId,
+    meetkaiPassword: row.meetkaiPassword,
     attendees: row.attendees.map((a) => ({ userId: a.userId, name: a.user.displayName, rsvp: a.rsvp, optional: a.optional })),
     busyOnly: false,
   };
@@ -232,6 +236,10 @@ calendar.post('/calendars/:calendarId/events', authenticateToken, mutationLimit,
       if (why) return res.status(409).json({ error: why });
     }
 
+    const meetkaiRoomSlug = req.body?.meetkaiRoomSlug ? String(req.body.meetkaiRoomSlug).slice(0, 200) : null;
+    const meetkaiZoneId = meetkaiRoomSlug && req.body?.meetkaiZoneId ? String(req.body.meetkaiZoneId).slice(0, 200) : null;
+    const meetkaiPassword = meetkaiZoneId && req.body?.meetkaiPassword ? String(req.body.meetkaiPassword).slice(0, 200) : null;
+
     const eventData = {
       calendarId: req.params.calendarId, title,
       description: req.body?.description ? String(req.body.description).slice(0, 4000) : null,
@@ -242,6 +250,7 @@ calendar.post('/calendars/:calendarId/events', authenticateToken, mutationLimit,
       roomId, rrule: rule,
       organizerId: req.userId!,
       visibility: req.body?.visibility === 'private' ? 'private' : 'default',
+      meetkaiRoomSlug, meetkaiZoneId, meetkaiPassword,
       attendees: {
         create: (Array.isArray(req.body?.attendeeIds) ? req.body.attendeeIds : [])
           .filter((id: unknown) => typeof id === 'string' && id !== req.userId)
@@ -302,6 +311,9 @@ calendar.patch('/calendars/events/:eventId', authenticateToken, mutationLimit, a
     if (req.body?.description !== undefined) patch.description = req.body.description ? String(req.body.description).slice(0, 4000) : null;
     if (req.body?.location !== undefined) patch.location = req.body.location ? String(req.body.location).slice(0, 200) : null;
     if (req.body?.visibility !== undefined) patch.visibility = req.body.visibility === 'private' ? 'private' : 'default';
+    if (req.body?.meetkaiRoomSlug !== undefined) patch.meetkaiRoomSlug = req.body.meetkaiRoomSlug ? String(req.body.meetkaiRoomSlug).slice(0, 200) : null;
+    if (req.body?.meetkaiZoneId !== undefined) patch.meetkaiZoneId = req.body.meetkaiZoneId ? String(req.body.meetkaiZoneId).slice(0, 200) : null;
+    if (req.body?.meetkaiPassword !== undefined) patch.meetkaiPassword = req.body.meetkaiPassword ? String(req.body.meetkaiPassword).slice(0, 200) : null;
 
     const newStart = req.body?.start ? new Date(String(req.body.start)) : null;
     const newEnd = req.body?.end ? new Date(String(req.body.end)) : null;
@@ -338,6 +350,9 @@ calendar.patch('/calendars/events/:eventId', authenticateToken, mutationLimit, a
           allDay: row.allDay, timezone: row.timezone,
           location: (patch.location as string | null) ?? row.location,
           roomId: row.roomId,
+          meetkaiRoomSlug: 'meetkaiRoomSlug' in patch ? (patch.meetkaiRoomSlug as string | null) : row.meetkaiRoomSlug,
+          meetkaiZoneId: 'meetkaiZoneId' in patch ? (patch.meetkaiZoneId as string | null) : row.meetkaiZoneId,
+          meetkaiPassword: 'meetkaiPassword' in patch ? (patch.meetkaiPassword as string | null) : row.meetkaiPassword,
           masterId: row.id, recurrenceId: occurrence,
           organizerId: row.organizerId,
           visibility: (patch.visibility as string) ?? row.visibility,
@@ -364,6 +379,9 @@ calendar.patch('/calendars/events/:eventId', authenticateToken, mutationLimit, a
             allDay: row.allDay, timezone: row.timezone,
             location: (patch.location as string | null) ?? row.location,
             roomId: row.roomId,
+            meetkaiRoomSlug: 'meetkaiRoomSlug' in patch ? (patch.meetkaiRoomSlug as string | null) : row.meetkaiRoomSlug,
+            meetkaiZoneId: 'meetkaiZoneId' in patch ? (patch.meetkaiZoneId as string | null) : row.meetkaiZoneId,
+            meetkaiPassword: 'meetkaiPassword' in patch ? (patch.meetkaiPassword as string | null) : row.meetkaiPassword,
             rrule: req.body?.rrule !== undefined ? normaliseRule(String(req.body.rrule)) : row.rrule,
             organizerId: row.organizerId,
             visibility: (patch.visibility as string) ?? row.visibility,
