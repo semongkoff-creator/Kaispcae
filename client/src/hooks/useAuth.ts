@@ -181,6 +181,16 @@ export function useAuth() {
     setUser((prev) => (prev ? { ...prev, displayName: name } : prev));
   }, []);
 
+  // specs/2026-08-21-full-name-field-design.md — same optimistic-update
+  // pattern as updateDisplayName above, for the separate `fullName` field:
+  // the caller already persists via api.saveFullName, so this ONLY patches
+  // the cached `user` object locally. Without it, reopening the Avatar
+  // Editor later in the same session pre-fills "Nama Lengkap" with the
+  // stale pre-save value, and saving again silently reverts the edit.
+  const updateFullName = useCallback((name: string) => {
+    setUser((prev) => (prev ? { ...prev, fullName: name } : prev));
+  }, []);
+
   const logout = useCallback(() => {
     // Captured BEFORE removing it — the server needs the outgoing token to
     // know WHICH session to invalidate (see auth.ts's /logout), so it must
@@ -194,5 +204,5 @@ export function useAuth() {
     api.logout(token).catch(() => {});
   }, []);
 
-  return { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, createOrganization, logout, setError, markTutorialSeen, updatePreferences, updateDisplayName };
+  return { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, createOrganization, logout, setError, markTutorialSeen, updatePreferences, updateDisplayName, updateFullName };
 }

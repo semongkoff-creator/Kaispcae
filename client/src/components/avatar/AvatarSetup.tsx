@@ -62,9 +62,15 @@ interface AvatarSetupProps {
   // fullName is not part of the pixel-avatar config, it's saved through
   // its own dedicated endpoint (api.saveFullName), not api.saveAvatar.
   initialFullName?: string | null;
+  // Bug-class fix mirroring onDisplayNameChange (see App.tsx's Game) —
+  // local-only optimistic patch for the cached useAuth() user.fullName, so
+  // reopening this editor later in the same session doesn't pre-fill the
+  // stale pre-save value. No API call of its own; api.saveFullName below
+  // already persists it.
+  onFullNameSave?: (name: string) => void;
 }
 
-export function AvatarSetup({ initialConfig, onSave, onClose, localUserId, initialFullName }: AvatarSetupProps) {
+export function AvatarSetup({ initialConfig, onSave, onClose, localUserId, initialFullName, onFullNameSave }: AvatarSetupProps) {
   const previewRef = useRef<HTMLCanvasElement>(null);
 
   // ── Profile photo (chat avatar) — independent of the pixel avatar above;
@@ -172,7 +178,9 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId, initi
     // failure here must never block the avatar-config save above or the
     // panel closing. Empty string is a valid submission (clears fullName
     // back to null server-side) — see the route's own comment.
-    api.saveFullName(fullName.trim()).catch(() => {});
+    const trimmedFullName = fullName.trim();
+    api.saveFullName(trimmedFullName).catch(() => {});
+    onFullNameSave?.(trimmedFullName);
   };
 
   const handleClose = () => {
