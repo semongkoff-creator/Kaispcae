@@ -3368,6 +3368,15 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
           const owner = seatClaims[seat.id];
           const isMine = !!owner && owner.userId === localUserId;
           const ownerOnline = !!owner && Object.values(playerRecords).some((p) => p.userId === owner.userId);
+          // playerRecords structurally never contains the LOCAL player's own
+          // entry (setRoomState/upsertPlayer both skip it — see
+          // ParticipantPanel.tsx's own `remotePlayers.length + 1` for the
+          // same reason), so ownerOnline is always false for your own seat
+          // even though you're obviously online right now. The show/hide
+          // below needs "is the owner actually present" — for your own
+          // seat that's unconditionally true — not a literal playerRecords
+          // lookup, which only makes sense for someone ELSE's seat.
+          const ownerVisible = ownerOnline || isMine;
           return (
             <div
               key={seat.id}
@@ -3375,9 +3384,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
                 if (el) claimSeatMarkerRefs.current.set(seat.id, el);
                 else claimSeatMarkerRefs.current.delete(seat.id);
               }}
-              className={`absolute top-0 left-0 will-change-transform origin-top-left pointer-events-auto flex flex-col items-center -mt-3.5 -ml-3.5 group transition-opacity ${
-                ownerOnline ? 'opacity-40 hover:opacity-100' : ''
-              }`}
+              className="absolute top-0 left-0 will-change-transform origin-top-left pointer-events-auto flex flex-col items-center -mt-3.5 -ml-3.5 group"
             >
               <button
                 data-seat-id={seat.id}
@@ -3409,10 +3416,14 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
                   } else {
                     // ZEP-style confirm — see pendingSeatClaim's own doc
                     // comment; a bare click no longer claims directly.
-                    setPendingSeatClaim({ seatId: seat.id, ownerName: owner?.name ?? null });
+                    // ownerOnline-gated (not just owner) — see this button's
+                    // own comment below: an offline owner's seat looks and
+                    // behaves exactly like an unclaimed one, so the confirm
+                    // dialog must not reveal it was actually claimed either.
+                    setPendingSeatClaim({ seatId: seat.id, ownerName: ownerOnline ? (owner?.name ?? null) : null });
                   }
                 }}
-                title={owner ? (isMine ? 'Kursimu — klik untuk duduk di sini' : `Diklaim ${owner.name}`) : 'Klaim kursi ini'}
+                title={ownerVisible ? (isMine ? 'Kursimu — klik untuk duduk di sini' : `Diklaim ${owner!.name}`) : 'Klaim kursi ini'}
                 // Unclaimed — deliberately invisible (no bg/border/icon, per
                 // the room admin): the hit area still works exactly like an
                 // Impassable tile's invisible barrier, just with no shape
@@ -3420,11 +3431,21 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
                 // "Kamu"/owner-name text (merged in — see the follow-up
                 // comment below) instead of a separate stacked pill, so a
                 // claimed seat is ONE small label, not three stacked pieces.
+                // Gated on ownerVisible (ownerOnline, OR it's your own seat
+                // — see its own comment above), not just owner — a seat
+                // whose owner has gone offline reverts to looking (and
+                // behaving, see the onClick/title above) exactly like a
+                // genuinely unclaimed seat: no name label, invisible hit
+                // area, no "already claimed" warning if someone else clicks
+                // it. Still fully claimed in the underlying data
+                // (seatClaims/assignedToName elsewhere aren't touched) —
+                // only this marker's own presentation while the owner is
+                // away changes.
                 className={`h-7 px-2 flex items-center justify-center gap-1 text-xs font-semibold rounded-full transition-transform cursor-pointer whitespace-nowrap ${
-                  owner ? `shadow-md border-2 hover:scale-105 text-white ${isMine ? 'bg-emerald-500/95 border-emerald-600' : 'bg-amber-500/95 border-amber-600'}` : 'w-7'
+                  ownerVisible ? `shadow-md border-2 hover:scale-105 text-white ${isMine ? 'bg-emerald-500/95 border-emerald-600' : 'bg-amber-500/95 border-amber-600'}` : 'w-7'
                 }`}
               >
-                {owner ? `🪑 ${isMine ? 'Kamu' : truncateName(owner.name, SEAT_MARKER_NAME_MAX_CHARS)}` : ''}
+                {ownerVisible ? `🪑 ${isMine ? 'Kamu' : truncateName(owner!.name, SEAT_MARKER_NAME_MAX_CHARS)}` : ''}
               </button>
               {/* Follow-up — used to be a separate always-visible "Kamu" pill
                   PLUS this release button stacked below it, permanently in
