@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { DateTime } from 'luxon';
 import { XLg, Trash, CameraVideo, People, GeoAlt, Bell, ArrowRepeat } from 'react-bootstrap-icons';
 import { EditScope, Rsvp, RSVP_LABELS, describeRule } from '@kaispace/shared';
-import { calendarApi, CalendarEventDto, CalendarSummary, MeetingRoomDto, EventInput, BusyBlock } from './api';
+import { calendarApi, CalendarEventDto, CalendarSummary, MeetingRoomDto, MeetingZoneDto, EventInput, BusyBlock } from './api';
+import { api, RoomInfo } from '@/services/api';
 import { showConfirm } from '@/stores/modalStore';
 
 const RRULE_PRESETS: { label: string; value: string | null }[] = [
@@ -67,6 +68,11 @@ export function EventPanel({
   const [visibility, setVisibility] = useState<'default' | 'private'>(event?.visibility ?? 'default');
   const [roomId, setRoomId] = useState(event?.roomId ?? '');
   const [rooms, setRooms] = useState<MeetingRoomDto[]>([]);
+  const [meetkaiRoomSlug, setMeetkaiRoomSlug] = useState(event?.meetkaiRoomSlug ?? '');
+  const [kaispaceRooms, setKaispaceRooms] = useState<RoomInfo[]>([]);
+  const [meetkaiZoneId, setMeetkaiZoneId] = useState(event?.meetkaiZoneId ?? '');
+  const [meetingZones, setMeetingZones] = useState<MeetingZoneDto[]>([]);
+  const [meetkaiPassword, setMeetkaiPassword] = useState(event?.meetkaiPassword ?? '');
   const [reminders, setReminders] = useState<number[]>([10]);
   const [members, setMembers] = useState<{ userId: string; name: string }[]>([]);
   const [attendeeIds, setAttendeeIds] = useState<string[]>(event?.attendees?.map((a) => a.userId).filter((id) => id !== event?.organizerId) ?? []);
@@ -82,6 +88,19 @@ export function EventPanel({
   const canEdit = isNew || (!event!.busyOnly && calendars.find((c) => c.id === event!.calendarId)?.role !== 'viewer');
 
   useEffect(() => { calendarApi.listRooms().then((r) => setRooms(r.rooms)).catch(() => { /* rooms are optional */ }); }, []);
+  useEffect(() => { api.getRooms().then((r) => setKaispaceRooms(r.rooms)).catch(() => { /* optional */ }); }, []);
+
+  // Refetches this room's Meeting Areas whenever the Room selection changes,
+  // and drops a stale Zone selection left over from a previously-picked room.
+  useEffect(() => {
+    if (!meetkaiRoomSlug) { setMeetingZones([]); setMeetkaiZoneId(''); return; }
+    calendarApi.listMeetingZones(meetkaiRoomSlug)
+      .then((r) => {
+        setMeetingZones(r.zones);
+        setMeetkaiZoneId((prev) => (r.zones.some((z) => z.id === prev) ? prev : ''));
+      })
+      .catch(() => setMeetingZones([]));
+  }, [meetkaiRoomSlug]);
   useEffect(() => {
     // The workspace directory — NOT /api/admin/members, which is admin-only:
     // using that meant an ordinary member got a 403 and an empty invite list,
@@ -130,6 +149,9 @@ export function EventPanel({
       visibility,
       attendeeIds,
       reminders,
+      meetkaiRoomSlug: meetkaiRoomSlug || null,
+      meetkaiZoneId: meetkaiRoomSlug && meetkaiZoneId ? meetkaiZoneId : null,
+      meetkaiPassword: meetkaiRoomSlug && meetkaiZoneId && meetkaiPassword ? meetkaiPassword : null,
     };
     try {
       if (isNew) await calendarApi.createEvent(calendarId, input);
@@ -248,6 +270,46 @@ export function EventPanel({
           </select>
           <p className="text-[10px] text-gray-400 mt-0.5">Bentrok ruang ditolak server, bukan cuma disembunyikan di sini.</p>
         </div>
+
+        <div>
+          <label className={label} htmlFor="ev-kaispace-room">Room KaiSpace</label>
+          <select
+            id="ev-kaispace-room" value={meetkaiRoomSlug}
+            onChange={(e) => setMeetkaiRoomSlug(e.target.value)}
+            disabled={!canEdit} className={field}
+          >
+            <option value="">Tidak pakai auto-join</option>
+            {kaispaceRooms.map((r) => <option key={r.slug} value={r.slug}>{r.name}</option>)}
+          </select>
+        </div>
+
+        {meetkaiRoomSlug && (
+          <div>
+            <label className={label} htmlFor="ev-meeting-area">Meeting Area</label>
+            <select
+              id="ev-meeting-area" value={meetkaiZoneId}
+              onChange={(e) => setMeetkaiZoneId(e.target.value)}
+              disabled={!canEdit} className={field}
+            >
+              <option value="">Pilih Meeting Area…</option>
+              {meetingZones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+            </select>
+            <p className="text-[10px] text-gray-400 mt-0.5">Peserta yang online di room ini otomatis ditarik ke sini saat meeting mulai.</p>
+          </div>
+        )}
+
+        {meetkaiRoomSlug && meetkaiZoneId && (
+          <div>
+            <label className={label} htmlFor="ev-meeting-password">Password (opsional)</label>
+            <input
+              id="ev-meeting-password" type="text" value={meetkaiPassword}
+              onChange={(e) => setMeetkaiPassword(e.target.value)}
+              readOnly={!canEdit} className={field}
+              placeholder="Kosongkan jika tidak private"
+            />
+            <p className="text-[10px] text-gray-400 mt-0.5">Peserta terundang selalu bisa masuk tanpa password.</p>
+          </div>
+        )}
 
         <div>
           <label className={label} htmlFor="ev-loc"><GeoAlt size={10} className="inline mr-1" />Lokasi</label>
