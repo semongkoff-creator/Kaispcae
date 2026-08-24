@@ -18,7 +18,7 @@ import { setCachedTiles, setCachedImpassableAreas, setCachedDoorAreaRects, setCa
 function mediaShape(r: { id: string; roomId: string; type: string; x: number; y: number; createdBy: string; createdByName: string; createdAt: Date; expiresAt: Date | null; payload: unknown }) {
   return { id: r.id, roomId: r.roomId, type: r.type, x: r.x, y: r.y, createdBy: r.createdBy, createdByName: r.createdByName, createdAt: r.createdAt.toISOString(), expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null, payload: (r.payload as MediaPayload) ?? {} };
 }
-import { validate, createRoomSchema, renameRoomSchema, avatarUpdateSchema } from '../middleware/validate';
+import { validate, createRoomSchema, renameRoomSchema, avatarUpdateSchema, fullNameSchema } from '../middleware/validate';
 import { ensureGroupConversation } from '../lib/conversations';
 
 const rooms = Router();
@@ -866,6 +866,28 @@ rooms.put('/users/me/avatar', authenticateToken, validate(avatarUpdateSchema), a
   } catch (err) {
     console.error('[rooms] avatar save error:', err);
     return res.status(500).json({ error: 'Failed to save avatar' });
+  }
+});
+
+// PUT /api/users/me/full-name — specs/2026-08-21-full-name-field-design.md.
+// Deliberately its OWN route, not folded into PUT /users/me/avatar above:
+// that route stores its ENTIRE request body as avatarConfig verbatim —
+// reusing it here would nest fullName inside that JSON blob instead of
+// writing the real User.fullName column. This route writes fullName and
+// NOTHING else. An empty string clears it back to null (fullName is an
+// optional, explicitly-clearable field, not a required one).
+rooms.put('/users/me/full-name', authenticateToken, validate(fullNameSchema), async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const trimmed = req.body.name.trim();
+    await prisma.user.update({
+      where: { id: req.userId },
+      data: { fullName: trimmed || null },
+    });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[rooms] full name save error:', err);
+    return res.status(500).json({ error: 'Failed to save full name' });
   }
 });
 

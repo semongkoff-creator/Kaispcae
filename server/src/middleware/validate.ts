@@ -70,6 +70,15 @@ export const avatarUpdateSchema = z.object({
   premadeId: z.string().optional(),
 });
 
+// specs/2026-08-21-full-name-field-design.md — no `.min(1)`: an empty
+// string is a valid submission and means "clear the field back to null"
+// (see the route below), not an invalid one. 100 chars is generous
+// compared to displayName's 20-char nametag cap — a real full name is
+// often longer than a casual nickname.
+export const fullNameSchema = z.object({
+  name: z.string().max(100),
+});
+
 export function sanitizeChat(text: string): string {
   return text
     .replace(/<[^>]*>/g, '')
