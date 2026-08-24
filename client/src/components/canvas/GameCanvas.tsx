@@ -610,14 +610,14 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
   // click-behavior updates the instant someone else claims or releases it.
   const seatClaims = useGameStore((s) => s.seatClaims);
   const localUserId = useGameStore((s) => s.localUserId);
-  // Bug fix — a claimed seat's marker used to stay at full opacity even
-  // while its owner was actually online (often sitting right there,
-  // overlapping their own avatar/nametag and the desk furniture under it —
-  // reported as visual clutter). Faded to under 50% once the owner is
-  // actually present; full opacity again once they're the only ones who'd
-  // need the reminder (offline, so the marker is the sole "whose seat is
-  // this" cue left). Reactive subscription (not playerRecordsRef, which
-  // only the imperative draw loop reads) so this updates the instant
+  // A claimed seat's marker is the "whose desk is this" cue for when the
+  // owner ISN'T there to identify it themselves — so it only needs to show
+  // while they're offline. While they're online (often sitting right there,
+  // overlapping their own avatar/nametag and the desk furniture under it),
+  // the floating label is redundant with their own visible presence and was
+  // reported as visual clutter — hidden entirely in that case, same as a
+  // genuinely unclaimed seat. Reactive subscription (not playerRecordsRef,
+  // which only the imperative draw loop reads) so this updates the instant
   // someone joins/leaves.
   const playerRecords = useGameStore((s) => s.playerRecords);
   // Incoming requests to take over a seat WE own (Izinkan/Tolak cards) and
@@ -3368,15 +3368,14 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
           const owner = seatClaims[seat.id];
           const isMine = !!owner && owner.userId === localUserId;
           const ownerOnline = !!owner && Object.values(playerRecords).some((p) => p.userId === owner.userId);
-          // playerRecords structurally never contains the LOCAL player's own
-          // entry (setRoomState/upsertPlayer both skip it — see
-          // ParticipantPanel.tsx's own `remotePlayers.length + 1` for the
-          // same reason), so ownerOnline is always false for your own seat
-          // even though you're obviously online right now. The show/hide
-          // below needs "is the owner actually present" — for your own
-          // seat that's unconditionally true — not a literal playerRecords
-          // lookup, which only makes sense for someone ELSE's seat.
-          const ownerVisible = ownerOnline || isMine;
+          // Marker shows when the owner is OFFLINE (their own avatar isn't
+          // in the room to identify the desk, so the label is the only
+          // cue), or it's your own seat (always shown as "Kamu", regardless
+          // of the online check below — playerRecords structurally never
+          // contains the LOCAL player's own entry, per setRoomState/
+          // upsertPlayer, so a literal lookup would incorrectly read as
+          // "offline" for yourself; isMine overrides that).
+          const ownerVisible = !!owner && (isMine || !ownerOnline);
           return (
             <div
               key={seat.id}
@@ -3416,11 +3415,12 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
                   } else {
                     // ZEP-style confirm — see pendingSeatClaim's own doc
                     // comment; a bare click no longer claims directly.
-                    // ownerOnline-gated (not just owner) — see this button's
-                    // own comment below: an offline owner's seat looks and
-                    // behaves exactly like an unclaimed one, so the confirm
-                    // dialog must not reveal it was actually claimed either.
-                    setPendingSeatClaim({ seatId: seat.id, ownerName: ownerOnline ? (owner?.name ?? null) : null });
+                    // ownerVisible-gated (not just owner) — see this
+                    // button's own comment below: an online owner's seat
+                    // looks and behaves exactly like an unclaimed one, so
+                    // the confirm dialog must not reveal it was actually
+                    // claimed either.
+                    setPendingSeatClaim({ seatId: seat.id, ownerName: ownerVisible ? (owner?.name ?? null) : null });
                   }
                 }}
                 title={ownerVisible ? (isMine ? 'Kursimu — klik untuk duduk di sini' : `Diklaim ${owner!.name}`) : 'Klaim kursi ini'}
@@ -3431,16 +3431,16 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
                 // "Kamu"/owner-name text (merged in — see the follow-up
                 // comment below) instead of a separate stacked pill, so a
                 // claimed seat is ONE small label, not three stacked pieces.
-                // Gated on ownerVisible (ownerOnline, OR it's your own seat
-                // — see its own comment above), not just owner — a seat
-                // whose owner has gone offline reverts to looking (and
+                // Gated on ownerVisible (owner offline, OR it's your own
+                // seat — see its own comment above), not just owner — a
+                // seat whose owner has COME online reverts to looking (and
                 // behaving, see the onClick/title above) exactly like a
                 // genuinely unclaimed seat: no name label, invisible hit
                 // area, no "already claimed" warning if someone else clicks
                 // it. Still fully claimed in the underlying data
                 // (seatClaims/assignedToName elsewhere aren't touched) —
                 // only this marker's own presentation while the owner is
-                // away changes.
+                // present changes.
                 className={`h-7 px-2 flex items-center justify-center gap-1 text-xs font-semibold rounded-full transition-transform cursor-pointer whitespace-nowrap ${
                   ownerVisible ? `shadow-md border-2 hover:scale-105 text-white ${isMine ? 'bg-emerald-500/95 border-emerald-600' : 'bg-amber-500/95 border-amber-600'}` : 'w-7'
                 }`}
