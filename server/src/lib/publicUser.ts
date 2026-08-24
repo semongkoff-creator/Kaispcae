@@ -8,7 +8,7 @@ import { isOperatorEmail } from './operator';
 
 type PublicUserFields = Pick<
   User,
-  'id' | 'email' | 'displayName' | 'accountRole' | 'workspaceRole' | 'timezone' | 'tutorialCompletedAt' | 'preferences'
+  'id' | 'email' | 'displayName' | 'fullName' | 'accountRole' | 'workspaceRole' | 'timezone' | 'tutorialCompletedAt' | 'preferences'
 >;
 
 export function publicUser(user: PublicUserFields) {
@@ -16,6 +16,7 @@ export function publicUser(user: PublicUserFields) {
     id: user.id,
     email: user.email,
     displayName: user.displayName,
+    fullName: user.fullName,
     accountRole: user.accountRole,
     workspaceRole: user.workspaceRole,
     timezone: user.timezone,

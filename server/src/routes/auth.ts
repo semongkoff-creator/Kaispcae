@@ -292,7 +292,7 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
     const user = await prisma.user.findUnique({
       where: { id: req.userId },
       select: {
-        id: true, email: true, displayName: true, avatarConfig: true, preferences: true,
+        id: true, email: true, displayName: true, fullName: true, avatarConfig: true, preferences: true,
         accountRole: true, workspaceRole: true, timezone: true, active: true,
         // Bug 1 — needed to preserve / adopt the single-session id below.
         currentSessionId: true,

@@ -23,6 +23,18 @@ model User {
   email                   String                    @unique
   password                String
   displayName             String
+  // specs/2026-08-21-full-name-field-design.md — a separate, purely
+  // additive field from displayName above: the account's real/legal name,
+  // shown/editable only in the Avatar Editor, never used for the nametag,
+  // chat, Participant Panel, or any other surface that already reads
+  // displayName. Auto-populated once from Lark's real profile name for
+  // Lark-authenticated accounts (see lib/statusIntervals.ts's firstSeenAt
+  // for the same "set exactly once, race-safe" pattern this reuses) — set
+  // via an atomic updateMany({where: {id, fullName: null}, ...}) on Lark
+  // login, so a manually-edited value is never silently overwritten. Null
+  // for a manually-registered account until the user fills it in
+  // themselves; never guessed.
+  fullName                String?
   avatarConfig            Json?
   // Lightweight, cross-device UI preferences — e.g. { tooltipsEnabled, notifKinds }.
   // Server-synced by design (Settings feature) so they follow the user between
