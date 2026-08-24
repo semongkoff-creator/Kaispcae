@@ -267,6 +267,7 @@ export function ParticipantPanel({ remoteStreams, roomSlug, isMicMuted, isGuest,
               workMode={localWorkMode}
               awayReason={localAwayReason}
               spotlightActive={localSpotlightActive}
+              onToggleSpotlight={canSpotlight && localUserId && emitSpotlight ? () => emitSpotlight(localUserId, !localSpotlightActive) : undefined}
               micMuted={isMicMuted}
               speaking={localSpeaking}
               role={localRole}
@@ -341,6 +342,7 @@ function ParticipantRow({
   onForceMute,
   onForcePull,
   onSpotlight,
+  onToggleSpotlight,
   onLocate,
   isGuest,
 }: {
@@ -409,9 +411,20 @@ function ParticipantRow({
   // onKick — a plain member never sees this row's option exist at all.
   onForcePull?: () => void;
   // Toggles Spotlight on/off for this row's player — undefined (not just a
-  // no-op) below admin, same convention as onKick. Never present on the
-  // local row (isLocal never gets action props, only the badge above).
+  // no-op) below admin, same convention as onKick. Only ever passed for
+  // REMOTE rows; the local row gets the separate onToggleSpotlight below
+  // instead, since Spotlight is the one action that's meaningful to target
+  // at yourself (see specs/2026-08-21-self-spotlight-design.md) — Kick/
+  // ForceMute/ForcePull stay excluded from the local row entirely.
   onSpotlight?: () => void;
+  // specs/2026-08-21-self-spotlight-design.md — the local row's OWN way to
+  // toggle Spotlight on itself. Distinct from onSpotlight above (which is
+  // for acting on a REMOTE row): when this is present, the badge below
+  // renders as an always-visible, clickable toggle instead of the passive
+  // "shown only while active" badge every other row keeps. undefined (not
+  // just a no-op) when the local viewer isn't an admin — same "hide, don't
+  // disable" convention as every other admin-only action in this file.
+  onToggleSpotlight?: () => void;
   // Locate ("Temukan") — walks the LOCAL player toward this row's player
   // via real pathfinding (see GameCanvas.tsx's locateRequestRef). Open to
   // everyone, like Summon/Slap — finding a coworker's current desk isn't a
@@ -499,7 +512,18 @@ function ParticipantRow({
       <div className="flex items-center gap-1 shrink-0">
         {/* Live presence cues, glanceable per row — same signals shown over
             the avatar (raise-hand ✋, presence badge) and video tile (speaking 🔊). */}
-        {spotlightActive && <MegaphoneFill title="Spotlight aktif — terdengar/terlihat seluruh room" size={11} className="text-amber-500 shrink-0" />}
+        {onToggleSpotlight ? (
+          <button
+            type="button"
+            onClick={onToggleSpotlight}
+            title={spotlightActive ? 'Matikan Spotlight' : 'Nyalakan Spotlight'}
+            className={`shrink-0 cursor-pointer transition-colors ${spotlightActive ? 'text-amber-500' : 'text-gray-300 dark:text-gray-600 hover:text-amber-400'}`}
+          >
+            <MegaphoneFill size={11} />
+          </button>
+        ) : (
+          spotlightActive && <MegaphoneFill title="Spotlight aktif — terdengar/terlihat seluruh room" size={11} className="text-amber-500 shrink-0" />
+        )}
         {handRaised && <img src="/assets/img/raise-hand-icon.png" alt="" title="Hand raised" className="w-3 h-2.5 animate-bounce shrink-0" />}
         {workMode === 'focus' && <Headphones title="Fokus (jangan diganggu)" size={12} className="text-purple-500 shrink-0" />}
         {workMode && workMode !== 'focus' && workMode !== 'available' && (
