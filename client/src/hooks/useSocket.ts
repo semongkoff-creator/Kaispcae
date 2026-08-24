@@ -363,6 +363,13 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       const currentPrompt = useGameStore.getState().zonePasswordPrompt;
       if (data.correct && currentPrompt?.zoneId === data.zoneId) {
         useGameStore.getState().setZonePasswordPrompt(null);
+        // The socket is only NOW unlocked server-side, and the ZONE_ENTER
+        // that triggered this prompt was refused — so zone chat/roster/music
+        // are still unsynced. Hand App.tsx a one-shot signal to re-emit
+        // ZONE_ENTER (enterZoneNow) rather than making the player walk out
+        // and back in. Set only inside this already-zone-matched branch, so a
+        // stale result for some other zone can never trigger a re-entry.
+        useGameStore.getState().setZonePasswordUnlockedZoneId(data.zoneId);
       }
     });
 

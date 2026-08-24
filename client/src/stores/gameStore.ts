@@ -821,6 +821,15 @@ export interface GameState {
   setZonePasswordPrompt: (prompt: { zoneId: string; eventTitle: string } | null) => void;
   zonePasswordResult: { zoneId: string; correct: boolean } | null;
   setZonePasswordResult: (result: { zoneId: string; correct: boolean } | null) => void;
+  // One-shot signal: a password was just verified correct for this zone.
+  // App.tsx's effect on this calls enterZoneNow(zoneId) (re-emits ZONE_ENTER
+  // so zone chat/roster/music resync now that the socket is actually
+  // unlocked server-side), then clears it. Separate from zonePasswordResult
+  // (which can also hold a STALE result for a zone that's no longer the
+  // open prompt — see useSocket.ts's zone-match guard) so this only ever
+  // fires for a result that genuinely matched the prompt it closed.
+  zonePasswordUnlockedZoneId: string | null;
+  setZonePasswordUnlockedZoneId: (zoneId: string | null) => void;
 
   // Soundboard — this room's custom uploaded sounds (defaults live purely
   // client-side as SOUNDBOARD_DEFAULT_SOUNDS, no server round trip needed).
@@ -1678,6 +1687,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   setZonePasswordPrompt: (prompt) => set({ zonePasswordPrompt: prompt }),
   zonePasswordResult: null,
   setZonePasswordResult: (result) => set({ zonePasswordResult: result }),
+  zonePasswordUnlockedZoneId: null,
+  setZonePasswordUnlockedZoneId: (zoneId) => set({ zonePasswordUnlockedZoneId: zoneId }),
 
   soundboardSounds: [],
   setSoundboardSounds: (sounds) => set({ soundboardSounds: sounds }),

@@ -1429,6 +1429,21 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     emitZonePasswordSubmit(zonePasswordPrompt.zoneId, attempt);
   }, [zonePasswordPrompt, emitZonePasswordSubmit]);
 
+  // Correct password → actually get in. The ZONE_ENTER that raised the prompt
+  // was refused server-side (and ZoneWatcher bounced the avatar back out of
+  // the zone), so unlocking the socket alone leaves zone chat, the roster's
+  // location and the zone's music all unsynced until the player happens to
+  // walk out and back in. enterZoneNow is the same "we've just been admitted,
+  // re-sync membership now" path the CEO queue already uses when a ticket is
+  // called. One-shot: the signal is cleared immediately after use.
+  const zonePasswordUnlockedZoneId = useGameStore((s) => s.zonePasswordUnlockedZoneId);
+  useEffect(() => {
+    if (zonePasswordUnlockedZoneId) {
+      enterZoneNow(zonePasswordUnlockedZoneId);
+      useGameStore.getState().setZonePasswordUnlockedZoneId(null);
+    }
+  }, [zonePasswordUnlockedZoneId, enterZoneNow]);
+
   // A correct door password should just let the player walk through — no
   // "Password benar" confirmation to dismiss. Movement itself is already
   // unblocked server-side the instant the check succeeds; this only closes

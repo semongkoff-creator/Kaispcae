@@ -97,6 +97,16 @@ export function ZoneWatcher({
   // instead of visibly standing inside a locked room it was denied entry to.
   const lastAllowedPosRef = useRef({ x: localPlayer.x, y: localPlayer.y });
 
+  // Where we were standing JUST BEFORE the most recent optimistic ZONE_ENTER,
+  // kept separately from lastAllowedPosRef because that ref is overwritten
+  // with the now-INSIDE-the-zone position the moment the crossing is emitted
+  // (and again on every step taken inside). The predictive bounces below can
+  // rely on lastAllowedPosRef since they run before that overwrite; a
+  // REACTIVE bounce — one that only learns the crossing was refused after a
+  // server round trip — cannot, and would otherwise "snap back" to a spot
+  // still inside the zone it is trying to eject the avatar from.
+  const preEntryPosRef = useRef<{ zoneId: string; x: number; y: number } | null>(null);
+
   useEffect(() => {
     const zone = findZoneAt(localPlayer, zones);
     const zoneId = zone?.id ?? null;
@@ -171,6 +181,12 @@ export function ZoneWatcher({
           return;
         }
       }
+      // Every gate the client can decide for itself has now passed, so this
+      // crossing is optimistic from here on: the server may still refuse it
+      // (the meeting-password gate below is the one case whose answer only
+      // exists server-side). Record the outside-the-zone spot first — see
+      // preEntryPosRef's own comment.
+      preEntryPosRef.current = { zoneId, x: lastAllowedPosRef.current.x, y: lastAllowedPosRef.current.y };
       emitZoneEnter(zoneId);
     }
     currentZoneIdRef.current = zoneId;
@@ -189,6 +205,54 @@ export function ZoneWatcher({
     // "in no zone" gap to trigger the old guard.
     zoneLock.clearDenied();
   }, [localPlayer.x, localPlayer.y, zones, emitZoneEnter, emitZoneExit]);
+
+  // Meeting Zone password — the REACTIVE counterpart to the two bounces
+  // above. Those gates (manual lock, restricted/queue zone) are predicted
+  // locally from already-synced state, so they can refuse a crossing before
+  // it ever happens; the password gate's answer exists only server-side
+  // (which CalendarEvent occurrence is running right now, and whether this
+  // socket is on its guest list), so it arrives as a ZONE_PASSWORD_REQUIRED
+  // only after the optimistic ZONE_ENTER already went out. This undoes it.
+  //
+  // Without this the prompt is purely decorative: the server refuses its own
+  // bookkeeping (zone chat, roster, music), but the avatar is still standing
+  // in the zone — and A/V proximity is computed CLIENT-SIDE from raw position
+  // (useProximity.ts), independent of server zone membership — so anyone who
+  // simply dismissed the prompt would remain in the meeting's audio/video.
+  //
+  // Keyed on the prompt OBJECT, not its zoneId: useSocket.ts stores a fresh
+  // object per ZONE_PASSWORD_REQUIRED, and every one of those is a genuine
+  // server refusal of a genuine ZONE_ENTER — so walking back into the SAME
+  // zone while the modal is still up must bounce again, which a zoneId-keyed
+  // guard would swallow.
+  const zonePasswordPrompt = useGameStore((s) => s.zonePasswordPrompt);
+  const prevZonePasswordPromptRef = useRef<{ zoneId: string; eventTitle: string } | null>(null);
+  useEffect(() => {
+    const newZoneId = zonePasswordPrompt?.zoneId ?? null;
+    if (newZoneId && zonePasswordPrompt !== prevZonePasswordPromptRef.current) {
+      // Prefer the snapshot taken as the refused crossing was emitted;
+      // lastAllowedPosRef is only a fallback (a prompt with no matching
+      // pending entry — e.g. one that survived a remount).
+      const pending = preEntryPosRef.current;
+      const back = pending && pending.zoneId === newZoneId ? pending : lastAllowedPosRef.current;
+      useGameStore.getState().setLocalPlayer({ x: back.x, y: back.y, isMoving: false });
+      lastAllowedPosRef.current = { x: back.x, y: back.y };
+      preEntryPosRef.current = null;
+      // The server never registered us in this zone, so there is nothing to
+      // ZONE_EXIT — just forget the optimistic membership, which also lets
+      // the main effect above re-run cleanly (and re-emit ZONE_ENTER) if the
+      // password later comes back correct.
+      if (currentZoneIdRef.current === newZoneId) {
+        currentZoneIdRef.current = null;
+        // The optimistic crossing already reported this zone to App (it drives
+        // the ChatPanel's "Private" tab), so take that back too. If the bounce
+        // landed us inside a DIFFERENT zone we were legitimately in before,
+        // the main effect re-runs on the position change and re-reports it.
+        onZoneChange(null);
+      }
+    }
+    prevZonePasswordPromptRef.current = zonePasswordPrompt;
+  }, [zonePasswordPrompt, currentZoneIdRef, onZoneChange]);
 
 
   // App renders <MeetingControl> off this; reported rather than returned so
