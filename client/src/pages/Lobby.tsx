@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { TrashFill, InfoCircle, SunFill, MoonFill, BoxArrowRight, XLg, Check2, ChevronDown, ThreeDotsVertical, Search, BoxArrowInRight, Image, GearFill, PencilFill, XCircleFill, Files } from 'react-bootstrap-icons';
 import { SettingsPanel } from '@/components/ui/SettingsPanel';
 import { io } from 'socket.io-client';
@@ -78,6 +79,16 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
   //   shows a compact "Join with Code" pill, not an always-open field),
   //   toggled exactly like showCreate already toggles the create panel.
   const [showUserMenu, setShowUserMenu] = useState(false);
+  // Portaled to document.body (see below) rather than nested under <header>
+  // — header has backdrop-blur-sm, which makes it a containing block for
+  // fixed-position descendants, so a plain `fixed inset-0` click-catcher
+  // nested inside it only covers the header's own strip, not the full
+  // screen, letting clicks "pierce through" to the room grid underneath
+  // while the menu stays open. Portal + window listener sidesteps this
+  // entirely — same pattern as PlayerCard.tsx/Tooltip.tsx.
+  const userMenuBtnRef = useRef<HTMLButtonElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const [userMenuPos, setUserMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState<'recent' | 'mine'>('recent');
   const [search, setSearch] = useState('');
@@ -212,6 +223,31 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
     return () => { socket.removeAllListeners(); socket.disconnect(); };
   }, []);
 
+  useLayoutEffect(() => {
+    if (!showUserMenu) { setUserMenuPos(null); return; }
+    const btn = userMenuBtnRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    setUserMenuPos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+  }, [showUserMenu]);
+
+  useEffect(() => {
+    if (!showUserMenu) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (userMenuRef.current?.contains(target)) return;
+      if (userMenuBtnRef.current?.contains(target)) return;
+      setShowUserMenu(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowUserMenu(false); };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [showUserMenu]);
+
   const handleCreate = async () => {
     // Previously a silent no-op — clicking Create with an empty name did
     // nothing at all, with zero feedback, which reads exactly like "the
@@ -250,6 +286,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
             — same onToggleTheme/onLogout calls, just relocated. */}
         <div className="relative">
           <button
+            ref={userMenuBtnRef}
             onClick={() => setShowUserMenu((v) => !v)}
             className="flex items-center gap-1.5 cursor-pointer"
           >
@@ -257,10 +294,12 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
             <ChevronDown size={12} className="text-gray-400 dark:text-gray-500 shrink-0" />
           </button>
 
-          {showUserMenu && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
-              <div className="absolute right-0 top-full mt-2 w-52 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-purple-100 dark:border-gray-700 py-1.5 z-50">
+          {showUserMenu && userMenuPos && createPortal(
+              <div
+                ref={userMenuRef}
+                style={{ position: 'fixed', top: userMenuPos.top, right: userMenuPos.right }}
+                className="w-52 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-purple-100 dark:border-gray-700 py-1.5 z-50"
+              >
                 <div className="flex items-center gap-2.5 px-3.5 py-2 border-b border-purple-50 dark:border-gray-700">
                   {myPhoto ? (
                     <img src={myPhoto} alt="" className="w-7 h-7 rounded-full object-cover shrink-0 shadow-sm" />
@@ -295,9 +334,9 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                 >
                   <BoxArrowRight size={14} /> Logout
                 </button>
-              </div>
-            </>
-          )}
+              </div>,
+              document.body
+            )}
         </div>
       </header>
       <main className="max-w-6xl mx-auto px-6 py-8">
