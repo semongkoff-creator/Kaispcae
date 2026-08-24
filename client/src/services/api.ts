@@ -161,6 +161,12 @@ export interface UserProfile {
   id: string;
   email: string;
   displayName: string;
+  // specs/2026-08-21-full-name-field-design.md — separate from
+  // displayName; null means the account has never had it set (a
+  // manually-registered account that hasn't filled it in yet, or a Lark
+  // account whose profile fetch never returned a name). Shown/editable
+  // only in the Avatar Editor.
+  fullName?: string | null;
   avatarConfig?: any;
   preferences?: UserPreferences | null;
   // Global, account-level role (see shared/permissions.ts's AccountRole) —
@@ -478,6 +484,16 @@ export const api = {
     request<{ success: boolean }>('/users/me/avatar', {
       method: 'PUT',
       body: JSON.stringify(config),
+    }),
+
+  // specs/2026-08-21-full-name-field-design.md — separate endpoint from
+  // saveAvatar above on purpose: that route stores its whole body as
+  // avatarConfig verbatim, so reusing it here would nest fullName inside
+  // that JSON blob instead of writing the real column.
+  saveFullName: (name: string) =>
+    request<{ success: boolean }>('/users/me/full-name', {
+      method: 'PUT',
+      body: JSON.stringify({ name }),
     }),
 
   // Partial update — merges server-side, so this only needs to send the

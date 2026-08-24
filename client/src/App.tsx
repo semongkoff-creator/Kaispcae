@@ -2367,6 +2367,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onSave={handleAvatarSave}
           onClose={closePanel}
           localUserId={localUserId}
+          initialFullName={currentUser.fullName}
         />
       )}
 
@@ -3309,6 +3310,7 @@ function MainApp() {
       <AvatarSetup
         initialConfig={{ ...loadAvatarConfig(), name: playerName || user.displayName }}
         onSave={handleAvatarSave}
+        initialFullName={user.fullName}
       />
     );
   }

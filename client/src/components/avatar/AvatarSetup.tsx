@@ -57,9 +57,14 @@ interface AvatarSetupProps {
   // opens (via the batch endpoint). The upload/delete calls themselves are
   // authed server-side, so they don't need it.
   localUserId?: string;
+  // specs/2026-08-21-full-name-field-design.md — pre-fills the new "Nama
+  // Lengkap" field. Separate from initialConfig/AvatarConfig entirely —
+  // fullName is not part of the pixel-avatar config, it's saved through
+  // its own dedicated endpoint (api.saveFullName), not api.saveAvatar.
+  initialFullName?: string | null;
 }
 
-export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: AvatarSetupProps) {
+export function AvatarSetup({ initialConfig, onSave, onClose, localUserId, initialFullName }: AvatarSetupProps) {
   const previewRef = useRef<HTMLCanvasElement>(null);
 
   // ── Profile photo (chat avatar) — independent of the pixel avatar above;
@@ -68,6 +73,12 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: Ava
   const [photo, setPhoto] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState('');
+
+  // specs/2026-08-21-full-name-field-design.md — independent of `config`
+  // (the AvatarConfig) entirely, same reasoning as the photo state right
+  // above: saved through its own dedicated call (api.saveFullName), not
+  // bundled into onSave/api.saveAvatar.
+  const [fullName, setFullName] = useState(initialFullName ?? '');
 
   // Load the current photo once, so the editor shows what's already set.
   useEffect(() => {
@@ -156,6 +167,12 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: Ava
     const trimmed = { ...config, name: config.name.trim() || 'You', statusTag: config.statusTag.trim().slice(0, 10) };
     setConfig(trimmed);
     onSave(trimmed);
+    // specs/2026-08-21-full-name-field-design.md — fire-and-forget, same
+    // posture as every other profile-field save in this codebase; a
+    // failure here must never block the avatar-config save above or the
+    // panel closing. Empty string is a valid submission (clears fullName
+    // back to null server-side) — see the route's own comment.
+    api.saveFullName(fullName.trim()).catch(() => {});
   };
 
   const handleClose = () => {
@@ -283,6 +300,21 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: Ava
             ))}
           </Section>
         )}
+
+        {/* Nama Lengkap — specs/2026-08-21-full-name-field-design.md.
+            Separate from Display Name below: this is the account's real
+            name, saved through its own endpoint, never shown on the
+            nametag/desk pill/chat/anywhere else. */}
+        <Section label="Nama Lengkap">
+          <input
+            type="text"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value.slice(0, 100))}
+            maxLength={100}
+            className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 transition-colors text-sm"
+            placeholder="Nama lengkap kamu"
+          />
+        </Section>
 
         {/* Display Name */}
         <Section label="Display Name">
