@@ -650,6 +650,7 @@ model CalendarEvent {
   @@index([calendarId, start])
   @@index([roomId, start])
   @@index([masterId])
+  @@index([meetkaiRoomSlug, meetkaiZoneId])
 }
 
 model EventAttendee {
