@@ -29,12 +29,12 @@ export function isTileBlocked(tiles: RoomTile[][], tileX: number, tileY: number)
 // rasterized into the RoomTile grid (see mapLayers.ts's
 // getImpassableAreaRects doc comment for why), so it needs its OWN
 // collision check, done directly against pixel-space rectangles instead of
-// discrete tiles. Same single-source-of-truth posture as isTileBlocked:
-// shared by the server's authoritative check (movementHandler.ts, a
-// point-in-rect test against the target position — the same granularity
-// isTileBlocked already gets there) and the client's own prediction
-// (useMovement.ts's wouldCollide, a full hitbox-vs-rect overlap test — the
-// same granularity isTileBlocked already gets there too).
+// discrete tiles. A single-point test — used for the server's "Door Area"
+// locked-door gate (movementHandler.ts), where the target either has or
+// hasn't crossed into the area, not for player-body collision. Movement/
+// teleport collision against Impassable Areas uses the full-hitbox
+// doesRectOverlapImpassableArea below instead (see movementHitboxBounds's
+// own doc comment for why a plain point test isn't precise enough there).
 export function isPointInImpassableArea(rects: ImpassableAreaRect[], x: number, y: number): boolean {
   for (const r of rects) {
     if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return true;
@@ -47,6 +47,31 @@ export function doesRectOverlapImpassableArea(rects: ImpassableAreaRect[], left:
     if (left < r.x + r.w && right > r.x && top < r.y + r.h && bottom > r.y) return true;
   }
   return false;
+}
+
+// Bug 7's narrower hitbox half-width while standing/arriving on a door tile
+// (vs. the normal TILE_SIZE / 2 - 2 used everywhere else — see
+// useMovement.ts's wouldCollide for the full doorway-alignment rationale).
+// A raw literal, not derived from TILE_SIZE, so this file doesn't need a
+// runtime import from types/index.ts (which re-exports FROM this file —
+// importing TILE_SIZE back here would make that circular).
+export const DOOR_HITBOX_HALF_PX = 6;
+
+// The pixel-space box a player's hitbox occupies centered on (px, py), given
+// its half-width (TILE_SIZE / 2 - 2 normally, DOOR_HITBOX_HALF_PX on a door
+// tile — caller computes which, using its own already-imported TILE_SIZE).
+// Factored out of wouldCollide so every caller that needs to test a
+// candidate position against Impassable Area rectangles (not just the
+// tile-grid loop, which still needs its own per-caller isBlocked callback)
+// builds the exact same box rather than a second hand-rolled copy that could
+// disagree at an edge — see git history, Item #9 follow-up ("kadang masih
+// ada bug ... di atas impassible": the server's teleport/move validation
+// used to test only the single target PIXEL against Impassable Area rects,
+// not the player's actual hitbox, so a target just outside a rect's edge
+// could pass validation while the rendered avatar still visually overlapped
+// it).
+export function movementHitboxBounds(px: number, py: number, half: number): { left: number; right: number; top: number; bottom: number } {
+  return { left: px - half, right: px + half, top: py - half, bottom: py + half };
 }
 
 // Bug 7 — doorways are exactly one tile wide, embedded in a wall line, and

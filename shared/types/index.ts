@@ -2114,7 +2114,7 @@ export interface RoomUpdatePayload {
 
 export { createDefaultOfficeLayout, createCorporateOfficeLayout, findSpawnPixel, createRoomLayoutFromTemplate, ROOM_TEMPLATES } from '../defaultRoomLayout';
 export type { RoomTemplateId } from '../defaultRoomLayout';
-export { BLOCKED_TILES, isTileBlocked, isDoorTile, findZoneEntryTile, findAdjacentFreeTile, isPointInImpassableArea, doesRectOverlapImpassableArea } from '../tileCollision';
+export { BLOCKED_TILES, isTileBlocked, isDoorTile, findZoneEntryTile, findAdjacentFreeTile, isPointInImpassableArea, doesRectOverlapImpassableArea, DOOR_HITBOX_HALF_PX, movementHitboxBounds } from '../tileCollision';
 // ZEP Room Editor — Potong 1 layered map format + legacy adaptors.
 export { MAP_FORMAT_VERSION, legacyToLayerData, layerDataToLegacy, AVATAR_SCALE_MIN, AVATAR_SCALE_MAX, getImpassableAreaRects, getDoorAreaRects } from '../mapLayers';
 export type { LayerData, TileEffect, AreaEffect, CustomAssetEntry, ReferenceImageData, ImpassableAreaRect, DoorAreaRect } from '../mapLayers';

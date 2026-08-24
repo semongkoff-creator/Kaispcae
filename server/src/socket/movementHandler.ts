@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointInImpassableArea, shouldIsolateZoneAudio, RoomTile, JumpEvent, NudgeEvent, PlayerMovePayload, PlayerMovedPayload, PlayerStoppedPayload } from '@kaispace/shared';
+import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isDoorTile, isPointInImpassableArea, doesRectOverlapImpassableArea, movementHitboxBounds, DOOR_HITBOX_HALF_PX, shouldIsolateZoneAudio, RoomTile, JumpEvent, NudgeEvent, PlayerMovePayload, PlayerMovedPayload, PlayerStoppedPayload } from '@kaispace/shared';
 import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas, getCachedDoorAreaRects, getCachedZones, getCachedPlayers } from '../store/roomStore';
 import { isDoorUnlocked, isDoorAreaUnlocked, clearUnlockedDoors } from './doorLock';
 import { isDoorOverrideActive } from './roomHandler';
@@ -101,9 +101,21 @@ const canNudge = socketRateLimit(3);
 // because Impassable Area rectangles are checked at sub-tile precision, not
 // against the tile grid (see mapLayers.ts's getImpassableAreaRects doc
 // comment for why they're never rasterized into it).
+//
+// Follow-up ("kadang masih ada bug ... di atas impassible") — the Impassable
+// Area check below used to test only the single target PIXEL against the
+// rects (isPointInImpassableArea), while the client's own movement
+// prediction (useMovement.ts's wouldCollide) tests the player's full
+// hitbox. A minimap teleport has no incremental walk history the way normal
+// stepping does, so its target point could land just outside a rect's edge
+// — passing the point check — while the rendered avatar's hitbox still
+// visually overlapped the rect. Now uses the same hitbox box as the client
+// (movementHitboxBounds, door-aware) so the two never disagree at an edge.
 function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string, tileX: number, tileY: number, pixelX: number, pixelY: number): boolean {
   if (isTileBlocked(tiles, tileX, tileY)) return true;
-  if (isPointInImpassableArea(getCachedImpassableAreas(room), pixelX, pixelY)) return true;
+  const half = isDoorTile(tiles, tileX, tileY) ? DOOR_HITBOX_HALF_PX : TILE_SIZE / 2 - 2;
+  const { left, top, right, bottom } = movementHitboxBounds(pixelX, pixelY, half);
+  if (doesRectOverlapImpassableArea(getCachedImpassableAreas(room), left, top, right, bottom)) return true;
   const tile = tiles[tileY]?.[tileX];
   if (tile?.type === 'door' && tile.doorPasswordEnabled && tile.doorPassword) {
     // Item #9 — emergency override lets everyone through every door in this

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill, Display } from 'react-bootstrap-icons';
-import { Avatar, AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents, ProximityPlayer } from '@kaispace/shared';
+import { Avatar, AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents, ProximityPlayer, doesRectOverlapImpassableArea, movementHitboxBounds, DOOR_HITBOX_HALF_PX } from '@kaispace/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -99,7 +99,7 @@ import { JoinOrgInvite } from './pages/JoinOrgInvite';
 import { useAuth } from './hooks/useAuth';
 import { useTheme, Theme } from './hooks/useTheme';
 import { api, UserPreferences } from './services/api';
-import { createDefaultRoom, isTileBlocked } from './utils/createDefaultRoom';
+import { createDefaultRoom, isTileBlocked, isDoorTile } from './utils/createDefaultRoom';
 import { ZoneWatcher } from './components/ZoneWatcher';
 import { AnnouncementTicker } from './components/ui/AnnouncementTicker';
 import { BroadcastComposer } from './components/ui/BroadcastComposer';
@@ -2796,6 +2796,22 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           // passing the isTileBlocked check above.
           const targetX = tileX * TILE_SIZE + TILE_SIZE / 2;
           const targetY = tileY * TILE_SIZE + TILE_SIZE / 2;
+          // Bug fix ("kadang masih ada bug ... di atas impassible") — this
+          // check was missing entirely: Impassable Area rectangles are a
+          // free-form pixel-space overlay, never rasterized into the tile
+          // grid (see mapLayers.ts's getImpassableAreaRects doc comment), so
+          // the isTileBlocked check above never catches them. Below this
+          // point the player's position is set OPTIMISTICALLY (no waiting on
+          // server confirmation — see emitMove's own comment further down),
+          // so without this check a click landing inside an Impassable Area
+          // visibly dropped the local player right on top of it, even though
+          // the server would correctly refuse to broadcast that position to
+          // anyone else. Same hitbox box the server now validates with
+          // (movementHitboxBounds) so a click this rejects is never one the
+          // server would have accepted anyway.
+          const half = isDoorTile(state.tiles, tileX, tileY) ? DOOR_HITBOX_HALF_PX : TILE_SIZE / 2 - 2;
+          const { left, right, top, bottom } = movementHitboxBounds(targetX, targetY, half);
+          if (doesRectOverlapImpassableArea(state.impassableAreaRects, left, top, right, bottom)) return;
           // Stand up first if sitting — otherwise the player's x/y moves to
           // the clicked spot but isSitting stays true, so useMovement's
           // isFrozen check keeps refusing all WASD input at the new
