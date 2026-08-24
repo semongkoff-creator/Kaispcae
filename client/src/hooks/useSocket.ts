@@ -360,7 +360,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
     socket.on(SocketEvents.ZONE_PASSWORD_RESULT, (data: { zoneId: string; correct: boolean }) => {
       useGameStore.getState().setZonePasswordResult(data);
-      if (data.correct) useGameStore.getState().setZonePasswordPrompt(null);
+      const currentPrompt = useGameStore.getState().zonePasswordPrompt;
+      if (data.correct && currentPrompt?.zoneId === data.zoneId) {
+        useGameStore.getState().setZonePasswordPrompt(null);
+      }
     });
 
     // Meeting auto-join — same lightweight activity-feed notice FORCE_PULLED
