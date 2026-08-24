@@ -13,6 +13,7 @@ import { isValidMediaPayload, isUploadUrl } from '../socket/mediaHandler';
 import { redactInteractiveSecrets, redactDoorPasswords, redactDoorAreaPasswords } from '../lib/redactFurniture';
 import { deleteUploadedFile, storage as uploadStorage } from './uploads';
 import { setCachedTiles, setCachedImpassableAreas, setCachedDoorAreaRects, setCachedZones, getPlayers, updatePlayerPosition } from '../store/roomStore';
+import { zonesOfRoom } from './roomMembers';
 
 // Client shape for a MapMediaObject row (mirrors mediaHandler.toClientShape).
 function mediaShape(r: { id: string; roomId: string; type: string; x: number; y: number; createdBy: string; createdByName: string; createdAt: Date; expiresAt: Date | null; payload: unknown }) {
@@ -154,12 +155,12 @@ rooms.get('/rooms/:slug/zones', authenticateToken, async (req: AuthRequest, res:
     const prisma = getPrisma();
     const room = await prisma.room.findUnique({
       where: { slug: req.params.slug },
-      select: { organizationId: true, zones: true },
+      select: { organizationId: true, zones: true, layerData: true },
     });
     if (!room || room.organizationId !== req.organizationId) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    const zones = (Array.isArray(room.zones) ? room.zones : []) as unknown as { id: string; name: string; type?: string }[];
+    const zones = zonesOfRoom(room);
     return res.json({
       zones: zones.filter((z) => z.type === 'meeting').map((z) => ({ id: z.id, name: z.name })),
     });

@@ -17,7 +17,7 @@ import { findRoomInOrg, findUserInOrg } from '../lib/orgScope';
 // stored in — a ZEP-edited room's zones live in layerData (layerDataToLegacy
 // derives them), an older room's live in the legacy `zones` column directly.
 // Same fallback JOIN_ROOM already applies when populating the live cache.
-function zonesOfRoom(room: { zones: unknown; layerData: unknown }): Zone[] {
+export function zonesOfRoom(room: { zones: unknown; layerData: unknown }): Zone[] {
   if (room.layerData) {
     try {
       return layerDataToLegacy(room.layerData as unknown as LayerData).zones;

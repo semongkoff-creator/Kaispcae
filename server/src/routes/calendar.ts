@@ -315,6 +315,15 @@ calendar.patch('/calendars/events/:eventId', authenticateToken, mutationLimit, a
     if (req.body?.meetkaiZoneId !== undefined) patch.meetkaiZoneId = req.body.meetkaiZoneId ? String(req.body.meetkaiZoneId).slice(0, 200) : null;
     if (req.body?.meetkaiPassword !== undefined) patch.meetkaiPassword = req.body.meetkaiPassword ? String(req.body.meetkaiPassword).slice(0, 200) : null;
 
+    // Re-enforce password requires zone requires room — same cascade POST
+    // already applies, but PATCH can touch these fields independently of
+    // each other across separate requests, so re-derive from the EFFECTIVE
+    // (patched-or-existing) values, not just what THIS request happened to include.
+    const effectiveRoomSlug = 'meetkaiRoomSlug' in patch ? (patch.meetkaiRoomSlug as string | null) : row.meetkaiRoomSlug;
+    const effectiveZoneId = 'meetkaiZoneId' in patch ? (patch.meetkaiZoneId as string | null) : row.meetkaiZoneId;
+    if (!effectiveRoomSlug && 'meetkaiZoneId' in patch) patch.meetkaiZoneId = null;
+    if ((!effectiveRoomSlug || !effectiveZoneId) && 'meetkaiPassword' in patch) patch.meetkaiPassword = null;
+
     const newStart = req.body?.start ? new Date(String(req.body.start)) : null;
     const newEnd = req.body?.end ? new Date(String(req.body.end)) : null;
     if ((newStart && isNaN(newStart.getTime())) || (newEnd && isNaN(newEnd.getTime()))) return res.status(400).json({ error: 'Waktu tidak valid' });
