@@ -626,6 +626,20 @@ model CalendarEvent {
   visibility      String  @default("default") // default | private
   // Link back to a MeetKai room session started from this event.
   meetkaiRoomSlug String?
+  // Zone.id (within meetkaiRoomSlug's Room.zones JSON — not a DB FK, Zones
+  // aren't their own table) this event's participants get auto-pulled into
+  // at start time. Null = no auto-join configured for this event.
+  meetkaiZoneId   String?
+  // Optional, plaintext (same posture as door passwords — casual privacy,
+  // not access control against a determined attacker). Gates non-attendees
+  // from walking into meetkaiZoneId while this occurrence is in progress;
+  // invited attendees never see this prompt. Null = zone unrestricted.
+  meetkaiPassword String?
+  // Set once meetingAutoJoinSweep.ts has force-pulled attendees for a given
+  // occurrence, to the occurrence's own start instant — same per-occurrence
+  // dedup shape as EventReminder.lastFiredFor, needed because a recurring
+  // event's occurrences each need their own independent "already fired".
+  lastAutoJoinFiredFor DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
