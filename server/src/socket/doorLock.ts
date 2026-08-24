@@ -62,3 +62,24 @@ export function unlockDoorArea(socketId: string, room: string, areaId: string): 
   if (!set) { set = new Set(); unlockedDoors.set(socketId, set); }
   set.add(areaKey(room, areaId));
 }
+
+// Meeting Zone password (CalendarEvent.meetkaiPassword) — same per-socket,
+// per-session unlock tracking, reusing the SAME underlying map as the door
+// functions above (key `${room}:zonepw:${zoneId}`, distinguishable from a
+// tile key's `${room}:${x}:${y}` and an area key's `${room}:area:${id}` by
+// the literal "zonepw" segment). clearUnlockedDoors/clearUnlockedDoorsForRoom
+// above already clear this with no changes needed — both still start with
+// the same `${room}:` prefix.
+function zonePasswordKey(room: string, zoneId: string): string {
+  return `${room}:zonepw:${zoneId}`;
+}
+
+export function isZonePasswordUnlocked(socketId: string, room: string, zoneId: string): boolean {
+  return unlockedDoors.get(socketId)?.has(zonePasswordKey(room, zoneId)) ?? false;
+}
+
+export function unlockZonePassword(socketId: string, room: string, zoneId: string): void {
+  let set = unlockedDoors.get(socketId);
+  if (!set) { set = new Set(); unlockedDoors.set(socketId, set); }
+  set.add(zonePasswordKey(room, zoneId));
+}

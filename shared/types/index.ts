@@ -549,6 +549,14 @@ export enum SocketEvents {
   ZONE_LOCK_SET = 'zone:lock_set',
   ZONE_LOCK_UPDATED = 'zone:lock_updated',
   ZONE_LOCKED_DENIED = 'zone:locked_denied',
+  // A CalendarEvent's optional meetkaiPassword gate — a DIFFERENT mechanism
+  // from ZONE_LOCK_SET above (no live keyholder; checked automatically
+  // against the event's own stored password during its [start, end] window).
+  // Never fires for an invited attendee of that same event — see
+  // zoneHandler.ts's ZONE_ENTER.
+  ZONE_PASSWORD_REQUIRED = 'zone:password_required',
+  ZONE_PASSWORD_SUBMIT = 'zone:password_submit',
+  ZONE_PASSWORD_RESULT = 'zone:password_result',
   ZONE_KNOCK = 'zone:knock',
   ZONE_KNOCK_REQUEST = 'zone:knock_request',
   ZONE_KNOCK_DECIDE = 'zone:knock_decide',

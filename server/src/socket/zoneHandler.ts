@@ -6,6 +6,7 @@ import { getCachedZones, getCachedZoneRestriction } from '../store/roomStore';
 import { getConnectedAdminSocketIds, getRoleInRoom, isCeoInRoom, getPlayerName, updateRosterZone, broadcastZoneQueueSessionCleared } from './roomHandler';
 import { getPrisma } from '../lib/prisma';
 import { admitCalledEntry, advanceQueue } from '../lib/roomQueue';
+import { isZonePasswordUnlocked, unlockZonePassword } from './doorLock';
 
 // Actual A/V zone restriction is computed client-side (see useProximity.ts —
 // every client already knows every player's position and the room's zones,
@@ -189,6 +190,26 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
       }
     }
 
+    // Meeting Zone password (CalendarEvent.meetkaiPassword) — a DIFFERENT
+    // gate from the lock/member-only/capacity checks above: automated
+    // (no live keyholder), scoped to a specific event's own [start, end]
+    // window, and never applied to that event's own invited attendees.
+    const activeMeeting = await getPrisma().calendarEvent.findFirst({
+      where: {
+        meetkaiRoomSlug: room, meetkaiZoneId: zoneId,
+        meetkaiPassword: { not: null },
+        start: { lte: new Date() }, end: { gte: new Date() },
+      },
+      select: { id: true, title: true, meetkaiPassword: true, attendees: { select: { userId: true } } },
+    });
+    if (activeMeeting) {
+      const isAttendee = !!uid && activeMeeting.attendees.some((a) => a.userId === uid);
+      if (!isAttendee && !isZonePasswordUnlocked(socket.id, room, zoneId)) {
+        socket.emit(SocketEvents.ZONE_PASSWORD_REQUIRED, { zoneId, eventTitle: activeMeeting.title });
+        return;
+      }
+    }
+
     socketZone.set(socket.id, { room, zoneId });
     socket.to(room).emit(SocketEvents.ZONE_ENTER, { playerId: socket.id, zoneId });
     // Bug follow-up — the member list's live location, see
@@ -197,6 +218,24 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
     // Fitur 2 correction — a Music Bot track already playing in this zone
     // must start for the joining socket right away, with no click/popup.
     sendMusicStateToSocket(socket, room, zoneId);
+  });
+
+  socket.on(SocketEvents.ZONE_PASSWORD_SUBMIT, async (data: { zoneId: string; password: string }) => {
+    if (!currentRoom || typeof data?.zoneId !== 'string' || typeof data?.password !== 'string') return;
+    const room = currentRoom;
+    const now = new Date();
+    const activeMeeting = await getPrisma().calendarEvent.findFirst({
+      where: {
+        meetkaiRoomSlug: room, meetkaiZoneId: data.zoneId,
+        meetkaiPassword: { not: null },
+        start: { lte: now }, end: { gte: now },
+      },
+      select: { meetkaiPassword: true },
+    });
+    if (!activeMeeting) return; // nothing active to unlock — a stale prompt from before the meeting ended
+    const correct = activeMeeting.meetkaiPassword === data.password;
+    if (correct) unlockZonePassword(socket.id, room, data.zoneId);
+    socket.emit(SocketEvents.ZONE_PASSWORD_RESULT, { zoneId: data.zoneId, correct });
   });
 
   socket.on(SocketEvents.ZONE_EXIT, async (zoneId: string) => {
