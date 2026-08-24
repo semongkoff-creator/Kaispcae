@@ -177,7 +177,7 @@ const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', 
 
 function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest, onUpdatePreferences, onDisplayNameChange, onFullNameChange }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean; onUpdatePreferences?: (patch: UserPreferences) => void; onDisplayNameChange?: (name: string) => void; onFullNameChange?: (name: string) => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, emitSeatClaimRequest, emitSeatClaimDecide, emitSeatClaimRequestCancel, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitRemoteHelpRequest, emitRemoteHelpRespond, emitRemoteHelpCredential, emitRemoteHelpEnd, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, emitSeatClaimRequest, emitSeatClaimDecide, emitSeatClaimRequestCancel, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitRemoteHelpRequest, emitRemoteHelpRespond, emitRemoteHelpCredential, emitRemoteHelpEnd, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide, emitZonePasswordSubmit } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
   const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead }, currentUser.name);
   // ZEP-style User Guide — Sidebar's "Panduan" row (Room Features menu).
   // Independent of MainApp's own first-run TutorialModal gate (shown before
@@ -1395,6 +1395,40 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       }
     : null;
 
+  const zonePasswordPrompt = useGameStore((s) => s.zonePasswordPrompt);
+  const zonePasswordResult = useGameStore((s) => s.zonePasswordResult);
+
+  // Meeting Zone password — same InteractiveObjectModal-reuse trick as the
+  // door password adapters above, adapting the prompt into the same
+  // synthetic Furniture shape.
+  const zonePasswordFurniture = zonePasswordPrompt
+    ? {
+        id: `zonepw:${zonePasswordPrompt.zoneId}`,
+        x: 0, y: 0, paletteId: '', tilesW: 1, tilesH: 1,
+        name: zonePasswordPrompt.eventTitle,
+        interactiveType: 'password' as const,
+        interactiveConfig: {
+          passwordDescription: `"${zonePasswordPrompt.eventTitle}" sedang berlangsung — masukkan password untuk masuk.`,
+          correctText: 'Password benar — silakan masuk.',
+          failureMessage: 'Password salah.',
+        },
+      }
+    : null;
+  const zonePasswordResultAdapted = (zonePasswordPrompt && zonePasswordResult && zonePasswordResult.zoneId === zonePasswordPrompt.zoneId)
+    ? {
+        furnitureId: `zonepw:${zonePasswordPrompt.zoneId}`,
+        correct: zonePasswordResult.correct,
+        correctText: zonePasswordFurniture?.interactiveConfig.correctText,
+        failureMessage: zonePasswordFurniture?.interactiveConfig.failureMessage,
+      }
+    : null;
+
+  const handleCheckZonePassword = useCallback((_furnitureId: string, attempt: string) => {
+    if (!zonePasswordPrompt) return;
+    useGameStore.getState().setZonePasswordResult(null);
+    emitZonePasswordSubmit(zonePasswordPrompt.zoneId, attempt);
+  }, [zonePasswordPrompt, emitZonePasswordSubmit]);
+
   // A correct door password should just let the player walk through — no
   // "Password benar" confirmation to dismiss. Movement itself is already
   // unblocked server-side the instant the check succeeds; this only closes
@@ -2349,6 +2383,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onClose={() => { setDoorAreaPasswordAreaId(null); useGameStore.getState().setInteractiveDoorAreaPasswordResult(null); }}
           onCheckPassword={handleCheckDoorAreaPassword}
           passwordResult={doorAreaPasswordResultAdapted}
+          onCheckChoice={() => {}}
+          choiceResult={null}
+        />
+      )}
+
+      {zonePasswordFurniture && (
+        <InteractiveObjectModal
+          furniture={zonePasswordFurniture}
+          onClose={() => useGameStore.getState().setZonePasswordPrompt(null)}
+          onCheckPassword={handleCheckZonePassword}
+          passwordResult={zonePasswordResultAdapted}
           onCheckChoice={() => {}}
           choiceResult={null}
         />

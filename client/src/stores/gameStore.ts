@@ -813,6 +813,15 @@ export interface GameState {
   spotlightNotice: { id: string; name: string } | null;
   setSpotlightNotice: (notice: { id: string; name: string } | null) => void;
 
+  // Meeting Zone password prompt (ZONE_PASSWORD_REQUIRED) — which zone is
+  // currently asking, if any. Cleared once the modal closes (correct
+  // password, or the user dismisses it) or a fresh ZONE_PASSWORD_REQUIRED
+  // for a DIFFERENT zone replaces it.
+  zonePasswordPrompt: { zoneId: string; eventTitle: string } | null;
+  setZonePasswordPrompt: (prompt: { zoneId: string; eventTitle: string } | null) => void;
+  zonePasswordResult: { zoneId: string; correct: boolean } | null;
+  setZonePasswordResult: (result: { zoneId: string; correct: boolean } | null) => void;
+
   // Soundboard — this room's custom uploaded sounds (defaults live purely
   // client-side as SOUNDBOARD_DEFAULT_SOUNDS, no server round trip needed).
   // Synced from SOUNDBOARD_LIST on join, kept live via SOUNDBOARD_SOUND_ADDED.
@@ -1664,6 +1673,11 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   spotlightNotice: null,
   setSpotlightNotice: (notice) => set({ spotlightNotice: notice }),
+
+  zonePasswordPrompt: null,
+  setZonePasswordPrompt: (prompt) => set({ zonePasswordPrompt: prompt }),
+  zonePasswordResult: null,
+  setZonePasswordResult: (result) => set({ zonePasswordResult: result }),
 
   soundboardSounds: [],
   setSoundboardSounds: (sounds) => set({ soundboardSounds: sounds }),

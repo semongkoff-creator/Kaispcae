@@ -353,6 +353,23 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       useGameStore.getState().enqueueBroadcast(data);
     });
 
+    socket.on(SocketEvents.ZONE_PASSWORD_REQUIRED, (data: { zoneId: string; eventTitle: string }) => {
+      useGameStore.getState().setZonePasswordPrompt({ zoneId: data.zoneId, eventTitle: data.eventTitle });
+      useGameStore.getState().setZonePasswordResult(null);
+    });
+
+    socket.on(SocketEvents.ZONE_PASSWORD_RESULT, (data: { zoneId: string; correct: boolean }) => {
+      useGameStore.getState().setZonePasswordResult(data);
+      if (data.correct) useGameStore.getState().setZonePasswordPrompt(null);
+    });
+
+    // Meeting auto-join — same lightweight activity-feed notice FORCE_PULLED
+    // already uses, not a toast (see FORCE_PULLED's own comment for why).
+    socket.on(SocketEvents.MEETING_AUTO_JOINED, (data: { title: string }) => {
+      useGameStore.getState().addActivity(`📅 Kamu ditarik ke meeting: "${data.title}"`);
+    });
+
+
     socket.on(SocketEvents.PLAYER_SAT, (data: { id: string; isSitting: boolean; x: number; y: number; direction: Avatar['direction']; seatFurnitureId?: string }) => {
       const state = useGameStore.getState();
       if (data.id === state.localPlayerId) return;
@@ -1254,6 +1271,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.SPOTLIGHT_TOGGLE, { targetUserId, active });
   }, []);
 
+  const emitZonePasswordSubmit = useCallback((zoneId: string, password: string) => {
+    socketRef.current?.emit(SocketEvents.ZONE_PASSWORD_SUBMIT, { zoneId, password });
+  }, []);
+
   const emitBroadcastSend = useCallback((text: string) => {
     socketRef.current?.emit(SocketEvents.BROADCAST_SEND, { text });
   }, []);
@@ -1597,5 +1618,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, emitSeatClaimRequest, emitSeatClaimDecide, emitSeatClaimRequestCancel, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitRoomDelete, emitKick, emitForceMute, emitDoorOverride, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitRemoteHelpRequest, emitRemoteHelpRespond, emitRemoteHelpCredential, emitRemoteHelpEnd, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
+  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, emitSeatClaimRequest, emitSeatClaimDecide, emitSeatClaimRequestCancel, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitRoomDelete, emitKick, emitForceMute, emitDoorOverride, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitRemoteHelpRequest, emitRemoteHelpRespond, emitRemoteHelpCredential, emitRemoteHelpEnd, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitZonePasswordSubmit };
 }
