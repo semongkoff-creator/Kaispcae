@@ -1349,15 +1349,20 @@ export function RoomEditorPage({ slug }: { slug: string }) {
                 ctx.font = '14px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText(icon, mx + TILE_SIZE / 2, my + TILE_SIZE / 2 + 5); ctx.textAlign = 'left';
               }
             }
-            drawLayer(ctx, doc, m.theme, 'effects');
-            // Drawn LAST (on top of floor/wall/objects), not underneath — the
-            // floor layer above fills every single tile with an opaque
+            // Drawn on top of floor/wall/objects/top/media, not underneath —
+            // the floor layer above fills every single tile with an opaque
             // texture, so an underlay here would just always be fully
             // covered and never actually visible. A translucent overlay (its
             // own adjustable opacity is exactly what makes this work) lets
             // the admin see their in-progress trace AND the reference photo
             // at once, same as a real tracing-paper-over-a-photo workflow.
+            // Drawn BEFORE the effects layer right below (not after, like
+            // before) so tile-effect markers stay visible on top of the
+            // reference photo instead of being hidden underneath it — the
+            // admin needs to see exactly where a portal/spawn/door marker
+            // sits while tracing, not lose it under the reference image.
             drawReferenceImage(ctx, doc.referenceImage);
+            drawLayer(ctx, doc, m.theme, 'effects');
             if (z >= 0.5) {
               ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1 / z; ctx.beginPath();
               for (let x = 0; x <= doc.width; x++) { ctx.moveTo(x * TILE_SIZE, 0); ctx.lineTo(x * TILE_SIZE, doc.height * TILE_SIZE); }
