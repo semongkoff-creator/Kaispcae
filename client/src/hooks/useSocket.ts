@@ -332,6 +332,14 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       } else {
         upsertPlayer({ id: data.id, spotlightActive: data.active || undefined } as Avatar);
       }
+      // Announce via the same broadcast ticker admin messages use — only on
+      // activation (going dark isn't newsworthy the same way), reusing
+      // playerRecords for the name since it's already keyed by player id
+      // for both self and others (see nudgerName above).
+      if (data.active) {
+        const spotlightName = state.playerRecords[data.id]?.name ?? 'Seseorang';
+        state.enqueueBroadcast({ text: 'sedang di-Spotlight ✨', senderName: spotlightName, sentAt: Date.now() });
+      }
     });
 
     // QA #9/#10 — CEO/admin text broadcast toast, everyone in the room
