@@ -321,8 +321,12 @@ calendar.patch('/calendars/events/:eventId', authenticateToken, mutationLimit, a
     // (patched-or-existing) values, not just what THIS request happened to include.
     const effectiveRoomSlug = 'meetkaiRoomSlug' in patch ? (patch.meetkaiRoomSlug as string | null) : row.meetkaiRoomSlug;
     const effectiveZoneId = 'meetkaiZoneId' in patch ? (patch.meetkaiZoneId as string | null) : row.meetkaiZoneId;
-    if (!effectiveRoomSlug && 'meetkaiZoneId' in patch) patch.meetkaiZoneId = null;
-    if ((!effectiveRoomSlug || !effectiveZoneId) && 'meetkaiPassword' in patch) patch.meetkaiPassword = null;
+    if (!effectiveRoomSlug) {
+      patch.meetkaiZoneId = null;
+      patch.meetkaiPassword = null;
+    } else if (!effectiveZoneId) {
+      patch.meetkaiPassword = null;
+    }
 
     const newStart = req.body?.start ? new Date(String(req.body.start)) : null;
     const newEnd = req.body?.end ? new Date(String(req.body.end)) : null;
