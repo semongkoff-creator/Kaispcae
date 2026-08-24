@@ -717,6 +717,11 @@ export enum SocketEvents {
   FORCE_PULL_RESULT = 'force_pull:result',
   FORCE_PULLED = 'force_pull:pulled',
 
+  // A CalendarEvent's meetingAutoJoinSweep.ts fired for its own target —
+  // told directly to this one socket, distinct from the room-wide
+  // PLAYER_TELEPORTED broadcast everyone else's client also receives.
+  MEETING_AUTO_JOINED = 'meeting:auto_joined',
+
   // A10 — Slap/Tap ("colek"): a lightweight, ephemeral attention-nudge to one
   // person (vibrate + soft sound + shake + toast). SLAP is the sender's request
   // (by nickname, like SUMMON_USER); the server relays SLAPPED only to the

@@ -47,6 +47,7 @@ import operatorRoutes from './routes/operator';
 import analyticsRoutes from './routes/analytics';
 import csRoutes from './routes/cs';
 import { startReminderSweep } from './socket/reminderSweep';
+import { startMeetingAutoJoinSweep } from './socket/meetingAutoJoinSweep';
 import { startAttendanceSweep } from './socket/attendanceSweep';
 import { startQueueSweep } from './socket/queueSweep';
 import { startAnalyticsSweep } from './socket/analyticsSweep';
@@ -318,6 +319,7 @@ async function start() {
 
   startMediaExpirySweep(io);
   startReminderSweep(io);
+  startMeetingAutoJoinSweep(io);
   startAttendanceSweep(io);
   startQueueSweep(io);
   startAnalyticsSweep(io);
