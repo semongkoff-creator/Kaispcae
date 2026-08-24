@@ -1330,7 +1330,26 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             const { panX, panY, zoom: z } = st.viewport;
             disableImageSmoothing(ctx); ctx.setTransform(z * dpr, 0, 0, z * dpr, panX * dpr, panY * dpr);
             drawLayer(ctx, doc, m.theme, 'floor'); drawLayer(ctx, doc, m.theme, 'wall');
-            drawLayer(ctx, doc, m.theme, 'objects'); drawLayer(ctx, doc, m.theme, 'top'); drawLayer(ctx, doc, m.theme, 'effects');
+            drawLayer(ctx, doc, m.theme, 'objects'); drawLayer(ctx, doc, m.theme, 'top');
+            // Media markers (Potong 6, editor-only) — drawn BEFORE the effects
+            // layer right below (moved from after everything else), so tile
+            // effects (spawn/impassable/portal/door/sittable/claimable-seat
+            // markers) stay visible on top of a media marker occupying the
+            // same tile, instead of being hidden underneath it.
+            for (const mm of mediaRef.current) {
+              const mx = mm.x * TILE_SIZE, my = mm.y * TILE_SIZE;
+              if (mm.type === 'bgm') {
+                const w = (mm.payload.areaW ?? 1) * TILE_SIZE, h = (mm.payload.areaH ?? 1) * TILE_SIZE;
+                ctx.fillStyle = 'rgba(34,197,94,0.14)'; ctx.fillRect(mx, my, w, h);
+                ctx.strokeStyle = 'rgba(34,197,94,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(mx, my, w, h); ctx.setLineDash([]);
+                ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '11px sans-serif'; ctx.fillText(`🎵 ${mm.payload.name ?? ''}`, mx + 4, my + 14);
+              } else {
+                const icon = mm.type === 'image' ? '🖼️' : mm.type === 'youtube' ? '▶️' : mm.type === 'website' ? '🔗' : '📌';
+                ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(mx + 3, my + 3, TILE_SIZE - 6, TILE_SIZE - 6);
+                ctx.font = '14px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText(icon, mx + TILE_SIZE / 2, my + TILE_SIZE / 2 + 5); ctx.textAlign = 'left';
+              }
+            }
+            drawLayer(ctx, doc, m.theme, 'effects');
             // Drawn LAST (on top of floor/wall/objects), not underneath — the
             // floor layer above fills every single tile with an opaque
             // texture, so an underlay here would just always be fully
@@ -1368,20 +1387,6 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               const arr = st.activeLayer === 'top' ? doc.topObjects : doc.objects;
               const f = arr.find((o) => o.id === st.selectedObjectId);
               if (f) { const bx = f.x * TILE_SIZE, by = (f.y - (f.tilesH - 1)) * TILE_SIZE; ctx.strokeStyle = 'rgba(250,204,21,0.95)'; ctx.lineWidth = 2 / z; ctx.strokeRect(bx, by, f.tilesW * TILE_SIZE, f.tilesH * TILE_SIZE); }
-            }
-            // Media markers (Potong 6, editor-only).
-            for (const mm of mediaRef.current) {
-              const mx = mm.x * TILE_SIZE, my = mm.y * TILE_SIZE;
-              if (mm.type === 'bgm') {
-                const w = (mm.payload.areaW ?? 1) * TILE_SIZE, h = (mm.payload.areaH ?? 1) * TILE_SIZE;
-                ctx.fillStyle = 'rgba(34,197,94,0.14)'; ctx.fillRect(mx, my, w, h);
-                ctx.strokeStyle = 'rgba(34,197,94,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(mx, my, w, h); ctx.setLineDash([]);
-                ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '11px sans-serif'; ctx.fillText(`🎵 ${mm.payload.name ?? ''}`, mx + 4, my + 14);
-              } else {
-                const icon = mm.type === 'image' ? '🖼️' : mm.type === 'youtube' ? '▶️' : mm.type === 'website' ? '🔗' : '📌';
-                ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(mx + 3, my + 3, TILE_SIZE - 6, TILE_SIZE - 6);
-                ctx.font = '14px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText(icon, mx + TILE_SIZE / 2, my + TILE_SIZE / 2 + 5); ctx.textAlign = 'left';
-              }
             }
           }
         }
