@@ -3,14 +3,6 @@ import { SunFill, MoonFill } from 'react-bootstrap-icons';
 import { Theme } from '@/hooks/useTheme';
 import { api } from '@/services/api';
 
-// Figma "kaispace" reference — closest reading off the screenshot (no exact
-// hex was given). The button below hardcodes this same value in a Tailwind
-// arbitrary-value class instead of referencing this constant (Tailwind's
-// JIT scanner reads className as literal source text at build time, so a
-// template-interpolated class never resolves) — update both spots together
-// if Figma Dev Mode's Inspect tab gives an exact hex later.
-const FIGMA_PURPLE = '#3B1E54';
-
 // Google's real 4-color "G" mark — no react-bootstrap-icons equivalent
 // exists (checked), and this button has no backend behind it yet (see
 // GOOGLE_LOGIN_ENABLED below), so an accurate, recognizable mark matters
@@ -189,12 +181,6 @@ export function LoginPage({ onLogin, onRegister, onCreateOrganization, error, se
             </label>
           </div>
 
-          {/* Tailwind's JIT scanner reads this className as literal source
-              text at build time — it can't resolve a template-interpolated
-              class (`bg-[${FIGMA_PURPLE}]` would never match anything), so
-              the hex has to be hardcoded here rather than referencing the
-              FIGMA_PURPLE constant above. Update both places together if the
-              color changes. */}
           <button
             type="submit" disabled={loading}
             className="w-full bg-[#3B1E54] hover:bg-[#4A1E6D] disabled:opacity-50 text-white font-semibold rounded-lg py-2.5 transition-colors text-sm cursor-pointer"
@@ -236,8 +222,7 @@ export function LoginPage({ onLogin, onRegister, onCreateOrganization, error, se
             {mode === 'login' ? "Don't have account?" : 'Already have an account?'}{' '}
             <button
               onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-              style={{ color: FIGMA_PURPLE }}
-              className="font-semibold hover:brightness-110 cursor-pointer"
+              className="text-[#3B1E54] dark:text-purple-400 font-semibold hover:brightness-110 cursor-pointer"
             >
               {mode === 'login' ? 'Sign Up here!' : 'Sign in'}
             </button>
@@ -251,8 +236,7 @@ export function LoginPage({ onLogin, onRegister, onCreateOrganization, error, se
               <button
                 type="button"
                 onClick={() => setMode('login')}
-                style={{ color: FIGMA_PURPLE }}
-                className="font-semibold hover:brightness-110 cursor-pointer"
+                className="text-[#3B1E54] dark:text-purple-400 font-semibold hover:brightness-110 cursor-pointer"
               >
                 Login di sini
               </button>
@@ -263,8 +247,7 @@ export function LoginPage({ onLogin, onRegister, onCreateOrganization, error, se
               <button
                 type="button"
                 onClick={() => setMode('createOrg')}
-                style={{ color: FIGMA_PURPLE }}
-                className="font-semibold hover:brightness-110 cursor-pointer"
+                className="text-[#3B1E54] dark:text-purple-400 font-semibold hover:brightness-110 cursor-pointer"
               >
                 Buat di sini
               </button>
