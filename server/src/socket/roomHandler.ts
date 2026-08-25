@@ -978,7 +978,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // 'guest' regardless of anything this could add to adminUserIds).
     try {
       if (!isGuest) {
-        const account = await getPrisma().user.findUnique({ where: { id: uid }, select: { accountRole: true, memberVerifiedAt: true, workspaceRole: true } });
+        const account = await getPrisma().user.findUnique({ where: { id: uid }, select: { accountRole: true, memberVerifiedAt: true, workspaceRole: true, restrictedToRoomId: true } });
         if (account?.accountRole === 'admin') rs.adminUserIds.add(uid);
         // Guest-tier for self-registered accounts nobody has vouched for —
         // POST /auth/register is public (anyone can hit it), so a manual
@@ -991,7 +991,13 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // schema.prisma. Only clamps the DEFAULT — an admin explicitly
         // promoting the account (workspaceRole/accountRole, or a room-level
         // staff/admin grant, both checked above/below this) always wins.
-        if (account && !account.memberVerifiedAt && account.accountRole !== 'admin' && account.workspaceRole !== 'admin') {
+        // Exempt DCM-style restricted accounts (restrictedToRoomId set) from
+        // this clamp — that field can only ever be set by a deliberate
+        // admin/script DB write, never by any self-service path, so it's a
+        // stronger vouch than self-registration and can't reopen the bypass
+        // this clamp exists to close. Kept in sync with roles.ts's
+        // resolveRoomRole (see its own comment).
+        if (account && !account.memberVerifiedAt && account.accountRole !== 'admin' && account.workspaceRole !== 'admin' && !account.restrictedToRoomId) {
           rs.restrictedTierUserIds.add(uid);
         } else {
           rs.restrictedTierUserIds.delete(uid);

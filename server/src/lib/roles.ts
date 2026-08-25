@@ -16,7 +16,7 @@ export async function resolveRoomRole(prisma: PrismaClient, userId: string, room
   if (userId === ownerId) return 'owner';
 
   const [user, member] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { accountRole: true, memberVerifiedAt: true, workspaceRole: true, organizationId: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { accountRole: true, memberVerifiedAt: true, workspaceRole: true, organizationId: true, restrictedToRoomId: true } }),
     prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId } } }),
   ]);
 
@@ -37,6 +37,11 @@ export async function resolveRoomRole(prisma: PrismaClient, userId: string, room
   // so a REST route and a socket handler never disagree about the same
   // account's tier. Only the DEFAULT: an explicit room-level grant
   // (admin/staff, checked above) or workspace promotion always wins.
-  if (!user?.memberVerifiedAt && user?.workspaceRole !== 'admin') return 'guest';
+  // restrictedToRoomId is exempted here too — it can only ever be set by a
+  // deliberate admin/script DB write, never by any self-service path, so it's
+  // a stronger vouch than self-registration and can't reopen the bypass this
+  // guest-tier clamp exists to close. Kept in sync with roomHandler.ts's
+  // in-memory clamp (see its own comment).
+  if (!user?.memberVerifiedAt && user?.workspaceRole !== 'admin' && !user?.restrictedToRoomId) return 'guest';
   return 'member';
 }
