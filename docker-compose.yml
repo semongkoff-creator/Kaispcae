@@ -73,9 +73,18 @@ services:
       dockerfile: client/Dockerfile
       args:
         VITE_SERVER_URL: ${PUBLIC_URL:-http://localhost:8091}
-        VITE_TURN_URL: ""
-        VITE_TURN_USERNAME: ""
-        VITE_TURN_CREDENTIAL: ""
+        # Build args, not runtime env: Vite inlines these at BUILD time, so a
+        # restart never picks a change up here — the image has to be rebuilt.
+        # These were hardcoded to "" while .env carried real values, and that
+        # is the one shape webrtcService.ts's half-configured warning cannot
+        # see (it only fires when SOME of the three are set), so a relay that
+        # was never advertised to any browser looked exactly like a healthy
+        # one. Substituted from .env now, same as every other secret here.
+        # `:-` rather than `:?` on purpose: a TURN-less build is legitimate
+        # for local dev, where STUN-only works fine on a LAN.
+        VITE_TURN_URL: ${VITE_TURN_URL:-}
+        VITE_TURN_USERNAME: ${VITE_TURN_USERNAME:-}
+        VITE_TURN_CREDENTIAL: ${VITE_TURN_CREDENTIAL:-}
     ports:
       - '127.0.0.1:8091:80'
     depends_on:
