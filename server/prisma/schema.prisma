@@ -111,6 +111,16 @@ model User {
   tutorialCompletedAt     DateTime?
   departmentId            String?
   department              Department?               @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  // DCM restricted accounts (specs/2026-08-25-dcm-restricted-accounts-design.md)
+  // — null (every account today) means completely unrestricted, no behavior
+  // change. Set = this account may only see/enter this one Room (enforced
+  // in rooms.ts's GET /rooms and GET /rooms/:slug, and roomHandler.ts's
+  // JOIN_ROOM) and never sees a Lark-linked Sidebar item (Sidebar.tsx).
+  // onDelete: SetNull — if the room is ever deleted, the account falls back
+  // to unrestricted rather than pointing at a dangling id; re-restricting
+  // it in that edge case is a separate, later admin decision.
+  restrictedToRoomId      String?
+  restrictedToRoom        Room?                     @relation("RestrictedRoom", fields: [restrictedToRoomId], references: [id], onDelete: SetNull)
   managerId               String?
   manager                 User?                     @relation("UserManager", fields: [managerId], references: [id], onDelete: SetNull)
   reports                 User[]                    @relation("UserManager")
@@ -907,6 +917,12 @@ model Room {
   deskNotes         DeskNote[]
   seatClaims        RoomSeatClaim[]
   lastPositions     RoomLastPosition[]
+  // Reverse side of User.restrictedToRoomId above — Prisma requires both
+  // directions of a named relation to be declared. Named explicitly
+  // ("RestrictedRoom") because Room already has one unnamed User relation
+  // (owner/ownedRooms below) — a second User<->Room relation makes both
+  // ambiguous to Prisma without a name.
+  restrictedUsers   User[]                    @relation("RestrictedRoom")
 }
 
 // QA #7/#8/#9 — a sticky note placed on the map, same "Add Media, lands at
