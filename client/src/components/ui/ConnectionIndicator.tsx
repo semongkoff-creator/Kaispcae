@@ -43,20 +43,27 @@ export function ConnectionIndicator() {
             which is how "is it the app or my internet?" became unanswerable
             from inside the app.
 
-            Hidden entirely while alone in a room, rather than drawn hollow.
-            An empty meter is the universal symbol for "no signal", so showing
-            one to someone whose connection is perfectly fine — they simply
-            have nobody to talk to yet — reports a fault that does not exist.
-            The player count beside it already explains the room is empty. */}
-        {verdict.total > 0 && (
-          <>
-            <div className="w-px h-4 bg-purple-100 dark:bg-gray-700" />
-            <SignalBars
-              level={verdict.level}
-              bars={BARS[verdict.level]}
-              title={`${verdict.total - verdict.affected}/${verdict.total} koneksi suara sehat`}
-            />
-          </>
+            Alone in a room there is nothing to measure, and both obvious
+            treatments of that mislead: hollow bars read as "no signal" — a
+            fault, on a connection that is perfectly healthy — while removing
+            the meter entirely reads as the feature breaking. Both were tried
+            and both prompted the same question. A dash keeps the slot where
+            the eye already expects it and says "not applicable" rather than
+            "zero", which is the honest state. */}
+        <div className="w-px h-4 bg-purple-100 dark:bg-gray-700" />
+        {verdict.total > 0 ? (
+          <SignalBars
+            level={verdict.level}
+            bars={BARS[verdict.level]}
+            title={`${verdict.total - verdict.affected}/${verdict.total} koneksi suara sehat`}
+          />
+        ) : (
+          <span
+            className="text-gray-400 dark:text-gray-500 text-xs leading-none select-none"
+            title="Kualitas suara diukur dari koneksi ke peserta lain. Belum ada peserta lain di sekitar kamu."
+          >
+            —
+          </span>
         )}
         <div className="w-px h-4 bg-purple-100 dark:bg-gray-700" />
         <span className="text-gray-700 dark:text-gray-300 text-xs">
