@@ -3,6 +3,8 @@ import { SocketEvents, MAX_SCREEN_SHARES_PER_ROOM } from '@kaispace/shared';
 import { isPeerNegotiationStuck, NEGOTIATION_TIMEOUT_MS } from './peerHealth';
 import { screenShareBitrateFor } from './mediaBudget';
 import { tuneOpusForVoice } from './sdpAudio';
+import { classifyPeer, classifySelf, type PeerQuality, type PeerQualitySample, type LimitationReason } from './connectionQuality';
+import { publishConnectionQuality, clearConnectionQuality } from '@/stores/connectionQuality';
 
 // STUN alone only tells a peer its public address — it can't help when the
 // network refuses direct peer-to-peer traffic at all, which is the norm on
@@ -90,6 +92,9 @@ const ICE_DISCONNECTED_TIMEOUT_MS = 5000;
 // attempts don't clear the stall, the link is likely bad enough that ICE
 // itself will eventually report disconnected/failed too, and the existing
 // watchdog above takes over from there on its own — no coordination needed.
+/** How often the signal bars re-measure. See the call site for why 5s. */
+const QUALITY_SAMPLE_INTERVAL_MS = 5000;
+
 const SCREEN_STALL_RECOVERY_MAX_ATTEMPTS = 3;
 const SCREEN_STALL_RECOVERY_BASE_DELAY_MS = 2000;
 
@@ -887,6 +892,11 @@ class WebRTCService {
   // purely so reportStats() below can turn "total packets since the call
   // started" into "packets in the last ~5s" (see its own comment for why the
   // cumulative number alone is misleading for a mid-call stall).
+  // Loss is reported CUMULATIVELY since the call began, so the raw figure only
+  // ever climbs: a peer that dropped 200 packets in its first ten seconds and
+  // has been perfect for an hour still reads as lossy forever. Only the delta
+  // between two samples says anything about now.
+  private lastLossCounts = new Map<string, { lost: number; received: number }>();
   private lastPacketCounts = new Map<string, { in: number; out: number }>();
   // Screen-share stall recovery — cumulative framesReceived on the SCREEN
   // track's own receiver, last tick, per peer. Scoped to that one receiver
@@ -911,6 +921,115 @@ class WebRTCService {
   // "fine" even if it has been stalled for the last 10 minutes — inDelta/
   // outDelta (packets since the LAST tick, ~5s ago) is what actually proves
   // "flowing right now" vs "flowed once, then stopped".
+  /**
+   * One sampling pass across every connected peer, feeding the signal bars.
+   *
+   * Separate from reportStats above, and always on where that one is gated
+   * behind the diagnostics flag. A bar that only works when a developer sets
+   * an env var is worse than no bar: the whole point is that an ordinary user
+   * can tell "the app is broken" from "my WiFi is bad" without asking anyone.
+   */
+  async sampleConnectionQuality(): Promise<void> {
+    if (!this.peers.size) {
+      this.lastLossCounts.clear();
+      clearConnectionQuality();
+      return;
+    }
+    const qualities = new Map<string, PeerQuality>();
+    const samples: PeerQualitySample[] = [];
+    for (const [id, peer] of this.peers) {
+      const sample = await this.samplePeerQuality(id, peer);
+      if (!sample) continue;
+      samples.push(sample);
+      qualities.set(id, classifyPeer(sample));
+    }
+    // Peers that have gone away must not keep a stale loss baseline, or their
+    // next connection would diff against numbers from the previous one.
+    for (const id of this.lastLossCounts.keys()) {
+      if (!this.peers.has(id)) this.lastLossCounts.delete(id);
+    }
+    publishConnectionQuality(qualities, classifySelf(samples));
+  }
+
+  private async samplePeerQuality(id: string, peer: PeerConnection): Promise<PeerQualitySample | null> {
+    let rttMs: number | null = null;
+    let jitterMs: number | null = null;
+    let lossPct: number | null = null;
+    let availableOutgoingBps: number | null = null;
+    let localCandidateId: string | undefined;
+    let remoteCandidateId: string | undefined;
+    let lostTotal = 0;
+    let receivedTotal = 0;
+    let sawLoss = false;
+    const candidateTypes: Record<string, string> = {};
+    const limitations: LimitationReason[] = [];
+
+    try {
+      const stats = await peer.pc.getStats();
+      stats.forEach((r: Record<string, unknown>) => {
+        if (r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated) {
+          // Seconds in the spec, milliseconds everywhere a human reads them.
+          if (typeof r.currentRoundTripTime === 'number') rttMs = r.currentRoundTripTime * 1000;
+          // The real uplink to THIS peer, as the congestion controller sees
+          // it — not the number on the internet plan, which is the figure a
+          // user will quote back when told their upload is the problem.
+          if (typeof r.availableOutgoingBitrate === 'number') availableOutgoingBps = r.availableOutgoingBitrate;
+          if (typeof r.localCandidateId === 'string') localCandidateId = r.localCandidateId;
+          if (typeof r.remoteCandidateId === 'string') remoteCandidateId = r.remoteCandidateId;
+        }
+        if ((r.type === 'local-candidate' || r.type === 'remote-candidate') && typeof r.id === 'string') {
+          candidateTypes[r.id] = r.candidateType as string;
+        }
+        if (r.type === 'inbound-rtp' && r.kind === 'audio') {
+          if (typeof r.jitter === 'number') jitterMs = r.jitter * 1000;
+          if (typeof r.packetsLost === 'number' && typeof r.packetsReceived === 'number') {
+            lostTotal = r.packetsLost;
+            receivedTotal = r.packetsReceived;
+            sawLoss = true;
+          }
+        }
+        // Video carries the limitation signal, not audio: a 24 kbps Opus
+        // stream is never what a CPU or an uplink gives up on first, so an
+        // audio-only peer legitimately reports nothing here.
+        if (r.type === 'outbound-rtp' && r.kind === 'video' && typeof r.qualityLimitationReason === 'string') {
+          limitations.push(r.qualityLimitationReason as LimitationReason);
+        }
+      });
+    } catch {
+      // A peer torn down mid-walk throws rather than resolving. Reporting it
+      // as unknown would put a dead peer on screen at zero bars; skipping it
+      // lets the next tick pick up whatever actually exists.
+      return null;
+    }
+
+    if (sawLoss) {
+      const prev = this.lastLossCounts.get(id);
+      this.lastLossCounts.set(id, { lost: lostTotal, received: receivedTotal });
+      if (prev) {
+        const lostDelta = Math.max(0, lostTotal - prev.lost);
+        const receivedDelta = Math.max(0, receivedTotal - prev.received);
+        const window = lostDelta + receivedDelta;
+        lossPct = window > 0 ? (lostDelta / window) * 100 : 0;
+      }
+      // No previous sample means this tick only establishes a baseline. Left
+      // null on purpose: diffing against zero would charge the whole call's
+      // accumulated loss to the last five seconds and light up every bar red
+      // the moment someone joins.
+    }
+
+    // Either end being a relay candidate means the media is going through
+    // TURN, which costs latency for reasons that are nobody's fault locally.
+    const relayed = (localCandidateId ? candidateTypes[localCandidateId] : undefined) === 'relay'
+      || (remoteCandidateId ? candidateTypes[remoteCandidateId] : undefined) === 'relay';
+
+    // Anything other than 'none' is the interesting one — camera and screen
+    // share both report, and a limited screen share beside an unlimited
+    // camera is still a limitation.
+    const limitation = limitations.find((l) => l !== 'none') ?? limitations[0] ?? null;
+
+    return { rttMs, jitterMs, lossPct, availableOutgoingBps, limitation, relayed };
+  }
+
   async reportStats(force = false): Promise<void> {
     // getStats() walks the whole RTC stats graph per peer — never run it on
     // a timer unless diagnostics are actually switched on. `force` is the
@@ -2190,6 +2309,11 @@ if (typeof window !== 'undefined') {
   // Always available, flag or not — a snapshot on demand costs nothing until
   // someone actually asks for it.
   (window as unknown as { webrtcDiag: () => void }).webrtcDiag = () => { void webrtcService.reportStats(true); };
+  // Unlike the diagnostic report below, this runs for everyone, always. Five
+  // seconds is the slowest cadence that still notices a link going bad within
+  // a sentence or two of speech, and getStats() is expensive enough (it walks
+  // the whole stats graph per peer) that going faster is not free.
+  setInterval(() => { void webrtcService.sampleConnectionQuality(); }, QUALITY_SAMPLE_INTERVAL_MS);
   // [webrtc-diag] For someone reproducing the bug who isn't going to
   // manually scroll/select console output mid-meeting: run
   // webrtcDiagExport() in the console once, and the whole session's log

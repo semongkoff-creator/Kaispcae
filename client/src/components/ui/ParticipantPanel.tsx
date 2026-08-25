@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { CameraVideoFill, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, Headphones, HandIndexThumbFill, MegaphoneFill, MicMuteFill, GeoAltFill, Search, VolumeMuteFill, VolumeUpFill, FlagFill } from 'react-bootstrap-icons';
 import { roleAtLeast, Role, WorkMode } from '@kaispace/shared';
@@ -7,6 +7,9 @@ import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { showConfirm } from '@/stores/modalStore';
 import { api, OrgMember } from '@/services/api';
+import { SignalBars } from '@/components/ui/SignalBars';
+import type { PeerQuality } from '@/services/connectionQuality';
+import { subscribeConnectionQuality, getPeerQualitySnapshot } from '@/stores/connectionQuality';
 
 // One labelled row inside a participant's action menu. Icon plus wording,
 // because five bare icons crowded into a row said nothing until you hovered
@@ -118,6 +121,10 @@ export function ParticipantPanel({ remoteStreams, roomSlug, isMicMuted, isGuest,
   }, [meetingViewActive, open, onClose]);
 
   const playerRecords = useGameStore((s) => s.playerRecords);
+  // Per-peer media quality, keyed by the same player id playerRecords and
+  // remoteStreams use. Subscribed separately from gameStore so a 5s sampling
+  // tick re-renders this panel and nothing else.
+  const peerQuality = useSyncExternalStore(subscribeConnectionQuality, getPeerQualitySnapshot);
   // Per-field selectors, not the whole object. gameStore's
   // setLocalPlayerMoving replaces localPlayer every 100ms while walking, so
   // subscribing to the object re-rendered this panel — one row per person in
@@ -292,6 +299,7 @@ export function ParticipantPanel({ remoteStreams, roomSlug, isMicMuted, isGuest,
                 role={roleOf(p.userId)}
                 isLocal={false}
                 inCall={remoteStreams.has(p.id)}
+                quality={peerQuality.get(p.id)}
                 isFollowingThem={!!p.userId && followInfo?.targetUserId === p.userId}
                 onFollow={p.userId ? () => emitFollowRequest(p.userId!) : undefined}
                 onUnfollow={emitFollowUnfollow}
@@ -328,6 +336,7 @@ function ParticipantRow({
   role,
   isLocal,
   inCall,
+  quality,
   followerCount,
   isFollowingThem,
   onFollow,
@@ -375,6 +384,11 @@ function ParticipantRow({
   role?: Role;
   isLocal: boolean;
   inCall: boolean;
+  // Undefined for anyone this client has no peer connection to — an offline
+  // member, or someone in the room who is simply out of proximity range.
+  // Absent is not the same as bad, so the bars are omitted rather than drawn
+  // empty.
+  quality?: PeerQuality;
   // Local player row only — how many other players currently have me as
   // their Follow target (see followerUserIds in gameStore.ts).
   followerCount?: number;
@@ -543,6 +557,11 @@ function ParticipantRow({
         {micMuted && <MicMuteFill className="text-red-500" size={11} title={isLocal ? 'Mic Anda mati' : 'Mic mati'} />}
         {isMuted && <VolumeMuteFill className="text-gray-400" size={11} title="Anda bisukan orang ini" />}
         {inCall && <CameraVideoFill className="text-purple-600" size={11} title="In call" />}
+        {/* Per-peer, deliberately: this is the reading that separates "my
+            connection is bad" from "theirs is". One red row among green ones
+            points at that person; all rows red points at this machine, which
+            is what the summary in ConnectionIndicator says out loud. */}
+        {quality && <SignalBars level={quality.level} bars={quality.bars} relayed={quality.relayed} />}
         {!!followerCount && (
           <span className="text-purple-500 text-[10px] inline-flex items-center gap-0.5" title={`Followed by ${followerCount}`}>
             <PersonWalking size={10} /> {followerCount}
