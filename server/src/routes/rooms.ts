@@ -71,6 +71,18 @@ function generateSlug(name: string): string {
 rooms.get('/rooms', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
+    // DCM restricted accounts — undefined means authenticateToken's own
+    // lookup threw and this account's restriction status was never actually
+    // resolved (see AuthRequest's restrictedToRoomId comment); that must NOT
+    // be treated the same as null (confirmed unrestricted). In practice the
+    // organizationId guard just above already rejects on this same
+    // underlying failure (both fields come from one query in
+    // authenticateToken), but this doesn't depend on that coupling holding
+    // forever — an empty list here is the same shape the client already
+    // handles for "your one allowed room was deleted" (see comment below).
+    if (req.restrictedToRoomId === undefined) {
+      return res.json({ rooms: [] });
+    }
     const prisma = getPrisma();
     // DCM restricted accounts — a restricted account's Lobby shows exactly
     // one room (or zero, if it's since been deleted), never the org's full
@@ -132,7 +144,14 @@ rooms.get('/rooms/:slug', authenticateToken, async (req: AuthRequest, res: Respo
       return res.status(404).json({ error: 'Room not found' });
     }
     // DCM restricted accounts — same "can't tell 404 from wrong-access"
-    // posture as the org check just above.
+    // posture as the org check just above. undefined means the auth lookup
+    // threw and this account's restriction status was never resolved — that
+    // must NOT be treated the same as null (confirmed unrestricted), so it
+    // fails closed unconditionally rather than falling through to the
+    // ordinary id-match check below.
+    if (req.restrictedToRoomId === undefined) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
     if (req.restrictedToRoomId && room.id !== req.restrictedToRoomId) {
       return res.status(404).json({ error: 'Room not found' });
     }

@@ -797,6 +797,19 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       // walk-in" fallback a few lines up, a restricted account must never
       // get the benefit of the doubt on an unreadable room.
       const enteringRestrictedToRoomId = (socket.data as { restrictedToRoomId?: string | null }).restrictedToRoomId;
+      // undefined means the handshake's own auth query threw and this
+      // account's restriction status was never actually resolved —
+      // deliberately NOT treated the same as null (confirmed unrestricted).
+      // An unconfirmed status fails CLOSED unconditionally, regardless of
+      // which room is being joined or whether that room's own lookup
+      // (approvalRoom) succeeded — the alternative (falling through to the
+      // ordinary "unreadable room, treat as walk-in" fallback a few lines
+      // up) would let a genuinely restricted account slip through during a
+      // rare coincidence of two independent transient failures.
+      if (enteringUid && enteringRestrictedToRoomId === undefined) {
+        socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'not-found' });
+        return;
+      }
       if (enteringUid && enteringRestrictedToRoomId && approvalRoom?.id !== enteringRestrictedToRoomId) {
         socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'not-found' });
         return;
