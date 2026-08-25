@@ -150,7 +150,30 @@ const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
 // cap — 6 cameras is ~3 Mbps up, still sane; the screen share on top of
 // that is bounded separately, and now by an aggregate budget rather than
 // per-peer (see mediaBudget.ts).
-export const MAX_TOTAL_PEERS = 16;
+//
+// Raised again, 16 -> 35, and this one is a DELIBERATE override of the
+// `total <= 24` ceiling performanceGuards.test.ts used to assert. The reason
+// for the number is that it sits ABOVE the whole user base rather than near
+// it: with 30 people in the org, the largest cluster anyone can form is 29,
+// so at 35 this cap can never be the thing that drops someone. At 16 a
+// 30-person all-hands left 14 people inaudible to each other, silently and
+// with nothing in the UI to say so — the zone rule asks for every member of
+// a meeting area regardless of distance, so the whole room really does try
+// to connect at once.
+//
+// Upload is still not the constraint: 34 mic tracks at ~40 kbps is ~1.4 Mbps
+// up, and usedtx=1 means the silent majority costs nearly nothing (see
+// sdpAudio.ts). MAX_VIDEO_PEERS stays at 6 — that is what keeps this
+// survivable, since video is the expensive track and does NOT follow the
+// total up.
+//
+// What this trades away is honest to state: the old ceiling existed as a
+// brake for the day a crowd forms, and 34 simultaneous RTCPeerConnections —
+// each with its own ICE agent, DTLS session, congestion controller and
+// jitter buffer — has NOT been measured on a mid-range laptop here. That is
+// what the live test is for. A mesh at this size is a stopgap for a room
+// that wants an SFU; see mediaBudget.ts's note on the same conclusion.
+export const MAX_TOTAL_PEERS = 35;
 export const MAX_VIDEO_PEERS = 6;
 
 // QA (Load checklist item 3, "War Room share massal") — previously

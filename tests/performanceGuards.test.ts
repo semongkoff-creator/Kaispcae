@@ -58,7 +58,15 @@ test('mesh peer caps bound the EXPENSIVE track, not the cheap one', () => {
   assert.ok(Number.isFinite(total) && Number.isFinite(video), 'both caps must stay plain exported constants');
   assert.ok(video < total, 'cameras must stay a subset of connected peers');
   assert.ok(video <= 8, `${video} simultaneous cameras is more uplink than a mesh can carry`);
-  assert.ok(total <= 24, `${total} peer connections per client is past what a mesh should attempt at all`);
+  // Was 24, on the reasoning that a mesh should not attempt more. Raised to 40
+  // as a deliberate decision, not a drift: the cap is now set ABOVE the whole
+  // user base (30 people, so a largest possible cluster of 29) specifically so
+  // it can never be what silently drops someone from an all-hands. The ceiling
+  // is kept — well above the intended 35, far below anything absurd — because
+  // its job is to catch a typo or a hopeful edit, not to relitigate that call.
+  // If the room ever genuinely needs more than this, it needs an SFU, and no
+  // number here fixes that.
+  assert.ok(total <= 40, `${total} peer connections per client is past what a mesh should attempt at all`);
   // A flat per-peer screen-share ceiling is what made a share cost
   // 2.5 Mbps x peers on the presenter's own uplink.
   assert.equal(source.includes('const SCREEN_SHARE_MAX_BITRATE_BPS'), false, 'screen bitrate should come from the aggregate budget');
