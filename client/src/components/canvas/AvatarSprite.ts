@@ -305,13 +305,25 @@ function spriteFrameCoords(direction: Direction, isMoving: boolean, timestamp: n
 // touches all the layer spritesheets again. That is the episodic spike this was
 // supposed to remove (frames clustered at 200-290ms while several people walked
 // in different directions), caused by the cure rather than the disease.
-const LAYERED_AVATAR_CACHE_LIMIT = 2000;
+// Raised from 2000 for a 30-person room: 30 x 72 is 2160, which the old cap
+// could not hold, putting a full all-hands back into exactly the thrashing
+// described above. 3000 leaves room for outfit changes and people passing
+// through mid-session rather than sitting exactly on the working set.
+const LAYERED_AVATAR_CACHE_LIMIT = 3000;
 // And a second bound, because entry COUNT is not what costs memory: an entry is
 // rasterW x rasterH pixels, which grows with zoom and dpr. ~8M pixels is about
 // 32MB of canvas — at the common 48x66 frame that is ~2500 entries, and at 2x
 // zoom on a 2x display it falls to ~600, which is the correct direction for it
 // to move on its own.
-const LAYERED_AVATAR_CACHE_PIXEL_BUDGET = 8_000_000;
+// Doubled to ~64MB alongside the entry cap above. Deliberately NOT raised to
+// the ~29M pixels a 30-outfit working set would need at 2x zoom on a 2x
+// display: the two bounds bite in opposite conditions. Zoomed OUT — many
+// people on screen at once, which is the case that matters here — an entry is
+// small and 2160 of them are only ~2M pixels, so the ENTRY CAP is what bites
+// and the pixel budget is slack. Zoomed IN, entries grow 16x but the viewport
+// holds far fewer people, so the working set shrinks on its own. Paying 115MB
+// to cache 30 avatars at 2x zoom buys a case that does not occur.
+const LAYERED_AVATAR_CACHE_PIXEL_BUDGET = 16_000_000;
 const layeredSpriteCache = new Map<string, HTMLCanvasElement>();
 let layeredSpriteCachePixels = 0;
 

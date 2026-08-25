@@ -272,9 +272,13 @@ test('the avatar frame cache is bigger than its own working set', () => {
   // re-composite touches all the layer spritesheets again. The first version
   // capped at 240 against a working set of ~1300 and produced exactly the
   // episodic 200-290ms frames it was added to remove.
+  // 18 was the old target and is no longer the room size to design for: an
+  // all-hands is 30 people in one Zone, where zone membership overrides the
+  // distance rule and everyone renders at once. At 18 this guard passed while
+  // a 30-person room sat 160 entries over the cap and thrashed.
   const perOutfit = 4 * framesPerDirection * 3;
-  const roomful = perOutfit * 18;
-  assert.ok(limit >= roomful, `${limit} entries cannot hold ${roomful} (18 outfits x ${perOutfit} frames)`);
+  const roomful = perOutfit * 30;
+  assert.ok(limit >= roomful, `${limit} entries cannot hold ${roomful} (30 outfits x ${perOutfit} frames)`);
 
   // Count alone is the wrong bound — an entry's size grows with zoom and dpr.
   assert.ok(source.includes('LAYERED_AVATAR_CACHE_PIXEL_BUDGET'), 'memory needs its own bound');
