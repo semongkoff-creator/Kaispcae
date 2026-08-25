@@ -131,6 +131,10 @@ export interface AuthRequest extends Request {
   // Bug 1 — the token's sessionId claim; /auth/me preserves it on refresh so
   // the same device keeps one session across sliding-refresh.
   sessionId?: string;
+  // DCM restricted accounts — resolved fresh from the DB by authenticateToken
+  // below, same "never from the token" posture as organizationId above (the
+  // token predates this field and isn't reissued just to add a claim).
+  restrictedToRoomId?: string | null;
 }
 
 // Bug 1 — a token is superseded when the user has an active session id and this
@@ -186,17 +190,20 @@ export async function authenticateToken(req: AuthRequest, res: Response, next: N
   // and org-filtered routes are required to treat that as "reject", not
   // "skip the filter" (see AuthRequest's comment).
   let organizationId: string | undefined;
+  let restrictedToRoomId: string | null | undefined;
   try {
-    const user = await getPrisma().user.findUnique({ where: { id: decoded.userId }, select: { currentSessionId: true, organizationId: true } });
+    const user = await getPrisma().user.findUnique({ where: { id: decoded.userId }, select: { currentSessionId: true, organizationId: true, restrictedToRoomId: true } });
     if (user?.currentSessionId && decoded.sessionId !== user.currentSessionId) {
       return res.status(401).json({ error: SESSION_SUPERSEDED, message: SESSION_SUPERSEDED_MESSAGE });
     }
     organizationId = user?.organizationId;
+    restrictedToRoomId = user?.restrictedToRoomId;
   } catch (e) {
     console.error('[auth] session/org lookup error:', e);
   }
   req.userId = decoded.userId;
   req.organizationId = organizationId;
+  req.restrictedToRoomId = restrictedToRoomId;
   req.tokenExp = decoded.exp;
   req.sessionId = decoded.sessionId;
   next();

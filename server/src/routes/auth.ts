@@ -299,6 +299,8 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
         // QA #1/#6 — gates the first-run tutorial (App.tsx); null means this
         // account has never finished it.
         tutorialCompletedAt: true,
+        // DCM restricted accounts — see publicUser.ts's field comment.
+        restrictedToRoomId: true,
       },
     });
     if (!user) {

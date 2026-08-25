@@ -789,6 +789,19 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         return;
       }
 
+      // DCM restricted accounts — same "reads as not-found, never a distinct
+      // reason that would confirm the room exists" posture as the org check
+      // just above. approvalRoom is already fetched; if the lookup itself
+      // failed (approvalRoom null), fail CLOSED here specifically for a
+      // restricted account — unlike the general "can't tell, treat as
+      // walk-in" fallback a few lines up, a restricted account must never
+      // get the benefit of the doubt on an unreadable room.
+      const enteringRestrictedToRoomId = (socket.data as { restrictedToRoomId?: string | null }).restrictedToRoomId;
+      if (enteringUid && enteringRestrictedToRoomId && approvalRoom?.id !== enteringRestrictedToRoomId) {
+        socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'not-found' });
+        return;
+      }
+
       // QA (Akses ruang checklist item 1) — restrictedAccess must be
       // checked regardless of requiresApproval's own value: they're
       // independent flags (a room could be restrictedAccess=true but

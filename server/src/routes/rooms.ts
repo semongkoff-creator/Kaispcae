@@ -72,8 +72,13 @@ rooms.get('/rooms', authenticateToken, async (req: AuthRequest, res: Response) =
   try {
     if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
     const prisma = getPrisma();
+    // DCM restricted accounts — a restricted account's Lobby shows exactly
+    // one room (or zero, if it's since been deleted), never the org's full
+    // public list.
     const roomList = await prisma.room.findMany({
-      where: { isPublic: true, organizationId: req.organizationId },
+      where: req.restrictedToRoomId
+        ? { id: req.restrictedToRoomId, organizationId: req.organizationId }
+        : { isPublic: true, organizationId: req.organizationId },
       include: {
         owner: { select: { displayName: true } },
       },
@@ -124,6 +129,11 @@ rooms.get('/rooms/:slug', authenticateToken, async (req: AuthRequest, res: Respo
     });
 
     if (!room || room.organizationId !== req.organizationId) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    // DCM restricted accounts — same "can't tell 404 from wrong-access"
+    // posture as the org check just above.
+    if (req.restrictedToRoomId && room.id !== req.restrictedToRoomId) {
       return res.status(404).json({ error: 'Room not found' });
     }
 

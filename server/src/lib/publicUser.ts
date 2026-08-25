@@ -8,7 +8,7 @@ import { isOperatorEmail } from './operator';
 
 type PublicUserFields = Pick<
   User,
-  'id' | 'email' | 'displayName' | 'fullName' | 'accountRole' | 'workspaceRole' | 'timezone' | 'tutorialCompletedAt' | 'preferences'
+  'id' | 'email' | 'displayName' | 'fullName' | 'accountRole' | 'workspaceRole' | 'timezone' | 'tutorialCompletedAt' | 'preferences' | 'restrictedToRoomId'
 >;
 
 export function publicUser(user: PublicUserFields) {
@@ -25,6 +25,10 @@ export function publicUser(user: PublicUserFields) {
     // Every response shape that flows through this helper picks this up
     // automatically — see specs/2026-08-12-operator-org-list-design.md.
     isOperator: isOperatorEmail(user.email),
+    // DCM restricted accounts — null for every account except the ones this
+    // feature creates; drives the room-visibility restriction enforced
+    // server-side elsewhere (GET /rooms, GET /rooms/:slug, JOIN_ROOM).
+    restrictedToRoomId: user.restrictedToRoomId,
   };
 }
 

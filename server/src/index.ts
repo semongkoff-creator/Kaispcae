@@ -187,18 +187,21 @@ io.use(async (socket, next) => {
       // just stays undefined in that case, and every org-scoped check below
       // is required to treat that as "reject", not "skip the check".
       let organizationId: string | undefined;
+      let restrictedToRoomId: string | null | undefined;
       try {
-        const user = await getPrisma().user.findUnique({ where: { id: claims.userId }, select: { currentSessionId: true, organizationId: true } });
+        const user = await getPrisma().user.findUnique({ where: { id: claims.userId }, select: { currentSessionId: true, organizationId: true, restrictedToRoomId: true } });
         if (user?.currentSessionId && claims.sessionId !== user.currentSessionId) {
           return next(new Error(SESSION_SUPERSEDED));
         }
         organizationId = user?.organizationId;
+        restrictedToRoomId = user?.restrictedToRoomId;
       } catch (e) {
         console.error('[auth] socket session/org lookup error:', e);
       }
       socket.data.userId = claims.userId;
       socket.data.sessionId = claims.sessionId;
       socket.data.organizationId = organizationId;
+      socket.data.restrictedToRoomId = restrictedToRoomId;
     }
   }
   next();
