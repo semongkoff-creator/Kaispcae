@@ -20,3 +20,7 @@ playwright-report/
 # success; a failed run can leave it behind).
 .temp-limezu-extract/
 backups/
+# Real credentials — a plaintext email/password list for the DCM account
+# batch (server/scripts/seedDcmAccounts.ts reads it directly at run time).
+# Never commit.
+DCM_Password_List.xlsx
