@@ -111,7 +111,7 @@ model User {
   tutorialCompletedAt     DateTime?
   departmentId            String?
   department              Department?               @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  // DCM restricted accounts (specs/2026-08-25-dcm-restricted-accounts-design.md)
+  // DCM restricted accounts (docs/superpowers/specs/2026-08-25-dcm-restricted-accounts-design.md)
   // — null (every account today) means completely unrestricted, no behavior
   // change. Set = this account may only see/enter this one Room (enforced
   // in rooms.ts's GET /rooms and GET /rooms/:slug, and roomHandler.ts's

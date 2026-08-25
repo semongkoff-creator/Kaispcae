@@ -1,5 +1,5 @@
 // One-off, idempotent creator for the "DCM" room + its ~26 restricted
-// accounts (specs/2026-08-25-dcm-restricted-accounts-design.md). Reads
+// accounts (docs/superpowers/specs/2026-08-25-dcm-restricted-accounts-design.md). Reads
 // credentials directly from DCM_Password_List.xlsx (repo root, gitignored —
 // see that file's own comment in .gitignore) at run time — the plaintext
 // password is NEVER embedded in this file or logged.
@@ -15,6 +15,7 @@
 
 import 'dotenv/config';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import bcrypt from 'bcryptjs';
 import ExcelJS from 'exceljs';
 import { getPrisma } from '../src/lib/prisma';
@@ -24,7 +25,10 @@ import { createRoomLayoutFromTemplate } from '@virtualmeet/shared';
 
 const SLUG = 'dcm';
 const ROOM_NAME = 'DCM';
-const XLSX_PATH = path.resolve(__dirname, '../../DCM_Password_List.xlsx');
+// server/package.json has "type": "module", so this file runs as ESM under
+// tsx — __dirname is not defined there. fileURLToPath(new URL('.', import.meta.url))
+// is the ESM-safe equivalent of __dirname (resolves to this file's directory).
+const XLSX_PATH = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '../../DCM_Password_List.xlsx');
 
 async function loadCredentials(): Promise<{ email: string; password: string }[]> {
   const workbook = new ExcelJS.Workbook();
@@ -32,9 +36,32 @@ async function loadCredentials(): Promise<{ email: string; password: string }[]>
   const sheet = workbook.worksheets[0];
   const rows: { email: string; password: string }[] = [];
   sheet.eachRow((row, rowNumber) => {
-    if (rowNumber === 1) return; // header row
-    const email = String(row.getCell(1).value ?? '').trim().toLowerCase();
-    const password = String(row.getCell(2).value ?? '');
+    if (rowNumber === 1) {
+      // Validate the header instead of blindly skipping it — if the real
+      // spreadsheet's columns were ever reordered (e.g. a Name column
+      // inserted before Email), every data row below would still pass the
+      // non-empty check and we'd silently create accounts with wrong data.
+      const col1 = String(row.getCell(1).value ?? '').trim().toLowerCase();
+      const col2 = String(row.getCell(2).value ?? '').trim().toLowerCase();
+      if (col1 !== 'email' || col2 !== 'password') {
+        throw new Error(
+          `[seedDcmAccounts] unexpected header row — expected columns 1,2 to be "Email","Password" but found "${row.getCell(1).value}","${row.getCell(2).value}". Refusing to proceed.`
+        );
+      }
+      return;
+    }
+    // ExcelJS can hand back an object (not a string) for rich-text/formula/
+    // hyperlink cells. Coercing that straight to a string would silently
+    // produce the literal "[object Object]", which then gets bcrypt-hashed
+    // as if it were a real password — skip and warn instead.
+    const cell1Value = row.getCell(1).value;
+    const cell2Value = row.getCell(2).value;
+    if ((typeof cell1Value === 'object' && cell1Value !== null) || (typeof cell2Value === 'object' && cell2Value !== null)) {
+      console.warn(`[seedDcmAccounts] row ${rowNumber}: cell value is a rich object (not plain text), skipped`);
+      return;
+    }
+    const email = String(cell1Value ?? '').trim().toLowerCase();
+    const password = String(cell2Value ?? '');
     if (!email || !password) {
       console.warn(`[seedDcmAccounts] row ${rowNumber}: missing email or password, skipped`);
       return;
@@ -88,6 +115,10 @@ async function main() {
   for (const cred of credentials) {
     const existing = await prisma.user.findUnique({ where: { email: cred.email } });
     if (existing) {
+      // Surface WHICH email collided (never the password) — the existing
+      // account may already be in the org unrestricted, and this script
+      // would otherwise leave it that way with no visible signal.
+      console.warn(`[seedDcmAccounts] ${cred.email}: account already exists, skipped (left as-is, not restricted)`);
       skipped++;
       continue;
     }
