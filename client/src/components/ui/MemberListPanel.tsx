@@ -96,7 +96,7 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
                       go stale. */}
                   <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                     {online
-                      ? `${r.presence!.roomName}${r.presence!.zoneName ? ` · ${r.presence!.zoneName}` : ''}`
+                      ? `Online · ${r.presence!.roomName}${r.presence!.zoneName ? ` · ${r.presence!.zoneName}` : ''}`
                       : 'Offline'}
                   </p>
                 </div>
