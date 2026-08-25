@@ -44,8 +44,13 @@ async function loadCredentials(): Promise<{ email: string; password: string }[]>
       const col1 = String(row.getCell(1).value ?? '').trim().toLowerCase();
       const col2 = String(row.getCell(2).value ?? '').trim().toLowerCase();
       if (col1 !== 'email' || col2 !== 'password') {
+        // Never interpolate column 2's raw value here — it's the password
+        // column, and if row 1 turns out to be a data row rather than a
+        // real header (the most likely way this check ever fires), that
+        // value is a real plaintext password. Report which columns failed
+        // to match, never what they actually contained.
         throw new Error(
-          `[seedDcmAccounts] unexpected header row — expected columns 1,2 to be "Email","Password" but found "${row.getCell(1).value}","${row.getCell(2).value}". Refusing to proceed.`
+          `[seedDcmAccounts] unexpected header row — expected columns 1,2 to be "Email","Password" but ${col1 !== 'email' ? 'column 1 did not read as "Email"' : 'column 1 is fine'} and ${col2 !== 'password' ? 'column 2 did not read as "Password"' : 'column 2 is fine'}. Refusing to proceed.`
         );
       }
       return;
