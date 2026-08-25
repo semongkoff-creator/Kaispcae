@@ -1153,7 +1153,7 @@ export const VideoTile = memo(function VideoTile({
           rendering bug. */}
       {hasVolumeSlider && (
         <div
-          className={`absolute left-1 right-1 bottom-1 flex items-center gap-1.5 bg-black/45 backdrop-blur-md rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-150 ${
+          className={`absolute left-1 right-1 bottom-1 flex items-center gap-1.5 bg-black/45 backdrop-blur-md rounded-full overflow-hidden opacity-0 group-hover:opacity-100 transition-opacity duration-150 ${
             large ? 'px-2 py-1' : 'px-1.5 py-0.5'
           }`}
         >
