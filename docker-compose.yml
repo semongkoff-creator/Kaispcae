@@ -11,6 +11,7 @@ name: office_tenant
 
 services:
   postgres:
+    restart: unless-stopped
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
@@ -24,6 +25,7 @@ services:
       timeout: 5s
       retries: 5
   redis:
+    restart: unless-stopped
     image: redis:7-alpine
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
@@ -31,6 +33,7 @@ services:
       timeout: 5s
       retries: 5
   server:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: server/Dockerfile
@@ -68,6 +71,7 @@ services:
       redis:
         condition: service_healthy
   nginx:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: client/Dockerfile
@@ -85,6 +89,17 @@ services:
         VITE_TURN_URL: ${VITE_TURN_URL:-}
         VITE_TURN_USERNAME: ${VITE_TURN_USERNAME:-}
         VITE_TURN_CREDENTIAL: ${VITE_TURN_CREDENTIAL:-}
+        # RustDesk relay behind Remote Help (see specs/2026-08-17-remote-help-
+        # via-rustdesk-design.md). client/Dockerfile has always declared these
+        # three ARGs, but this file never passed them, so on the prod host they
+        # survived only as an uncommitted local edit — a git checkout there
+        # would have silently switched Remote Help off, with nothing to say so.
+        # Read from .env like everything else here. The values are not secret
+        # either way: a VITE_ var is inlined into the bundle and served to
+        # every browser, so .env buys consistency, not confidentiality.
+        VITE_RUSTDESK_ID_SERVER: ${VITE_RUSTDESK_ID_SERVER:-}
+        VITE_RUSTDESK_RELAY_SERVER: ${VITE_RUSTDESK_RELAY_SERVER:-}
+        VITE_RUSTDESK_KEY: ${VITE_RUSTDESK_KEY:-}
     ports:
       - '127.0.0.1:8091:80'
     depends_on:
