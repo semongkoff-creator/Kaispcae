@@ -91,17 +91,43 @@ export function isDoorTile(tiles: RoomTile[][], tileX: number, tileY: number): b
 // Picks a walkable tile inside a zone — used to auto-seed a Team Location
 // (§4.1) for every named Zone in a room's own layout ("denah"), so staff
 // get a ready-made teleport list instead of an empty one they'd have to
-// fill in by walking to each spot manually. Tries the rect's center first
-// (usually open floor); falls back to a row-major scan of the rect for any
-// room whose center happens to land on furniture (e.g. a meeting table).
-export function findZoneEntryTile(tiles: RoomTile[][], zone: ZoneRect): { x: number; y: number } {
+// fill in by walking to each spot manually, AND to land someone teleported
+// straight into a Zone (e.g. a calendar meeting's auto-join). Tries the
+// rect's center first (usually open floor); falls back to a row-major scan
+// of the rect for any room whose center happens to land on furniture (e.g.
+// a meeting table).
+//
+// Bug fix — a meeting table marked Impassable in the Room Editor is a
+// free-form pixel-space rect (ImpassableAreaRect), never rasterized into
+// the tile grid isTileBlocked checks (see mapLayers.ts's
+// getImpassableAreaRects doc comment for why) — so a version of this
+// function that checked only isTileBlocked would happily land someone
+// right on top of it. impassableAreas/tileSize let every candidate tile
+// get the same check real movement collision already uses elsewhere.
+// tileSize is a parameter (not read from an internal TILE_SIZE import) to
+// avoid a runtime-circular import back into types/index.ts, which
+// re-exports this very function — see movementHitboxBounds's own doc
+// comment for the same constraint.
+export function findZoneEntryTile(
+  tiles: RoomTile[][],
+  zone: ZoneRect,
+  impassableAreas: ImpassableAreaRect[],
+  tileSize: number,
+): { x: number; y: number } {
+  const isWalkable = (tx: number, ty: number): boolean => {
+    if (isTileBlocked(tiles, tx, ty)) return false;
+    const px = tx * tileSize + tileSize / 2;
+    const py = ty * tileSize + tileSize / 2;
+    return !isPointInImpassableArea(impassableAreas, px, py);
+  };
+
   const centerX = zone.x + Math.floor(zone.width / 2);
   const centerY = zone.y + Math.floor(zone.height / 2);
-  if (!isTileBlocked(tiles, centerX, centerY)) return { x: centerX, y: centerY };
+  if (isWalkable(centerX, centerY)) return { x: centerX, y: centerY };
 
   for (let y = zone.y; y < zone.y + zone.height; y++) {
     for (let x = zone.x; x < zone.x + zone.width; x++) {
-      if (!isTileBlocked(tiles, x, y)) return { x, y };
+      if (isWalkable(x, y)) return { x, y };
     }
   }
   return { x: centerX, y: centerY }; // every real zone has floor somewhere; this is a last-resort fallback

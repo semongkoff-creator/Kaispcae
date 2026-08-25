@@ -755,7 +755,10 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
     if (layout.zones.length > 0) {
       await prisma.teleportLocation.createMany({
         data: layout.zones.map((zone, index) => {
-          const point = findZoneEntryTile(layout.tiles, zone);
+          // Templates are pre-authored with no admin-drawn Impassable Areas
+          // yet (those only exist once someone edits the room afterward), so
+          // [] is genuinely accurate here, not just a shortcut.
+          const point = findZoneEntryTile(layout.tiles, zone, [], TILE_SIZE);
           return { roomId: room.id, name: zone.name, x: point.x, y: point.y, orderIndex: index, createdBy: req.userId! };
         }),
       });
@@ -833,7 +836,13 @@ rooms.post('/rooms/:slug/duplicate', authenticateToken, async (req: AuthRequest,
     if (zones.length > 0 && tiles.length > 0) {
       await prisma.teleportLocation.createMany({
         data: zones.map((zone, index) => {
-          const point = findZoneEntryTile(tiles as any, zone as any);
+          // [] — this legacy-format-only path (see comment above) has no
+          // derived Impassable Area rects available from `source` to check
+          // against; a copied room whose source has admin-drawn ones could
+          // still pre-fill a Team Location inside one, same as before this
+          // function gained the parameter. Narrower/lower-stakes than the
+          // live-teleport case this fix targets — not addressed here.
+          const point = findZoneEntryTile(tiles as any, zone as any, [], TILE_SIZE);
           return { roomId: room.id, name: zone.name, x: point.x, y: point.y, orderIndex: index, createdBy: req.userId! };
         }),
       });

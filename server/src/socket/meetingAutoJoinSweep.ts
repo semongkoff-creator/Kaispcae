@@ -1,7 +1,7 @@
 import { Server } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
 import { SocketEvents, expandOccurrences, findZoneEntryTile, TILE_SIZE, type Occurrence } from '@virtualmeet/shared';
-import { getPlayers, updatePlayerPosition, getCachedTiles, getCachedZones } from '../store/roomStore';
+import { getPlayers, updatePlayerPosition, getCachedTiles, getCachedZones, getCachedImpassableAreas } from '../store/roomStore';
 import { isZoneLocked, admitUserToZone } from './zoneLock';
 
 // Calendar meeting auto-join. Structurally parallel to reminderSweep.ts (same
@@ -81,7 +81,9 @@ export function startMeetingAutoJoinSweep(io: Server, intervalMs = TICK_MS): voi
           // player's own position is used instead) when the zone can no
           // longer be found at all.
           const zoneRect = getCachedZones(room).find((z) => z.id === zoneId) ?? null;
-          const landing = tiles && tiles.length > 0 && zoneRect ? findZoneEntryTile(tiles, zoneRect) : null;
+          const landing = tiles && tiles.length > 0 && zoneRect
+            ? findZoneEntryTile(tiles, zoneRect, getCachedImpassableAreas(room), TILE_SIZE)
+            : null;
 
           // Everyone the meeting belongs to — the organizer PLUS the invited
           // attendees, deduped. EventAttendee deliberately excludes the

@@ -21,7 +21,7 @@
 import 'dotenv/config';
 import { getPrisma } from '../src/lib/prisma';
 import { ensureGroupConversation } from '../src/lib/conversations';
-import { createCorporateOfficeLayout, findZoneEntryTile } from '@kaispace/shared';
+import { createCorporateOfficeLayout, findZoneEntryTile, TILE_SIZE } from '@kaispace/shared';
 
 const SLUG = 'office';
 const ROOM_NAME = 'Kantor';
@@ -105,7 +105,9 @@ async function main() {
   if (layout.zones.length > 0) {
     await prisma.teleportLocation.createMany({
       data: layout.zones.map((zone, index) => {
-        const point = findZoneEntryTile(layout.tiles, zone);
+        // [] — fresh from a template, no admin-drawn Impassable Areas exist
+        // yet (those only get added once someone edits the room afterward).
+        const point = findZoneEntryTile(layout.tiles, zone, [], TILE_SIZE);
         return { roomId: room.id, name: zone.name, x: point.x, y: point.y, orderIndex: index, createdBy: owner.id };
       }),
     });
