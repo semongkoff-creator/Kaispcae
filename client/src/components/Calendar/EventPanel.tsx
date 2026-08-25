@@ -262,20 +262,33 @@ export function EventPanel({
           </div>
         )}
 
-        <div>
-          <label className={label} htmlFor="ev-room">Ruang meeting</label>
-          <select id="ev-room" value={roomId} onChange={(e) => setRoomId(e.target.value)} disabled={!canEdit} className={field}>
-            <option value="">Tidak pakai ruang</option>
-            {rooms.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.capacity} orang{r.bookableBy === 'admin' ? ' (admin)' : ''}</option>)}
-          </select>
-          <p className="text-[10px] text-gray-400 mt-0.5">Bentrok ruang ditolak server, bukan cuma disembunyikan di sini.</p>
-        </div>
+        {/* Hidden once a KaiSpace room is picked below — Ruang meeting (a
+            generic bookable resource, capacity/equipment, clash-checked) and
+            Room KaiSpace (this event's actual auto-join room) both answer
+            "which room is this meeting in", so showing both at once reads as
+            two competing pickers. Room KaiSpace wins once chosen. */}
+        {!meetkaiRoomSlug && (
+          <div>
+            <label className={label} htmlFor="ev-room">Ruang meeting</label>
+            <select id="ev-room" value={roomId} onChange={(e) => setRoomId(e.target.value)} disabled={!canEdit} className={field}>
+              <option value="">Tidak pakai ruang</option>
+              {rooms.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.capacity} orang{r.bookableBy === 'admin' ? ' (admin)' : ''}</option>)}
+            </select>
+            <p className="text-[10px] text-gray-400 mt-0.5">Bentrok ruang ditolak server, bukan cuma disembunyikan di sini.</p>
+          </div>
+        )}
 
         <div>
           <label className={label} htmlFor="ev-kaispace-room">Room KaiSpace</label>
           <select
             id="ev-kaispace-room" value={meetkaiRoomSlug}
-            onChange={(e) => setMeetkaiRoomSlug(e.target.value)}
+            onChange={(e) => {
+              setMeetkaiRoomSlug(e.target.value);
+              // Ruang meeting hides once this is set (see above) — drop
+              // whatever it held so a stale, now-invisible selection
+              // doesn't still ride along in the save payload.
+              if (e.target.value) setRoomId('');
+            }}
             disabled={!canEdit} className={field}
           >
             <option value="">Tidak pakai auto-join</option>
