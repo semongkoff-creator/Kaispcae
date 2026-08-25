@@ -36,22 +36,28 @@ export function ConnectionIndicator() {
             {isConnected ? 'Connected' : 'Menyambung ulang…'}
           </span>
         </div>
-        <div className="w-px h-4 bg-purple-100 dark:bg-gray-700" />
         {/* The dot above is the SIGNALLING socket; these bars are the MEDIA
             path, and the two fail independently. The old indicator only had
             the dot, so a room where every voice connection had failed still
             read "Connected" — technically true and completely misleading,
             which is how "is it the app or my internet?" became unanswerable
-            from inside the app. */}
-        <SignalBars
-          level={verdict.level}
-          bars={BARS[verdict.level]}
-          title={
-            verdict.total === 0
-              ? 'Belum ada peserta lain untuk diukur'
-              : `${verdict.total - verdict.affected}/${verdict.total} koneksi suara sehat`
-          }
-        />
+            from inside the app.
+
+            Hidden entirely while alone in a room, rather than drawn hollow.
+            An empty meter is the universal symbol for "no signal", so showing
+            one to someone whose connection is perfectly fine — they simply
+            have nobody to talk to yet — reports a fault that does not exist.
+            The player count beside it already explains the room is empty. */}
+        {verdict.total > 0 && (
+          <>
+            <div className="w-px h-4 bg-purple-100 dark:bg-gray-700" />
+            <SignalBars
+              level={verdict.level}
+              bars={BARS[verdict.level]}
+              title={`${verdict.total - verdict.affected}/${verdict.total} koneksi suara sehat`}
+            />
+          </>
+        )}
         <div className="w-px h-4 bg-purple-100 dark:bg-gray-700" />
         <span className="text-gray-700 dark:text-gray-300 text-xs">
           {playerCount} {playerCount === 1 ? 'player' : 'players'} online
