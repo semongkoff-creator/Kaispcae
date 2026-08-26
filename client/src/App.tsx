@@ -1867,12 +1867,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           (translate-y-14) — task review found that band overlaps the
           Summon/Follow consent-toast stack (also top-16, centered, z-50),
           which a single incoming request toast reaches into, not just
-          several stacked ones. Moved to the LEFT of center instead
-          (-translate-x-48, mirroring the standalone control's own
-          translate-x-48 to the RIGHT), clearing the toast stack's column
-          entirely regardless of how many toasts are showing — same
-          reasoning as the Recording Revamp's own fix for the standalone
-          control colliding with other top-of-screen HUD elements. */}
+          several stacked ones. Moved to the LEFT of center instead,
+          anchored via `right-1/2 -translate-x-48` (NOT `left-1/2
+          -translate-x-48` — a first attempt at this fix used `left-1/2`,
+          which anchors the panel's LEFT edge and leaves it extending
+          rightward into the very toasts it needs to clear, and was caught
+          and corrected in review). `right-1/2` anchors the panel's RIGHT
+          edge — the one facing center — at a fixed 192px offset, so the
+          gap to the toast column (centered, symmetric around center) holds
+          regardless of the panel's own width, mirroring how the standalone
+          control's `left-1/2 translate-x-48` anchors ITS near (left) edge
+          192px to the right of center. */}
       {recordZoneId && !editorMode && (
         <RecordAreaPanel
           canRecord={canRecordHere}
