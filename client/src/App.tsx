@@ -13,6 +13,7 @@ import { NameModal } from './components/ui/NameModal';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
 import { RecordingControl } from './components/ui/RecordingControl';
+import { RecordAreaPanel } from './components/ui/RecordAreaPanel';
 // QA (Kompat checklist item 7) — same reasoning as RoomEditorPage above:
 // only a workspace admin ever opens this (AdminConsole itself re-gates on
 // workspaceRole, see its own file), so splitting it out means the far more
@@ -1850,6 +1851,36 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             onResume={resumeRecording}
           />
         </div>
+      )}
+
+      {/* §7 — Task 4 of the Record Area Zone + Recording Pause/Resume
+          plan: a zone-gated recording surface, shown only while the local
+          avatar stands inside a 'record'-type zone (Task 1's Room Editor
+          tool, Task 2's zone-entry detection). Deliberately one-click (no
+          title prompt, unlike the standalone RecordingControl above).
+          Reuses the exact same recording state as the standalone
+          control (requestRecording/stopMyRecording/pauseRecording/
+          resumeRecording, recordingTargets, canRecordHere) — there is only
+          one useScreenRecording() call in the whole app, this is just an
+          additional surface for it. Positioned in its own vertical band
+          (translate-y-14 below the standalone control's own top-16 row)
+          rather than beside it, to avoid the same collision class the
+          Recording Revamp's final review caught between the standalone
+          control and other top-of-screen HUD elements. */}
+      {recordZoneId && !editorMode && (
+        <RecordAreaPanel
+          canRecord={canRecordHere}
+          hasTarget={recordingTargets.length > 0}
+          isRecordingMine={isRecordingMine}
+          isPaused={isRecordingPaused}
+          uploading={recordingUploading}
+          onStart={() => {
+            if (recordingTargets.length > 0) requestRecording(recordingTargets[0].userId, 'Rekaman Zona', emitRecordingStart);
+          }}
+          onStop={stopMyRecording}
+          onPause={pauseRecording}
+          onResume={resumeRecording}
+        />
       )}
 
       {miniModeWindow && (
