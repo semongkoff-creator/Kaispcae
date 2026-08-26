@@ -444,6 +444,16 @@ export const api = {
   // Fase 5 (org-resolution) — PUBLIC preview of an org invite (org name +
   // the email/role it's for), shown before the visitor commits to setting
   // a password. Same unauthenticated posture as guestJoin above.
+  // POST /api/livekit/token — the credential for joining this room's SFU
+  // session. Scoped to one room and short-lived, so it is fetched per join
+  // rather than cached: the server re-checks room access every time it mints
+  // one, and a cached token would let a revoked account back in.
+  getLiveKitToken: (roomSlug: string) =>
+    request<{ token: string; url: string; identity: string }>('/livekit/token', {
+      method: 'POST',
+      body: JSON.stringify({ roomSlug }),
+    }),
+
   getOrgInvite: (token: string) =>
     request<{ organizationName: string; email: string; role: string }>(`/org-invites/${token}`),
 

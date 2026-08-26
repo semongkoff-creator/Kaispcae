@@ -100,6 +100,11 @@ services:
         VITE_RUSTDESK_ID_SERVER: ${VITE_RUSTDESK_ID_SERVER:-}
         VITE_RUSTDESK_RELAY_SERVER: ${VITE_RUSTDESK_RELAY_SERVER:-}
         VITE_RUSTDESK_KEY: ${VITE_RUSTDESK_KEY:-}
+        # Rooms routed to LiveKit instead of the mesh (see .env.example).
+        # Blank means every room stays on the mesh, which is the shipped
+        # default and the only safe one: the two media paths cannot
+        # interoperate, so this is per-room by construction.
+        VITE_LIVEKIT_ROOMS: ${VITE_LIVEKIT_ROOMS:-}
     ports:
       - '127.0.0.1:8091:80'
     depends_on:
