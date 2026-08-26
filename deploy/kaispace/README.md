@@ -132,10 +132,24 @@ curl -s http://127.0.0.1:8090/api/health; echo
 
 ```bash
 cd /var/www
-git clone git@github.com:DingkyWingky/kaispace_website.git landing
+# --branch dev-aga, NOT the default. The landing repo's `main` is a single
+# commit from 16 Aug — the initial import, 67 commits behind. The branch the
+# landing team treats as current is dev-aga, and cloning without naming it
+# silently deploys the import instead: no /perusahaan, no /segera, no
+# floorplan, and none of the console work.
+git clone --branch dev-aga git@github.com:DingkyWingky/kaispace_website.git landing
 cd landing
 npm ci
 npm run build          # → dist/, aset di dist/landing-assets/
+```
+
+Sudah terlanjur clone tanpa branch? Pindahkan tanpa clone ulang:
+
+```bash
+cd /var/www/landing
+git fetch origin dev-aga
+git checkout dev-aga
+npm ci && npm run build
 ```
 
 Sajikan `dist/` di `127.0.0.1:8080`. Paling sederhana lewat nginx host
