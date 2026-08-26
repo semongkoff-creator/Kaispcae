@@ -1,0 +1,78 @@
+# LiveKit server configuration — KaiSpace SFU
+#
+# Deliberately minimal. Every setting below is here because this deployment
+# needs it; nothing is copied in "just in case", because an option nobody
+# understands is an option nobody will dare change later.
+
+# The HTTP/WebSocket port clients connect to. Kept on plain HTTP and put
+# behind Caddy for TLS (see docker-compose.yml), rather than using LiveKit's
+# own certificate handling: Caddy is doing that job anyway for the TURN/TLS
+# listener below, and one thing renewing certificates is easier to reason
+# about than two.
+port: 7880
+
+rtc:
+  # The UDP range media actually flows over.
+  #
+  # 200 ports, not the 10,000 LiveKit defaults to. One port is consumed per
+  # participant connection, so 200 covers roughly 200 simultaneous people —
+  # far past the 30 this is being built for — while staying a firewall rule a
+  # human can read and an infra team will actually approve. Widen it the day
+  # the number of concurrent participants gets close, not before.
+  port_range_start: 50000
+  port_range_end: 50200
+
+  # TCP fallback for networks that drop UDP outright. Slower and less pleasant
+  # than UDP, and still far better than a participant who simply cannot
+  # connect — which is the case this exists for.
+  tcp_port: 7881
+
+  # Tells LiveKit to work out its own public address. Correct on a plain VPS
+  # with a public IP; set `use_external_ip: false` and `node_ip` explicitly if
+  # this ever moves behind NAT.
+  use_external_ip: true
+
+# Built-in TURN over TLS, on 5349.
+#
+# 5349 and not 443, because Caddy needs 443 for the WebSocket API and the two
+# cannot share a TCP port. The API is the one that must always get through —
+# without it a client cannot even attempt to join — so it takes 443, where it
+# is indistinguishable from ordinary HTTPS traffic.
+#
+# 5349 is the registered TURNS port and is allowed through far more often than
+# the bare 3478 this deployment has today, which has no TLS variant at all: a
+# user behind a firewall that drops UDP and non-standard TCP is currently
+# stuck with no path whatsoever. This is a real improvement, not a complete
+# answer.
+#
+# If 5349 turns out to be blocked on the office network — worth testing early,
+# see the README — the fix is a second IP for the machine so TURN can have its
+# own 443, or SNI-based demultiplexing on one. Both add moving parts, so
+# neither is worth doing before there is evidence they are needed.
+turn:
+  enabled: true
+  domain: LIVEKIT_DOMAIN_PLACEHOLDER
+  tls_port: 5349
+  # UDP TURN is left off: clients that can reach UDP at all will use the
+  # rtc.port_range above directly, so a second UDP path earns nothing.
+  udp_port: 0
+  # Certificates come from certbot on the host (README step 3), mounted
+  # read-only. The same files Caddy uses for the API — one issuer, two
+  # consumers, no ACME client racing another for the same domain.
+  cert_file: /etc/livekit/certs/live/LIVEKIT_DOMAIN_PLACEHOLDER/fullchain.pem
+  key_file: /etc/livekit/certs/live/LIVEKIT_DOMAIN_PLACEHOLDER/privkey.pem
+
+# Keys come from the environment (LIVEKIT_KEYS in .env), never from this file —
+# it is committed to git and they are not.
+
+logging:
+  level: info
+  # Structured output, so a log aggregator can read it later without regex.
+  json: true
+
+# Single node, so no Redis.
+#
+# LiveKit only needs Redis to coordinate MULTIPLE server instances. One node
+# serving one office does not, and adding it now would mean another container
+# to run, monitor and back up in exchange for nothing. Add it on the day a
+# second node does.

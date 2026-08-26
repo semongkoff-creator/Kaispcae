@@ -1,0 +1,31 @@
+# Caddy terminates TLS for LiveKit's WebSocket/API port, and does nothing else.
+#
+# A page served over HTTPS is forbidden from opening an insecure WebSocket, so
+# something has to put TLS in front of LiveKit's plain-HTTP port 7880. That is
+# the whole job.
+#
+# Media never passes through here. It arrives directly on LiveKit's UDP range
+# (50000-50200), or on its TURN/TLS listener at 5349 for clients that cannot
+# use UDP at all. A reverse proxy in that path would add a hop to every packet
+# and buy nothing.
+
+{
+	# No ACME. Certificates come from certbot on the host (see README step 3),
+	# and are mounted read-only into this container and into LiveKit's.
+	#
+	# One issuer with two consumers, rather than Caddy fetching its own while
+	# LiveKit needs the same certificate for TURN — which would mean either two
+	# ACME clients racing for the same domain, or copying files out of Caddy's
+	# internal storage, whose layout differs between Caddy versions and fails
+	# silently when it changes.
+	auto_https off
+}
+
+https://LIVEKIT_DOMAIN_PLACEHOLDER {
+	tls /certs/live/LIVEKIT_DOMAIN_PLACEHOLDER/fullchain.pem /certs/live/LIVEKIT_DOMAIN_PLACEHOLDER/privkey.pem
+
+	# LiveKit speaks HTTP and WebSocket on the same port and upgrades in
+	# place, so a plain reverse_proxy handles both — no websocket directive
+	# needed.
+	reverse_proxy localhost:7880
+}

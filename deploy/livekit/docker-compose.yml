@@ -1,0 +1,49 @@
+# LiveKit SFU — runs on its OWN machine, not beside the app.
+#
+# Not a preference. The existing host carries around twenty containers on 8 GB
+# — five PostgreSQL, four Redis, coturn, rustdesk, n8n, a second tenant stack —
+# and an SFU is bound by CPU and network interrupts, which is what that box has
+# least of.
+#
+# Bandwidth is not the constraint anywhere: the Vultr pool sits at 6.6% used
+# (2.79 of 44.38 TB), and this adds perhaps 1 TB a month. The measured uplink
+# on the existing box is ~480 Mbps against the ~93 Mbps an all-hands needs.
+
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    # Host networking, which LiveKit genuinely requires rather than merely
+    # prefers. Media arrives on 200 UDP ports and Docker's userland proxy
+    # would add a hop to every packet on every one of them; more importantly,
+    # ICE candidates are built from the address LiveKit believes it has, and
+    # behind a bridge that address is wrong.
+    network_mode: host
+    command: --config /etc/livekit/livekit.yaml
+    environment:
+      # "key: secret" pairs, generated once (README step 4) and kept in .env —
+      # never in a file that is committed.
+      LIVEKIT_KEYS: ${LIVEKIT_KEYS:?LIVEKIT_KEYS must be set — see deploy/livekit/README.md}
+    volumes:
+      - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
+      # certbot's directory, read-only. LiveKit needs the certificate for its
+      # TURN/TLS listener; it never renews anything itself.
+      - /etc/letsencrypt:/etc/livekit/certs:ro
+
+  # TLS in front of LiveKit's plain-HTTP API port, and nothing else. Media does
+  # not pass through here — see the Caddyfile.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /etc/letsencrypt:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - livekit
+
+volumes:
+  caddy_data:
+  caddy_config:
