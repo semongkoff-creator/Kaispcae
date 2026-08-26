@@ -563,7 +563,7 @@ export function ChatPanel({
             <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">Chat</span>
           </div>
 
-          <div className="flex gap-1 px-3 pt-2 pb-1 overflow-x-auto">
+          <div className="flex flex-wrap gap-1 px-3 pt-2 pb-1">
             {channels.map((c) => (
               <Tooltip key={c.id} label={`#${c.name}`} detail="Pindah ke channel ini." wrapperClassName="shrink-0">
                 <button
