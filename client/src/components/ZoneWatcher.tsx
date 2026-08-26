@@ -29,6 +29,7 @@ interface ZoneWatcherProps {
   currentZoneIdRef: MutableRefObject<string | null>;
   onZoneChange: (zone: { id: string; name: string } | null) => void;
   onMeetingZoneChange: (zoneId: string | null) => void;
+  onRecordZoneChange: (zoneId: string | null) => void;
   emitZoneEnter: (zoneId: string) => void;
   emitZoneExit: (zoneId: string) => void;
   emitWorkMode: (mode: WorkMode, zoneId?: string, awayReason?: string) => void;
@@ -39,6 +40,7 @@ export function ZoneWatcher({
   currentZoneIdRef,
   onZoneChange,
   onMeetingZoneChange,
+  onRecordZoneChange,
   emitZoneEnter,
   emitZoneExit,
   emitWorkMode,
@@ -70,6 +72,15 @@ export function ZoneWatcher({
   // Purely derived; also feeds the A11 presence status below.
   const meetingZone = useMemo(
     () => findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'meeting')),
+    [localPlayer.x, localPlayer.y, zones],
+  );
+
+  // Record Area zone detection — mirrors meetingZone above exactly, but for
+  // the SEPARATE screen-recording feature (never the Lark-meeting one). The
+  // new zone-gated recording panel (App.tsx) renders only while the local
+  // avatar is inside a Zone of type 'record'.
+  const recordZone = useMemo(
+    () => findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'record')),
     [localPlayer.x, localPlayer.y, zones],
   );
 
@@ -260,6 +271,12 @@ export function ZoneWatcher({
   useEffect(() => {
     onMeetingZoneChange(meetingZone?.id ?? null);
   }, [meetingZone?.id, onMeetingZoneChange]);
+
+  // Same reporting pattern as meetingZone above — App renders the new
+  // Record Area panel off this.
+  useEffect(() => {
+    onRecordZoneChange(recordZone?.id ?? null);
+  }, [recordZone?.id, onRecordZoneChange]);
 
   return null;
 }

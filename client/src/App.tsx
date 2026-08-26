@@ -434,6 +434,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // App no longer subscribes to the local position at all. Only the RESULT
   // lands here, and only when it changes.
   const [meetingZoneId, setMeetingZoneId] = useState<string | null>(null);
+  const [recordZoneId, setRecordZoneId] = useState<string | null>(null);
   // Kept for the workMode effect that ZoneWatcher owns; the setters stay here
   // because the presence menu writes them directly.
   const setManualStatus = useGameStore((s) => s.setManualStatus);
@@ -1739,6 +1740,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         currentZoneIdRef={currentZoneIdRef}
         onZoneChange={setCurrentZone}
         onMeetingZoneChange={setMeetingZoneId}
+        onRecordZoneChange={setRecordZoneId}
         emitZoneEnter={emitZoneEnter}
         emitZoneExit={emitZoneExit}
         emitWorkMode={emitWorkMode}
