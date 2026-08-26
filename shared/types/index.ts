@@ -1420,7 +1420,25 @@ export const DISCONNECT_DEBOUNCE_MS = 1000;
 // since the local count can only see peers this client is connected to.
 // Two copies of the number that could drift apart is exactly the bug this
 // placement avoids.
-export const MAX_SCREEN_SHARES_PER_ROOM = 4;
+//
+// Lowered 4 -> 1 after four simultaneous shares took people's VOICE away in
+// production, which is the opposite of what the priority markings were meant
+// to guarantee. The reason they could not protect it: networkPriority only
+// arbitrates WITHIN one RTCPeerConnection, and a mesh gives every peer its
+// own. A presenter's microphone to one person competes with their screen to
+// the other twelve with no priority relationship between those connections at
+// all — the office uplink arbitrates, and it knows nothing about WebRTC.
+//
+// The arithmetic says the same thing. mediaBudget's aggregate is per
+// PRESENTER, so it has no idea anyone else is sharing: in a 14-person room one
+// share is ~9 Mbps up, and four is ~36 Mbps out of one office link, while
+// every viewer decodes four 1080p streams at once.
+//
+// 1 is the honest number for a mesh, and matches what comparable products
+// allow. It goes back up once media runs through an SFU, where a presenter
+// uploads once and the server fans out — the cap exists because of the
+// topology, not because of the product.
+export const MAX_SCREEN_SHARES_PER_ROOM = 1;
 
 // §6 — mirrors the spec's own three-state enum name
 // (full_visible/translucent/not_visible) for computeVisibility's result.
