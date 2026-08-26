@@ -24,3 +24,16 @@ backups/
 # batch (server/scripts/seedDcmAccounts.ts reads it directly at run time).
 # Never commit.
 DCM_Password_List.xlsx
+
+# Database dumps and upload archives pulled off a server during the migration
+# (kaitech-db.sql.gz, kaitech-uploads.tar.gz). These are real production data —
+# every account, every session, every uploaded file — and they land in the repo
+# root, one `git add -A` away from being published. Ignored by pattern rather
+# than by name so the next restore does not have to remember to add its own.
+# Anchored to the repo root with a leading slash, which is where a dump
+# lands. An unanchored *.sql would also match server/prisma/migrations/*/
+# migration.sql — the existing ones stay tracked, but every FUTURE migration
+# would be silently ignored and the schema would drift on the next deploy.
+/*.sql
+*.sql.gz
+*-uploads.tar.gz
