@@ -642,6 +642,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
       // default; irrelevant for 'focusArea' (proximity is already blocked by
       // workMode==='focus' in useProximity, independent of any zone flag) and
       // for 'impassable' (Item #9, excluded from the zones list entirely).
+      // 'recordArea' is force-set to `false` HERE (not left to infer, unlike
+      // mapLocation above) — RoomEditorPage.tsx's dialog for it never even
+      // offers an isolate toggle (unlike privateArea/mapLocation/meetingArea),
+      // and the product decision is that a Record Area is a "record here"
+      // marker, not a chat/audio zone: walking into one to start/pause/stop a
+      // recording must never cut off proximity audio/video with people
+      // standing outside it, or dim the rest of the room.
       const id = crypto.randomUUID();
       const zoneType = effect === 'focusArea' ? 'focus' : effect === 'meetingArea' ? 'meeting' : effect === 'recordArea' ? 'record' : 'desk';
       // Matches EFFECTS' own legend colors above (RoomEditorPage.tsx) exactly
@@ -659,7 +666,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
         : effect === 'focusArea' ? '#f59e0b'
         : effect === 'recordArea' ? '#db2777'
         : undefined;
-      d.areas.push({ id, effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, color, zoneType, areaId, audioIsolated, capacity, memberOnly });
+      // See the comment above `id` for why 'recordArea' can't just fall
+      // through to whatever `audioIsolated` the caller passed (always
+      // `undefined` today) — force it to `false` explicitly, the same
+      // "explicit, not inferred" posture mapLocation's own default gets in
+      // layerDataToLegacy (shared/mapLayers.ts), so it round-trips through
+      // Room.layerData.areas JSON storage as a real stored `false`.
+      const resolvedAudioIsolated = effect === 'recordArea' ? false : audioIsolated;
+      d.areas.push({ id, effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, color, zoneType, areaId, audioIsolated: resolvedAudioIsolated, capacity, memberOnly });
       areasDirty = true; pushHistory(snap); commit();
       return id;
     },

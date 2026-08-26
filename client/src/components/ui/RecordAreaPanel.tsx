@@ -27,9 +27,9 @@ export function RecordAreaPanel({ canRecord, hasTarget, isRecordingMine, isPause
   if (isRecordingMine) {
     return (
       <div className="absolute top-16 right-1/2 -translate-x-48 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-600 text-white text-xs font-medium shadow-lg pointer-events-auto">
-        <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+        <span className={`w-1.5 h-1.5 rounded-full bg-white ${isPaused ? '' : 'animate-pulse'}`} />
         {isPaused ? 'Rekaman dijeda' : 'Merekam'}
-        <button onClick={isPaused ? onResume : onPause} title={isPaused ? 'Lanjutkan' : 'Jeda'} className="ml-1 cursor-pointer">
+        <button onClick={isPaused ? onResume : onPause} disabled={uploading} title={isPaused ? 'Lanjutkan' : 'Jeda'} className="ml-1 cursor-pointer disabled:opacity-60">
           {isPaused ? <PlayCircleFill size={14} /> : <PauseFill size={14} />}
         </button>
         <button onClick={onStop} disabled={uploading} title={uploading ? 'Uploading...' : 'Stop'} className="cursor-pointer disabled:opacity-60">

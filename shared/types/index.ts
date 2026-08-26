@@ -1751,7 +1751,11 @@ export interface InteractiveApiCallResultPayload {
 // (label required to look right); 'desk'/'focus' render a small floating
 // pill label instead; 'general' (or no type, for zones created before this
 // field existed) keeps the plain dashed-outline + centered name that was
-// already there.
+// already there; 'record' (Room Editor's "Record Area" tool) renders like
+// 'general' in-game but is what App.tsx keys off of to show RecordAreaPanel's
+// Start/Pause/Stop screen-recording panel while the local avatar stands
+// inside it — deliberately unconnected to 'meeting'/Lark VC, and never
+// audio-isolating (see shouldIsolateZoneAudio below).
 export type ZoneType = 'meeting' | 'desk' | 'focus' | 'general' | 'record';
 
 // Live lock state of one zone, broadcast to the room so every client can draw

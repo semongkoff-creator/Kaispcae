@@ -153,10 +153,11 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
     <div className="flex items-center gap-1.5">
       <button
         onClick={isPaused ? onResume : onPause}
+        disabled={uploading}
         title={isPaused ? 'Lanjutkan' : 'Jeda'}
         className={isSidebar
-          ? 'w-10 h-10 rounded-lg flex items-center justify-center bg-amber-500 text-white cursor-pointer'
-          : 'px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-amber-500 text-white border-amber-400'}
+          ? 'w-10 h-10 rounded-lg flex items-center justify-center bg-amber-500 text-white cursor-pointer disabled:opacity-60'
+          : 'px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-amber-500 text-white border-amber-400 disabled:opacity-60'}
       >
         {isPaused ? <PlayCircleFill size={isSidebar ? 16 : 12} /> : <PauseFill size={isSidebar ? 16 : 12} />}
         {!isSidebar && (isPaused ? 'Lanjutkan' : 'Jeda')}

@@ -945,6 +945,19 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
         ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px sans-serif'; ctx.fillText(`🎥 ${isolated ? '🔇' : '🔊'} ${a.name || 'Meeting'}`, zx + 4, zy + 14);
         continue;
       }
+      if (a.effect === 'recordArea') {
+        // Pink, matching EFFECTS' own toolbar legend color for this tool
+        // exactly (rgba(219,39,119,0.95)) — was previously falling through to
+        // the privateArea/mapLocation fallback below and rendering with Map
+        // Location's purple instead. No isolation badge (unlike meetingArea
+        // above): a Record Area never audio-isolates — see editorStore.ts's
+        // addArea, which force-sets audioIsolated:false for it — so there's
+        // no per-area isolation state worth showing, same as focusArea above.
+        ctx.fillStyle = 'rgba(219,39,119,0.16)'; ctx.fillRect(zx, zy, zw, zh);
+        ctx.strokeStyle = 'rgba(219,39,119,0.95)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(zx, zy, zw, zh); ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px sans-serif'; ctx.fillText(`🎬 ${a.name || 'Record Area'}`, zx + 4, zy + 14);
+        continue;
+      }
       if (a.effect === 'doorArea') {
         // Tan, matching the per-tile Door effect's color — only blocks
         // movement while a password is set AND unlocked for that socket
@@ -1657,7 +1670,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         s.setSelection({ x: fx, y: fy, w: 0, h: 0 });
         dragRef.current = { mode: 'impassableAreaRect', anchor: { x: fx, y: fy }, effect: targetEffect };
       } else { // mapLocation | privateArea | focusArea | meetingArea | restrictedArea — rectangular
-        if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y, eff as 'mapLocation' | 'privateArea' | 'focusArea' | 'meetingArea' | 'restrictedArea'); }
+        if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y, eff as 'mapLocation' | 'privateArea' | 'focusArea' | 'meetingArea' | 'restrictedArea' | 'recordArea'); }
         else { s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 }); dragRef.current = { mode: 'areaRect', anchor: { x: t.x, y: t.y } }; }
       }
     }

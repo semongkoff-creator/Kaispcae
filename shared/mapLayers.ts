@@ -159,6 +159,12 @@ export interface AreaEffect {
   // hasn't unlocked THIS area id yet (see server/src/socket/doorLock.ts's
   // isDoorAreaUnlocked). Excluded from the zones list like impassable/
   // wallArea (never a chat/audio zone).
+  // 'recordArea' — a zone-gated Start/Pause/Stop panel for the client-local
+  // screen-recording feature (RecordAreaPanel.tsx), deliberately unconnected
+  // to Lark meetings/'meetingArea'. Converts to a plain Zone like every
+  // other non-impassable area below, but — unlike every other zone type —
+  // never audio-isolates (see editorStore.ts's addArea, which force-sets
+  // audioIsolated:false for it rather than leaving it to infer).
   effect: 'privateArea' | 'mapLocation' | 'impassable' | 'focusArea' | 'wallArea' | 'meetingArea' | 'restrictedArea' | 'doorArea' | 'recordArea';
   name: string;
   x: number;

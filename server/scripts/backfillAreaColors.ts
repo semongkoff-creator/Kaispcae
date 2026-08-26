@@ -27,6 +27,7 @@ const COLOR_BY_EFFECT: Record<string, string> = {
   mapLocation: '#c084fc',
   privateArea: '#60a5fa',
   focusArea: '#f59e0b',
+  recordArea: '#db2777',
 };
 
 const BATCH_SIZE = 200;
