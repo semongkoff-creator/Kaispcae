@@ -21,7 +21,7 @@ SFU menambah sekitar 1 TB per bulan.
 - VPS baru, Ubuntu/Debian, **4 vCPU / 8 GB**
 - Docker + Docker Compose plugin
 - Sebuah subdomain yang A-record-nya menunjuk ke IP mesin ini
-  (mis. `livekit.dev-kaitech.com`)
+  (mis. `livekit.kaispace.io`)
 - Port yang harus terbuka di firewall:
 
 | Port | Protokol | Untuk |
@@ -42,8 +42,8 @@ infra.
 ### 1. Salin folder ini ke server
 
 ```bash
-scp -r deploy/livekit root@<IP-BARU>:/opt/livekit
-ssh root@<IP-BARU>
+scp -r deploy/livekit root@45.32.121.66:/opt/livekit
+ssh root@45.32.121.66
 cd /opt/livekit
 ```
 
@@ -52,7 +52,7 @@ cd /opt/livekit
 Ganti `LIVEKIT_DOMAIN_PLACEHOLDER` di **dua** file:
 
 ```bash
-DOMAIN=livekit.dev-kaitech.com
+DOMAIN=livekit.kaispace.io
 sed -i "s/LIVEKIT_DOMAIN_PLACEHOLDER/$DOMAIN/g" livekit.yaml Caddyfile
 grep -rn "$DOMAIN" livekit.yaml Caddyfile   # harus muncul 4x
 ```
