@@ -1,6 +1,6 @@
 import { useState, useRef, useLayoutEffect, RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { RecordCircleFill, StopCircleFill, Download } from 'react-bootstrap-icons';
+import { RecordCircleFill, StopCircleFill, Download, PlayCircleFill, X } from 'react-bootstrap-icons';
 import { Recording } from '@kaispace/shared';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { api, ApiError } from '@/services/api';
@@ -85,6 +85,8 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
   const [showList, setShowList] = useState(false);
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [error, setError] = useState('');
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewTitle, setPreviewTitle] = useState('');
   const recordButtonRef = useRef<HTMLButtonElement>(null);
   const recordingsButtonRef = useRef<HTMLButtonElement>(null);
   const picker = useFlyoutPosition(recordButtonRef, isSidebar && showPicker);
@@ -126,6 +128,22 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Gagal download rekaman');
     }
+  };
+
+  const handlePreview = async (rec: Recording) => {
+    try {
+      const url = await api.previewRecording(rec.id);
+      setPreviewUrl(url);
+      setPreviewTitle(rec.title);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Gagal memuat preview');
+    }
+  };
+
+  const closePreview = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    setPreviewTitle('');
   };
 
   const recordButton = isRecordingMine ? (
@@ -228,9 +246,14 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
               them if admin+), and the download route re-checks the
               same rule independently anyway. */}
           {rec.status === 'done' && (
-            <button onClick={() => handleDownload(rec)} title="Download" className="text-purple-500 hover:text-purple-700 cursor-pointer shrink-0">
-              <Download size={13} />
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={() => handlePreview(rec)} title="Preview" className="text-purple-500 hover:text-purple-700 cursor-pointer">
+                <PlayCircleFill size={13} />
+              </button>
+              <button onClick={() => handleDownload(rec)} title="Download" className="text-purple-500 hover:text-purple-700 cursor-pointer">
+                <Download size={13} />
+              </button>
+            </div>
           )}
         </div>
       ))}
@@ -254,6 +277,22 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
     )
   );
 
+  const previewModal = previewUrl && createPortal(
+    <div className="fixed inset-0 z-[10000] bg-black/80 flex items-center justify-center p-4" onClick={closePreview}>
+      <div className="relative max-w-3xl w-full" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-white text-sm font-medium truncate">{previewTitle}</p>
+          <button onClick={closePreview} title="Tutup" className="text-white hover:text-gray-300 cursor-pointer">
+            <X size={20} />
+          </button>
+        </div>
+        {/* eslint-disable-next-line jsx-a11y/media-has-caption -- recordings have no caption track */}
+        <video src={previewUrl} controls autoPlay className="w-full rounded-lg" />
+      </div>
+    </div>,
+    document.body,
+  );
+
   if (isSidebar) {
     return (
       <>
@@ -265,6 +304,7 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
           {recordingsButton}
           {listPanel}
         </div>
+        {previewModal}
       </>
     );
   }
@@ -277,6 +317,7 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
       </div>
       {pickerPanel}
       {listPanel}
+      {previewModal}
     </div>
   );
 }
