@@ -101,6 +101,10 @@ model User {
   // rooms", which is far narrower than "may configure the whole workspace,
   // set shift rules, and read everyone's attendance".
   workspaceRole           String                    @default("member")
+  // Pure label ("who's freelance vs fulltime") — no other feature reads or
+  // branches on this. Same plain-string, app-layer-validated pattern as
+  // workspaceRole above, not a DB enum.
+  employmentType          String                    @default("fulltime")
   // IANA zone (e.g. "Asia/Jakarta"). All timestamps are stored UTC in the DB
   // and rendered in this zone — Calendar and Attendance both depend on it.
   timezone                String                    @default("Asia/Jakarta")

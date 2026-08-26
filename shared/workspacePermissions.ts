@@ -105,3 +105,10 @@ export const WORKSPACE_ROLE_LABELS: Record<WorkspaceRole, string> = {
   admin: 'Admin',
   member: 'Anggota',
 };
+
+export type EmploymentType = 'fulltime' | 'freelance';
+
+export const EMPLOYMENT_TYPE_LABELS: Record<EmploymentType, string> = {
+  fulltime: 'Fulltime',
+  freelance: 'Freelance',
+};
