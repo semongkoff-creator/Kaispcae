@@ -160,7 +160,16 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
         return;
       }
 
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus' : 'video/webm';
+      // MP4 first, WebM fallback — isTypeSupported() never throws, so a
+      // browser with no MP4 MediaRecorder support (e.g. Firefox) silently
+      // falls through to the existing WebM chain with zero behavior change.
+      const mimeType = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2')
+        ? 'video/mp4;codecs=avc1,mp4a.40.2'
+        : MediaRecorder.isTypeSupported('video/mp4')
+        ? 'video/mp4'
+        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+        ? 'video/webm;codecs=vp8,opus'
+        : 'video/webm';
       const recorder = new MediaRecorder(stream, { mimeType });
       chunksRef.current = [];
 
@@ -171,7 +180,11 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
       recorder.onstop = async () => {
         displayStream?.getTracks().forEach((t) => t.stop());
         displayStream = null;
-        const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+        // recorder.mimeType is the browser's own authoritative value — it
+        // may normalize/drop codec parameters even if the request above
+        // included them, so this is more reliable than reusing the
+        // `mimeType` const from startCapture.
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'video/webm' });
         chunksRef.current = [];
         setUploading(true);
         try {

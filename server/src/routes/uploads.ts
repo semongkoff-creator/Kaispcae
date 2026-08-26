@@ -82,15 +82,17 @@ uploads.post('/uploads', authenticateToken, upload.single('file'), async (req: A
 // RECORDING_MAX_DURATION_MS), so it needs a much larger size ceiling than
 // ordinary Add Media uploads — kept as its own multer instance rather than
 // raising the 10MB limit above for everyone.
+const RECORDING_MIME_TYPES = new Set(['video/webm', 'video/mp4']);
+
 const recordingUpload = multer({
   storage,
   limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB
-  fileFilter: (_req, file, cb) => cb(null, file.mimetype === 'video/webm'),
+  fileFilter: (_req, file, cb) => cb(null, RECORDING_MIME_TYPES.has(file.mimetype)),
 });
 
 uploads.post('/uploads/recording', authenticateToken, recordingUpload.single('file'), async (req: AuthRequest, res: Response) => {
   if (!req.file) {
-    return res.status(400).json({ error: 'No file provided, or not a video/webm recording' });
+    return res.status(400).json({ error: 'No file provided, or not a supported recording format (webm/mp4)' });
   }
   return res.status(201).json({ url: `/api/uploads/${req.file.filename}` });
 });

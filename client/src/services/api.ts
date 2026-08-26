@@ -73,7 +73,13 @@ async function uploadFile(path: string, file: File, roomSlugOverride?: string): 
 async function uploadRecordingBlob(blob: Blob): Promise<{ url: string }> {
   const token = localStorage.getItem('vm_token');
   const form = new FormData();
-  form.append('file', blob, 'recording.webm');
+  // Extension must match the blob's real container format — the server's
+  // disk storage derives the saved file's on-disk extension from THIS
+  // filename (see routes/uploads.ts's storage.filename), not from the
+  // Content-Type header, so a mismatch here would silently mislabel the
+  // stored file even though the bytes themselves are correct.
+  const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+  form.append('file', blob, `recording.${ext}`);
   const roomSlug = localStorage.getItem('vm_last_room_slug');
   if (roomSlug) form.append('roomSlug', roomSlug);
   const res = await fetch(`${API_BASE}/uploads/recording`, {
