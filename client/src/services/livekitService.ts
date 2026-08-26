@@ -20,6 +20,31 @@ import { api } from './api';
 // complete mirror yet — Fase A is connect, microphone, camera and remote
 // tracks. Proximity subscription (Fase B) and screen share (Fase C) follow.
 
+/**
+ * One person in range, as useProximity reports them.
+ *
+ * Deliberately a local shape rather than the shared ProximityPlayer: the gain
+ * is already computed by the caller (calcGain, or 1 for a zone-mate), so this
+ * service never needs to know the distance curve — only the answer.
+ */
+export interface ProximityEntry {
+  /** LiveKit identity — the ACCOUNT id, not the socket id. */
+  userId?: string;
+  distanceTiles: number;
+  viaZone?: boolean;
+  gain: number;
+}
+
+/**
+ * How many nearby people's cameras to pull at once.
+ *
+ * The mesh cap existed because every camera was a separate encode on the
+ * SENDER. Here the sender encodes once regardless, so this bounds only what
+ * this browser decodes — which is why it can be the same number without the
+ * old worry about what it costs everyone else.
+ */
+const MAX_VIDEO_SUBSCRIPTIONS = 6;
+
 type RemoteStreamCb = (identity: string, stream: MediaStream) => void;
 type SpeakingCb = (identity: string, speaking: boolean) => void;
 type ConnectionCb = (state: 'connecting' | 'connected' | 'disconnected' | 'failed') => void;
@@ -202,6 +227,109 @@ class LiveKitService {
   setParticipantVolume(identity: string, volume: number): void {
     const participant = this.room?.remoteParticipants.get(identity);
     participant?.setVolume(Math.max(0, Math.min(1, volume)));
+  }
+
+  // ── Screen share ─────────────────────────────────────────────────────────
+
+  /**
+   * Start or stop sharing this screen.
+   *
+   * One call, one publication, whatever the room size. The mesh version had to
+   * addTrack on every peer connection and renegotiate each one, which is where
+   * both the black-tile bug and the m-line ordering failure came from — and
+   * why MAX_SCREEN_SHARES_PER_ROOM had to be cut to 1: at ~600 kbps per viewer
+   * on the presenter's own uplink, four simultaneous shares asked around
+   * 36 Mbps of one office connection and took people's voices with it.
+   *
+   * Here the presenter uploads once and the server fans out, so that cap is a
+   * property of the mesh and not of the product. It can go back up for rooms
+   * on this path.
+   */
+  async setScreenShareEnabled(enabled: boolean): Promise<{ success: boolean; error?: string }> {
+    const room = this.room;
+    if (!room) return { success: false, error: 'Belum tersambung ke room media.' };
+    try {
+      await room.localParticipant.setScreenShareEnabled(enabled, {
+        // Matches the mesh's own capture bounds (webrtcService's
+        // SCREEN_SHARE_CONSTRAINTS): a shared screen is mostly static text, so
+        // resolution is what keeps it readable and frames are what can be
+        // dropped when the link is tight.
+        resolution: { width: 1920, height: 1080, frameRate: 15 },
+      });
+      return { success: true };
+    } catch (err) {
+      // The user dismissing the OS picker lands here and is not a failure
+      // worth reporting as one — same distinction webrtcService draws between
+      // NotAllowedError and a genuine capture problem.
+      const name = err instanceof DOMException ? err.name : '';
+      return {
+        success: false,
+        error: name === 'NotAllowedError' ? 'Share layar dibatalkan.' : 'Gagal memulai share layar.',
+      };
+    }
+  }
+
+  isScreenSharing(): boolean {
+    return this.room?.localParticipant.isScreenShareEnabled ?? false;
+  }
+
+  /** The local screen capture, for the presenter's own preview tile. */
+  getScreenStream(): MediaStream | null {
+    const pub = this.room?.localParticipant.getTrackPublication(Track.Source.ScreenShare);
+    const track = pub?.track?.mediaStreamTrack;
+    return track ? new MediaStream([track]) : null;
+  }
+
+  // ── Proximity ────────────────────────────────────────────────────────────
+
+  /**
+   * Apply one proximity tick.
+   *
+   * The RULES do not live here and are not changing: useProximity.ts still
+   * decides who is audible — zone isolation, Focus/DND, distance falloff,
+   * table grouping, Spotlight — and this is only what its answer is fed into.
+   * On the mesh that was connect/disconnect a peer connection; here it is
+   * subscribe/unsubscribe a track that the server is already holding.
+   *
+   * That difference is the whole reason this migration is worth doing. A mesh
+   * had to renegotiate to change who you could hear, and renegotiation is
+   * where the m-line ordering failure came from. Subscribing touches no SDP at
+   * all, so walking past somebody can no longer break a call.
+   */
+  applyProximity(nearby: ProximityEntry[]): void {
+    const room = this.room;
+    if (!room) return;
+
+    // Ranked the same way the mesh ranked it: zone-mates first, then closest.
+    // Only the top few get video — audio is cheap and everyone in range gets
+    // it, cameras are not and never were.
+    const ranked = [...nearby].sort((a, b) => {
+      if (!!a.viaZone !== !!b.viaZone) return a.viaZone ? -1 : 1;
+      return a.distanceTiles - b.distanceTiles;
+    });
+    const videoAllowed = new Set(ranked.slice(0, MAX_VIDEO_SUBSCRIPTIONS).map((p) => p.userId).filter(Boolean));
+    const audible = new Map<string, ProximityEntry>();
+    for (const p of ranked) if (p.userId) audible.set(p.userId, p);
+
+    for (const [identity, participant] of room.remoteParticipants) {
+      const entry = audible.get(identity);
+
+      for (const pub of participant.trackPublications.values()) {
+        const isVideo = pub.kind === Track.Kind.Video;
+        // A screen share is never proximity-gated. Someone presenting is
+        // addressing the room, and the mesh treated it the same way — it went
+        // to every connected peer regardless of distance.
+        const isScreen = pub.source === Track.Source.ScreenShare;
+
+        const want = !!entry && (isScreen || !isVideo || videoAllowed.has(identity));
+        if (pub.isSubscribed !== want) pub.setSubscribed(want);
+      }
+
+      // Zone-mates hear each other at full volume however far apart they are;
+      // everyone else fades with distance. Identical to the mesh rule, and it
+      // has to be, because it is the same useProximity output driving it.
+      if (entry) this.setParticipantVolume(identity, entry.viaZone ? 1 : entry.gain);
+    }
   }
 }
 

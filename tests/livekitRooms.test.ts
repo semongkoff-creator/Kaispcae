@@ -97,6 +97,72 @@ test('identity is the KaiSpace user id end to end', () => {
   assert.ok(/participant\.identity/.test(service));
 });
 
+// ── Fase B: proximity ──────────────────────────────────────────────────────
+
+test('the proximity RULES stay in useProximity, untouched', () => {
+  const prox = readFileSync(resolve('client/src/hooks/useProximity.ts'), 'utf8');
+  // Zone isolation, Focus/DND, distance, table grouping, Spotlight — the most
+  // distinctive logic in the product, and none of it moves. Only what its
+  // answer is fed into changes.
+  assert.ok(prox.includes('shouldIsolateZoneAudio'), 'zone isolation stays here');
+  assert.ok(prox.includes("workMode === 'focus'"), 'Focus/DND stays here');
+  assert.equal(/livekit/i.test(prox), false, 'and it must know nothing about the transport');
+});
+
+test('proximity drives subscription, not connection', () => {
+  // On the mesh, changing who you can hear meant renegotiating — which is
+  // where the m-line ordering failure came from. Subscribing touches no SDP,
+  // so walking past somebody can no longer break a call.
+  assert.ok(/applyProximity/.test(service));
+  assert.ok(/setSubscribed\(want\)/.test(service));
+  assert.equal(/connectToPlayer|createOffer|setLocalDescription/.test(service), false,
+    'no peer-connection plumbing belongs on this path');
+});
+
+test('a screen share is never proximity-gated', () => {
+  // Someone presenting is addressing the room. The mesh sent a share to every
+  // connected peer regardless of distance, and that has to stay true.
+  assert.ok(/Track\.Source\.ScreenShare/.test(service));
+  assert.ok(/isScreen \|\| !isVideo/.test(service), 'audio and screen are ungated; cameras are ranked');
+});
+
+test('zone-mates hear each other at full volume, exactly as on the mesh', () => {
+  // Same rule, same source: it is the same useProximity output driving it.
+  assert.ok(/entry\.viaZone \? 1 : entry\.gain/.test(service));
+});
+
+test('only a bounded number of cameras are pulled at once', () => {
+  assert.ok(/MAX_VIDEO_SUBSCRIPTIONS/.test(service));
+  // Ranked the way the mesh ranked it: zone-mates first, then closest.
+  assert.ok(/viaZone \? -1 : 1/.test(service));
+  assert.ok(/distanceTiles - b\.distanceTiles/.test(service));
+});
+
+test('an account id, never a socket id, identifies a participant', () => {
+  const shared = readFileSync(resolve('shared/types/index.ts'), 'utf8');
+  // A socket id changes on reconnect, so a participant would return as a
+  // stranger. ProximityPlayer now carries both so the map and the SFU can be
+  // matched without a second lookup.
+  assert.ok(/userId\?: string;\n  distanceTiles/.test(shared), 'ProximityPlayer must carry userId');
+  assert.ok(/p\.userId/.test(service));
+});
+
+// ── Fase C: screen share ───────────────────────────────────────────────────
+
+test('a share is published once, not once per viewer', () => {
+  // The mesh addTrack'd on every peer connection and renegotiated each one —
+  // the origin of both the black-tile bug and the m-line failure, and why the
+  // simultaneous-share cap had to be cut to 1.
+  assert.ok(/setScreenShareEnabled/.test(service));
+  assert.equal(/for \(const peer of this\.peers/.test(service), false, 'no per-peer loop');
+});
+
+test('capture bounds match the mesh, and a cancelled picker is not an error', () => {
+  assert.ok(/width: 1920, height: 1080, frameRate: 15/.test(service),
+    'a shared screen is mostly text: resolution matters, frames can drop');
+  assert.ok(/NotAllowedError/.test(service), 'dismissing the OS picker is a choice, not a failure');
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

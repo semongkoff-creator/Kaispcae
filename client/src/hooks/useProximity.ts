@@ -112,14 +112,14 @@ export function computeProximity(
       // with distance) — an announcement should be uniformly audible, not
       // quieter the farther away you are.
       if (p.spotlightActive) {
-        return { id: p.id, distanceTiles, visibility: 'full_visible' as VisibilityStatus, viaZone: true };
+        return { id: p.id, userId: p.userId, distanceTiles, visibility: 'full_visible' as VisibilityStatus, viaZone: true };
       }
 
       // A3 Focus/DND — checked before table/zone/distance so it overrides every
       // auto-connect path (including a shared 'focus' zone: focus is meant to be
       // solo). If either side is in focus mode, they don't auto-connect.
       if (localFocus || p.workMode === 'focus') {
-        return { id: p.id, distanceTiles, visibility: 'not_visible' as VisibilityStatus };
+        return { id: p.id, userId: p.userId, distanceTiles, visibility: 'not_visible' as VisibilityStatus };
       }
 
       // Table membership: two people seated at chairs sharing a tableId are one
@@ -129,7 +129,7 @@ export function computeProximity(
       // identically. Standing clears seatFurnitureId, so this lapses on its own
       // and they fall back to plain distance below.
       if (localTable && seatedTable(p) === localTable) {
-        return { id: p.id, distanceTiles, visibility: 'full_visible' as VisibilityStatus, viaZone: true };
+        return { id: p.id, userId: p.userId, distanceTiles, visibility: 'full_visible' as VisibilityStatus, viaZone: true };
       }
 
       const remoteZone = audioZoneAt(pos);
@@ -140,12 +140,12 @@ export function computeProximity(
       if (localZone || remoteZone) {
         const sameZone = !!localZone && !!remoteZone && localZone.id === remoteZone.id;
         const visibility: VisibilityStatus = sameZone ? 'full_visible' : 'not_visible';
-        return { id: p.id, distanceTiles, visibility, viaZone: sameZone };
+        return { id: p.id, userId: p.userId, distanceTiles, visibility, viaZone: sameZone };
       }
 
       const visibility: VisibilityStatus =
         distanceTiles <= PROXIMITY_THRESHOLD ? 'full_visible' : distanceTiles <= TRANSLUCENT_THRESHOLD ? 'translucent' : 'not_visible';
-      return { id: p.id, distanceTiles, visibility };
+      return { id: p.id, userId: p.userId, distanceTiles, visibility };
     });
   }
 }

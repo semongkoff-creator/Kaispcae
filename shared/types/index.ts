@@ -1446,6 +1446,17 @@ export type VisibilityStatus = 'full_visible' | 'translucent' | 'not_visible';
 
 export interface ProximityPlayer {
   id: string;
+  // The account behind this player, when there is one.
+  //
+  // The id above is the socket/player id, which is what the mesh keyed peer
+  // connections on. LiveKit identifies participants by ACCOUNT id instead —
+  // deliberately, since a socket id changes on every reconnect and a
+  // participant would come back as a stranger — so the SFU path needs both,
+  // and this is the only place that already knows the pairing.
+  //
+  // Optional because a guest joined through an invite link has no account at
+  // all (see roomHandler.ts's JOIN_ROOM guest branch).
+  userId?: string;
   distanceTiles: number;
   visibility: VisibilityStatus;
   // true when connected because both players share a private Zone (see
