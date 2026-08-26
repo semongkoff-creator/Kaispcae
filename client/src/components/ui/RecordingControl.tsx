@@ -202,7 +202,7 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
       </div>,
       document.body,
     ) : (
-      <div className="absolute bottom-full mb-1.5 left-0 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50">
+      <div className="absolute top-full mt-1.5 left-0 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50">
         {pickerContent}
       </div>
     )
@@ -248,7 +248,7 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
       </div>,
       document.body,
     ) : (
-      <div className="absolute bottom-full mb-1.5 right-0 w-64 max-h-64 overflow-y-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50">
+      <div className="absolute top-full mt-1.5 right-0 w-64 max-h-64 overflow-y-auto bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 p-2 z-50">
         {listContent}
       </div>
     )

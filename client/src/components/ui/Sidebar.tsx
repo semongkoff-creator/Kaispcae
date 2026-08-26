@@ -1,9 +1,7 @@
 import { ReactNode } from 'react';
-import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, ShieldLock, Buildings, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill, GearFill, HourglassSplit } from 'react-bootstrap-icons';
+import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, LockFill, UnlockFill, ShieldLock, Buildings, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill, GearFill, HourglassSplit } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
-import { RecordingControl } from './RecordingControl';
-import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { Theme } from '@/hooks/useTheme';
 import { ManualStatus } from '@/data/presence';
 import { Role } from '@kaispace/shared';
@@ -156,15 +154,6 @@ interface SidebarProps {
   showAddMediaPanel: boolean;
   onToggleAddMedia: () => void;
 
-  canRecord: boolean;
-  recordingTargets: { userId: string; name: string }[];
-  activeRecording: ActiveRecordingInfo | null;
-  isRecordingMine: boolean;
-  recordingUploading: boolean;
-  roomSlug: string;
-  onStartRecording: (targetUserId: string, title: string) => void;
-  onStopRecording: () => void;
-
   // Back to the room list (Lobby) without logging out — distinct from
   // onLogout below, which clears the session entirely.
   onLeaveRoom: () => void;
@@ -261,14 +250,6 @@ export function Sidebar({
   onToggleMiniMode,
   showAddMediaPanel,
   onToggleAddMedia,
-  canRecord,
-  recordingTargets,
-  activeRecording,
-  isRecordingMine,
-  recordingUploading,
-  roomSlug,
-  onStartRecording,
-  onStopRecording,
   onLeaveRoom,
   onLogout,
   onOpenSettings,
@@ -514,27 +495,6 @@ export function Sidebar({
               <Tooltip label="Tambah Media" detail="Tempel gambar, video, atau file ke dalam room." side="right" wrapperClassName="w-full">
                 <MenuRow icon={<ImageFill size={15} />} label="Add Media" active={showAddMediaPanel} onClick={closeAnd(onToggleAddMedia)} />
               </Tooltip>
-            )}
-
-            {canRecord && (
-              <div className="flex items-center gap-3 px-3 py-2">
-                <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-purple-50 dark:bg-gray-700 text-purple-600 dark:text-purple-300">
-                  <RecordCircleFill size={15} />
-                </span>
-                <span className="flex-1 text-sm text-gray-700 dark:text-gray-200">Recording</span>
-                <div className="flex items-center gap-1 shrink-0">
-                  <RecordingControl
-                    variant="sidebar"
-                    recordingTargets={recordingTargets}
-                    activeRecording={activeRecording}
-                    isRecordingMine={isRecordingMine}
-                    uploading={recordingUploading}
-                    roomSlug={roomSlug}
-                    onStart={onStartRecording}
-                    onStop={onStopRecording}
-                  />
-                </div>
-              </div>
             )}
 
             {/* TEMPORARY DIAGNOSTIC — remove once the "guest still sees

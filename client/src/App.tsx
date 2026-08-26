@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { Clipboard, PersonWalking, X, MagnetFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill, Display, StarFill } from 'react-bootstrap-icons';
-import { Avatar, AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents, ProximityPlayer, doesRectOverlapImpassableArea, movementHitboxBounds, DOOR_HITBOX_HALF_PX } from '@kaispace/shared';
+import { Avatar, AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, hasFeatureAccess, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents, ProximityPlayer, doesRectOverlapImpassableArea, movementHitboxBounds, DOOR_HITBOX_HALF_PX } from '@kaispace/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -12,6 +12,7 @@ import { AvatarSetup } from './components/avatar/AvatarSetup';
 import { NameModal } from './components/ui/NameModal';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
+import { RecordingControl } from './components/ui/RecordingControl';
 // QA (Kompat checklist item 7) — same reasoning as RoomEditorPage above:
 // only a workspace admin ever opens this (AdminConsole itself re-gates on
 // workspaceRole, see its own file), so splitting it out means the far more
@@ -966,6 +967,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // be switched on — the toggle went with the retired editor (Potong 7) — but
   // the store field and GameCanvas's editor branches remain, permanently off.
   const isAdmin = useGameStore((s) => s.isAdmin);
+  // hasFeatureAccess (shared/permissions.ts) is the same check
+  // recordingHandler.ts applies server-side — this client-side call can
+  // never grant more than the server allows even if it drifts or is
+  // bypassed, since the server re-checks independently on RECORDING_START.
+  const canRecordHere = hasFeatureAccess(localRole, 'recording:start');
   const editorMode = useGameStore((s) => s.editorMode);
   const selectedTileType = useGameStore((s) => s.selectedTileType);
   const selectedPaletteId = useGameStore((s) => s.selectedPaletteId);
@@ -1821,6 +1827,23 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </div>
       )}
 
+      {/* Screen recording — moved out of the Sidebar's "Room Features"
+          dropdown to a standalone control near the top of the screen,
+          next to Start Meeting. Not zone-gated. */}
+      {canRecordHere && !editorMode && (
+        <div className="absolute top-16 left-1/2 translate-x-24 z-30 pointer-events-auto">
+          <RecordingControl
+            recordingTargets={recordingTargets}
+            activeRecording={activeRecording}
+            isRecordingMine={isRecordingMine}
+            uploading={recordingUploading}
+            roomSlug={roomSlug}
+            onStart={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
+            onStop={stopMyRecording}
+          />
+        </div>
+      )}
+
       {miniModeWindow && (
         <MiniMode
           pipWindow={miniModeWindow}
@@ -2214,14 +2237,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleMiniMode={handleToggleMiniMode}
         showAddMediaPanel={showAddMediaPanel}
         onToggleAddMedia={() => openPanel('addMedia')}
-        canRecord={isAdmin}
-        recordingTargets={recordingTargets}
-        activeRecording={activeRecording}
-        isRecordingMine={isRecordingMine}
-        recordingUploading={recordingUploading}
-        roomSlug={roomSlug}
-        onStartRecording={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
-        onStopRecording={stopMyRecording}
         onLeaveRoom={onLeave}
         onLogout={() => setShowLogoutConfirm(true)}
         hiddenActive={!!localHidden}
