@@ -260,7 +260,9 @@ auth.post('/login', loginRateLimit, validate(loginSchema), async (req, res: Resp
     const { email, password } = req.body;
     const prisma = getPrisma();
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
