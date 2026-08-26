@@ -12,7 +12,6 @@ import { AvatarSetup } from './components/avatar/AvatarSetup';
 import { NameModal } from './components/ui/NameModal';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
-import { RecordingControl } from './components/ui/RecordingControl';
 import { RecordAreaPanel } from './components/ui/RecordAreaPanel';
 // QA (Kompat checklist item 7) — same reasoning as RoomEditorPage above:
 // only a workspace admin ever opens this (AdminConsole itself re-gates on
@@ -1830,41 +1829,18 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </div>
       )}
 
-      {/* Screen recording — moved out of the Sidebar's "Room Features"
-          dropdown to a standalone control near the top of the screen,
-          next to Start Meeting. Not zone-gated. Pushed further right and
-          raised to z-40 (from an earlier translate-x-24/z-30) so it clears
-          neighboring top-of-screen HUD elements instead of risking getting
-          painted over. */}
-      {canRecordHere && !editorMode && (
-        <div className="absolute top-16 left-1/2 translate-x-48 z-40 pointer-events-auto">
-          <RecordingControl
-            recordingTargets={recordingTargets}
-            activeRecording={activeRecording}
-            isRecordingMine={isRecordingMine}
-            isPaused={isRecordingPaused}
-            uploading={recordingUploading}
-            roomSlug={roomSlug}
-            onStart={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
-            onStop={stopMyRecording}
-            onPause={pauseRecording}
-            onResume={resumeRecording}
-          />
-        </div>
-      )}
-
       {/* §7 — Task 4 of the Record Area Zone + Recording Pause/Resume
           plan: a zone-gated recording surface, shown only while the local
           avatar stands inside a 'record'-type zone (Task 1's Room Editor
           tool, Task 2's zone-entry detection). Deliberately one-click (no
-          title prompt, unlike the standalone RecordingControl above).
-          Reuses the exact same recording state as the standalone
-          control (requestRecording/stopMyRecording/pauseRecording/
+          title prompt, unlike the Sidebar's own Recording control).
+          Reuses the exact same recording state as the Sidebar's
+          Recording control (requestRecording/stopMyRecording/pauseRecording/
           resumeRecording, recordingTargets, canRecordHere) — there is only
           one useScreenRecording() call in the whole app, this is just an
           additional surface for it. Originally positioned in its own
-          vertical band below the standalone control's own top-16 row
-          (translate-y-14) — task review found that band overlaps the
+          vertical band below a since-removed standalone control's top-16
+          row (translate-y-14) — task review found that band overlaps the
           Summon/Follow consent-toast stack (also top-16, centered, z-50),
           which a single incoming request toast reaches into, not just
           several stacked ones. Moved to the LEFT of center instead,
@@ -1875,9 +1851,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           and corrected in review). `right-1/2` anchors the panel's RIGHT
           edge — the one facing center — at a fixed 192px offset, so the
           gap to the toast column (centered, symmetric around center) holds
-          regardless of the panel's own width, mirroring how the standalone
-          control's `left-1/2 translate-x-48` anchors ITS near (left) edge
-          192px to the right of center. */}
+          regardless of the panel's own width. (The standalone recording
+          control this originally mirrored has since moved back into the
+          Sidebar's "Room Features" menu and no longer floats here, but this
+          panel's own position and the box-model reasoning above are
+          unaffected either way.) */}
       {recordZoneId && !editorMode && (
         <RecordAreaPanel
           canRecord={canRecordHere}
@@ -2287,6 +2265,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleMiniMode={handleToggleMiniMode}
         showAddMediaPanel={showAddMediaPanel}
         onToggleAddMedia={() => openPanel('addMedia')}
+        canRecord={canRecordHere}
+        recordingTargets={recordingTargets}
+        activeRecording={activeRecording}
+        isRecordingMine={isRecordingMine}
+        recordingUploading={recordingUploading}
+        roomSlug={roomSlug}
+        onStartRecording={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
+        onStopRecording={stopMyRecording}
+        isRecordingPaused={isRecordingPaused}
+        onPauseRecording={pauseRecording}
+        onResumeRecording={resumeRecording}
         onLeaveRoom={onLeave}
         onLogout={() => setShowLogoutConfirm(true)}
         hiddenActive={!!localHidden}
