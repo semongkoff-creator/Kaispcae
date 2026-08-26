@@ -78,7 +78,10 @@ export function ZoneWatcher({
   // Record Area zone detection — mirrors meetingZone above exactly, but for
   // the SEPARATE screen-recording feature (never the Lark-meeting one). The
   // new zone-gated recording panel (App.tsx) renders only while the local
-  // avatar is inside a Zone of type 'record'.
+  // avatar is inside a Zone of type 'record'. Deliberately does NOT feed
+  // into the workMode/presence effect below (unlike meetingZone/focusZone) —
+  // a Record Area has no presence-status concept of its own; don't "fix"
+  // this by wiring it in.
   const recordZone = useMemo(
     () => findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'record')),
     [localPlayer.x, localPlayer.y, zones],
