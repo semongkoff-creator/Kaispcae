@@ -91,7 +91,10 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
   const list = useFlyoutPosition(recordingsButtonRef, isSidebar && showList);
 
   const startWithTarget = async (targetUserId: string) => {
-    const title = await showPrompt('Judul rekaman:', 'Sesi Meeting');
+    const title = await showPrompt(
+      'Judul rekaman:\n\nSaat browser minta pilih layar/tab, pilih "Tab ini" (This Tab) — supaya rekaman tidak terputus kalau kamu pindah ke tab lain.',
+      'Sesi Meeting',
+    );
     setShowPicker(false);
     if (!title?.trim()) return;
     onStart(targetUserId, title.trim());

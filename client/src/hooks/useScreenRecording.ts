@@ -93,7 +93,20 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
         // would only ever show my face. The mic track comes from the
         // existing camera/mic stream so my voice is captured too.
         try {
-          displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+          // preferCurrentTab biases the browser's own "choose what to
+          // share" picker toward this tab as the default/highlighted
+          // choice — it does NOT remove the picker (no web API can; every
+          // major browser requires this prompt as a security boundary),
+          // but "this tab" is the one capture-source choice that keeps
+          // recording this tab's content regardless of which OS window or
+          // browser tab later has focus (unlike "Entire Screen" or "a
+          // Window", both of which silently start showing whatever the
+          // user switches to). TypeScript's DOM lib may not yet type
+          // `preferCurrentTab` on DisplayMediaStreamOptions — if the
+          // typecheck in Step 3 fails on this line, cast the options object
+          // (e.g. `as DisplayMediaStreamOptions & { preferCurrentTab?: boolean }`)
+          // rather than removing the option.
+          displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, preferCurrentTab: true } as DisplayMediaStreamOptions & { preferCurrentTab?: boolean });
           const micTrack = webrtcService.getLocalStream()?.getAudioTracks()[0];
           stream = new MediaStream([...displayStream.getVideoTracks(), ...(micTrack ? [micTrack] : [])]);
         } catch (e) {
