@@ -202,8 +202,9 @@ interface SidebarProps {
 // Features" menu instead, one labeled row each, opening to the right — same
 // flyout convention Teleport/Add Media already used, just with text labels
 // since a whole LIST of features (unlike one single-purpose icon) needs
-// them to stay scannable. (Recording moved through here too, then back out
-// to its own standalone top-of-screen control — see App.tsx.)
+// them to stay scannable. (Recording briefly moved out to its own
+// standalone top-of-screen control and back — see this file's own
+// Recording row further below, and commit 829cd166.)
 //
 // z-50 — above MeetingView's z-40 full-screen overlay, so the rail (or its
 // collapsed form below) stays reachable even while Meeting View is active;
