@@ -30,6 +30,7 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [myRecordingId, setMyRecordingId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
 
   const stopCapture = useCallback(() => {
     if (timeoutRef.current) {
@@ -39,6 +40,7 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
     if (recorderRef.current && recorderRef.current.state !== 'inactive') {
       recorderRef.current.stop();
     }
+    setIsPaused(false);
   }, []);
 
   // Request a new recording — capture itself only begins once the server
@@ -64,6 +66,36 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
     emitRecordingStop(myRecordingId);
     stopCapture();
   }, [myRecordingId, emitRecordingStop, stopCapture]);
+
+  // Pause/resume — real MediaRecorder.pause()/.resume(), entirely
+  // client-local (no server event, no Recording.status change): the server
+  // has no visibility into the capture pipeline by this feature's own
+  // existing architecture (capture lives only in the recorder's own
+  // browser), and the one-recording-per-room lock is keyed on
+  // status IN ('recording','processing'), unaffected by pause either way.
+  // The wall-clock 80-minute auto-stop timer is cleared while paused and
+  // restarted at FULL duration on resume — a deliberate simplification
+  // (a recording paused/resumed several times can span more than 80 minutes
+  // of wall-clock time since the original Start, though never more than 80
+  // minutes of any single actively-capturing segment) rather than tracking
+  // precise cumulative active time, matching the cap's original purpose of
+  // bounding one unattended capture session.
+  const pauseRecording = useCallback(() => {
+    if (!recorderRef.current || recorderRef.current.state !== 'recording') return;
+    recorderRef.current.pause();
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    setIsPaused(true);
+  }, []);
+
+  const resumeRecording = useCallback(() => {
+    if (!recorderRef.current || recorderRef.current.state !== 'paused') return;
+    recorderRef.current.resume();
+    timeoutRef.current = setTimeout(stopCapture, RECORDING_MAX_DURATION_MS);
+    setIsPaused(false);
+  }, [stopCapture]);
 
   useEffect(() => {
     if (!activeRecording) return;
@@ -163,6 +195,7 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
         stopCapture();
       });
 
+      setIsPaused(false);
       recorder.start();
       recorderRef.current = recorder;
       setMyRecordingId(activeRecording.recordingId);
@@ -192,7 +225,10 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
   return {
     requestRecording,
     stopMyRecording,
+    pauseRecording,
+    resumeRecording,
     isRecordingMine: !!myRecordingId,
+    isPaused,
     uploading,
   };
 }

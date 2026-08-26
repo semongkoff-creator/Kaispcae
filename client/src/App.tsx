@@ -545,7 +545,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     (userId: string) => Object.values(playerRecords).find((p) => p.userId === userId)?.id,
     [playerRecords],
   );
-  const { requestRecording, stopMyRecording, isRecordingMine, uploading: recordingUploading } = useScreenRecording({
+  const { requestRecording, stopMyRecording, pauseRecording, resumeRecording, isRecordingMine, isPaused: isRecordingPaused, uploading: recordingUploading } = useScreenRecording({
     activeRecording,
     localUserId,
     findSocketIdByUserId,
@@ -1841,10 +1841,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             recordingTargets={recordingTargets}
             activeRecording={activeRecording}
             isRecordingMine={isRecordingMine}
+            isPaused={isRecordingPaused}
             uploading={recordingUploading}
             roomSlug={roomSlug}
             onStart={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
             onStop={stopMyRecording}
+            onPause={pauseRecording}
+            onResume={resumeRecording}
           />
         </div>
       )}

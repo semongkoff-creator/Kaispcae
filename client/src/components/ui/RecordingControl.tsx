@@ -1,6 +1,6 @@
 import { useState, useRef, useLayoutEffect, RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { RecordCircleFill, StopCircleFill, Download, PlayCircleFill, X } from 'react-bootstrap-icons';
+import { RecordCircleFill, StopCircleFill, Download, PlayCircleFill, PauseFill, X } from 'react-bootstrap-icons';
 import { Recording } from '@kaispace/shared';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { api, ApiError } from '@/services/api';
@@ -65,10 +65,13 @@ interface RecordingControlProps {
   recordingTargets: RecordingTarget[];
   activeRecording: ActiveRecordingInfo | null;
   isRecordingMine: boolean;
+  isPaused: boolean;
   uploading: boolean;
   roomSlug: string;
   onStart: (targetUserId: string, title: string) => void;
   onStop: () => void;
+  onPause: () => void;
+  onResume: () => void;
   // 'sidebar': icon-only, popovers open to the right — see Sidebar.tsx.
   // Omit (or 'standalone') for the original labeled-button floating bar.
   variant?: 'standalone' | 'sidebar';
@@ -79,7 +82,7 @@ interface RecordingControlProps {
 // badge, a stop button visible only to whoever started it (spec's own explicit
 // rule — not even another admin can stop someone else's recording), and a
 // small list of past recordings available to download.
-export function RecordingControl({ recordingTargets, activeRecording, isRecordingMine, uploading, roomSlug, onStart, onStop, variant = 'standalone' }: RecordingControlProps) {
+export function RecordingControl({ recordingTargets, activeRecording, isRecordingMine, isPaused, uploading, roomSlug, onStart, onStop, onPause, onResume, variant = 'standalone' }: RecordingControlProps) {
   const isSidebar = variant === 'sidebar';
   const [showPicker, setShowPicker] = useState(false);
   const [showList, setShowList] = useState(false);
@@ -147,16 +150,28 @@ export function RecordingControl({ recordingTargets, activeRecording, isRecordin
   };
 
   const recordButton = isRecordingMine ? (
-    <button
-      onClick={onStop}
-      disabled={uploading}
-      title={uploading ? 'Uploading...' : 'Stop Recording'}
-      className={isSidebar
-        ? 'w-10 h-10 rounded-lg flex items-center justify-center bg-red-600 text-white disabled:opacity-60 cursor-pointer'
-        : 'px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-red-600 text-white border-red-500 disabled:opacity-60'}
-    >
-      <StopCircleFill size={isSidebar ? 16 : 12} /> {!isSidebar && (uploading ? 'Uploading...' : 'Stop Recording')}
-    </button>
+    <div className="flex items-center gap-1.5">
+      <button
+        onClick={isPaused ? onResume : onPause}
+        title={isPaused ? 'Lanjutkan' : 'Jeda'}
+        className={isSidebar
+          ? 'w-10 h-10 rounded-lg flex items-center justify-center bg-amber-500 text-white cursor-pointer'
+          : 'px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-amber-500 text-white border-amber-400'}
+      >
+        {isPaused ? <PlayCircleFill size={isSidebar ? 16 : 12} /> : <PauseFill size={isSidebar ? 16 : 12} />}
+        {!isSidebar && (isPaused ? 'Lanjutkan' : 'Jeda')}
+      </button>
+      <button
+        onClick={onStop}
+        disabled={uploading}
+        title={uploading ? 'Uploading...' : 'Stop Recording'}
+        className={isSidebar
+          ? 'w-10 h-10 rounded-lg flex items-center justify-center bg-red-600 text-white disabled:opacity-60 cursor-pointer'
+          : 'px-3 py-2 rounded-lg text-xs font-medium border transition-all cursor-pointer inline-flex items-center gap-1.5 bg-red-600 text-white border-red-500 disabled:opacity-60'}
+      >
+        <StopCircleFill size={isSidebar ? 16 : 12} /> {!isSidebar && (uploading ? 'Uploading...' : 'Stop Recording')}
+      </button>
+    </div>
   ) : activeRecording ? (
     isSidebar ? (
       <div title={`REC: ${activeRecording.targetName}`} className="w-10 h-10 rounded-lg flex items-center justify-center bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400">
