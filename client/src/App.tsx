@@ -1829,9 +1829,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
       {/* Screen recording — moved out of the Sidebar's "Room Features"
           dropdown to a standalone control near the top of the screen,
-          next to Start Meeting. Not zone-gated. */}
+          next to Start Meeting. Not zone-gated. Pushed further right and
+          raised to z-40 (from an earlier translate-x-24/z-30) so it clears
+          neighboring top-of-screen HUD elements instead of risking getting
+          painted over. */}
       {canRecordHere && !editorMode && (
-        <div className="absolute top-16 left-1/2 translate-x-24 z-30 pointer-events-auto">
+        <div className="absolute top-16 left-1/2 translate-x-44 z-40 pointer-events-auto">
           <RecordingControl
             recordingTargets={recordingTargets}
             activeRecording={activeRecording}

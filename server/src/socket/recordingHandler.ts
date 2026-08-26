@@ -8,7 +8,8 @@ import { resolveRoomRole as resolveRole } from '../lib/roles';
 // Prisma model's doc comment for the full architectural reasoning). This
 // handler only owns the metadata lifecycle (lock, per-role visibility,
 // finalize, disconnect cleanup) — the actual capture/upload happens
-// entirely in the starting admin's own browser.
+// entirely in the starting user's own browser (admin-only, see
+// hasFeatureAccess(role, 'recording:start')).
 //
 // Self-contained module tracking its own uid/room mappings rather than
 // reaching into roomHandler.ts's private state — same "small deliberate
@@ -81,7 +82,7 @@ export function registerRecordingHandlers(io: Server, socket: Socket): void {
 
       const role = await resolveRole(prisma, uid, dbRoom.id, dbRoom.ownerId, dbRoom.organizationId);
       if (!hasFeatureAccess(role, 'recording:start')) {
-        socket.emit('admin:error', { message: 'Admin role required to start a recording' });
+        socket.emit('admin:error', { message: 'You do not have permission to start a recording in this room' });
         return;
       }
 

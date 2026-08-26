@@ -182,13 +182,14 @@ interface SidebarProps {
 
 // ZEP-style left icon rail. Kept deliberately SHORT — only identity (avatar,
 // status) and the one seat-jump shortcut live here permanently. Everything
-// else (view-mode toggles, room management, recording) used to each be its
-// own icon stacked in this same rail, which read as cluttered once enough
-// features landed in the same session; they now live inside the hamburger
-// "Room Features" menu instead, one labeled row each, opening to the right
-// — same flyout convention Teleport/Add Media already used, just with text
-// labels since a whole LIST of features (unlike one single-purpose icon)
-// needs them to stay scannable.
+// else (view-mode toggles, room management) used to each be its own icon
+// stacked in this same rail, which read as cluttered once enough features
+// landed in the same session; they now live inside the hamburger "Room
+// Features" menu instead, one labeled row each, opening to the right — same
+// flyout convention Teleport/Add Media already used, just with text labels
+// since a whole LIST of features (unlike one single-purpose icon) needs
+// them to stay scannable. (Recording moved through here too, then back out
+// to its own standalone top-of-screen control — see App.tsx.)
 //
 // z-50 — above MeetingView's z-40 full-screen overlay, so the rail (or its
 // collapsed form below) stays reachable even while Meeting View is active;
