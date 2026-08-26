@@ -1834,7 +1834,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           neighboring top-of-screen HUD elements instead of risking getting
           painted over. */}
       {canRecordHere && !editorMode && (
-        <div className="absolute top-16 left-1/2 translate-x-44 z-40 pointer-events-auto">
+        <div className="absolute top-16 left-1/2 translate-x-48 z-40 pointer-events-auto">
           <RecordingControl
             recordingTargets={recordingTargets}
             activeRecording={activeRecording}
