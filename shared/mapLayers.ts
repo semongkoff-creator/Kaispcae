@@ -415,17 +415,21 @@ export function layerDataToLegacy(ld: LayerData): { tiles: RoomTile[][]; furnitu
     if (a.color != null) z.color = a.color;
     if (a.label != null) z.label = a.label;
     if (a.zoneType != null) z.type = a.zoneType;
-    // Only ever explicitly set to `false` (mapLocation's default) — leaving
-    // it unset for everything else means "isolates" (Zone.audioIsolated's own
-    // documented default), which is what every legacy-converted zone already
-    // is (legacyToLayerData always emits effect:'privateArea', never
-    // 'mapLocation' — that type didn't exist pre-editor), so this can't add a
-    // key the round-trip guard in convertLegacyRoom.ts doesn't expect. This IS
-    // computed at read time rather than stored, so it applies retroactively
-    // to every 'Map location' ever drawn, not just ones drawn after this field
-    // existed.
+    // Only ever explicitly set to `false` (mapLocation's and recordArea's own
+    // defaults) — leaving it unset for everything else means "isolates"
+    // (Zone.audioIsolated's own documented default), which is what every
+    // legacy-converted zone already is (legacyToLayerData always emits
+    // effect:'privateArea', never 'mapLocation'/'recordArea' — neither type
+    // existed pre-editor), so this can't add a key the round-trip guard in
+    // convertLegacyRoom.ts doesn't expect. This IS computed at read time
+    // rather than stored, so it applies retroactively to every zone of these
+    // two effects ever drawn, not just ones drawn after this field/effect
+    // existed — recordArea's own client-side write in editorStore.ts's
+    // addArea() already stores an explicit `false` for new zones, but this
+    // read-time default covers any recordArea drawn before that write-side
+    // fix landed too.
     if (a.audioIsolated != null) z.audioIsolated = a.audioIsolated;
-    else if (a.effect === 'mapLocation') z.audioIsolated = false;
+    else if (a.effect === 'mapLocation' || a.effect === 'recordArea') z.audioIsolated = false;
     // Bug fix — tracked separately from audioIsolated (see Zone.isMapLocation's
     // own doc comment): a Map Location created with "kedap suara: YA" still
     // needs its label to always show, which audioIsolated alone can't express
