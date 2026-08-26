@@ -1862,11 +1862,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           control (requestRecording/stopMyRecording/pauseRecording/
           resumeRecording, recordingTargets, canRecordHere) — there is only
           one useScreenRecording() call in the whole app, this is just an
-          additional surface for it. Positioned in its own vertical band
-          (translate-y-14 below the standalone control's own top-16 row)
-          rather than beside it, to avoid the same collision class the
-          Recording Revamp's final review caught between the standalone
-          control and other top-of-screen HUD elements. */}
+          additional surface for it. Originally positioned in its own
+          vertical band below the standalone control's own top-16 row
+          (translate-y-14) — task review found that band overlaps the
+          Summon/Follow consent-toast stack (also top-16, centered, z-50),
+          which a single incoming request toast reaches into, not just
+          several stacked ones. Moved to the LEFT of center instead
+          (-translate-x-48, mirroring the standalone control's own
+          translate-x-48 to the RIGHT), clearing the toast stack's column
+          entirely regardless of how many toasts are showing — same
+          reasoning as the Recording Revamp's own fix for the standalone
+          control colliding with other top-of-screen HUD elements. */}
       {recordZoneId && !editorMode && (
         <RecordAreaPanel
           canRecord={canRecordHere}

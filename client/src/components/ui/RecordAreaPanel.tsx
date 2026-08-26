@@ -26,7 +26,7 @@ export function RecordAreaPanel({ canRecord, hasTarget, isRecordingMine, isPause
 
   if (isRecordingMine) {
     return (
-      <div className="absolute top-16 left-1/2 -translate-x-1/2 translate-y-14 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-600 text-white text-xs font-medium shadow-lg pointer-events-auto">
+      <div className="absolute top-16 left-1/2 -translate-x-48 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-red-600 text-white text-xs font-medium shadow-lg pointer-events-auto">
         <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
         {isPaused ? 'Rekaman dijeda' : 'Merekam'}
         <button onClick={isPaused ? onResume : onPause} title={isPaused ? 'Lanjutkan' : 'Jeda'} className="ml-1 cursor-pointer">
@@ -45,7 +45,7 @@ export function RecordAreaPanel({ canRecord, hasTarget, isRecordingMine, isPause
     <button
       onClick={onStart}
       title="Mulai rekam"
-      className="absolute top-16 left-1/2 -translate-x-1/2 translate-y-14 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 text-xs font-medium border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer pointer-events-auto"
+      className="absolute top-16 left-1/2 -translate-x-48 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 text-xs font-medium border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer pointer-events-auto"
     >
       <RecordCircleFill size={14} /> Start Recording
     </button>
