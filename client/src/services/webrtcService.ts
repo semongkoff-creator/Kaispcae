@@ -98,18 +98,10 @@ const QUALITY_SAMPLE_INTERVAL_MS = 5000;
 const SCREEN_STALL_RECOVERY_MAX_ATTEMPTS = 3;
 const SCREEN_STALL_RECOVERY_BASE_DELAY_MS = 2000;
 
-// Fallback classifier, used only until the presenter's RTC_SCREEN_SHARE
-// announcement is known. A camera is published in the same MediaStream as the
-// microphone; a screen comes from getDisplayMedia in a stream of its own with
-// no audio. Kept as a backstop rather than deleted: the announcement can
-// arrive after the track on a slow link, and a peer that briefly showed
-// nothing would be worse than one classified by a good guess.
-function arrivedWithAudioOrUngrouped(event: RTCTrackEvent, peer: { videoStream: MediaStream | null }): boolean {
-  if ((event.streams[0]?.getAudioTracks().length ?? 0) > 0) return true;
-  // No stream grouping at all — nothing to reason from, so fall back to the
-  // old "first video is the camera" rule rather than dropping the track.
-  return !peer.videoStream && !event.streams[0];
-}
+// Gone: a fallback classifier that decided camera-or-screen from whether a
+// video track arrived grouped with audio, and from arrival order when it had
+// nothing else. Both questions are now answered exactly by which transceiver
+// the track came in on — see pc.ontrack in createPeer.
 
 // Camera capture settings. Previously a hard 320x240 @15fps — QVGA, roughly a
 // twelfth of the pixels below, which is why video looked poor no matter what:
@@ -295,6 +287,29 @@ interface PeerConnection {
   // once, per the spec's "2 track terpisah... UI render sebagai 2 box
   // berbeda" requirement.
   remoteScreenStream: MediaStream | null;
+  // The three senders this connection will ever have, created up front in a
+  // fixed order and never added to or removed after (see createPeer).
+  //
+  // SDP media sections — m-lines — must keep the same order for the life of a
+  // connection: an offer whose order disagrees with what was already
+  // negotiated is rejected outright with InvalidAccessError, and that pair is
+  // then finished, because every rebuild reproduces the same disagreement.
+  //
+  // This used to be built implicitly, by whichever addTrack() happened to run
+  // first across eight different call sites on different code paths — one
+  // person turning a camera on, another starting a share, a third connecting
+  // mid-share. Two sides could therefore end up with different orders, and in
+  // production they did: an endless "negotiation never completed — tearing
+  // down so it can be retried" loop, seen from the receiving side only, which
+  // presented as a black screen share and as one person being inaudible to
+  // some listeners but not others.
+  //
+  // Holding the senders explicitly means every later change is a
+  // replaceTrack() on a slot that already exists — which does not renegotiate
+  // at all, and so cannot reorder anything or collide with the other side
+  // offering at the same moment.
+  audioSender: RTCRtpSender | null;
+  camSender: RTCRtpSender | null;
   screenSender: RTCRtpSender | null;
   // Combined into audioGain.gain.value as proximityGain * manualVolume —
   // proximity drives the automatic distance falloff (existing behavior),
@@ -562,21 +577,12 @@ class WebRTCService {
     const videoTrack = stream.getVideoTracks()[0] ?? null;
 
     for (const [remoteId, peer] of this.peers) {
-      const senders = peer.pc.getSenders();
-      const audioSender = senders.find((s) => s.track?.kind === 'audio');
-      // Exclude the screen-share sender — that one carries the display
-      // capture, not the camera, and must not be overwritten by it.
-      const videoSender = senders.find((s) => s.track?.kind === 'video' && s !== peer.screenSender);
-
+      // No searching for the right sender any more, and no addTrack fallback:
+      // createPeer made all three slots before this connection ever offered,
+      // so the only question left is whether there is a track to put in one.
       try {
-        if (audioTrack) {
-          if (audioSender) audioSender.replaceTrack(audioTrack).catch(() => {});
-          else this.prioritiseSender(peer.pc.addTrack(audioTrack, stream), 'high');
-        }
-        if (videoTrack) {
-          if (videoSender) videoSender.replaceTrack(videoTrack).catch(() => {});
-          else this.prioritiseSender(peer.pc.addTrack(videoTrack, stream), 'low', 'maintain-framerate');
-        }
+        if (audioTrack && peer.audioSender) peer.audioSender.replaceTrack(audioTrack).catch(() => {});
+        if (videoTrack && peer.camSender && peer.videoEligible) peer.camSender.replaceTrack(videoTrack).catch(() => {});
       } catch (err) {
         console.error('[webrtc] failed to sync tracks to', remoteId, err);
       }
@@ -660,13 +666,7 @@ class WebRTCService {
     stream.removeTrack(old);
     stream.addTrack(track);
     for (const peer of this.peers.values()) {
-      const sender = this.cameraSender(peer);
-      if (sender) sender.replaceTrack(track).catch(() => {});
-      else {
-        const added = peer.pc.addTrack(track, stream);
-        this.videoSenders.add(added);
-        this.prioritiseSender(added, 'low', 'maintain-framerate');
-      }
+      if (peer.camSender) peer.camSender.replaceTrack(track).catch(() => {});
     }
   }
 
@@ -682,18 +682,10 @@ class WebRTCService {
     }
   }
 
-  // The camera sender for a peer — the screen-share sender is excluded, since
-  // it is also a video track and overwriting it would replace someone's
-  // presentation with their face.
-  private cameraSender(peer: PeerConnection): RTCRtpSender | undefined {
-    return peer.pc.getSenders().find((s) => s !== peer.screenSender && (s.track?.kind === 'video' || (!s.track && this.videoSenders.has(s))));
-  }
-
-  // Senders that have carried a camera track at least once. Needed because a
-  // sender whose track was replaced with null reports kind 'null' and would
-  // otherwise be indistinguishable from an audio sender, leaving a fresh
-  // camera track with nowhere to go and forcing a pointless renegotiation.
-  private videoSenders = new Set<RTCRtpSender>();
+  // Gone: a `cameraSender()` search and a `videoSenders` Set that existed only
+  // to tell one video sender from another after their tracks had been nulled.
+  // Both were working around not knowing which slot was which — peer.camSender
+  // and peer.screenSender are now assigned at creation and simply are.
 
   // Acquires the camera on demand. Requested separately from the mic so the
   // device is only ever open while the camera is actually on — see
@@ -734,13 +726,7 @@ class WebRTCService {
       // this loop would silently hand every audio-only peer a camera track
       // and defeat the cap the moment anyone toggled their camera.
       if (!peer.videoEligible) continue;
-      const sender = this.cameraSender(peer);
-      if (sender) sender.replaceTrack(track).catch(() => {});
-      else {
-        const added = peer.pc.addTrack(track, this.localStream);
-        this.videoSenders.add(added);
-        this.prioritiseSender(added, 'low', 'maintain-framerate');
-      }
+      if (peer.camSender) peer.camSender.replaceTrack(track).catch(() => {});
     }
     return { success: true };
   }
@@ -753,11 +739,10 @@ class WebRTCService {
     if (!stream) return;
 
     for (const peer of this.peers.values()) {
-      const sender = this.cameraSender(peer);
-      if (sender) {
-        this.videoSenders.add(sender);
-        sender.replaceTrack(null).catch(() => {});
-      }
+      // The slot stays; only its track goes. Emptying a sender does not
+      // renegotiate, so turning a camera off can never disturb the m-line
+      // order the way removing the track from the connection would.
+      if (peer.camSender) peer.camSender.replaceTrack(null).catch(() => {});
     }
     for (const t of stream.getVideoTracks()) {
       t.stop();
@@ -1241,6 +1226,8 @@ class WebRTCService {
       speaking: false,
       videoStream: null,
       remoteScreenStream: null,
+      audioSender: null,
+      camSender: null,
       screenSender: null,
       proximityGain: 1,
       manualVolume: 1,
@@ -1275,23 +1262,47 @@ class WebRTCService {
       this.disconnectFromPlayer(remoteId);
     }, NEGOTIATION_TIMEOUT_MS);
 
+    // The m-line layout, decided here and never again.
+    //
+    // Three transceivers, always, in this order, whether or not there is a
+    // track to put in them yet — audio, camera, screen. Both sides of every
+    // pair run this same code (handleOffer creates its peer through
+    // createPeer too), so both produce the identical layout, and the offer
+    // and answer can no longer disagree about it.
+    //
+    // 'sendrecv' even while empty is the point: declaring the direction up
+    // front means attaching a track later is a replaceTrack() on a slot that
+    // is already negotiated, which needs no renegotiation and therefore
+    // cannot collide with the other side offering at the same instant. The
+    // old code added tracks as they appeared, which renegotiated every time
+    // and is what produced the glare the comments below still describe.
+    const audioTx = pc.addTransceiver('audio', { direction: 'sendrecv' });
+    const cameraTx = pc.addTransceiver('video', { direction: 'sendrecv' });
+    const screenTx = pc.addTransceiver('video', { direction: 'sendrecv' });
+    peer.audioSender = audioTx.sender;
+    peer.camSender = cameraTx.sender;
+    peer.screenSender = screenTx.sender;
+    this.prioritiseSender(audioTx.sender, 'high');
+    this.prioritiseSender(cameraTx.sender, 'low', 'maintain-framerate');
+
     if (this.localStream) {
       const audioTrack = this.localStream.getAudioTracks()[0];
-      if (audioTrack) this.prioritiseSender(pc.addTrack(audioTrack, this.localStream), 'high');
+      if (audioTrack) void audioTx.sender.replaceTrack(audioTrack).catch(() => {});
       // MAX_VIDEO_PEERS — audio is cheap and always included up to the
-      // total-peer cap; the camera track (the expensive one) is only added
-      // for whoever was closest at connection time. `enableCamera()`
-      // (turning the camera on AFTER this peer already connected audio-only)
-      // still reaches them separately — see its own addTrack loop below,
-      // which is untouched by this flag.
+      // total-peer cap; the camera track (the expensive one) only goes to
+      // whoever was closest at connection time. The slot exists either way,
+      // so `enableCamera()` can fill it later without touching the SDP.
       const camTrack = includeVideo ? this.localStream.getVideoTracks()[0] : undefined;
-      if (camTrack) this.prioritiseSender(pc.addTrack(camTrack, this.localStream), 'low', 'maintain-framerate');
+      if (camTrack) void cameraTx.sender.replaceTrack(camTrack).catch(() => {});
     }
     // Pick up an already-in-progress screen share when connecting mid-share
     // (e.g. someone joins after sharing already started).
     if (this.screenStream) {
       const screenTrack = this.screenStream.getVideoTracks()[0];
-      if (screenTrack) peer.screenSender = this.capScreenShareBitrate(pc.addTrack(screenTrack, this.screenStream));
+      if (screenTrack) {
+        void screenTx.sender.replaceTrack(screenTrack).catch(() => {});
+        this.capScreenShareBitrate(screenTx.sender);
+      }
       // This peer joining just made everyone else's slice of the budget
       // smaller — the existing senders are still on the old, larger one.
       this.reapplyScreenShareBitrates();
@@ -1400,40 +1411,55 @@ class WebRTCService {
       // SCREEN as their first video track — it was then filed as a camera,
       // complete with a volume slider, and never appeared as a shared screen
       // at all.
-      const inboundId = event.streams[0]?.id;
-      // Preferred answer: the presenter told us which stream is their screen
-      // (RTC_SCREEN_SHARE). No inference involved.
-      const announced = peer.screenStreamId ?? this.announcedScreens.get(remoteId) ?? null;
-      const isCamera = announced && inboundId
-        ? inboundId !== announced
-        // Fallback for the window before that announcement lands (or if it is
-        // lost): a camera travels in the same MediaStream as the microphone,
-        // a screen is captured on its own by getDisplayMedia and carries no
-        // audio. Still order-independent — just less certain than being told.
-        : arrivedWithAudioOrUngrouped(event, peer);
+      // Answered by WHICH TRANSCEIVER it arrived on, which is now exact.
+      //
+      // createPeer builds the same two video transceivers, in the same order,
+      // on both sides of every pair — so the receiver on cameraTx is that
+      // peer's camera and the receiver on screenTx is their screen, by
+      // construction rather than by inference.
+      //
+      // The three heuristics this replaces were each correct about the
+      // failure that prompted them and each still guessable wrong: stream
+      // grouping (replaceTrack carries no MediaStream at all, so
+      // event.streams is empty and there is nothing to group by), the
+      // announced stream id (same problem — nothing to compare against), and
+      // arrival order (which is what filed a screen share as a camera,
+      // complete with a volume slider, whenever someone shared with their
+      // camera off).
+      const isCamera = event.transceiver === cameraTx;
 
-      if (isCamera) {
-        // Overwrites any previous camera stream rather than ignoring the new
-        // one: a peer who turns their camera back on after it was released
-        // sends a genuinely new track, and keeping the old dead one would
-        // leave their tile frozen on the last frame before they switched off.
-        const stream = new MediaStream([event.track]);
-        peer.videoStream = stream;
-        this.onRemoteStream?.(remoteId, stream);
-      } else if (!peer.remoteScreenStream) {
-        const stream = new MediaStream([event.track]);
-        peer.remoteScreenStream = stream;
-        this.onRemoteScreenStream?.(remoteId, stream);
-        event.track.onended = () => {
-          peer.remoteScreenStream = null;
-          this.lastScreenFrameCounts.delete(remoteId);
-          if (peer.screenStalled) {
-            peer.screenStalled = false;
-            this.onScreenShareStalled?.(remoteId, false);
-          }
-          this.onRemoteScreenEnded?.(remoteId);
-        };
-      }
+      const publish = () => {
+        if (isCamera) {
+          // Overwrites any previous camera stream rather than ignoring the
+          // new one: a peer turning their camera back on unmutes this same
+          // track, and leaving the old wrapper would keep their tile frozen
+          // on the last frame before they switched off.
+          const stream = new MediaStream([event.track]);
+          peer.videoStream = stream;
+          this.onRemoteStream?.(remoteId, stream);
+        } else if (!peer.remoteScreenStream) {
+          const stream = new MediaStream([event.track]);
+          peer.remoteScreenStream = stream;
+          this.onRemoteScreenStream?.(remoteId, stream);
+        }
+      };
+
+      // A slot negotiated before anyone has put anything in it still delivers
+      // a track — present, but MUTED. Publishing that immediately would give
+      // every peer a black camera tile and a black screen-share panel from
+      // the moment they connect, for a camera and a screen nobody turned on.
+      //
+      // So the stream is surfaced on the track's first unmute instead, and on
+      // every later one: replaceTrack does not mint a new receiver track, so
+      // the second and third time somebody shares their screen it is this
+      // same track unmuting again, not a new ontrack.
+      //
+      // Retraction stays where it already is — the RTC_SCREEN_SHARE stop
+      // announcement over the socket (see setupSignaling), which that code's
+      // own comment calls the reliable signal after the track's `ended` event
+      // proved to leave ghost panels behind.
+      event.track.onunmute = publish;
+      if (!event.track.muted) publish();
     };
 
     // Fires when addTrack (screen share start, or syncTracksToPeers backfilling
@@ -2124,14 +2150,15 @@ class WebRTCService {
     this.socket?.emit(SocketEvents.RTC_SCREEN_SHARE, { streamId: stream.id });
 
     for (const peer of this.peers.values()) {
-      peer.screenSender = this.capScreenShareBitrate(peer.pc.addTrack(screenTrack, stream));
-      // A peer still completing its very first offer/answer swallows the
-      // onnegotiationneeded that addTrack just fired (renegotiate's
-      // initialNegotiationDone guard), and that in-flight offer may already
-      // have been built without this track. Flag it so the negotiation runs
-      // the moment that handshake finishes — otherwise this one viewer is
-      // the only person in the room who never sees the share.
-      if (peer.pc.signalingState !== 'stable') peer.pendingRenegotiation = true;
+      // Filling a slot that has existed since the connection was made. No
+      // addTrack, so no onnegotiationneeded, so nothing to defer or catch up:
+      // the pendingRenegotiation dance that used to guard this — a peer still
+      // mid-handshake swallowing the event and never being told about the
+      // share — has nothing left to go wrong in. That was the "one viewer
+      // who never sees the share" case, and this is why it cannot recur.
+      if (!peer.screenSender) continue;
+      void peer.screenSender.replaceTrack(screenTrack).catch(() => {});
+      this.capScreenShareBitrate(peer.screenSender);
     }
     return { success: true };
   }
@@ -2143,10 +2170,13 @@ class WebRTCService {
     this.socket?.emit(SocketEvents.RTC_SCREEN_SHARE, { streamId: null });
 
     for (const peer of this.peers.values()) {
-      if (peer.screenSender) {
-        peer.pc.removeTrack(peer.screenSender);
-        peer.screenSender = null;
-      }
+      // replaceTrack(null), never removeTrack. removeTrack renegotiates and
+      // releases the transceiver for reuse, and the two sides do not
+      // necessarily agree about which slot got recycled on the next share —
+      // which is precisely how the m-line order came apart. The slot is kept
+      // for the life of the connection and simply emptied; peer.screenSender
+      // therefore stays set, because the sender still exists.
+      if (peer.screenSender) peer.screenSender.replaceTrack(null).catch(() => {});
     }
     this.onScreenShareEnded?.();
   }
