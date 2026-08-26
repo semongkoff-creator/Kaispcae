@@ -1838,24 +1838,20 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           Recording control (requestRecording/stopMyRecording/pauseRecording/
           resumeRecording, recordingTargets, canRecordHere) — there is only
           one useScreenRecording() call in the whole app, this is just an
-          additional surface for it. Originally positioned in its own
-          vertical band below a since-removed standalone control's top-16
-          row (translate-y-14) — task review found that band overlaps the
-          Summon/Follow consent-toast stack (also top-16, centered, z-50),
-          which a single incoming request toast reaches into, not just
-          several stacked ones. Moved to the LEFT of center instead,
-          anchored via `right-1/2 -translate-x-48` (NOT `left-1/2
-          -translate-x-48` — a first attempt at this fix used `left-1/2`,
-          which anchors the panel's LEFT edge and leaves it extending
-          rightward into the very toasts it needs to clear, and was caught
-          and corrected in review). `right-1/2` anchors the panel's RIGHT
-          edge — the one facing center — at a fixed 192px offset, so the
-          gap to the toast column (centered, symmetric around center) holds
-          regardless of the panel's own width. (The standalone recording
-          control this originally mirrored has since moved back into the
-          Sidebar's "Room Features" menu and no longer floats here, but this
-          panel's own position and the box-model reasoning above are
-          unaffected either way.) */}
+          additional surface for it.
+
+          Positioning history: originally a vertical band below the top-16
+          row (collided with the consent-toast stack), then offset left of
+          center via `right-1/2 -translate-x-48` (verified collision-free
+          against the toast stack, independent of this panel's own width —
+          see the deleted version of this comment in git history for the
+          full box-model trace). EXPLICITLY RE-CENTERED per direct user
+          request (`left-1/2 -translate-x-1/2`) — this reintroduces the
+          exact collision risk the offset was built to avoid: a
+          Summon/Follow/RemoteHelp toast can paint over this panel's
+          Pause/Stop buttons. Known and accepted, not an oversight — do not
+          "fix" this back to the offset without checking with the user
+          first. */}
       {recordZoneId && !editorMode && (
         <RecordAreaPanel
           canRecord={canRecordHere}
