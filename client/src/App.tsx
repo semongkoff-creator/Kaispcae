@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
-import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill, Display, StarFill } from 'react-bootstrap-icons';
+import { Clipboard, PersonWalking, X, MagnetFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill, Display, StarFill } from 'react-bootstrap-icons';
 import { Avatar, AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents, ProximityPlayer, doesRectOverlapImpassableArea, movementHitboxBounds, DOOR_HITBOX_HALF_PX } from '@kaispace/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
@@ -1025,7 +1025,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   const mediaObjects = useGameStore((s) => s.mediaObjects);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
-  const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
   const adminViewActive = activePanel === 'adminConsole';
   const operatorConsoleActive = activePanel === 'operatorConsole';
@@ -2611,9 +2610,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </div>
       )}
 
-      {/* Room name HUD + code */}
+      {/* Room code */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 pointer-events-auto">
-        <p className="text-gray-500 dark:text-gray-400 text-xs font-medium tracking-wider uppercase">MAIN OFFICE</p>
         <Tooltip label="Salin Kode Room" detail="Salin kode room ini untuk dibagikan.">
           <button
             onClick={async () => {
@@ -2626,34 +2624,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             <Clipboard size={11} /> {roomSlug.slice(0, 12)}
           </button>
         </Tooltip>
-        <Tooltip label="Salin Link Undangan" detail="Salin link undangan ke room ini.">
-          <button
-            onClick={async () => {
-              // ?join=<slug> — read back on load by App()'s own pending-invite
-              // effect below, which auto-joins this exact room once the
-              // clicker is authenticated (logging in first if they weren't).
-              const url = new URL(window.location.href);
-              url.search = '';
-              url.searchParams.set('join', roomSlug);
-              await navigator.clipboard.writeText(url.toString());
-              setInviteLinkCopied(true);
-              setTimeout(() => setInviteLinkCopied(false), 2000);
-            }}
-            className="text-gray-400 hover:text-gray-700 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
-          >
-            <Link45deg size={12} /> Invite
-          </button>
-        </Tooltip>
       </div>
 
       {roomCodeCopied && (
         <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 bg-purple-100 text-purple-700 text-[10px] px-2 py-0.5 rounded-full pointer-events-none">
           Code copied!
-        </div>
-      )}
-      {inviteLinkCopied && (
-        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 bg-purple-100 text-purple-700 text-[10px] px-2 py-0.5 rounded-full pointer-events-none">
-          Invite link copied!
         </div>
       )}
 
