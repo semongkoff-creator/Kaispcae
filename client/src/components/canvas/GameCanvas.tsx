@@ -3370,7 +3370,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
           const ownerOnline = !!owner && Object.values(playerRecords).some((p) => p.userId === owner.userId);
           // Marker shows when the owner is OFFLINE (their own avatar isn't
           // in the room to identify the desk, so the label is the only
-          // cue), or it's your own seat (always shown as "Kamu", regardless
+          // cue), or it's your own seat (always shown as "You", regardless
           // of the online check below — playerRecords structurally never
           // contains the LOCAL player's own entry, per setRoomState/
           // upsertPlayer, so a literal lookup would incorrectly read as
@@ -3428,7 +3428,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
                 // the room admin): the hit area still works exactly like an
                 // Impassable tile's invisible barrier, just with no shape
                 // drawn. Once claimed, this same button also carries the
-                // "Kamu"/owner-name text (merged in — see the follow-up
+                // "You"/owner-name text (merged in — see the follow-up
                 // comment below) instead of a separate stacked pill, so a
                 // claimed seat is ONE small label, not three stacked pieces.
                 // Gated on ownerVisible (owner offline, OR it's your own
@@ -3445,7 +3445,7 @@ function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cam
                   ownerVisible ? `shadow-md border-2 hover:scale-105 text-white ${isMine ? 'bg-emerald-500/95 border-emerald-600' : 'bg-amber-500/95 border-amber-600'}` : 'w-7'
                 }`}
               >
-                {ownerVisible ? `🪑 ${isMine ? 'Kamu' : truncateName(owner!.name, SEAT_MARKER_NAME_MAX_CHARS)}` : ''}
+                {ownerVisible ? `🪑 ${isMine ? 'You' : truncateName(owner!.name, SEAT_MARKER_NAME_MAX_CHARS)}` : ''}
               </button>
               {/* Follow-up — used to be a separate always-visible "Kamu" pill
                   PLUS this release button stacked below it, permanently in
