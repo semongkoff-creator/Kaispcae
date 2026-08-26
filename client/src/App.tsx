@@ -112,6 +112,7 @@ import { setProximitySnapshot, notifyProximityChanged, interpolateRemotePosition
 // walking speed and ~116ms running, so 200ms still catches every
 // boundary well before it matters for audio or video.
 const PROXIMITY_TICK_MS = 200;
+import { livekitService } from '@/services/livekitService';
 import { useGameStore } from './stores/gameStore';
 import { showAlert, showConfirm, showPrompt } from '@/stores/modalStore';
 import { useSocket } from './hooks/useSocket';
@@ -221,7 +222,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     screenStalledPeers,
     setManualVolume,
     destroy,
-  } = useWebRTC({ socketRef });
+  } = useWebRTC({ socketRef, roomSlug });
 
   // Remote video streams
   const [remoteStreams] = useState(() => new Map<string, MediaStream>());
@@ -249,6 +250,38 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       } else {
         setPlayerSpeaking(id, speaking);
       }
+    });
+
+    // The same three sinks, fed from LiveKit for rooms on that path.
+    //
+    // Translated at the boundary, because the two layers key people
+    // differently: the mesh used the socket id, LiveKit identifies
+    // participants by ACCOUNT id (a socket id changes on reconnect, so a
+    // participant would come back as a stranger). Everything downstream —
+    // VideoGrid, ParticipantPanel, the signal bars — is keyed by player id and
+    // stays exactly as it is; only this lookup is new.
+    const playerIdFor = (identity: string): string | null => {
+      const records = useGameStore.getState().playerRecords;
+      for (const p of Object.values(records)) if (p.userId === identity) return p.id;
+      return null;
+    };
+
+    livekitService.setOnRemoteStream((identity, stream) => {
+      const id = playerIdFor(identity);
+      if (!id) return;
+      remoteStreams.set(id, stream);
+      setStreamsVersion((v) => v + 1);
+    });
+    livekitService.setOnRemoteStreamEnded((identity) => {
+      const id = playerIdFor(identity);
+      if (!id) return;
+      remoteStreams.delete(id);
+      remoteScreenStreams.delete(id);
+      setStreamsVersion((v) => v + 1);
+    });
+    livekitService.setOnSpeakingChange((identity, speaking) => {
+      const id = playerIdFor(identity);
+      if (id) setPlayerSpeaking(id, speaking);
     });
   }, []);
 

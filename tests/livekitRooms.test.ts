@@ -163,6 +163,47 @@ test('capture bounds match the mesh, and a cancelled picker is not an error', ()
   assert.ok(/NotAllowedError/.test(service), 'dismissing the OS picker is a choice, not a failure');
 });
 
+// ── Fase D: wired into the app ─────────────────────────────────────────────
+
+test('the branch lives in useWebRTC, so App never sees two implementations', () => {
+  const hook = readFileSync(resolve('client/src/hooks/useWebRTC.ts'), 'utf8');
+  const app = readFileSync(resolve('client/src/App.tsx'), 'utf8');
+
+  // This hook is already the only door between the app and the media layer.
+  // Branching here means every caller keeps using the same six functions and
+  // does not have to know there are two implementations behind them.
+  assert.ok(/const onLiveKit = usesLiveKit\(roomSlug\)/.test(hook));
+  assert.ok(/useWebRTC\(\{ socketRef, roomSlug \}\)/.test(app), 'App must pass the room');
+
+  // Every entry point has to branch, or a room would connect to one path and
+  // publish on the other.
+  for (const fn of ['initMedia', 'toggleMic', 'toggleCamera', 'toggleScreenShare', 'updateProximity', 'destroy']) {
+    const at = hook.indexOf(`const ${fn} = useCallback`);
+    assert.ok(at > 0, `${fn} should still exist`);
+    assert.ok(
+      hook.slice(at, at + 700).includes('onLiveKit'),
+      `${fn} must choose a path`,
+    );
+  }
+});
+
+test('identity is translated to a player id at the boundary', () => {
+  const app = readFileSync(resolve('client/src/App.tsx'), 'utf8');
+  // The two layers key people differently — socket id on the mesh, account id
+  // on LiveKit. Translating here means VideoGrid, ParticipantPanel and the
+  // signal bars all stay exactly as they are.
+  assert.ok(/playerIdFor/.test(app));
+  assert.ok(/p\.userId === identity/.test(app));
+});
+
+test('the distance curve stays in one place for both paths', () => {
+  const hook = readFileSync(resolve('client/src/hooks/useWebRTC.ts'), 'utf8');
+  // calcGain is the falloff. Computing it in the hook rather than inside
+  // either service is what stops the two paths drifting into different
+  // definitions of "how quiet is someone four tiles away".
+  assert.ok(/gain: p\.viaZone \? 1 : calcGain\(p\.distanceTiles\)/.test(hook));
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

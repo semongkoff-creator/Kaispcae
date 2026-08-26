@@ -2,11 +2,20 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { Socket } from 'socket.io-client';
 import { ProximityPlayer, DISCONNECT_DEBOUNCE_MS } from '@kaispace/shared';
 import { webrtcService, MAX_VIDEO_PEERS } from '@/services/webrtcService';
+import { livekitService } from '@/services/livekitService';
+import { usesLiveKit } from '@/services/livekitRooms';
 import { calcGain } from './useProximity';
 
 interface UseWebRTCOptions {
   socketRef: React.MutableRefObject<Socket | null>;
   onRemoteStream?: (id: string, stream: MediaStream) => void;
+  // Which room this is, so the media path can be chosen per room.
+  //
+  // The branch lives here rather than in App because this hook is already the
+  // only door between the app and the media layer — every caller goes through
+  // the same six functions it returns, so App does not have to know there are
+  // two implementations behind them.
+  roomSlug?: string | null;
 }
 
 // How long a peer has to stay inside proximity range before a connection is
@@ -15,7 +24,11 @@ interface UseWebRTCOptions {
 // takes, but enough that simply walking past someone never negotiates at all.
 const CONNECT_DWELL_MS = 400;
 
-export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
+export function useWebRTC({ socketRef, onRemoteStream, roomSlug }: UseWebRTCOptions) {
+  // Decided once per room and never mid-session. The two paths cannot
+  // interoperate, so a room is entirely on one or entirely on the other —
+  // switching under a live call would leave everyone half-connected to each.
+  const onLiveKit = usesLiveKit(roomSlug);
   const connectedRef = useRef<Set<string>>(new Set());
   const initRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
@@ -70,6 +83,22 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // mic/camera buttons would then silently do nothing for the rest of the
   // session, no matter how many times they were clicked.
   const initMedia = useCallback(async () => {
+    if (onLiveKit) {
+      // One connection to the server, and the microphone published on it.
+      // No peer loop, no offer, no ICE — joining a room of thirty costs the
+      // same as joining a room of two.
+      if (initRef.current || livekitService.isConnected() || !roomSlug) return;
+      initRef.current = true;
+      const res = await livekitService.connect(roomSlug);
+      initRef.current = false;
+      if (!res.success) { setMediaError(res.error ?? 'Tidak bisa menyambung ke server media.'); return; }
+      // Mic starts muted, matching the mesh path's own posture so the UI does
+      // not show "live" before the user has chosen to be.
+      await livekitService.setMicrophoneEnabled(false);
+      setIsMicMuted(true);
+      setIsCameraOn(false);
+      return;
+    }
     if (initRef.current) return;
     // The mic is all this needs to obtain. It used to also require a video
     // track before considering itself done, which no longer makes sense: the
@@ -164,6 +193,27 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // fairness for stability, which matters more for a call already in
   // progress than for who wins a not-yet-made connection.
   const updateProximity = useCallback((nearby: ProximityPlayer[]) => {
+    if (onLiveKit) {
+      // The same useProximity output, spent differently. On the mesh this
+      // opened and closed peer connections and renegotiated to do it; here it
+      // subscribes and unsubscribes tracks the server already holds, which
+      // touches no SDP at all — so walking past somebody can no longer break
+      // a call, which is the entire reason for this migration.
+      //
+      // The gain is computed here and not in the service, so the distance
+      // curve stays in one place (calcGain) for both paths.
+      livekitService.applyProximity(
+        nearby
+          .filter((p) => p.visibility !== 'not_visible')
+          .map((p) => ({
+            userId: p.userId,
+            distanceTiles: p.distanceTiles,
+            viaZone: p.viaZone,
+            gain: p.viaZone ? 1 : calcGain(p.distanceTiles),
+          })),
+      );
+      return;
+    }
     const visible = nearby.filter((p) => p.visibility !== 'not_visible');
     const sorted = [...visible].sort((a, b) => {
       if (!!a.viaZone !== !!b.viaZone) return a.viaZone ? -1 : 1;
@@ -293,6 +343,12 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   }, []);
 
   const toggleMic = useCallback(async () => {
+    if (onLiveKit) {
+      const next = !livekitService.isMicrophoneEnabled();
+      await livekitService.setMicrophoneEnabled(next);
+      setIsMicMuted(!next);
+      return true;
+    }
     // This click is a user gesture — the one thing the browser was waiting
     // for before it would let any peer audio actually play.
     webrtcService.resumeAudio();
@@ -322,6 +378,12 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // re-acquired the whole stream and silently re-muted a mic the user had
   // already turned on).
   const toggleCamera = useCallback(async () => {
+    if (onLiveKit) {
+      const next = !livekitService.isCameraEnabled();
+      await livekitService.setCameraEnabled(next);
+      setIsCameraOn(next);
+      return true;
+    }
     webrtcService.resumeAudio();
 
     // No local stream at all yet — the very first click also has to obtain
@@ -344,6 +406,13 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   }, [initMedia]);
 
   const toggleScreenShare = useCallback(async () => {
+    if (onLiveKit) {
+      const sharing = livekitService.isScreenSharing();
+      const res = await livekitService.setScreenShareEnabled(!sharing);
+      if (!res.success) { setScreenShareError(res.error ?? null); return false; }
+      setIsScreenSharing(!sharing);
+      return true;
+    }
     if (webrtcService.isScreenSharing()) {
       webrtcService.stopScreenShare();
       setIsScreenSharing(false);
@@ -369,6 +438,9 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   }, []);
 
   const destroy = useCallback(() => {
+    // Leaving a LiveKit room is one disconnect. The mesh needs the timer
+    // sweep below because it holds a teardown timer per peer.
+    if (onLiveKit) void livekitService.disconnect();
     for (const timer of disconnectTimers.current.values()) {
       clearTimeout(timer);
     }
