@@ -76,11 +76,21 @@ async function invalidateSession(userId: string): Promise<void> {
 const REFRESH_THRESHOLD_SECONDS = 3 * 24 * 60 * 60; // 3 days
 
 // Login/register are brute-force targets — much tighter than the global
-// 100-req/min limiter applied to every other route.
-const authRateLimit = rateLimit(15 * 60 * 1000, 10); // 10 attempts / 15 min / IP
+// 100-req/min limiter applied to every other route. Split into two
+// independent limiters (each rateLimit() call gets its own Map — see that
+// function's own comment on why a shared instance was a bug) after a real
+// report: DCM's restricted-account rollout put several accounts behind one
+// shared office/NAT IP, and 10 login attempts/15min is exhausted the
+// moment ~10 different coworkers each try once around the same time —
+// "too many requests" for everyone else until the window resets, despite
+// every one of them using a correct, working password. registerRateLimit
+// stays tight since account creation is a rare, admin-driven action, not
+// something many real users do concurrently.
+const registerRateLimit = rateLimit(15 * 60 * 1000, 10); // 10 attempts / 15 min / IP
+const loginRateLimit = rateLimit(15 * 60 * 1000, 30); // 30 attempts / 15 min / IP
 
 // POST /auth/register
-auth.post('/register', authRateLimit, validate(registerSchema), async (req, res: Response) => {
+auth.post('/register', registerRateLimit, validate(registerSchema), async (req, res: Response) => {
   try {
     const { email, password, displayName } = req.body;
     const prisma = getPrisma();
@@ -245,7 +255,7 @@ auth.post('/create-organization', authRateLimit, validate(createOrganizationSche
 });
 
 // POST /auth/login
-auth.post('/login', authRateLimit, validate(loginSchema), async (req, res: Response) => {
+auth.post('/login', loginRateLimit, validate(loginSchema), async (req, res: Response) => {
   try {
     const { email, password } = req.body;
     const prisma = getPrisma();

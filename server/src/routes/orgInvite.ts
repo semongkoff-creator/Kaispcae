@@ -13,7 +13,8 @@ import { publicUser } from '../lib/publicUser';
 const orgInvite = Router();
 const mutationLimit = rateLimit(60 * 1000, 30);
 // Public, account-creation-adjacent — same tightness as auth.ts's own
-// authRateLimit for register/login (10 attempts/15min/IP).
+// registerRateLimit (10 attempts/15min/IP; login is separately 30/15min,
+// see registerRateLimit's own comment for why the two split).
 const acceptLimit = rateLimit(15 * 60 * 1000, 10);
 
 // ─── Admin: create/list/revoke ───────────────────────────────────────
