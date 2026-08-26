@@ -155,7 +155,13 @@ export function ParticipantPanel({ remoteStreams, roomSlug, isMicMuted, isGuest,
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
   useEffect(() => {
     if (!open) return;
-    api.getRoomParticipants(roomSlug).then((r) => setOrgMembers(r.members)).catch(() => {});
+    // Logged rather than silently swallowed — a fetch failure here used to
+    // look identical to "genuinely nobody's offline" (an empty list either
+    // way), which made a real bug report impossible to tell apart from
+    // working-as-intended without opening devtools.
+    api.getRoomParticipants(roomSlug).then((r) => setOrgMembers(r.members)).catch((e) => {
+      console.error('[ParticipantPanel] failed to load room participants:', e);
+    });
   }, [open, roomSlug]);
 
   // A player's live room role (see gameStore's applyAdminChanged) — keyed by
