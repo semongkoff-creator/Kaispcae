@@ -90,4 +90,45 @@ recordings.get('/recordings/:id/download', authenticateToken, async (req: AuthRe
   }
 });
 
+// Preview — same permission shape as download (self-or-admin, must be
+// 'done'), but deliberately skips the downloadCount/downloadExpiresAt gate
+// entirely: previewing must never count against, or be blocked by, the
+// 3-download/3-day limit that download enforces. Served inline (no
+// Content-Disposition: attachment) so a <video> element plays it directly
+// instead of triggering a save-file prompt.
+recordings.get('/recordings/:id/preview', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const row = await prisma.recording.findUnique({ where: { id: req.params.id } });
+    if (!row) return res.status(404).json({ error: 'Recording not found' });
+
+    const room = await prisma.room.findUnique({ where: { id: row.roomId } });
+    if (!room || room.organizationId !== req.organizationId) return res.status(404).json({ error: 'Room not found' });
+    const role = await resolveRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
+    if (row.targetUserId !== req.userId && !hasFeatureAccess(role, 'recording:start')) {
+      return res.status(403).json({ error: 'Not authorized to preview this recording' });
+    }
+
+    if (row.status !== 'done' || !row.fileUrl) {
+      return res.status(400).json({ error: 'Recording is not ready for preview' });
+    }
+
+    if (row.fileUrl.startsWith('drive:')) {
+      const dl = await openDownloadStream(row.fileUrl.slice('drive:'.length), req.organizationId!);
+      if (!dl) return res.status(404).json({ error: 'Recording file not found' });
+      res.setHeader('Content-Type', 'video/webm');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- DOM vs node:stream/web ReadableStream typing
+      return Readable.fromWeb(dl.body as any).pipe(res);
+    }
+    const filename = path.basename(row.fileUrl);
+    const filePath = path.join(process.cwd(), 'uploads', filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Recording file not found' });
+    res.setHeader('Content-Type', 'video/webm');
+    return fs.createReadStream(filePath).pipe(res);
+  } catch (err) {
+    console.error('[recordings] preview error:', err);
+    return res.status(500).json({ error: 'Failed to preview recording' });
+  }
+});
+
 export default recordings;

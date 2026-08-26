@@ -133,6 +133,24 @@ async function downloadRecordingBlob(id: string, filename: string): Promise<void
   URL.revokeObjectURL(url);
 }
 
+// Same authenticated-fetch necessity as downloadRecordingBlob above, but
+// returns an object URL for a <video> element instead of triggering a save.
+// Caller is responsible for URL.revokeObjectURL(...) once the preview is
+// closed (see RecordingControl.tsx) — an object URL otherwise leaks for the
+// tab's lifetime.
+async function previewRecordingBlob(id: string): Promise<string> {
+  const token = localStorage.getItem('vm_token');
+  const res = await fetch(`${API_BASE}/recordings/${id}/preview`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError((body as any).error || `Preview failed: ${res.status}`, res.status);
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 // Customer Service chat — one line in a CsSession's history. `from`
 // distinguishes who actually wrote it (never who it's addressed to).
 export interface CsMessage {
@@ -623,6 +641,8 @@ export const api = {
   getRecordings: (slug: string) => request<{ recordings: Recording[] }>(`/rooms/${slug}/recordings`),
 
   downloadRecording: (id: string, filename: string) => downloadRecordingBlob(id, filename),
+
+  previewRecording: (id: string) => previewRecordingBlob(id),
 
   // Soundboard — GET is a fallback/refresh path; the live list normally
   // arrives via SOUNDBOARD_LIST right after room:state (see useSocket.ts).
