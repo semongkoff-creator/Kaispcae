@@ -1752,7 +1752,7 @@ export interface InteractiveApiCallResultPayload {
 // pill label instead; 'general' (or no type, for zones created before this
 // field existed) keeps the plain dashed-outline + centered name that was
 // already there.
-export type ZoneType = 'meeting' | 'desk' | 'focus' | 'general';
+export type ZoneType = 'meeting' | 'desk' | 'focus' | 'general' | 'record';
 
 // Live lock state of one zone, broadcast to the room so every client can draw
 // the padlock and know who to knock on. `allowedUserIds` is the admit list the

@@ -28,7 +28,7 @@ type LoadError = 'auth' | 'forbidden' | 'notfound' | 'generic';
 const OBJ_CATEGORIES: { key: 'furniture' | 'decor' | 'electronics'; label: string }[] = [
   { key: 'furniture', label: 'Furniture' }, { key: 'decor', label: 'Decor' }, { key: 'electronics', label: 'Electronics' },
 ];
-const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat' | 'restrictedArea' | 'doorArea'; label: string; color: string; hint: string }[] = [
+const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'recordArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat' | 'restrictedArea' | 'doorArea'; label: string; color: string; hint: string }[] = [
   { id: 'startingPoint', label: 'Starting point', color: 'rgba(16,185,129,0.9)', hint: 'Stamp per tile = titik spawn (bisa banyak; pemain muncul di salah satunya).' },
   { id: 'impassable', label: 'Impassable', color: 'rgba(239,68,68,0.85)', hint: 'Stamp per tile = penghalang tak terlihat (memblok gerak, tanpa tekstur).' },
   { id: 'impassableArea', label: 'Impassable Area', color: 'rgba(220,38,38,0.6)', hint: 'Drag di area kosong = buat area kotak baru, ukuran bebas (tidak ikut grid). Klik area yang sudah ada = pilih (muncul handle) — drag badan untuk pindah, tarik pojok/sisi untuk resize, Delete untuk hapus. Saat main, penghalangnya tetap memblok tile penuh mana pun yang tersentuh kotak ini — invisible, sama seperti Impassable per-tile.' },
@@ -37,6 +37,7 @@ const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateAr
   { id: 'privateArea', label: 'Private area', color: 'rgba(96,165,250,0.95)', hint: 'Stamp: drag area + Area ID. Area ber-ID sama = satu grup audio (walau terpisah). Bisa pilih kedap suara atau tidak (default: kedap suara).' },
   { id: 'focusArea', label: 'Focus area', color: 'rgba(245,158,11,0.95)', hint: 'Drag area lalu beri nama. Pemain yang masuk otomatis berstatus Focus + DND (tidak bisa disummon/slap/di-follow, tidak auto-connect proximity), bisa nyetel musik privat sendiri, dan channel chat "Fokus" otomatis kebuka. Area sedikit digelapkan pas ditempati (lebih terang dari Private Area), nama areanya tetap muncul sebagai label.' },
   { id: 'meetingArea', label: 'Meeting area', color: 'rgba(20,184,166,0.95)', hint: 'Drag area lalu beri nama. Pemain yang masuk otomatis berstatus "In a meeting" dan bicara lewat voice/video jarak-dekat. Bisa pilih kedap suara atau tidak (default: kedap suara, seperti rapat sungguhan).' },
+  { id: 'recordArea', label: 'Record area', color: 'rgba(219,39,119,0.95)', hint: 'Drag area lalu beri nama. Pemain yang masuk melihat panel Start/Jeda/Stop untuk merekam layar mereka sendiri — beda total dari Meeting area.' },
   { id: 'restrictedArea', label: 'Restricted area', color: 'rgba(220,38,38,0.85)', hint: 'Drag area lalu beri nama (mis. "CEO Office") — hanya ADMIN yang bisa langsung masuk. Orang lain yang menyentuh area ini langsung disodori form antrean "Ngobrol dengan CEO" untuk dapat giliran masuk sendiri.' },
   { id: 'portal', label: 'Portal', color: 'rgba(124,58,237,0.95)', hint: 'Stamp klik tile portal → pilih tujuan room lain, atau klik titik tujuan di room ini. Pemain tekan F untuk pindah.' },
   { id: 'door', label: 'Door', color: 'rgba(212,160,86,0.9)', hint: 'Stamp per tile = pintu yang bisa dilewati. Pilih tool Select lalu klik pintu untuk atur Password (opsional, mirip ZEP).' },
@@ -1787,6 +1788,9 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             // happening just outside its walls.
             const isolate = await showConfirm('Area ini KEDAP SUARA?\n\nOK = ya — orang di luar area ini tidak akan saling dengar dengan yang di dalam.\nBatal = tidak — cuma jarak biasa yang menentukan siapa dengar siapa.');
             s.addArea('meetingArea', sel, name || 'Meeting', undefined, isolate);
+          } else if (s.selectedEffect === 'recordArea') {
+            const name = ((await showPrompt('Nama record area:', 'Record Area')) ?? '').trim();
+            s.addArea('recordArea', sel, name || 'Record Area');
           } else if (s.selectedEffect === 'restrictedArea') {
             const name = ((await showPrompt('Nama area (mis. "CEO Office"):', 'CEO Office')) ?? '').trim();
             const id = s.addArea('restrictedArea', sel, name || 'Restricted Area');

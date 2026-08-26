@@ -159,7 +159,7 @@ export interface AreaEffect {
   // hasn't unlocked THIS area id yet (see server/src/socket/doorLock.ts's
   // isDoorAreaUnlocked). Excluded from the zones list like impassable/
   // wallArea (never a chat/audio zone).
-  effect: 'privateArea' | 'mapLocation' | 'impassable' | 'focusArea' | 'wallArea' | 'meetingArea' | 'restrictedArea' | 'doorArea';
+  effect: 'privateArea' | 'mapLocation' | 'impassable' | 'focusArea' | 'wallArea' | 'meetingArea' | 'restrictedArea' | 'doorArea' | 'recordArea';
   name: string;
   x: number;
   y: number;
