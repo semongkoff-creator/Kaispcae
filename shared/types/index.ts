@@ -1,8 +1,6 @@
 import type { Role } from '../permissions';
 import type { RoomTemplateId } from '../defaultRoomLayout';
 import type { ReferenceImageData, ImpassableAreaRect, DoorAreaRect } from '../mapLayers';
-export type { EmploymentType } from '../workspacePermissions';
-export { EMPLOYMENT_TYPE_LABELS } from '../workspacePermissions';
 
 // Direction the avatar is facing or moving
 export type Direction = 'up' | 'down' | 'left' | 'right';
@@ -2149,5 +2147,5 @@ export type { EditScope, RecurringMaster, Occurrence } from '../recurrence';
 export { expandOccurrences, truncateRuleBefore, normaliseRule, describeRule } from '../recurrence';
 export type { DocRole, DocAction, DocCtx } from '../docPermissions';
 export { docRoleAtLeast, canDoc, DOC_ROLE_LABELS } from '../docPermissions';
-export type { WorkspaceRole, WorkspaceAction, WorkspaceCtx } from '../workspacePermissions';
-export { canWorkspace, WORKSPACE_ACTIONS, WORKSPACE_ROLE_LABELS } from '../workspacePermissions';
+export type { WorkspaceRole, WorkspaceAction, WorkspaceCtx, EmploymentType } from '../workspacePermissions';
+export { canWorkspace, WORKSPACE_ACTIONS, WORKSPACE_ROLE_LABELS, EMPLOYMENT_TYPE_LABELS } from '../workspacePermissions';
