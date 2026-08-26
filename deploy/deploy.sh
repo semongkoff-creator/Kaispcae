@@ -243,8 +243,21 @@ if [[ "$MIGRATE" == "1" && "$BACKUP" == "1" ]]; then
     # rather than leaving a valid gzip of a truncated dump behind.
     "${COMPOSE[@]}" exec -T "$PG_SERVICE" pg_dump -U "$PG_USER" "$PG_DB" | gzip > "$BACKUP_FILE"
     BACKUP_SIZE="$(wc -c < "$BACKUP_FILE" | tr -d ' ')"
-    [[ "$BACKUP_SIZE" -gt 10240 ]] || die "Backup $BACKUP_FILE is only $BACKUP_SIZE bytes — refusing to migrate against it."
-    printf 'Backup written: %s (%s bytes)\n' "$BACKUP_FILE" "$BACKUP_SIZE"
+    # Completeness, not size.
+    #
+    # This was a size floor, which is the wrong question and said so the first
+    # time a brand-new deployment ran it: pg_dump of an empty database is a
+    # few hundred bytes and perfectly valid, so the guard blocked the one
+    # migration that could not possibly destroy anything.
+    #
+    # pg_dump writes this trailer only after it finishes, so its presence
+    # proves the dump ran to completion — which is what the size check was
+    # reaching for, and it holds whether the database has one table or three
+    # hundred.
+    if ! gzip -dc "$BACKUP_FILE" 2>/dev/null | tail -5 | grep -q 'PostgreSQL database dump complete'; then
+      die "Backup $BACKUP_FILE is truncated or unreadable (${BACKUP_SIZE} bytes) — refusing to migrate against it."
+    fi
+    printf 'Backup written: %s (%s bytes, complete)\n' "$BACKUP_FILE" "$BACKUP_SIZE"
   fi
 elif [[ "$MIGRATE" == "1" ]]; then
   log "Skip database backup (--skip-backup)"
