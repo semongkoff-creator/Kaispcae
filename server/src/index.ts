@@ -20,7 +20,7 @@ import { registerFollowHandlers } from './socket/followHandler';
 import { registerRemoteHelpHandlers } from './socket/remoteHelpHandler';
 import { registerMediaHandlers, startMediaExpirySweep } from './socket/mediaHandler';
 import { registerRecordingHandlers } from './socket/recordingHandler';
-import { getRedis } from './store/roomStore';
+import { getRedis, clearAllPlayerPresence } from './store/roomStore';
 import { getPrisma } from './lib/prisma';
 import { loadConfig, getConfig } from './config';
 import { rateLimit } from './middleware/rateLimit';
@@ -273,6 +273,13 @@ async function start() {
   const redis = await getRedis();
   console.log(`[server] ${redis ? 'Redis connected' : 'Redis unavailable — in-memory mode'}`);
   console.log(`[server] environment: ${config.NODE_ENV}`);
+
+  // Player presence — see clearAllPlayerPresence's own doc comment: a
+  // redeploy leaves ghost "online" entries in Redis for everyone connected
+  // at that instant, since their 'disconnect' handler never runs. Must
+  // finish before the first socket can possibly JOIN_ROOM, so this runs
+  // before io.on(CONNECT) registration below.
+  await clearAllPlayerPresence();
 
   io.on(SocketEvents.CONNECT, (socket) => {
     console.log(`[server] player connected: ${socket.id}`);

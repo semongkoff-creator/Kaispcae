@@ -90,6 +90,28 @@ export async function getRedis(): Promise<Redis | null> {
 
 // ─── Player CRUD (Redis or in-memory) ─────────────────────────────
 
+// Startup-only: wipes every room's persisted player-presence entry. A bare
+// server restart (redeploy, crash) tears down every live socket without
+// ever running its 'disconnect' handler, so Redis-persisted
+// `room:<id>:players` entries for whoever was connected at that exact
+// moment survive the restart as permanent ghosts — nothing else ever
+// cleans them up except that SAME account's own next JOIN_ROOM (see
+// roomHandler.ts's stale-entry eviction loop, which only self-heals the
+// rejoining account's own ghost, not anyone else's). A fresh process has
+// zero real connections by definition, so wiping this store at boot is
+// always safe — any browser tab left open elsewhere still reconnects its
+// socket and re-JOIN_ROOMs within seconds regardless.
+export async function clearAllPlayerPresence(): Promise<void> {
+  const r = await getRedis();
+  if (!r) return; // in-memory store is already empty on a fresh process
+  try {
+    const keys = await r.keys('room:*:players');
+    if (keys.length > 0) await r.del(...keys);
+  } catch (e) {
+    console.warn('[roomStore] failed to clear stale player presence on startup:', e);
+  }
+}
+
 export async function getPlayers(roomId: string): Promise<Avatar[]> {
   const r = await getRedis();
   if (r) {
