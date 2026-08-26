@@ -56,7 +56,7 @@ admin.get('/admin/members', authenticateToken, requireWorkspace('workspace:manag
   }
 });
 
-// Change workspace role / department / manager / active.
+// Change workspace role / employment type / department / manager / active.
 admin.patch('/admin/members/:userId', authenticateToken, requireWorkspace('workspace:manageMembers'), adminMutationLimit, async (req: AuthRequest, res: Response) => {
   if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
