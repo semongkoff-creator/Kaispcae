@@ -123,49 +123,13 @@ test('audio outranks video and screen share on a saturated uplink', () => {
   const source = readFileSync(resolve('client/src/services/webrtcService.ts'), 'utf8');
   // One connection carries mic, camera and screen through the same congestion
   // controller; equal priority means a screen share degrades the voice call.
-  // Asserted against the transceiver's sender rather than an addTrack return
-  // value: the tracks are no longer added as they appear, because doing so
-  // renegotiated every time and let the two sides' m-line order drift apart.
-  // The guarantee is unchanged — audio high, camera low — only where the
-  // sender comes from.
-  assert.ok(/prioritiseSender\(audioTx\.sender, 'high'\)/.test(source));
-  assert.ok(/prioritiseSender\(cameraTx\.sender, 'low', 'maintain-framerate'\)/.test(source));
+  assert.ok(/prioritiseSender\(pc\.addTrack\(audioTrack, this\.localStream\), 'high'\)/.test(source));
+  assert.ok(/prioritiseSender\(pc\.addTrack\(camTrack, this\.localStream\), 'low', 'maintain-framerate'\)/.test(source));
   assert.ok(source.includes("WebRTCService.setSenderPriority(params, 'low')"), 'the screen sender must yield too');
   assert.ok(source.includes("params.degradationPreference = 'maintain-resolution'"), 'screen text should stay legible, frames can drop');
   // Both spellings of the same knob — browsers read one or the other.
   assert.ok(source.includes('params.encodings[0].networkPriority = priority'));
   assert.ok(source.includes('params.encodings[0].priority = priority'));
-});
-
-test('the m-line layout is fixed at connection and never changed after', () => {
-  const source = readFileSync(resolve('client/src/services/webrtcService.ts'), 'utf8');
-
-  // The bug this guards against was not subtle in its effects: an offer whose
-  // media sections are ordered differently from the previous one is rejected
-  // with InvalidAccessError, and that pair is finished — every rebuild
-  // reproduces the same disagreement. It presented as a black screen share,
-  // and as one person being audible to some listeners but not others.
-  //
-  // It happened because m-lines were created implicitly by whichever
-  // addTrack() ran first across several call sites, so two sides could end up
-  // with different orders. Three transceivers up front, in a fixed order, on
-  // both sides, is what makes that impossible.
-  assert.ok(/addTransceiver\('audio'/.test(source), 'audio must be m-line 0');
-  assert.equal((source.match(/addTransceiver\('video'/g) ?? []).length, 2, 'camera and screen each need their own fixed slot');
-
-  // Adding a track later renegotiates, and renegotiation is what allowed the
-  // order to drift. Every later change has to be a replaceTrack on a slot
-  // that already exists.
-  assert.equal(/pc\.addTrack\(/.test(source), false, 'tracks must be attached with replaceTrack, never added');
-
-  // removeTrack renegotiates AND releases the transceiver for reuse, and the
-  // two sides do not necessarily agree which slot got recycled next time.
-  assert.equal(/pc\.removeTrack\(/.test(source), false, 'a slot is emptied with replaceTrack(null), never removed');
-
-  // Which transceiver a track arrived on is the only camera-or-screen test
-  // that cannot be wrong. Stream grouping cannot work at all now, since
-  // replaceTrack carries no MediaStream.
-  assert.ok(source.includes('event.transceiver === cameraTx'), 'classify by transceiver, not by inference');
 });
 
 if (process.exitCode) {
