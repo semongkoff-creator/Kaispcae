@@ -27,6 +27,7 @@ import { rateLimit } from './middleware/rateLimit';
 import { verifyTokenClaims, verifyGuestTokenClaims, SESSION_SUPERSEDED, isInviteRevoked, GUEST_LINK_REVOKED } from './middleware/auth';
 import { setSessionKickIo } from './lib/sessionKick';
 import authRoutes from './routes/auth';
+import livekitRoutes from './routes/livekit';
 import roomRoutes, { setIo } from './routes/rooms';
 import roomMemberRoutes, { setMembersIo } from './routes/roomMembers';
 import guestInviteRoutes, { setIo as setGuestInviteIo } from './routes/guestInvite';
@@ -259,6 +260,7 @@ app.use('/api', userRoutes);
 // only /api/ is proxied to the backend).
 app.use('/api', googleRoutes);
 app.use('/api', operatorRoutes);
+app.use('/api', livekitRoutes);
 app.use('/api', adminRoutes);
 app.use('/api', attendanceRoutes);
 app.use('/api', attendanceAdminRoutes);
