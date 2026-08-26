@@ -1,4 +1,4 @@
-import { WorkspaceRole } from '@kaispace/shared';
+import { WorkspaceRole, EmploymentType } from '@kaispace/shared';
 
 const API_BASE = '/api';
 
@@ -24,6 +24,7 @@ export interface AdminMember {
   email: string;
   displayName: string;
   workspaceRole: WorkspaceRole;
+  employmentType: EmploymentType;
   timezone: string;
   active: boolean;
   createdAt: string;
@@ -158,7 +159,7 @@ export const adminApi = {
     req<{ requests: { userId: string; displayName: string; email: string; roomSlug: string; roomName: string; requestedAt: number }[] }>(
       '/admin/join-requests',
     ).then((r) => r.requests),
-  updateMember: (userId: string, patch: Partial<{ workspaceRole: WorkspaceRole; active: boolean; departmentId: string | null; managerId: string | null }>) =>
+  updateMember: (userId: string, patch: Partial<{ workspaceRole: WorkspaceRole; employmentType: EmploymentType; active: boolean; departmentId: string | null; managerId: string | null }>) =>
     req<Record<string, unknown>>(`/admin/members/${userId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 
   // Fase 5 (org-resolution) — invite a new member by email; they land in

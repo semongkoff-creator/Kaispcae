@@ -1,6 +1,8 @@
 import type { Role } from '../permissions';
 import type { RoomTemplateId } from '../defaultRoomLayout';
 import type { ReferenceImageData, ImpassableAreaRect, DoorAreaRect } from '../mapLayers';
+export type { EmploymentType } from '../workspacePermissions';
+export { EMPLOYMENT_TYPE_LABELS } from '../workspacePermissions';
 
 // Direction the avatar is facing or moving
 export type Direction = 'up' | 'down' | 'left' | 'right';
