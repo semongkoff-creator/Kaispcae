@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { CameraVideoOffFill } from 'react-bootstrap-icons';
-import { Icon } from '@iconify/react';
 import { isTypingTarget } from '@/utils/hotkeys';
 import { Tooltip } from '@/components/ui/Tooltip';
 
@@ -39,7 +38,9 @@ export function CameraButton({ enabled, onToggle }: CameraButtonProps) {
             : 'bg-white/90 dark:bg-gray-800/90 border-login-border-soft dark:border-white/10 shadow-purple-500/10'
         }`}
       >
-        {enabled ? <Icon icon="akar-icons:video-camera" width={16} height={16} className="text-white" /> : <CameraVideoOffFill className="text-red-500" size={16} />}
+        {/* No "camera off" variant exists in the real asset set — kept the
+            existing red react-bootstrap-icons glyph for that state. */}
+        {enabled ? <img src="/assets/img/icons/camera.svg" width={16} height={16} alt="" /> : <CameraVideoOffFill className="text-red-500" size={16} />}
       </button>
     </Tooltip>
   );

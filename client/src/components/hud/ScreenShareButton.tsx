@@ -1,5 +1,4 @@
 import { DisplayFill } from 'react-bootstrap-icons';
-import { Icon } from '@iconify/react';
 import { Tooltip } from '@/components/ui/Tooltip';
 
 interface ScreenShareButtonProps {
@@ -31,7 +30,7 @@ export function ScreenShareButton({ sharing, onToggle }: ScreenShareButtonProps)
           sharing ? 'bg-login-accent border-login-accent shadow-purple-500/30' : 'bg-white/90 dark:bg-gray-800/90 border-login-border-soft dark:border-white/10 shadow-purple-500/10'
         }`}
       >
-        {sharing ? <DisplayFill className="text-white" size={16} /> : <Icon icon="lucide:monitor-up" width={16} height={16} className="text-login-accent dark:text-purple-300" />}
+        {sharing ? <DisplayFill className="text-white" size={16} /> : <img src="/assets/img/icons/share_screen.svg" width={16} height={16} alt="" />}
         {sharing && (
           <div className="absolute inset-0 rounded-full border-2 border-purple-400 animate-pulse" />
         )}

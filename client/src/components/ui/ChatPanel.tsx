@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode, type MouseEvent, type ClipboardEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, MegaphoneFill, ChevronLeft, ChevronRight, XLg, Headset, Clipboard } from 'react-bootstrap-icons';
-import { Icon } from '@iconify/react';
+import { LockFill, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, MegaphoneFill, ChevronLeft, ChevronRight, XLg, Headset, Clipboard } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@kaispace/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -544,7 +543,7 @@ export function ChatPanel({
             onClick={() => onToggleOpen(!open)}
             className="font-login-body bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl px-3 py-2 rounded-lg text-sm text-login-accent dark:text-purple-300 hover:brightness-110 border border-login-border-soft dark:border-white/10 shadow-lg shadow-purple-500/10 cursor-pointer inline-flex items-center gap-1.5"
           >
-            <ChatDotsFill size={14} /> {open ? 'Hide' : 'Chat'}
+            <img src="/assets/img/icons/message.svg" width={14} height={14} alt="" /> {open ? 'Hide' : 'Chat'}
             {!open && totalUnread > 0 && (
               <span className="ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold inline-flex items-center justify-center">
                 {totalUnread > 99 ? '99+' : totalUnread}
@@ -987,7 +986,7 @@ export function ChatPanel({
           })()}
           <div className="p-3 border-t border-purple-100 dark:border-gray-700 flex gap-2 items-center">
             <Tooltip label="Emoji" detail="Tambahkan emoji ke pesanmu.">
-              <button onClick={() => setShowEmoji(!showEmoji)} className="text-purple-600 dark:text-purple-400 cursor-pointer"><EmojiSmile size={16} /></button>
+              <button onClick={() => setShowEmoji(!showEmoji)} className="cursor-pointer"><img src="/assets/img/icons/emoticon.svg" width={16} height={16} alt="" /></button>
             </Tooltip>
             {/* Potongan C3 — file attachments work for zone (Private) chat
                 too, not just persisted Channel/DM. */}
@@ -1060,7 +1059,7 @@ export function ChatPanel({
                 disabled={!text.trim() && pendingAttachments.items.length === 0}
                 className="bg-login-accent hover:brightness-110 disabled:opacity-40 text-white text-xs w-7 h-7 shrink-0 rounded flex items-center justify-center cursor-pointer"
               >
-                <Icon icon="iconamoon:send-thin" width={14} height={14} />
+                <img src="/assets/img/icons/send.svg" width={14} height={14} alt="" />
               </button>
             </Tooltip>
           </div>

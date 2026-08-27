@@ -1,4 +1,3 @@
-import { Icon } from '@iconify/react';
 import { Tooltip } from '@/components/ui/Tooltip';
 
 interface EmojiButtonProps {
@@ -25,7 +24,7 @@ export function EmojiButton({ open, onToggle }: EmojiButtonProps) {
             : 'bg-white/90 dark:bg-gray-800/90 border-login-border-soft dark:border-white/10 shadow-purple-500/10'
         }`}
       >
-        <Icon icon="ic:baseline-insert-emoticon" width={16} height={16} className={open ? 'text-white' : 'text-login-accent dark:text-purple-300'} />
+        <img src="/assets/img/icons/emoticon.svg" width={16} height={16} alt="" />
       </button>
     </Tooltip>
   );

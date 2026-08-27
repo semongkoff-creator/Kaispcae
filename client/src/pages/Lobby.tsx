@@ -276,15 +276,13 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
   return (
     <div className="w-screen h-screen overflow-y-auto bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
       <header className="px-6 py-3.5 flex items-center justify-between border-b border-login-border-soft dark:border-gray-800 backdrop-blur-sm">
-        <div className="flex items-center gap-1.5">
-          {/* Small inline SVG mark, not a hotlinked/external asset — an
-              approximation of the two-diamond wordmark accent from the
-              reference; no exact source asset was available to pull. */}
-          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
-            <rect x="2" y="7" width="12" height="12" rx="2.5" fill="#717BD8" transform="rotate(45 8 13)" />
-            <rect x="9" y="3" width="9" height="9" rx="2" fill="#717BD8" opacity="0.55" transform="rotate(45 13.5 7.5)" />
-          </svg>
-          <h1 className="font-login-heading text-xl font-bold tracking-tight text-gray-900 dark:text-gray-100 lowercase">KaiSpace</h1>
+        <div className="flex items-center">
+          {/* Real logo (client/kaispace_icon.rar, extracted 2026-08-27) —
+              mark + "kaispace" wordmark already combined in one image, so
+              this replaces both the earlier hand-drawn SVG approximation
+              AND the separate <h1> text (that would now just duplicate the
+              wordmark baked into the image). Self-hosted, not hotlinked. */}
+          <img src="/assets/img/logo_kaispace.png" alt="kaispace" className="h-6 w-auto" />
         </div>
 
         {/* User dropdown — Figma shows only plain "Name ▾", no avatar and no

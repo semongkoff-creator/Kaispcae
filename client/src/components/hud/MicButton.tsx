@@ -1,6 +1,4 @@
 import { useEffect } from 'react';
-import { MicMuteFill } from 'react-bootstrap-icons';
-import { Icon } from '@iconify/react';
 import { isTypingTarget } from '@/utils/hotkeys';
 import { Tooltip } from '@/components/ui/Tooltip';
 
@@ -43,7 +41,10 @@ export function MicButton({ muted, onToggle }: MicButtonProps) {
             : 'bg-login-accent border-login-accent shadow-purple-500/30'
         }`}
       >
-        {muted ? <MicMuteFill className="text-red-500" size={16} /> : <Icon icon="bi:mic-fill" width={16} height={16} className="text-white" />}
+        {/* mic.svg (neutral) / mic_on.svg (green, both fixed-color real
+            assets) — the pulsing red ring below stays the primary "you're
+            muted" signal since the icon itself can't be recolored to red. */}
+        <img src={`/assets/img/icons/${muted ? 'mic' : 'mic_on'}.svg`} width={16} height={16} alt="" />
         {muted && (
           <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-pulse" />
         )}

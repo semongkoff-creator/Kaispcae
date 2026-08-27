@@ -1,6 +1,12 @@
 import { ReactNode } from 'react';
-import { Icon } from '@iconify/react';
-import { XLg, XCircleFill, Tools, GeoAltFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, ShieldLock, Buildings, ClockHistory, PersonCheck, DoorOpenFill, DoorClosedFill, Link45deg, QuestionCircleFill, PeopleFill, HourglassSplit } from 'react-bootstrap-icons';
+import { XLg, XCircleFill, Tools, BoxArrowRight, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, LockFill, UnlockFill, Buildings, ClockHistory, DoorOpenFill, DoorClosedFill, Link45deg, HourglassSplit } from 'react-bootstrap-icons';
+
+// Real KaiSpace icon set (client/kaispace_icon.rar, extracted 2026-08-27) —
+// fixed-color SVGs (not currentColor-recolorable like the Iconify set they
+// replace), self-hosted under public/assets/img/icons, never hotlinked.
+function IconImg({ name, size = 15 }: { name: string; size?: number }) {
+  return <img src={`/assets/img/icons/${name}.svg`} width={size} height={size} alt="" className="shrink-0" />;
+}
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -316,7 +322,7 @@ export function Sidebar({
       <div className="relative">
         <Tooltip label="Room Features" detail="Buka menu pengaturan & kontrol room." side="right">
           <SidebarIcon active={roomFeaturesActive} onClick={onToggleRoomFeatures}>
-            <Icon icon="material-symbols:menu-rounded" width={16} height={16} />
+            <IconImg name="menu" size={16} />
           </SidebarIcon>
         </Tooltip>
 
@@ -342,7 +348,7 @@ export function Sidebar({
                 should be able to find without already knowing where
                 anything else is. */}
             <Tooltip label="Panduan" detail="Buka panduan cara pakai KaiSpace." side="right" wrapperClassName="w-full">
-              <MenuRow icon={<QuestionCircleFill size={15} />} label="Panduan" onClick={closeAnd(onOpenTutorial)} />
+              <MenuRow icon={<IconImg name="user_guide" />} label="Panduan" onClick={closeAnd(onOpenTutorial)} />
             </Tooltip>
             {/* QA (Presence checklist item #8, "Member list akurat") — a
                 guest has no User row (see server/src/routes/guestInvite.ts),
@@ -350,7 +356,7 @@ export function Sidebar({
                 nothing from opening this either. */}
             {!isGuest && (
               <Tooltip label="Daftar Member" detail="Lihat semua member terdaftar di room ini." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<PeopleFill size={15} />} label="Member" onClick={closeAnd(onOpenMemberList)} />
+                <MenuRow icon={<IconImg name="user_online" />} label="Member" onClick={closeAnd(onOpenMemberList)} />
               </Tooltip>
             )}
             <MenuDivider />
@@ -389,13 +395,13 @@ export function Sidebar({
             </Tooltip>
             {!isGuest && (
               <Tooltip label="Chat" detail="Buka tampilan pesan gaya messenger." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<Icon icon="ep:chat-dot-round" width={15} height={15} />} label={messengerViewActive ? 'Tutup Chat' : 'Chat'} active={messengerViewActive} onClick={closeAnd(onToggleMessengerView)} />
+                <MenuRow icon={<IconImg name="message" />} label={messengerViewActive ? 'Tutup Chat' : 'Chat'} active={messengerViewActive} onClick={closeAnd(onToggleMessengerView)} />
               </Tooltip>
             )}
             {isAdmin && (
               <Tooltip label="Permintaan Bergabung" detail="Lihat & proses permintaan masuk yang menunggu. (Khusus admin.)" side="right" wrapperClassName="w-full">
                 <MenuRow
-                  icon={<PersonCheck size={15} />}
+                  icon={<IconImg name="request" />}
                   label={pendingJoinCount > 0 ? `Permintaan bergabung (${pendingJoinCount})` : 'Permintaan bergabung'}
                   active={joinQueueActive}
                   onClick={closeAnd(onToggleJoinQueue)}
@@ -404,7 +410,7 @@ export function Sidebar({
             )}
             {!isGuest && (
               <Tooltip label="Kalender" detail="Buka kalender jadwal tim." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<Icon icon="ant-design:calendar-outlined" width={15} height={15} />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
+                <MenuRow icon={<IconImg name="calendar" />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
               </Tooltip>
             )}
             {/* Absensi + Cuti keduanya hidup di AttendanceApp (Cuti adalah tab
@@ -421,12 +427,12 @@ export function Sidebar({
                 why this is NOT nested inside the admin-only Konsol Admin). */}
             {!isGuest && (
               <Tooltip label="Analitik Saya" detail="Lihat ringkasan aktivitas & produktivitasmu." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<Icon icon="codicon:graph" width={15} height={15} />} label={myAnalyticsActive ? 'Tutup Analitik Saya' : 'Analitik Saya'} active={myAnalyticsActive} onClick={closeAnd(onToggleMyAnalytics)} />
+                <MenuRow icon={<IconImg name="stat" />} label={myAnalyticsActive ? 'Tutup Analitik Saya' : 'Analitik Saya'} active={myAnalyticsActive} onClick={closeAnd(onToggleMyAnalytics)} />
               </Tooltip>
             )}
             {isWorkspaceAdmin && (
               <Tooltip label="Konsol Admin" detail="Buka panel pengelolaan workspace. (Khusus admin.)" side="right" wrapperClassName="w-full">
-                <MenuRow icon={<ShieldLock size={15} />} label={adminViewActive ? 'Tutup Konsol Admin' : 'Konsol Admin'} active={adminViewActive} onClick={closeAnd(onToggleAdminView)} />
+                <MenuRow icon={<IconImg name="admin_panel" />} label={adminViewActive ? 'Tutup Konsol Admin' : 'Konsol Admin'} active={adminViewActive} onClick={closeAnd(onToggleAdminView)} />
               </Tooltip>
             )}
             {isOperator && (
@@ -501,7 +507,7 @@ export function Sidebar({
                 Link above — App.tsx's handleBroadcast prompts for the text. */}
             {canBroadcast && (
               <Tooltip label="Broadcast" detail="Kirim pengumuman teks ke semua orang di room ini." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<Icon icon="reicon:bullhorn" width={15} height={15} />} label="Broadcast" onClick={closeAnd(onBroadcast)} />
+                <MenuRow icon={<IconImg name="announce" />} label="Broadcast" onClick={closeAnd(onBroadcast)} />
               </Tooltip>
             )}
             {isAdmin && (
@@ -511,7 +517,7 @@ export function Sidebar({
             )}
             {canTeleport && (
               <Tooltip label="Teleport" detail="Pindah cepat ke lokasi tersimpan." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<GeoAltFill size={15} />} label="Teleport" active={showTeleportPanel} onClick={closeAnd(onToggleTeleport)} />
+                <MenuRow icon={<IconImg name="teleport" />} label="Teleport" active={showTeleportPanel} onClick={closeAnd(onToggleTeleport)} />
               </Tooltip>
             )}
 
@@ -521,7 +527,7 @@ export function Sidebar({
                 aren't registered for guest sockets at all), just never hidden. */}
             {!isGuest && (
               <Tooltip label="Tambah Media" detail="Tempel gambar, video, atau file ke dalam room." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<Icon icon="ci:add-plus-circle" width={15} height={15} />} label="Add Media" active={showAddMediaPanel} onClick={closeAnd(onToggleAddMedia)} />
+                <MenuRow icon={<IconImg name="add_media" />} label="Add Media" active={showAddMediaPanel} onClick={closeAnd(onToggleAddMedia)} />
               </Tooltip>
             )}
 
@@ -536,7 +542,7 @@ export function Sidebar({
             {canRecord && (
               <div className="flex items-center gap-3 px-3 py-2">
                 <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-login-surface dark:bg-gray-700 text-login-accent dark:text-purple-300">
-                  <RecordCircleFill size={15} />
+                  <IconImg name="record_on" />
                 </span>
                 <span className="flex-1 text-sm text-gray-700 dark:text-gray-200">Recording</span>
                 <div className="flex items-center gap-1 shrink-0">
@@ -578,7 +584,7 @@ export function Sidebar({
       {hasMySeat && (
         <Tooltip label="Ke Kursi Saya" detail="Teleport langsung ke kursi tetapmu di room ini." side="right">
           <SidebarIcon onClick={onMySeat}>
-            <span className="text-xs leading-none">🪑</span>
+            <IconImg name="back_to_seat" size={16} />
           </SidebarIcon>
         </Tooltip>
       )}
@@ -627,7 +633,7 @@ export function Sidebar({
           duplicating them. */}
       <Tooltip label="Pengaturan" detail="Buka pengaturan akun, notifikasi, dan tampilan." side="right">
         <SidebarIcon onClick={onOpenSettings}>
-          <Icon icon="ant-design:setting-outlined" width={14} height={14} />
+          <IconImg name="setting" size={14} />
         </SidebarIcon>
       </Tooltip>
 
@@ -636,7 +642,7 @@ export function Sidebar({
           onClick={onLeaveRoom}
           className="text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800"
         >
-          <HouseDoorFill size={14} />
+          <IconImg name="exit_space" size={14} />
         </SidebarIcon>
       </Tooltip>
       <Tooltip

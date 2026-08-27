@@ -1975,6 +1975,36 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       <div className="absolute top-4 right-4 flex items-center gap-2">
         <MapZoomControl />
         <ConnectionIndicator />
+        {/* Notification bell — a bell icon exists in the real asset set
+            (notif.svg), so it's back after being deliberately removed from
+            the sidebar rail in an earlier pass (see Sidebar.tsx's own
+            comment on that). Not a new notification-list feature — no such
+            feature exists here — just a second, more visible entry point
+            into the same Settings > Notifikasi section the gear icon
+            already opens (openPanel('settings')), same as the earlier
+            removal comment says that section now owns these toggles. */}
+        {!isGuest && (
+          <button
+            onClick={() => openPanel('settings')}
+            title="Notifikasi"
+            className="w-9 h-9 rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-login-border-soft dark:border-gray-700 shadow-sm flex items-center justify-center cursor-pointer"
+          >
+            <img src="/assets/img/icons/notif.svg" width={16} height={16} alt="" />
+          </button>
+        )}
+        {/* Invite — new top-bar entry point for an existing capability
+            (handleCreateGuestLink/canManageGuests below, already wired to
+            Sidebar's "Buat Guest Link" row), not a new backend feature.
+            Same isAdmin gate as that row. */}
+        {isAdmin && !isGuest && (
+          <button
+            onClick={handleCreateGuestLink}
+            className="flex items-center gap-1.5 bg-login-accent hover:brightness-110 text-white text-xs font-medium pl-2.5 pr-3 py-2 rounded-lg shadow-sm cursor-pointer"
+          >
+            <img src="/assets/img/icons/invite_user.svg" width={14} height={14} alt="" />
+            Invite
+          </button>
+        )}
       </div>
 
       {/* On-screen movement/action controls — self-hides on non-touch devices

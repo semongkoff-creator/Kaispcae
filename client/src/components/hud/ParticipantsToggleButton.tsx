@@ -1,4 +1,3 @@
-import { Icon } from '@iconify/react';
 import { Tooltip } from '@/components/ui/Tooltip';
 
 interface ParticipantsToggleButtonProps {
@@ -32,7 +31,7 @@ export function ParticipantsToggleButton({ open, onToggle }: ParticipantsToggleB
             : 'bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800 border border-login-border-soft dark:border-gray-700 shadow-sm'
         }`}
       >
-        <Icon icon="clarity:users-solid" width={14} height={14} />
+        <img src="/assets/img/icons/user_online.svg" width={14} height={14} alt="" />
       </button>
     </Tooltip>
   );
