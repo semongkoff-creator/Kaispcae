@@ -62,6 +62,13 @@ interface SidebarProps {
   soundboardActive: boolean;
   onToggleSoundboard: () => void;
 
+  // Rail toggle for ChatPanel (the bottom-right "Message" button/Global
+  // Chat panel) — reference design shows a chat icon in the rail's bottom
+  // cluster (near Settings/Profile); same underlying open state, just a
+  // second entry point, not a separate chat surface.
+  chatPanelOpen: boolean;
+  onToggleChatPanel: () => void;
+
   // Guest Link & Ruang Tunggu — admin-only, prompt-based (see App.tsx's
   // handleCreateGuestLink). No "current state" to reflect here (unlike Lock
   // Room/Door Override above) — this just fires an action, it isn't a toggle.
@@ -215,6 +222,8 @@ export function Sidebar({
   onToggleDoorOverride,
   soundboardActive,
   onToggleSoundboard,
+  chatPanelOpen,
+  onToggleChatPanel,
   canManageGuests,
   onCreateGuestLink,
   onRevokeLastGuestLink,
@@ -652,13 +661,26 @@ export function Sidebar({
           Settings' own "Notifikasi" section (see SettingsPanel.tsx), which
           reuses the exact same browserNotifications.ts functions rather than
           duplicating them. */}
+      {/* mt-auto moved here (was on "Pengaturan", before that on "Kembali ke
+          Daftar Room") — reference design adds a Chat icon right before
+          Pengaturan in this same bottom cluster, so the anchor now starts
+          here instead, keeping Chat, Pengaturan, Kembali, Theme, and
+          Profile packed together as one tight group. Reuses ChatPanel's
+          own open state (channelChat.chatPanelOpen in App.tsx) — same
+          panel the bottom-right "Message" button already opens, not a
+          second chat surface. */}
+      <Tooltip label={chatPanelOpen ? 'Tutup Chat' : 'Chat'} detail="Buka panel chat untuk kirim pesan ke channel, zone, atau langsung (DM) ke satu orang." side="right" wrapperClassName="mt-auto">
+        <SidebarIcon active={chatPanelOpen} onClick={onToggleChatPanel}>
+          <IconImg name="message" size={14} />
+        </SidebarIcon>
+      </Tooltip>
       <Tooltip label="Pengaturan" detail="Buka pengaturan akun, notifikasi, dan tampilan." side="right">
         <SidebarIcon onClick={onOpenSettings}>
           <IconImg name="setting" size={14} />
         </SidebarIcon>
       </Tooltip>
 
-      <Tooltip label="Kembali ke Daftar Room" detail="Keluar dari room ini, kembali ke Lobby." side="right" wrapperClassName="mt-auto">
+      <Tooltip label="Kembali ke Daftar Room" detail="Keluar dari room ini, kembali ke Lobby." side="right">
         <SidebarIcon
           onClick={onLeaveRoom}
           className="text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800"

@@ -2319,6 +2319,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleDoorOverride={() => emitDoorOverride(!doorOverride)}
         soundboardActive={activePanel === 'soundboard'}
         onToggleSoundboard={() => openPanel('soundboard')}
+        chatPanelOpen={channelChat.chatPanelOpen}
+        onToggleChatPanel={() => channelChat.setChatPanelOpen(!channelChat.chatPanelOpen)}
         canManageGuests={isAdmin}
         onCreateGuestLink={handleCreateGuestLink}
         onRevokeLastGuestLink={handleRevokeGuestLink}
