@@ -1,9 +1,9 @@
 import { randomUUID } from 'crypto';
-import { isUserInLockedZone, zoneKeyholderOf, admitUserToZone } from './zoneLock';
+import { isUserInLockedZone, isZoneLocked, mayEnterZone, zoneKeyholderOf, admitUserToZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
 import { getCachedZones } from '../store/roomStore';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, findSpawnPixel, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, DoorAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveDoorAreaPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH, RosterEntry, RosterUpdate } from '@kaispace/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, findSpawnPixel, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, DoorAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveDoorAreaPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH, RosterEntry, RosterUpdate, Zone } from '@kaispace/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerMic, updatePlayerHidden, updatePlayerWorkMode, updatePlayerSpotlight, updatePlayerSitting,
   setCachedTiles, getCachedTiles, setCachedImpassableAreas, setCachedDoorAreaRects, setCachedZones, getCachedFurnitureIds, setCachedFurnitureIds, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -1829,6 +1829,26 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     persistCeoGrant(room, data.targetUserId, false);
   });
 
+  // Bug fix — teleport had no zone-lock awareness at all, unlike every other
+  // way a player's position/membership can change (Summon/Follow/RemoteHelp
+  // all check isUserInLockedZone against their TARGET before moving them;
+  // regular walking's ZONE_ENTER checks mayEnterZone before granting zone
+  // membership). Teleport is self-directed, so both checks below apply to
+  // the REQUESTER's own state rather than someone else's. Mirrors client's
+  // useProximity.ts findZoneAt (smallest zone wins) but against a TILE
+  // position, not a pixel one — teleport targets are already tile
+  // coordinates by the time this runs, so no conversion is needed.
+  function findZoneAtTile(zones: Zone[], tileX: number, tileY: number): Zone | undefined {
+    let best: Zone | undefined;
+    let bestArea = Infinity;
+    for (const z of zones) {
+      if (tileX < z.x || tileX >= z.x + z.width || tileY < z.y || tileY >= z.y + z.height) continue;
+      const area = z.width * z.height;
+      if (area < bestArea) { best = z; bestArea = area; }
+    }
+    return best;
+  }
+
   // §4 — Teleport. Resolves the real x/y from the location's OWN stored
   // data (DB lookup by id, scoped to this room) rather than trusting
   // whatever coordinates a client might supply directly — same
@@ -1842,6 +1862,17 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const room = currentRoom; if (!room) return;
     const uid = findUserIdBySocket(socket.id);
     if (!uid || !data || (data.kind !== 'admin' && data.kind !== 'bookmark' && data.kind !== 'seat')) return;
+
+    // The lock seals the door BOTH ways (see zoneLock.ts's isSealedIn doc
+    // comment) — someone shut inside a locked zone stays put until it's
+    // unlocked, the same rule already enforced when an admin tries to pull
+    // them out via Summon/Follow/RemoteHelp. Teleport is the requester
+    // moving THEMSELVES, so without this check it was the one remaining way
+    // to walk out of a room that was supposedly sealed.
+    if (isUserInLockedZone(room, uid, zoneIdOfSocket(socket.id))) {
+      socket.emit('admin:error', { message: 'Kamu sedang di zona yang dikunci, tidak bisa teleport sampai dibuka' });
+      return;
+    }
 
     try {
       const prisma = getPrisma();
@@ -1910,6 +1941,19 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // Spec's own rule: if the resolved tile is invalid, leave the
         // player where they were rather than forcing them into a wall.
         socket.emit('admin:error', { message: 'That location is blocked and can’t be teleported to right now' });
+        return;
+      }
+
+      // Same enforcement zoneHandler.ts's ZONE_ENTER already applies to
+      // ordinary walking — a teleport landing someone inside a locked zone
+      // they aren't admitted to would otherwise be a second, unguarded door
+      // into the exact room the lock exists to keep people out of. Checked
+      // for every kind (including 'seat') since an assigned seat that
+      // happens to sit inside a since-locked zone is no more reachable this
+      // way than any other point in it.
+      const destZone = findZoneAtTile(getCachedZones(room), target.x, target.y);
+      if (destZone && isZoneLocked(room, destZone.id) && !mayEnterZone(room, destZone.id, uid)) {
+        socket.emit('admin:error', { message: 'Zona tujuan sedang dikunci' });
         return;
       }
 
