@@ -267,6 +267,36 @@ test('App feeds a share into the screen map, as the mesh does', () => {
   }
 });
 
+test('you can see yourself on both paths', () => {
+  const app = readFileSync(resolve('client/src/App.tsx'), 'utf8');
+  const hook = readFileSync(resolve('client/src/hooks/useWebRTC.ts'), 'utf8');
+
+  // App reached past the hook and called webrtcService directly for its own
+  // preview tile. webrtcService is never initialised on the LiveKit path, so
+  // that returned null for every LiveKit room and nobody could see themselves
+  // in Meeting View.
+  assert.equal(
+    /webrtcService\.get(Local|Screen)Stream\(\)/.test(app), false,
+    'App must not read a stream straight off the mesh service',
+  );
+  assert.ok(/getLocalStream,\n\s+getScreenStream,/.test(app), 'both come from the hook');
+  for (const fn of ['getLocalStream', 'getScreenStream']) {
+    assert.ok(
+      new RegExp(`${fn}: \\(\\) => \\(onLiveKit \\?`).test(hook),
+      `${fn} must choose a path like every other function here`,
+    );
+  }
+});
+
+test('a local preview stream keeps its identity across renders', () => {
+  // App reads these during render. A fresh MediaStream per call gives the
+  // <video> a new object every frame, which resets srcObject and leaves the
+  // tile flickering or black.
+  assert.ok(/private localStream = new MediaStream\(\)/.test(service));
+  assert.ok(/private localScreenStream = new MediaStream\(\)/.test(service));
+  assert.ok(/private syncLocal\(/.test(service), 'held streams are mutated, not rebuilt');
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

@@ -155,6 +155,17 @@ class LiveKitService {
   private mediaStreams = new Map<string, MediaStream>();
   private screenStreams = new Map<string, MediaStream>();
 
+  /**
+   * The local camera/mic and the local screen, as two stable MediaStreams.
+   *
+   * Stable is the whole point: App reads these during render to fill its own
+   * preview tile, and handing back `new MediaStream([...])` each call gives the
+   * <video> a different object every frame, which resets srcObject and leaves
+   * the tile flickering or black. Built once, mutated in place.
+   */
+  private localStream = new MediaStream();
+  private localScreenStream = new MediaStream();
+
   /** Screen share is two sources, not one — the video and its tab/system audio. */
   private static isScreenSource(source: Track.Source): boolean {
     return source === Track.Source.ScreenShare || source === Track.Source.ScreenShareAudio;
@@ -342,11 +353,38 @@ class LiveKitService {
     return this.room?.localParticipant.isScreenShareEnabled ?? false;
   }
 
+  /**
+   * The local camera and microphone, for the app's own preview tile.
+   *
+   * The mesh path exposes the getUserMedia stream it captured; on this path
+   * the tracks belong to the room, so they are collected into one stream that
+   * matches the shape App already expects. Without this, App's direct
+   * webrtcService.getLocalStream() returned null for every LiveKit room and
+   * nobody could see themselves in Meeting View.
+   */
+  getLocalStream(): MediaStream | null {
+    this.syncLocal(this.localStream, [Track.Source.Camera, Track.Source.Microphone]);
+    return this.localStream.getTracks().length ? this.localStream : null;
+  }
+
   /** The local screen capture, for the presenter's own preview tile. */
   getScreenStream(): MediaStream | null {
-    const pub = this.room?.localParticipant.getTrackPublication(Track.Source.ScreenShare);
-    const track = pub?.track?.mediaStreamTrack;
-    return track ? new MediaStream([track]) : null;
+    this.syncLocal(this.localScreenStream, [Track.Source.ScreenShare, Track.Source.ScreenShareAudio]);
+    return this.localScreenStream.getTracks().length ? this.localScreenStream : null;
+  }
+
+  /** Bring one held stream in line with what the room currently publishes. */
+  private syncLocal(stream: MediaStream, sources: Track.Source[]): void {
+    const local = this.room?.localParticipant;
+    const wanted = new Set<MediaStreamTrack>();
+    if (local) {
+      for (const source of sources) {
+        const track = local.getTrackPublication(source)?.track?.mediaStreamTrack;
+        if (track) wanted.add(track);
+      }
+    }
+    for (const track of stream.getTracks()) if (!wanted.has(track)) stream.removeTrack(track);
+    for (const track of wanted) if (!stream.getTracks().includes(track)) stream.addTrack(track);
   }
 
   // ── Proximity ────────────────────────────────────────────────────────────

@@ -222,6 +222,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     screenStalledPeers,
     setManualVolume,
     destroy,
+    getLocalStream,
+    getScreenStream,
   } = useWebRTC({ socketRef, roomSlug });
 
   // Remote video streams
@@ -1919,7 +1921,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {miniModeWindow && (
         <MiniMode
           pipWindow={miniModeWindow}
-          localStream={webrtcService.getLocalStream()}
+          localStream={getLocalStream()}
           remoteStreams={remoteStreams}
           remoteScreenStreams={remoteScreenStreams}
           micMuted={isMicMuted}
@@ -2551,8 +2553,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
       {meetingViewActive ? (
         <MeetingView
-          localStream={webrtcService.getLocalStream()}
-          localScreenStream={isScreenSharing ? webrtcService.getScreenStream() : null}
+          localStream={getLocalStream()}
+          localScreenStream={isScreenSharing ? getScreenStream() : null}
           remoteStreams={remoteStreams}
           remoteScreenStreams={remoteScreenStreams}
           micMuted={isMicMuted}
@@ -2569,8 +2571,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       ) : (
         <>
           <VideoGrid
-            localStream={webrtcService.getLocalStream()}
-            localScreenStream={isScreenSharing ? webrtcService.getScreenStream() : null}
+            localStream={getLocalStream()}
+            localScreenStream={isScreenSharing ? getScreenStream() : null}
             remoteStreams={remoteStreams}
             remoteScreenStreams={remoteScreenStreams}
             micMuted={isMicMuted}

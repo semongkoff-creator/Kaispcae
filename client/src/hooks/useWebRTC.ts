@@ -470,6 +470,11 @@ export function useWebRTC({ socketRef, onRemoteStream, roomSlug }: UseWebRTCOpti
     screenStalledPeers,
     setManualVolume,
     destroy,
-    getLocalStream: () => webrtcService.getLocalStream(),
+    // Both paths, through one door. App used to reach past this hook and call
+    // webrtcService directly for its own preview tile, which returned null for
+    // every LiveKit room — webrtcService is never initialised on that path —
+    // so nobody could see themselves in Meeting View.
+    getLocalStream: () => (onLiveKit ? livekitService.getLocalStream() : webrtcService.getLocalStream()),
+    getScreenStream: () => (onLiveKit ? livekitService.getScreenStream() : webrtcService.getScreenStream()),
   };
 }
