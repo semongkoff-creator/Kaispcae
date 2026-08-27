@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { XLg, XCircleFill, Tools, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, LockFill, UnlockFill, Buildings, ClockHistory, DoorOpenFill, DoorClosedFill, Link45deg, HourglassSplit, SpeakerFill } from 'react-bootstrap-icons';
+import { XLg, XCircleFill, Tools, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, LockFill, UnlockFill, Buildings, ClockHistory, DoorOpenFill, DoorClosedFill, Link45deg, HourglassSplit, SpeakerFill, ChatDotsFill } from 'react-bootstrap-icons';
 
 // Real KaiSpace icon set (client/kaispace_icon.rar, extracted 2026-08-27) —
 // fixed-color SVGs (not currentColor-recolorable like the Iconify set they
@@ -700,7 +700,13 @@ export function Sidebar({
           second chat surface. */}
       <Tooltip label={chatPanelOpen ? 'Tutup Chat' : 'Chat'} detail="Buka panel chat untuk kirim pesan ke channel, zone, atau langsung (DM) ke satu orang." side="right" wrapperClassName="mt-auto">
         <SidebarIcon active={chatPanelOpen} onClick={onToggleChatPanel}>
-          <IconImg name="message" size={14} />
+          {/* message.svg is a paper-plane/send glyph (confirmed by reading
+              its actual path data), not the rounded speech-bubble the
+              reference design shows — there's no bubble-shaped icon in the
+              extracted asset pack, so this uses ChatDotsFill, the same
+              react-bootstrap-icons glyph this exact toggle used before the
+              icon-pack swap. */}
+          <ChatDotsFill size={14} />
         </SidebarIcon>
       </Tooltip>
       <Tooltip label="Pengaturan" detail="Buka pengaturan akun, notifikasi, dan tampilan." side="right">
@@ -709,14 +715,9 @@ export function Sidebar({
         </SidebarIcon>
       </Tooltip>
 
-      <Tooltip label="Kembali ke Daftar Room" detail="Keluar dari room ini, kembali ke Lobby." side="right">
-        <SidebarIcon
-          onClick={onLeaveRoom}
-          className="text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800"
-        >
-          <IconImg name="exit_space" size={14} />
-        </SidebarIcon>
-      </Tooltip>
+      {/* "Kembali ke Daftar Room" rail icon removed — now a genuine
+          duplicate of the "Exit Space" row pinned to the bottom of the
+          Room Features flyout panel (see that panel's own comment). */}
       <Tooltip
         label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
         detail="Beralih antara tampilan terang dan gelap."
