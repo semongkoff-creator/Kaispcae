@@ -55,11 +55,16 @@ class LiveKitService {
 
   private onRemoteStream: RemoteStreamCb | null = null;
   private onRemoteStreamEnded: ((identity: string) => void) | null = null;
+  private onRemoteScreenStream: RemoteStreamCb | null = null;
+  private onRemoteScreenEnded: ((identity: string) => void) | null = null;
   private onSpeakingChange: SpeakingCb | null = null;
   private onConnectionChange: ConnectionCb | null = null;
 
   setOnRemoteStream(cb: RemoteStreamCb) { this.onRemoteStream = cb; }
   setOnRemoteStreamEnded(cb: (identity: string) => void) { this.onRemoteStreamEnded = cb; }
+  // Named to match webrtcService's own pair, so App wires both paths identically.
+  setOnRemoteScreenStream(cb: RemoteStreamCb) { this.onRemoteScreenStream = cb; }
+  setOnRemoteScreenEnded(cb: (identity: string) => void) { this.onRemoteScreenEnded = cb; }
   setOnSpeakingChange(cb: SpeakingCb) { this.onSpeakingChange = cb; }
   setOnConnectionChange(cb: ConnectionCb) { this.onConnectionChange = cb; }
 
@@ -133,22 +138,86 @@ class LiveKitService {
     this.onConnectionChange?.('disconnected');
   }
 
+  /**
+   * One MediaStream per participant per purpose, held here and added to.
+   *
+   * The first version built a fresh `new MediaStream([track])` on every
+   * TrackSubscribed and handed it over. The app keeps one entry per player, so
+   * each arriving track replaced the last: a camera silenced the microphone,
+   * and a screen share silenced both. That is the "suara hilang saat
+   * sharescreen" report — the voice was never lost, the element playing it was
+   * swapped for one holding only the screen.
+   *
+   * Two maps and not one, mirroring the mesh's own split (remoteStreams and
+   * remoteScreenStreams in App.tsx): a share has to arrive without disturbing
+   * the camera tile beside it.
+   */
+  private mediaStreams = new Map<string, MediaStream>();
+  private screenStreams = new Map<string, MediaStream>();
+
+  /** Screen share is two sources, not one — the video and its tab/system audio. */
+  private static isScreenSource(source: Track.Source): boolean {
+    return source === Track.Source.ScreenShare || source === Track.Source.ScreenShareAudio;
+  }
+
+  private streamFor(identity: string, screen: boolean): MediaStream {
+    const map = screen ? this.screenStreams : this.mediaStreams;
+    let stream = map.get(identity);
+    if (!stream) {
+      stream = new MediaStream();
+      map.set(identity, stream);
+    }
+    return stream;
+  }
+
+  private forgetParticipant(identity: string): void {
+    this.mediaStreams.delete(identity);
+    this.screenStreams.delete(identity);
+  }
+
   private wireEvents(room: Room): void {
-    room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
+    room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, pub: RemoteTrackPublication, participant: RemoteParticipant) => {
       // identity is the KaiSpace user id — see the token endpoint, which sets
       // it deliberately so a LiveKit participant can be matched back to a
       // player on the map without a second lookup.
-      if (track.kind === Track.Kind.Audio || track.kind === Track.Kind.Video) {
-        const stream = new MediaStream([track.mediaStreamTrack]);
+      if (track.kind !== Track.Kind.Audio && track.kind !== Track.Kind.Video) return;
+
+      const screen = LiveKitService.isScreenSource(pub.source);
+      const stream = this.streamFor(participant.identity, screen);
+      // Added, not replaced — the mic and the camera belong to the same stream,
+      // and a second arrival must not evict the first.
+      if (!stream.getTracks().includes(track.mediaStreamTrack)) {
+        stream.addTrack(track.mediaStreamTrack);
+      }
+
+      if (screen) this.onRemoteScreenStream?.(participant.identity, stream);
+      else this.onRemoteStream?.(participant.identity, stream);
+    });
+
+    room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, pub: RemoteTrackPublication, participant: RemoteParticipant) => {
+      const screen = LiveKitService.isScreenSource(pub.source);
+      const map = screen ? this.screenStreams : this.mediaStreams;
+      const stream = map.get(participant.identity);
+      if (!stream) return;
+
+      stream.removeTrack(track.mediaStreamTrack);
+
+      // Only when nothing is left. Ending the whole stream because one track
+      // stopped is what made stopping a share also drop the presenter's voice.
+      if (stream.getTracks().length === 0) {
+        map.delete(participant.identity);
+        if (screen) this.onRemoteScreenEnded?.(participant.identity);
+        else this.onRemoteStreamEnded?.(participant.identity);
+      } else if (screen) {
+        this.onRemoteScreenStream?.(participant.identity, stream);
+      } else {
         this.onRemoteStream?.(participant.identity, stream);
       }
     });
 
-    room.on(RoomEvent.TrackUnsubscribed, (_t, _pub, participant: RemoteParticipant) => {
-      this.onRemoteStreamEnded?.(participant.identity);
-    });
-
     room.on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
+      this.forgetParticipant(participant.identity);
+      this.onRemoteScreenEnded?.(participant.identity);
       this.onRemoteStreamEnded?.(participant.identity);
     });
 

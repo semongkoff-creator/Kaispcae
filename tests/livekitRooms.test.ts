@@ -229,6 +229,44 @@ test('the credentials the token endpoint needs actually reach the container', ()
   assert.ok(/VITE_LIVEKIT_ROOMS=\$VITE_LIVEKIT_ROOMS/.test(dockerfile), 'and forwarded to the build');
 });
 
+test('a screen share never evicts the voice beside it', () => {
+  // The reported symptom: "suara hilang saat sharescreen". Every subscribed
+  // track used to be wrapped in a fresh MediaStream and handed over, and the
+  // app holds one stream per player — so the camera replaced the microphone,
+  // and the screen replaced both.
+  assert.ok(/private mediaStreams = new Map/.test(service), 'streams must be held, not rebuilt');
+  assert.ok(/private screenStreams = new Map/.test(service), 'and a share kept apart from the camera');
+  assert.ok(/stream\.addTrack\(track\.mediaStreamTrack\)/.test(service), 'tracks are added');
+  assert.equal(
+    /new MediaStream\(\[track\.mediaStreamTrack\]\)/.test(service), false,
+    'never a new single-track stream per arrival',
+  );
+  // ScreenShareAudio is a separate source from ScreenShare — a shared tab's
+  // sound would otherwise land in the microphone's stream.
+  assert.ok(/Track\.Source\.ScreenShareAudio/.test(service));
+});
+
+test('stopping a share leaves the microphone subscribed', () => {
+  // TrackUnsubscribed used to end everything for that participant regardless
+  // of which track stopped, so ending a share also dropped their voice.
+  assert.ok(/stream\.removeTrack\(track\.mediaStreamTrack\)/.test(service));
+  assert.ok(/getTracks\(\)\.length === 0/.test(service), 'ended only when nothing is left');
+});
+
+test('App feeds a share into the screen map, as the mesh does', () => {
+  const app = readFileSync(resolve('client/src/App.tsx'), 'utf8');
+  assert.ok(/setOnRemoteScreenStream\(\(identity/.test(app));
+  assert.ok(/setOnRemoteScreenEnded\(\(identity/.test(app));
+  // The two paths must key the same two maps, or VideoGrid sees a share on one
+  // and not the other.
+  for (const svc of ['webrtcService', 'livekitService']) {
+    assert.ok(
+      new RegExp(`${svc}\\.setOnRemoteScreenStream`).test(app),
+      `${svc} must feed remoteScreenStreams`,
+    );
+  }
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

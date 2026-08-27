@@ -272,11 +272,26 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       remoteStreams.set(id, stream);
       setStreamsVersion((v) => v + 1);
     });
+    // A share arrives in its own map, exactly as it does on the mesh. Feeding
+    // it into remoteStreams is what made a presenter go silent: the app holds
+    // one stream per player, so the screen replaced the microphone.
+    livekitService.setOnRemoteScreenStream((identity, stream) => {
+      const id = playerIdFor(identity);
+      if (!id) return;
+      remoteScreenStreams.set(id, stream);
+      setStreamsVersion((v) => v + 1);
+    });
+    livekitService.setOnRemoteScreenEnded((identity) => {
+      const id = playerIdFor(identity);
+      if (!id) return;
+      // Only the share. Stopping one must leave the voice beside it alone.
+      remoteScreenStreams.delete(id);
+      setStreamsVersion((v) => v + 1);
+    });
     livekitService.setOnRemoteStreamEnded((identity) => {
       const id = playerIdFor(identity);
       if (!id) return;
       remoteStreams.delete(id);
-      remoteScreenStreams.delete(id);
       setStreamsVersion((v) => v + 1);
     });
     livekitService.setOnSpeakingChange((identity, speaking) => {
