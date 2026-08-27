@@ -603,6 +603,58 @@ rooms.delete('/rooms/:slug/editor/media/:id', authenticateToken, async (req: Aut
   } catch (err) { console.error('[rooms] editor media delete error:', err); return res.status(500).json({ error: 'Failed' }); }
 });
 
+// Import Image (Fitur 15) SVG/WebP support — a separate, admin-gated multer
+// instance + route, NOT the general POST /uploads used by chat attachments,
+// room covers, Add Media, etc. That shared route deliberately excludes SVG
+// everywhere (see uploads.ts's own comment: "excludes anything that can
+// carry an XSS payload when rendered inline") because ANY authenticated org
+// member can hit it, with no per-room role check at all — widening it would
+// have handed every member, not just admins, a way to get an SVG hosted and
+// URL'd by this server. This route instead requires room:update (admin or
+// owner), the exact same gate as editor-data/editor/layers/editor/media
+// above, so only someone who could already edit this room's map can import
+// an SVG through it.
+//
+// Same "reuse uploads.ts's disk storage + its existing GET /uploads/:filename
+// to serve the file back" pattern as the Soundboard upload below — no new
+// serving route, no Drive path (kept disk-only, same as Soundboard). That
+// serving route's isInlineable allowlist deliberately does NOT include .svg,
+// so it always comes back with Content-Disposition: attachment — the one
+// thing that stops an uploaded SVG's embedded <script> from executing if
+// someone is ever navigated straight to its file URL. That header has no
+// effect on how this app actually USES the imported asset: Room Editor
+// custom assets are only ever drawn via canvas drawImage() (spriteLoader.ts),
+// which reads the response body directly and ignores Content-Disposition
+// entirely — so SVG tiles render normally while staying protected.
+const roomAssetUpload = multer({
+  storage: uploadStorage,
+  limits: { fileSize: 100 * 1024 * 1024 }, // matches Import Image's own MAX_IMPORT_BYTES
+  fileFilter: (_req, file, cb) => {
+    const ext = file.originalname.slice(file.originalname.lastIndexOf('.')).toLowerCase();
+    const okMime = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(file.mimetype);
+    const okExt = ['.png', '.jpg', '.jpeg', '.webp', '.svg'].includes(ext);
+    cb(null, okMime || okExt);
+  },
+});
+
+rooms.post('/rooms/:slug/editor/asset', authenticateToken, roomAssetUpload.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'File tidak valid — hanya PNG/JPG/WebP/SVG.' });
+    const prisma = getPrisma();
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
+    if (!room) { fs.unlink(req.file.path, () => {}); return res.status(404).json({ error: 'Room not found' }); }
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
+    if (!hasFeatureAccess(role, 'room:update')) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(403).json({ error: 'Admin role required to import an asset into this room' });
+    }
+    return res.status(201).json({ url: `/api/uploads/${req.file.filename}`, fileName: req.file.originalname });
+  } catch (err) {
+    console.error('[rooms] editor asset upload error:', err);
+    return res.status(500).json({ error: 'Failed to upload asset' });
+  }
+});
+
 // Soundboard — LISTING is open to any approved member (canEnterRoom, same
 // "may this user even be in this room" check the socket join path uses).
 // UPLOADING a new custom sound is admin+ (see shared/permissions.ts's

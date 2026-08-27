@@ -643,6 +643,14 @@ export const api = {
   // (see mediaHandler.ts), not here; this endpoint only handles the binary.
   uploadMedia: (file: File, roomSlug?: string) => uploadFile('/uploads', file, roomSlug),
 
+  // Room Editor's Import Image (Fitur 15) — a separate, admin-gated route
+  // (server/src/routes/rooms.ts) that also accepts SVG/WebP, unlike the
+  // general uploadMedia above (which deliberately excludes SVG — see that
+  // route's own comment). Only usable by whoever can already edit this
+  // room's map; the server re-checks that regardless of what this client
+  // sends.
+  uploadRoomAsset: (file: File, roomSlug: string) => uploadFile(`/rooms/${encodeURIComponent(roomSlug)}/editor/asset`, file, roomSlug),
+
   // Potong 6 — media effects authored from the Room Editor (admin-gated REST,
   // reuses the MapMediaObject system + broadcast).
   getRoomMedia: (slug: string) => request<{ mediaObjects: unknown[] }>(`/rooms/${slug}/editor/media`),

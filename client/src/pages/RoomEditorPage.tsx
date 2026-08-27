@@ -1090,9 +1090,23 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const [importBusy, setImportBusy] = useState(false);
   const [importErr, setImportErr] = useState('');
   const openImportPicker = async () => {
-    const f = await pickFile('image/png,image/jpeg');
+    // webp — already accepted end-to-end by the server's general upload
+    // route (server/src/routes/uploads.ts's allowedMimeTypes/Extensions);
+    // this client-side gate was the only thing actually blocking it here.
+    // svg — accepted here too, but confirmImport below sends it through
+    // api.uploadRoomAsset (a SEPARATE, admin-gated server route), not the
+    // general uploadMedia every other upload in this app uses. That
+    // general route deliberately excludes SVG everywhere (see its own
+    // comment: "excludes anything that can carry an XSS payload when
+    // rendered inline") because it's reachable by any authenticated org
+    // member with no room-role check at all. Import Image is different:
+    // this whole picker only opens for someone who can already edit this
+    // room's map (server-checked, not just UI-hidden), the same trust
+    // tier as everything else Fitur 15 already does — so SVG rides on
+    // that existing gate instead of the shared endpoint's wider one.
+    const f = await pickFile('image/png,image/jpeg,image/webp,image/svg+xml');
     if (!f) return;
-    if (!['image/png', 'image/jpeg'].includes(f.type)) { await showAlert('Hanya file PNG atau JPG yang diperbolehkan.'); return; }
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(f.type)) { await showAlert('Hanya file PNG, JPG, WebP, atau SVG yang diperbolehkan.'); return; }
     if (f.size > MAX_IMPORT_BYTES) { await showAlert(`Ukuran file maksimal ${MAX_IMPORT_BYTES / 1024 / 1024}MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
     setImportFile(f);
     setImportLabel(f.name.replace(/\.[^.]+$/, ''));
@@ -1104,7 +1118,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     if (!importFile) return;
     setImportBusy(true); setImportErr('');
     try {
-      const { url } = await api.uploadMedia(importFile, slug);
+      const { url } = await api.uploadRoomAsset(importFile, slug);
       // tilesW/tilesH fixed at 1x1 (one 32px tile) — Fitur 15's own scope note
       // keeps this to a basic import; a multi-tile footprint picker is a
       // reasonable follow-up, not part of this pass.
