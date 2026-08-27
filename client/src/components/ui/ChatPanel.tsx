@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode, type MouseEvent, type ClipboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, MegaphoneFill, ChevronLeft, ChevronRight, XLg, Headset, Clipboard } from 'react-bootstrap-icons';
+import { Icon } from '@iconify/react';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@kaispace/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -541,7 +542,7 @@ export function ChatPanel({
         >
           <button
             onClick={() => onToggleOpen(!open)}
-            className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl px-3 py-2 rounded-lg text-sm text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 cursor-pointer inline-flex items-center gap-1.5"
+            className="font-login-body bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl px-3 py-2 rounded-lg text-sm text-login-accent dark:text-purple-300 hover:brightness-110 border border-login-border-soft dark:border-white/10 shadow-lg shadow-purple-500/10 cursor-pointer inline-flex items-center gap-1.5"
           >
             <ChatDotsFill size={14} /> {open ? 'Hide' : 'Chat'}
             {!open && totalUnread > 0 && (
@@ -555,12 +556,12 @@ export function ChatPanel({
 
       {open && (
         <div
-          className="absolute bottom-16 right-4 z-50 w-80 h-[28rem] bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-xl border border-purple-200/50 dark:border-white/10 shadow-2xl shadow-purple-500/10 flex flex-col pointer-events-auto"
+          className="absolute bottom-16 right-4 z-50 w-80 h-[28rem] bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-xl border border-login-border-soft dark:border-white/10 shadow-2xl shadow-purple-500/10 flex flex-col pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          <div className="p-3 border-b border-purple-100 dark:border-gray-700 flex items-center justify-between">
-            <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">Chat</span>
+          <div className="p-3 border-b border-login-border-soft dark:border-gray-700 flex items-center justify-between">
+            <span className="font-login-body text-gray-900 dark:text-gray-100 text-sm font-medium">Global Chat</span>
           </div>
 
           <div className="flex flex-wrap gap-1 px-3 pt-2 pb-1">
@@ -570,8 +571,8 @@ export function ChatPanel({
                   onClick={() => { setViewingZone(false); setCsTabActive(false); onSelectTarget({ type: 'channel', id: c.id }); }}
                   className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
                     !viewingZone && activeChatTarget?.type === 'channel' && activeChatTarget.id === c.id
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
+                      ? 'bg-login-accent text-white'
+                      : 'bg-login-surface dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-login-border-soft dark:hover:bg-gray-600'
                   }`}
                 >
                   #{c.name}
@@ -589,8 +590,8 @@ export function ChatPanel({
                   onClick={() => { setViewingZone(false); setCsTabActive(false); onSelectTarget({ type: 'dm', id: d.id }); }}
                   className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
                     !viewingZone && activeChatTarget?.type === 'dm' && activeChatTarget.id === d.id
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
+                      ? 'bg-login-accent text-white'
+                      : 'bg-login-surface dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-login-border-soft dark:hover:bg-gray-600'
                   }`}
                 >
                   @{d.otherUser.displayName}
@@ -607,7 +608,7 @@ export function ChatPanel({
                 <button
                   onClick={() => { setViewingZone(true); setCsTabActive(false); }}
                   className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
-                    viewingZone ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
+                    viewingZone ? 'bg-login-accent text-white' : 'bg-login-surface dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-login-border-soft dark:hover:bg-gray-600'
                   }`}
                 >
                   <LockFill size={10} className="inline -mt-0.5 mr-1" /> {currentZone.name}
@@ -624,7 +625,7 @@ export function ChatPanel({
               <button
                 onClick={() => { setViewingZone(false); setCsTabActive(true); }}
                 className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
-                  csTabActive ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
+                  csTabActive ? 'bg-login-accent text-white' : 'bg-login-surface dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-login-border-soft dark:hover:bg-gray-600'
                 }`}
               >
                 <Headset size={10} className="inline -mt-0.5 mr-1" /> CS
@@ -634,7 +635,7 @@ export function ChatPanel({
               <Tooltip label="Channel Baru" detail="Buat channel baru. (Khusus admin.)" wrapperClassName="shrink-0">
                 <button
                   onClick={() => setShowNewChannel((v) => !v)}
-                  className="shrink-0 px-2 py-1 rounded-md text-[11px] font-medium bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600 cursor-pointer"
+                  className="shrink-0 px-2 py-1 rounded-md text-[11px] font-medium bg-login-surface dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-login-border-soft dark:hover:bg-gray-600 cursor-pointer"
                 >
                   <PlusLg size={10} />
                 </button>
@@ -1048,18 +1049,18 @@ export function ChatPanel({
                 }}
                 onBlur={() => setMention(null)}
                 onPaste={handlePaste}
-                placeholder={viewingZone ? `Message ${currentZone?.name}...` : 'Type a message...'}
+                placeholder={viewingZone ? `Message ${currentZone?.name}...` : 'enter your chat here'}
                 maxLength={200}
-                className="w-full resize-none break-words bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 disabled:opacity-60"
+                className="font-login-body w-full resize-none break-words bg-login-surface dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-login-border-soft dark:border-gray-700 focus:border-login-accent disabled:opacity-60"
               />
             </div>
             <Tooltip label="Kirim" detail="Kirim pesanmu.">
               <button
                 onClick={handleSend}
                 disabled={!text.trim() && pendingAttachments.items.length === 0}
-                className="bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-xs px-3 py-1.5 rounded cursor-pointer"
+                className="bg-login-accent hover:brightness-110 disabled:opacity-40 text-white text-xs w-7 h-7 shrink-0 rounded flex items-center justify-center cursor-pointer"
               >
-                Send
+                <Icon icon="iconamoon:send-thin" width={14} height={14} />
               </button>
             </Tooltip>
           </div>
