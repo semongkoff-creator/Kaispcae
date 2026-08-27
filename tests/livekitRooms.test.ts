@@ -204,6 +204,31 @@ test('the distance curve stays in one place for both paths', () => {
   assert.ok(/gain: p\.viaZone \? 1 : calcGain\(p\.distanceTiles\)/.test(hook));
 });
 
+test('the credentials the token endpoint needs actually reach the container', () => {
+  // Twice now this repo has shipped a variable that exists in .env.example, is
+  // read correctly by the code, and never reaches the process: VITE_TURN_* to
+  // the client build, and then LIVEKIT_* to the server. Both presented as the
+  // feature simply not working, with nothing in any log saying why.
+  //
+  // routes/livekit.ts refuses to mint a token unless all three are set, so
+  // without them every room on the LiveKit path fails to join regardless of
+  // what VITE_LIVEKIT_ROOMS says.
+  const compose = readFileSync(resolve('docker-compose.yml'), 'utf8');
+  const server = compose.slice(compose.indexOf('\n  server:'), compose.indexOf('\n  nginx:'));
+  for (const key of ['LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET', 'LIVEKIT_URL']) {
+    assert.ok(
+      new RegExp(`^\\s+${key}:`, 'm').test(server),
+      `${key} must be passed to the server container, not only documented in .env.example`,
+    );
+  }
+  // And the client half, whose absence is just as silent: Vite inlines
+  // import.meta.env at build time, so a value missing from the Dockerfile's
+  // ARG/ENV pair is simply an empty string in the bundle.
+  const dockerfile = readFileSync(resolve('client/Dockerfile'), 'utf8');
+  assert.ok(/ARG VITE_LIVEKIT_ROOMS/.test(dockerfile), 'the build arg must be declared');
+  assert.ok(/VITE_LIVEKIT_ROOMS=\$VITE_LIVEKIT_ROOMS/.test(dockerfile), 'and forwarded to the build');
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

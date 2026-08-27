@@ -44,6 +44,19 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set — see .env.example}
       CLIENT_URL: ${PUBLIC_URL:-http://localhost:8091}
       CORS_ORIGIN: ${PUBLIC_URL:-http://localhost:8091}
+      # The three the token endpoint needs. routes/livekit.ts refuses to mint
+      # anything unless all three are present, so leaving them out of this
+      # block — as they were — means every room on the LiveKit path fails to
+      # join with "media server not configured", no matter what
+      # VITE_LIVEKIT_ROOMS says. The client-side flag and the server-side
+      # credentials are two halves of one switch; neither works alone.
+      #
+      # This is the same omission the VITE_TURN_* block already cost this repo
+      # once: a variable that exists in .env.example, is read correctly by the
+      # code, and never reaches the container.
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
+      LIVEKIT_URL: ${LIVEKIT_URL:-}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
