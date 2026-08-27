@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ThreeDotsVertical, Check, MicFill, VolumeUpFill, CameraVideoFill } from 'react-bootstrap-icons';
+import { ThreeDotsVertical, Check, VolumeUpFill } from 'react-bootstrap-icons';
 import { webrtcService } from '@/services/webrtcService';
 import { Tooltip } from '@/components/ui/Tooltip';
 
-// Device picker (mic/speaker/camera) — the same affordance Zoom/Meet/Zep
-// use, now behind a single ⋮ trigger instead of two separate carets next to
-// Mic and Camera (was one instance per `kind`, merged per request so the
-// toolbar has one less pair of small controls). Selection is applied
-// immediately via webrtcService and remembered there, so this component
-// holds no source of truth of its own beyond what it last read.
+// Speaker picker — Mic and Camera got their own DeviceCaret.tsx carets back
+// (matching the reference design), so this ⋮ menu now only needs to cover
+// Speaker, which has no dedicated toolbar button of its own to attach a
+// caret to. Selection is applied immediately via webrtcService and
+// remembered there, so this component holds no source of truth of its own
+// beyond what it last read.
 interface Group {
   label: string;
   icon: React.ReactNode;
@@ -24,23 +24,13 @@ export function DeviceMenu() {
   const ref = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
-    const { mics, cameras, speakers } = await webrtcService.listDevices();
+    const { speakers } = await webrtcService.listDevices();
     const sel = webrtcService.getSelectedDevices();
     setGroups([
-      {
-        label: 'Mikrofon', icon: <MicFill size={11} />, devices: mics,
-        selectedId: sel.micId, fallbackName: 'Mikrofon',
-        onPick: (id) => webrtcService.switchMic(id),
-      },
       {
         label: 'Speaker', icon: <VolumeUpFill size={11} />, devices: speakers,
         selectedId: sel.speakerId, fallbackName: 'Speaker',
         onPick: (id) => webrtcService.switchSpeaker(id),
-      },
-      {
-        label: 'Kamera', icon: <CameraVideoFill size={11} />, devices: cameras,
-        selectedId: sel.cameraId, fallbackName: 'Kamera',
-        onPick: (id) => webrtcService.switchCamera(id),
       },
     ]);
   }, []);
@@ -73,12 +63,12 @@ export function DeviceMenu() {
   };
 
   return (
-    // Now a standalone toolbar control (was a small sub-caret glued to
-    // Mic/Camera) — sized to match the other 44px main buttons.
+    // Standalone toolbar control for Speaker only now — Mic/Camera moved to
+    // their own DeviceCaret.tsx carets (see this file's header comment).
     <div className="relative" ref={ref}>
       <Tooltip
-        label="Pilih Perangkat"
-        detail="Pilih mikrofon, speaker, atau kamera yang ingin dipakai, tanpa perlu mematikan mic/kamera dulu."
+        label="Pilih Speaker"
+        detail="Pilih speaker/output audio yang ingin dipakai."
       >
         <button
           onClick={() => setOpen((v) => !v)}

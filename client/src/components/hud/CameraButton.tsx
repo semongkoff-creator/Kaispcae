@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { CameraVideoOffFill } from 'react-bootstrap-icons';
 import { isTypingTarget } from '@/utils/hotkeys';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { DeviceCaret } from './DeviceCaret';
 
 interface CameraButtonProps {
   enabled: boolean;
@@ -24,24 +25,27 @@ export function CameraButton({ enabled, onToggle }: CameraButtonProps) {
   }, [onToggle]);
 
   return (
-    <Tooltip
-      label={`Kamera (V) — ${enabled ? 'Aktif' : 'Mati'}`}
-      detail="Nyalakan/matikan kameramu. Video hanya terlihat oleh orang yang sedang satu zone/meeting denganmu."
-    >
-      <button
-        onClick={onToggle}
-        // Same active-state convention as MicButton: camera on = solid purple
-        // (the capability is actively broadcasting), off = glass + red icon.
-        className={`flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
-          enabled
-            ? 'bg-login-accent border-login-accent shadow-purple-500/30'
-            : 'bg-white/90 dark:bg-gray-800/90 border-login-border-soft dark:border-white/10 shadow-purple-500/10'
-        }`}
+    <div className="flex items-center">
+      <Tooltip
+        label={`Kamera (V) — ${enabled ? 'Aktif' : 'Mati'}`}
+        detail="Nyalakan/matikan kameramu. Video hanya terlihat oleh orang yang sedang satu zone/meeting denganmu."
       >
-        {/* No "camera off" variant exists in the real asset set — kept the
-            existing red react-bootstrap-icons glyph for that state. */}
-        {enabled ? <img src="/assets/img/icons/camera.svg" width={16} height={16} alt="" /> : <CameraVideoOffFill className="text-red-500" size={16} />}
-      </button>
-    </Tooltip>
+        <button
+          onClick={onToggle}
+          // Same active-state convention as MicButton: camera on = solid purple
+          // (the capability is actively broadcasting), off = glass + red icon.
+          className={`flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
+            enabled
+              ? 'bg-login-accent border-login-accent shadow-purple-500/30'
+              : 'bg-white/90 dark:bg-gray-800/90 border-login-border-soft dark:border-white/10 shadow-purple-500/10'
+          }`}
+        >
+          {/* No "camera off" variant exists in the real asset set — kept the
+              existing red react-bootstrap-icons glyph for that state. */}
+          {enabled ? <img src="/assets/img/icons/camera.svg" width={16} height={16} alt="" /> : <CameraVideoOffFill className="text-red-500" size={16} />}
+        </button>
+      </Tooltip>
+      <DeviceCaret kind="camera" label="Kamera" />
+    </div>
   );
 }

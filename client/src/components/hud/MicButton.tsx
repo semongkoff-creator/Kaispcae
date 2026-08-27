@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { isTypingTarget } from '@/utils/hotkeys';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { DeviceCaret } from './DeviceCaret';
 
 interface MicButtonProps {
   muted: boolean;
@@ -24,31 +25,33 @@ export function MicButton({ muted, onToggle }: MicButtonProps) {
   }, [onToggle]);
 
   return (
-    <Tooltip
-      label={`Mikrofon (M) — ${muted ? 'Mati' : 'Aktif'}`}
-      detail="Nyalakan/matikan mikrofonmu. Orang lain di zone/meeting yang sama akan mendengarmu saat aktif."
-    >
-      <button
-        onClick={onToggle}
-        // "Ethereal Collaboration" — live/unmuted now reads as the primary
-        // solid-purple action state (same treatment ScreenShareButton already
-        // uses for "currently sharing"), not just a neutral glass icon. Muted
-        // keeps the glass surface with a red icon/ring — that part was already
-        // on-spec, untouched.
-        className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
-          muted
-            ? 'bg-white/90 dark:bg-gray-800/90 border-login-border-soft dark:border-white/10 shadow-purple-500/10'
-            : 'bg-login-accent border-login-accent shadow-purple-500/30'
-        }`}
+    <div className="flex items-center">
+      <Tooltip
+        label={`Mikrofon (M) — ${muted ? 'Mati' : 'Aktif'}`}
+        detail="Nyalakan/matikan mikrofonmu. Orang lain di zone/meeting yang sama akan mendengarmu saat aktif."
       >
-        {/* mic.svg (neutral) / mic_on.svg (green, both fixed-color real
-            assets) — the pulsing red ring below stays the primary "you're
-            muted" signal since the icon itself can't be recolored to red. */}
-        <img src={`/assets/img/icons/${muted ? 'mic' : 'mic_on'}.svg`} width={16} height={16} alt="" />
-        {muted && (
-          <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-pulse" />
-        )}
-      </button>
-    </Tooltip>
+        <button
+          onClick={onToggle}
+          // Live/unmuted = green ring (matches the reference design's
+          // green "mic is live" state, and the mic_on.svg icon itself is
+          // already green-tinted) instead of the purple "Ethereal
+          // Collaboration" active fill other toolbar buttons use — mic is
+          // the one control where "on" needs its own distinct color, not
+          // the generic active-panel purple. Muted keeps the glass
+          // surface + red icon/ring, unchanged.
+          className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer bg-white/90 dark:bg-gray-800/90 ${
+            muted ? 'border-login-border-soft dark:border-white/10 shadow-purple-500/10' : 'border-green-500 shadow-green-500/20'
+          }`}
+        >
+          <img src={`/assets/img/icons/${muted ? 'mic' : 'mic_on'}.svg`} width={16} height={16} alt="" />
+          {muted ? (
+            <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-pulse" />
+          ) : (
+            <div className="absolute inset-0 rounded-full border-2 border-green-500" />
+          )}
+        </button>
+      </Tooltip>
+      <DeviceCaret kind="mic" label="Mikrofon" />
+    </div>
   );
 }
