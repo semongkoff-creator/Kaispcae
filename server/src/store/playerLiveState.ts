@@ -17,6 +17,18 @@ export function setLivePlayerMovement(roomId: string, playerId: string, movement
   roomMovement(roomId).set(playerId, movement);
 }
 
+/**
+ * What this player is actually doing right now, or undefined if still.
+ *
+ * The cached roster is NOT this: setPlayerMoved writes movement here and
+ * returns a merged copy, deliberately leaving the stored roster untouched, so
+ * a roster row's own isMoving stays false for a player's entire session. Any
+ * code that asks the roster "is this person moving?" gets false forever.
+ */
+export function getLivePlayerMovement(roomId: string, playerId: string): LivePlayerMovement | undefined {
+  return liveMovementByRoom.get(roomId)?.get(playerId);
+}
+
 export function clearLivePlayerMovement(roomId: string, playerId: string): void {
   const room = liveMovementByRoom.get(roomId);
   if (!room) return;

@@ -11,6 +11,7 @@ import { collectStaleMovers, MoverEntry, STALE_MOVE_SWEEP_INTERVAL_MS } from './
 import { recordPokeReceived } from '../lib/pokeResponse';
 import { getPlayerName } from './roomHandler';
 import { broadcastAnalyticsActivity } from './analyticsFeed';
+import { getLivePlayerMovement, clearLivePlayerMovement } from '../store/playerLiveState';
 
 // Rate limiting, per player.
 //
@@ -52,20 +53,38 @@ function startStaleMoveSweep(io: Server): void {
     for (const { socketId, room } of collectStaleMovers(activeMovers, now)) {
       activeMovers.delete(socketId);
 
-      // Gone already — the disconnect path has its own cleanup and has
-      // told the room; nothing to announce on behalf of a socket that
-      // isn't there.
+      // Whether they are moving lives HERE, not on the roster row.
+      // setPlayerMoved writes to the live map and returns a merged copy
+      // without touching the stored roster, so a roster row's isMoving is
+      // false for the whole session — and this used to read exactly that,
+      // `continue` every time, and clean up nothing. The sweep existed and
+      // did nothing, which is worse than not having one: a mover who went
+      // quiet stayed flagged as moving forever, and everyone who joined or
+      // refreshed after that saw them walking on the spot.
+      const live = getLivePlayerMovement(room, socketId);
+      if (!live?.isMoving) continue;
+
+      // Gone already. The roster cleanup belongs to the disconnect path, but
+      // the live flag has to go regardless: a player kept in the room through
+      // the disconnect debounce would otherwise be handed to the next person
+      // who refreshes, still walking.
       const socket = io.sockets.sockets.get(socketId);
-      if (!socket) continue;
+      if (!socket) {
+        clearLivePlayerMovement(room, socketId);
+        continue;
+      }
 
       const player = getCachedPlayers(room).find((p) => p.id === socketId);
-      if (!player || !player.isMoving) continue;
+      if (!player) continue;
 
+      // Position from the live state, which is where the last move actually
+      // landed. The roster row's own x/y is only written when a stop arrives —
+      // the very thing that never came.
       const stopped: PlayerStoppedPayload = {
         id: socketId,
-        x: player.x,
-        y: player.y,
-        direction: player.direction,
+        x: live.x,
+        y: live.y,
+        direction: live.direction,
         serverTime: now,
       };
       // socket.to(), NOT io.to() — everyone else needs correcting, but the
@@ -74,7 +93,7 @@ function startStaleMoveSweep(io: Server): void {
       // network hiccup rather than a backgrounded tab, that reads as a
       // rubber-band on a player who never actually stopped.
       socket.to(room).emit(SocketEvents.PLAYER_STOPPED, stopped);
-      void setPlayerStopped(room, socketId, player.x, player.y, player.direction);
+      void setPlayerStopped(room, socketId, live.x, live.y, live.direction);
     }
   }, STALE_MOVE_SWEEP_INTERVAL_MS);
   // Never a reason to hold the process open for this.

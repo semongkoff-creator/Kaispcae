@@ -3,6 +3,8 @@ import { createStoppedPayload } from './movementPayload';
 import { collectStaleMovers, MoverEntry } from './staleMovers';
 import { clearMovementSequence, shouldAcceptMoveSequence } from './movementSequence';
 import { clearLivePlayerMovement, mergeLivePlayerMovement, setLivePlayerMovement } from '../store/playerLiveState';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 // Movement tests. This repo has no test runner, so this file is a plain
 // self-checking script:
@@ -144,6 +146,48 @@ test('only the quiet movers are swept, not the whole room', () => {
 
 test('an empty roster sweeps nothing', () => {
   assert.deepEqual(collectStaleMovers(new Map(), Date.now(), 800), []);
+});
+
+
+// ── the stale-move sweep reads the right source ──────────────────────────
+
+test('a roster row never reports movement, so nothing may ask it', () => {
+  // setPlayerMoved writes movement into the live map and returns a merged
+  // COPY, leaving the stored roster untouched. A roster row's isMoving is
+  // therefore false for a player's whole session. The sweep used to gate on
+  // exactly that field, so it skipped every player and cleaned up nothing —
+  // and anyone who refreshed saw a quiet player walking on the spot.
+  const src = readFileSync(resolve('server/src/socket/movementHandler.ts'), 'utf8');
+  assert.equal(
+    /if \(!player \|\| !player\.isMoving\) continue/.test(src), false,
+    'the sweep must not gate on the roster row',
+  );
+  assert.ok(/getLivePlayerMovement\(room, socketId\)/.test(src), 'it must ask the live state');
+  assert.ok(/if \(!live\?\.isMoving\) continue/.test(src));
+});
+
+test('a vanished socket still gets its live flag cleared', () => {
+  // The roster cleanup belongs to the disconnect path, but a player held
+  // through the disconnect debounce would otherwise be handed to the next
+  // person who refreshes, still moving.
+  const src = readFileSync(resolve('server/src/socket/movementHandler.ts'), 'utf8');
+  const at = src.indexOf('if (!socket) {');
+  assert.ok(at > 0, 'the vanished-socket branch should be explicit');
+  assert.ok(src.slice(at, at + 160).includes('clearLivePlayerMovement'));
+});
+
+test('the stop is announced at the position the mover actually reached', () => {
+  // The roster row's x/y is only written when a stop arrives — the very
+  // event that never came. Using it would snap the avatar back to wherever
+  // they last stopped, which can be the other side of the room.
+  const src = readFileSync(resolve('server/src/socket/movementHandler.ts'), 'utf8');
+  assert.ok(/x: live\.x/.test(src));
+  assert.ok(/setPlayerStopped\(room, socketId, live\.x, live\.y, live\.direction\)/.test(src));
+});
+
+test('the live state can be read back, not only written', () => {
+  const live = readFileSync(resolve('server/src/store/playerLiveState.ts'), 'utf8');
+  assert.ok(/export function getLivePlayerMovement/.test(live));
 });
 
 if (process.exitCode) {
