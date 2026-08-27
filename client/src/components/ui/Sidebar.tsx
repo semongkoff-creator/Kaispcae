@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { XLg, XCircleFill, Tools, BoxArrowRight, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, LockFill, UnlockFill, Buildings, ClockHistory, DoorOpenFill, DoorClosedFill, Link45deg, HourglassSplit } from 'react-bootstrap-icons';
+import { XLg, XCircleFill, Tools, BoxArrowRight, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, LockFill, UnlockFill, Buildings, ClockHistory, DoorOpenFill, DoorClosedFill, Link45deg, HourglassSplit, SpeakerFill } from 'react-bootstrap-icons';
 
 // Real KaiSpace icon set (client/kaispace_icon.rar, extracted 2026-08-27) —
 // fixed-color SVGs (not currentColor-recolorable like the Iconify set they
@@ -8,11 +8,9 @@ function IconImg({ name, size = 15 }: { name: string; size?: number }) {
   return <img src={`/assets/img/icons/${name}.svg`} width={size} height={size} alt="" className="shrink-0" />;
 }
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
-import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { Theme } from '@/hooks/useTheme';
-import { ManualStatus } from '@/data/presence';
 import { Role } from '@kaispace/shared';
 import { Tooltip } from '@/components/ui/Tooltip';
 
@@ -42,20 +40,6 @@ interface SidebarProps {
   // TEMPORARY — only for the debug line at the bottom of this menu, see its
   // own comment. Remove alongside it.
   localRole: Role;
-  // Fitur 3B / A11 — manual presence picker (Available/WFH/Focus/In a
-  // meeting/Lunch/Break/Away). 'away' opens the Away-reason popup upstream
-  // (see App.tsx's handlePresencePick) rather than applying immediately,
-  // unlike the others.
-  manualStatus: ManualStatus;
-  onPickPresence: (status: ManualStatus) => void;
-  // Bug panel numpuk — same fix shape as roomFeaturesActive above: the
-  // Status dropdown (PresenceButton) is now one of the mutually-exclusive
-  // panels (activePanel === 'status') instead of its own independent
-  // useState, so it can never stay open behind/alongside Room Features (or
-  // vice versa).
-  statusPickerOpen: boolean;
-  onToggleStatusPicker: () => void;
-
   isAdmin: boolean;
   // ZEP Room Editor — opens the full-page editor in a new tab. The old overlay
   // editor was retired in Potong 7; this is the only edit path now.
@@ -65,21 +49,18 @@ interface SidebarProps {
   showTeleportPanel: boolean;
   onToggleTeleport: () => void;
 
-  // "My Seat" — only shown once the local player has a furniture item
-  // assigned to them in this room (see Furniture.assignedToUserId and
-  // App.tsx's handleMySeat). One click, no panel — unlike Teleport this
-  // isn't a list to pick from, there's only ever one meaningful answer.
-  // Kept in the always-visible top of the rail, not the features menu: it's
-  // the one action worth reaching without an extra click to open anything.
-  hasMySeat: boolean;
-  onMySeat: () => void;
-
   // Akses & Password Pintu audit item #9 — emergency door override
   // (canDoorOverride gates it to admins/owner; doorOverride reflects the
   // current state).
   doorOverride: boolean;
   canDoorOverride: boolean;
   onToggleDoorOverride: () => void;
+
+  // Rail toggle for the SoundboardPanel already rendered in App.tsx's
+  // top-left pill — same activePanel('soundboard') state, just a second
+  // entry point (see this file's own rail block for details).
+  soundboardActive: boolean;
+  onToggleSoundboard: () => void;
 
   // Guest Link & Ruang Tunggu — admin-only, prompt-based (see App.tsx's
   // handleCreateGuestLink). No "current state" to reflect here (unlike Lock
@@ -224,20 +205,16 @@ export function Sidebar({
   onOpenTutorial,
   onOpenMemberList,
   localRole,
-  manualStatus,
-  onPickPresence,
-  statusPickerOpen,
-  onToggleStatusPicker,
   isAdmin,
   onOpenRoomEditor,
   canTeleport,
   showTeleportPanel,
   onToggleTeleport,
-  hasMySeat,
-  onMySeat,
   doorOverride,
   canDoorOverride,
   onToggleDoorOverride,
+  soundboardActive,
+  onToggleSoundboard,
   canManageGuests,
   onCreateGuestLink,
   onRevokeLastGuestLink,
@@ -502,11 +479,20 @@ export function Sidebar({
                 <MenuRow icon={<XCircleFill size={15} />} label="Cabut Guest Link Terakhir" onClick={closeAnd(onRevokeLastGuestLink)} />
               </Tooltip>
             )}
-            {/* Broadcast, Teleport, Add Media — promoted to persistent rail
-                icons above; removed here to avoid duplication. */}
+            {/* Broadcast, Teleport — promoted to persistent rail icons
+                above; removed here to avoid duplication. Add Media is
+                restored below (see the comment further up on why). */}
             {isAdmin && (
               <Tooltip label="Edit Room" detail="Buka Room Editor untuk mengubah tata letak. (Khusus admin.)" side="right" wrapperClassName="w-full">
                 <MenuRow icon={<Tools size={15} />} label="Edit Room" onClick={closeAnd(onOpenRoomEditor)} />
+              </Tooltip>
+            )}
+            {/* QA (Akses tamu checklist item 2, "Guest terbatas") — was
+                already a dead end for a guest (mediaHandler.ts/noteHandler.ts
+                aren't registered for guest sockets at all), just never hidden. */}
+            {!isGuest && (
+              <Tooltip label="Tambah Media" detail="Tempel gambar, video, atau file ke dalam room." side="right" wrapperClassName="w-full">
+                <MenuRow icon={<IconImg name="add_media" />} label="Add Media" active={showAddMediaPanel} onClick={closeAnd(onToggleAddMedia)} />
               </Tooltip>
             )}
 
@@ -603,50 +589,41 @@ export function Sidebar({
           </SidebarIcon>
         </Tooltip>
       )}
-      {isAdmin && (
-        <Tooltip
-          label={pendingJoinCount > 0 ? `Permintaan bergabung (${pendingJoinCount})` : 'Permintaan Bergabung'}
-          detail="Lihat & proses permintaan masuk yang menunggu. (Khusus admin.)"
-          side="right"
-        >
-          <div className="relative">
-            <SidebarIcon active={joinQueueActive} onClick={onToggleJoinQueue}>
-              <IconImg name="request" size={16} />
-            </SidebarIcon>
-            {pendingJoinCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">
-                {pendingJoinCount > 9 ? '9+' : pendingJoinCount}
-              </span>
-            )}
-          </div>
-        </Tooltip>
-      )}
-      {!isGuest && (
-        <Tooltip label="Add Media" detail="Tempel gambar, video, atau file ke dalam room." side="right">
-          <SidebarIcon active={showAddMediaPanel} onClick={onToggleAddMedia}>
-            <IconImg name="add_media" size={16} />
+      {/* Annotated in the reference design as "request (cuti,dll)" — this
+          fork has no Cuti feature to map the request.svg rail slot to, so
+          it's left unfilled here (Permintaan Bergabung stays reachable
+          from the flyout instead, same as it always was). */}
+      {/* Speaker slot annotated as Soundboard — no dedicated speaker SVG in
+          the extracted asset pack, so this reuses SpeakerFill, the same
+          icon SoundboardPanel's own trigger already uses. Same
+          activePanel state as the SoundboardPanel instance rendered in
+          App.tsx's top-left pill (that's where the actual popover
+          appears; this is just a second toggle for it, same pattern as
+          other promoted icons). */}
+      {!isGuest && !simplifiedView && (
+        <Tooltip label="Soundboard" detail="Putar soundboard untuk semua orang di room ini." side="right">
+          <SidebarIcon active={soundboardActive} onClick={onToggleSoundboard}>
+            <SpeakerFill size={15} />
           </SidebarIcon>
         </Tooltip>
       )}
+      {/* The reference design's "+" rail slot is annotated "button add
+          apps" — no such feature (an app-marketplace-style integration
+          picker) exists in this codebase yet, so it's left unbuilt rather
+          than mis-mapped to Add Media (which stays reachable from the
+          flyout instead, restored there). */}
 
       <SidebarDivider />
 
-      {hasMySeat && (
-        <Tooltip label="Ke Kursi Saya" detail="Teleport langsung ke kursi tetapmu di room ini." side="right">
-          <SidebarIcon onClick={onMySeat}>
-            <IconImg name="back_to_seat" size={16} />
-          </SidebarIcon>
-        </Tooltip>
-      )}
-
-      <SidebarDivider />
+      {/* "Ke Kursi Saya" and PresenceButton (Status WFO/WFH/dll) moved to
+          App.tsx's top-left pill per the reference design — removed here
+          to avoid duplication. */}
 
       {/* QA (Akses tamu checklist item 2) — a guest's avatar edits already
           never persisted (PUT /users/me/avatar 401s and is swallowed, see
           App.tsx's persistAvatar) since they have no User row to save to —
           offering the editor at all was misleading, not just extraneous. */}
       {!isGuest && <AvatarEditorButton onClick={onEditAvatar} variant="sidebar" />}
-      <PresenceButton manualStatus={manualStatus} onPick={onPickPresence} open={statusPickerOpen} onToggle={onToggleStatusPicker} variant="sidebar" />
 
       {/* Ghost mode + Notification Settings — moved here from the meeting
           toolbar (previously HiddenButton/NotificationSettings in App.tsx's

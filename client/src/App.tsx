@@ -79,6 +79,7 @@ import { SoundboardPanel } from './components/ui/SoundboardPanel';
 import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
 import { AwayReasonModal } from './components/ui/AwayReasonModal';
 import { ActivityFeed } from './components/ui/ActivityFeed';
+import { PresenceButton } from './components/avatar/PresenceButton';
 import { PendingRequestToast } from './components/ui/PendingRequestToast';
 import { SpotlightNotice } from './components/ui/SpotlightNotice';
 import { RemoteHelpBanner } from './components/ui/RemoteHelpBanner';
@@ -1972,6 +1973,24 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
           </>
         )}
+        {/* Status (WFO/WFH/Cuti/dll) and "back to my seat" — the reference
+            design's top-left pill (annotated: smiley icon = status, chair
+            icon = back to my seat, 24×24). Both already existed elsewhere
+            (Sidebar's bottom cluster / hasMySeat block) — moved here rather
+            than duplicated, same handlers/state as before. */}
+        <div className="pointer-events-auto">
+          <PresenceButton manualStatus={manualStatus} onPick={handlePresencePick} open={activePanel === 'status'} onToggle={() => openPanel('status')} variant="sidebar" />
+        </div>
+        {hasMySeat && (
+          <Tooltip label="Ke Kursi Saya" detail="Teleport langsung ke kursi tetapmu di room ini.">
+            <button
+              onClick={handleMySeat}
+              className="pointer-events-auto w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800 border border-login-border-soft dark:border-gray-700 shadow-sm"
+            >
+              <img src="/assets/img/icons/back_to_seat.svg" width={14} height={14} alt="" />
+            </button>
+          </Tooltip>
+        )}
       </div>
       {!simplifiedView && !isGuest && <MusicPlayerWidget zoneId={currentZone?.id ?? null} />}
 
@@ -2282,10 +2301,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onOpenTutorial={() => openPanel('userGuide')}
         onOpenMemberList={() => openPanel('memberList')}
         localRole={localRole}
-        manualStatus={manualStatus}
-        onPickPresence={handlePresencePick}
-        statusPickerOpen={activePanel === 'status'}
-        onToggleStatusPicker={() => openPanel('status')}
         isAdmin={isAdmin}
         // Bare `/` only ever worked because the app used to own the whole
         // domain — on kaispace.io that root path now serves the marketing
@@ -2300,11 +2315,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         canTeleport={roleAtLeast(localRole, 'member')}
         showTeleportPanel={showTeleportPanel}
         onToggleTeleport={() => openPanel('teleport')}
-        hasMySeat={hasMySeat}
-        onMySeat={handleMySeat}
         doorOverride={doorOverride}
         canDoorOverride={isAdmin}
         onToggleDoorOverride={() => emitDoorOverride(!doorOverride)}
+        soundboardActive={activePanel === 'soundboard'}
+        onToggleSoundboard={() => openPanel('soundboard')}
         canManageGuests={isAdmin}
         onCreateGuestLink={handleCreateGuestLink}
         onRevokeLastGuestLink={handleRevokeGuestLink}
