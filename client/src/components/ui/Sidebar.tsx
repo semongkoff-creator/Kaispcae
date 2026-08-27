@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
-import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, ShieldLock, Buildings, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill, GearFill, HourglassSplit } from 'react-bootstrap-icons';
+import { Icon } from '@iconify/react';
+import { XLg, XCircleFill, Tools, GeoAltFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, ShieldLock, Buildings, ClockHistory, PersonCheck, DoorOpenFill, DoorClosedFill, Link45deg, QuestionCircleFill, PeopleFill, HourglassSplit } from 'react-bootstrap-icons';
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
 import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
@@ -297,7 +298,7 @@ export function Sidebar({
     return (
       <div className="absolute left-0 top-0 h-full w-12 z-50 flex flex-col items-center py-3 pointer-events-none">
         <Tooltip label="Tampilkan UI" detail="Munculkan lagi panel HUD yang disembunyikan." side="right">
-          <SidebarIcon onClick={onToggleSimplifiedView} className="pointer-events-auto bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800 shadow-sm border border-purple-100 dark:border-gray-700">
+          <SidebarIcon onClick={onToggleSimplifiedView} className="pointer-events-auto bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800 shadow-sm border border-login-border-soft dark:border-gray-700">
             <EyeFill size={14} />
           </SidebarIcon>
         </Tooltip>
@@ -311,21 +312,21 @@ export function Sidebar({
   };
 
   return (
-    <div className="absolute left-0 top-0 h-full w-12 z-50 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-r border-purple-100 dark:border-gray-700 shadow-sm flex flex-col items-center py-3 gap-0.5 pointer-events-auto">
+    <div className="absolute left-0 top-0 h-full w-12 z-50 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-r border-login-border-soft dark:border-gray-700 shadow-sm flex flex-col items-center py-3 gap-0.5 pointer-events-auto">
       <div className="relative">
         <Tooltip label="Room Features" detail="Buka menu pengaturan & kontrol room." side="right">
           <SidebarIcon active={roomFeaturesActive} onClick={onToggleRoomFeatures}>
-            <List size={16} />
+            <Icon icon="material-symbols:menu-rounded" width={16} height={16} />
           </SidebarIcon>
         </Tooltip>
 
         {roomFeaturesActive && (
           <div
-            className="absolute top-0 left-full ml-2 w-64 max-h-[85vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-purple-100 dark:border-gray-700 p-2 z-50"
+            className="absolute top-0 left-full ml-2 w-64 max-h-[85vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-login-border-soft dark:border-gray-700 p-2 z-50"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-2 py-1.5 mb-1">
-              <span className="text-gray-900 dark:text-gray-100 text-sm font-semibold">Room Features</span>
+              <span className="font-login-body text-gray-900 dark:text-gray-100 text-sm font-semibold">Room Features</span>
               <Tooltip label="Tutup" detail="Tutup panel Room Features." side="right">
                 <button onClick={onCloseRoomFeatures} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
                   <XLg size={14} />
@@ -388,7 +389,7 @@ export function Sidebar({
             </Tooltip>
             {!isGuest && (
               <Tooltip label="Chat" detail="Buka tampilan pesan gaya messenger." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<ChatDotsFill size={15} />} label={messengerViewActive ? 'Tutup Chat' : 'Chat'} active={messengerViewActive} onClick={closeAnd(onToggleMessengerView)} />
+                <MenuRow icon={<Icon icon="ep:chat-dot-round" width={15} height={15} />} label={messengerViewActive ? 'Tutup Chat' : 'Chat'} active={messengerViewActive} onClick={closeAnd(onToggleMessengerView)} />
               </Tooltip>
             )}
             {isAdmin && (
@@ -403,7 +404,7 @@ export function Sidebar({
             )}
             {!isGuest && (
               <Tooltip label="Kalender" detail="Buka kalender jadwal tim." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<CalendarEvent size={15} />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
+                <MenuRow icon={<Icon icon="ant-design:calendar-outlined" width={15} height={15} />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
               </Tooltip>
             )}
             {/* Absensi + Cuti keduanya hidup di AttendanceApp (Cuti adalah tab
@@ -420,7 +421,7 @@ export function Sidebar({
                 why this is NOT nested inside the admin-only Konsol Admin). */}
             {!isGuest && (
               <Tooltip label="Analitik Saya" detail="Lihat ringkasan aktivitas & produktivitasmu." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<BarChartFill size={15} />} label={myAnalyticsActive ? 'Tutup Analitik Saya' : 'Analitik Saya'} active={myAnalyticsActive} onClick={closeAnd(onToggleMyAnalytics)} />
+                <MenuRow icon={<Icon icon="codicon:graph" width={15} height={15} />} label={myAnalyticsActive ? 'Tutup Analitik Saya' : 'Analitik Saya'} active={myAnalyticsActive} onClick={closeAnd(onToggleMyAnalytics)} />
               </Tooltip>
             )}
             {isWorkspaceAdmin && (
@@ -500,7 +501,7 @@ export function Sidebar({
                 Link above — App.tsx's handleBroadcast prompts for the text. */}
             {canBroadcast && (
               <Tooltip label="Broadcast" detail="Kirim pengumuman teks ke semua orang di room ini." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<VolumeUpFill size={15} />} label="Broadcast" onClick={closeAnd(onBroadcast)} />
+                <MenuRow icon={<Icon icon="reicon:bullhorn" width={15} height={15} />} label="Broadcast" onClick={closeAnd(onBroadcast)} />
               </Tooltip>
             )}
             {isAdmin && (
@@ -520,7 +521,7 @@ export function Sidebar({
                 aren't registered for guest sockets at all), just never hidden. */}
             {!isGuest && (
               <Tooltip label="Tambah Media" detail="Tempel gambar, video, atau file ke dalam room." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<ImageFill size={15} />} label="Add Media" active={showAddMediaPanel} onClick={closeAnd(onToggleAddMedia)} />
+                <MenuRow icon={<Icon icon="ci:add-plus-circle" width={15} height={15} />} label="Add Media" active={showAddMediaPanel} onClick={closeAnd(onToggleAddMedia)} />
               </Tooltip>
             )}
 
@@ -534,7 +535,7 @@ export function Sidebar({
                 this scrollable dropdown. */}
             {canRecord && (
               <div className="flex items-center gap-3 px-3 py-2">
-                <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-purple-50 dark:bg-gray-700 text-purple-600 dark:text-purple-300">
+                <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-login-surface dark:bg-gray-700 text-login-accent dark:text-purple-300">
                   <RecordCircleFill size={15} />
                 </span>
                 <span className="flex-1 text-sm text-gray-700 dark:text-gray-200">Recording</span>
@@ -626,14 +627,14 @@ export function Sidebar({
           duplicating them. */}
       <Tooltip label="Pengaturan" detail="Buka pengaturan akun, notifikasi, dan tampilan." side="right">
         <SidebarIcon onClick={onOpenSettings}>
-          <GearFill size={14} />
+          <Icon icon="ant-design:setting-outlined" width={14} height={14} />
         </SidebarIcon>
       </Tooltip>
 
       <Tooltip label="Kembali ke Daftar Room" detail="Keluar dari room ini, kembali ke Lobby." side="right" wrapperClassName="mt-auto">
         <SidebarIcon
           onClick={onLeaveRoom}
-          className="text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
+          className="text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800"
         >
           <HouseDoorFill size={14} />
         </SidebarIcon>
@@ -645,7 +646,7 @@ export function Sidebar({
       >
         <SidebarIcon
           onClick={onToggleTheme}
-          className="text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
+          className="text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800"
         >
           {theme === 'dark' ? <SunFill size={14} /> : <MoonFill size={14} />}
         </SidebarIcon>
@@ -660,11 +661,11 @@ export function Sidebar({
 }
 
 function SidebarDivider() {
-  return <div className="w-6 border-t border-purple-100 dark:border-gray-700 my-0.5" />;
+  return <div className="w-6 border-t border-login-border-soft dark:border-gray-700 my-0.5" />;
 }
 
 function MenuDivider() {
-  return <div className="my-1.5 border-t border-purple-100 dark:border-gray-700" />;
+  return <div className="my-1.5 border-t border-login-border-soft dark:border-gray-700" />;
 }
 
 // One row inside the "Room Features" flyout — icon-in-a-box + label, same
@@ -697,13 +698,13 @@ function MenuRow({
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
       title={title}
-      className={`w-full flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-all ${
+      className={`font-login-body w-full flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-all ${
         disabled
           ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-60'
-          : `cursor-pointer ${active ? 'bg-purple-600 text-white' : 'text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'}`
+          : `cursor-pointer ${active ? 'bg-login-accent text-white' : 'text-gray-700 dark:text-gray-200 hover:bg-login-surface dark:hover:bg-gray-700'}`
       }`}
     >
-      <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${active && !disabled ? 'bg-white/20' : 'bg-purple-50 dark:bg-gray-700 text-purple-600 dark:text-purple-300'} ${disabled ? 'opacity-60' : ''}`}>
+      <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${active && !disabled ? 'bg-white/20' : 'bg-login-surface dark:bg-gray-700 text-login-accent dark:text-purple-300'} ${disabled ? 'opacity-60' : ''}`}>
         {icon}
       </span>
       <span className="flex-1 text-left truncate">{label}</span>
@@ -730,7 +731,7 @@ export function SidebarIcon({
       onClick={onClick}
       title={title}
       className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
-        className || (active ? 'bg-purple-600 text-white' : 'text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800')
+        className || (active ? 'bg-login-accent text-white' : 'text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800')
       }`}
     >
       {children}
