@@ -16,6 +16,71 @@ interface UseScreenRecordingOptions {
   emitRecordingFinalize: (recordingId: string, fileUrl: string | null) => void;
 }
 
+// Bug fix — Chrome's hardware H.264 encoder corrupts a fixed band of
+// macroblocks on EVERY frame whenever the captured video's height isn't a
+// multiple of 16 (getDisplayMedia — and a remote peer's negotiated
+// resolution — can be any arbitrary size, never guaranteed mod-16).
+// Confirmed directly against a real production recording: captured at
+// 868px height (868 / 16 = 54.25), it decoded with an identical
+// "concealing ~600 MV errors" defect on literally every frame from the
+// first keyframe onward, while a comparison recording captured at a
+// mod-16-safe 912px height decoded perfectly clean. Re-drawing each frame
+// onto a canvas cropped down to the nearest multiple of 16 (at most 15px
+// lost off the right/bottom edge — imperceptible for a screen recording)
+// sidesteps the encoder bug entirely, regardless of source size. Returns
+// the original stream untouched (and a no-op cleanup) when it's already
+// mod-16-safe, so the common case pays no extra canvas/CPU cost.
+function toSafeDimensionStream(sourceStream: MediaStream): { stream: MediaStream; cleanup: () => void } {
+  const videoTrack = sourceStream.getVideoTracks()[0];
+  if (!videoTrack) return { stream: sourceStream, cleanup: () => {} };
+
+  const settings = videoTrack.getSettings();
+  const width = settings.width ?? 0;
+  const height = settings.height ?? 0;
+  const safeWidth = Math.floor(width / 16) * 16;
+  const safeHeight = Math.floor(height / 16) * 16;
+  if (!width || !height || (width === safeWidth && height === safeHeight)) {
+    return { stream: sourceStream, cleanup: () => {} };
+  }
+
+  const video = document.createElement('video');
+  video.muted = true;
+  video.playsInline = true;
+  video.srcObject = new MediaStream([videoTrack]);
+  video.play().catch(() => {});
+
+  const canvas = document.createElement('canvas');
+  canvas.width = safeWidth;
+  canvas.height = safeHeight;
+  const ctx = canvas.getContext('2d', { alpha: false });
+
+  let stopped = false;
+  const drawFrame = () => {
+    if (stopped) return;
+    // Source rect == dest rect (no scale factor) — a direct pixel crop of
+    // the bottom-right edge, not a resize, so there's no blur/interpolation.
+    ctx?.drawImage(video, 0, 0, safeWidth, safeHeight, 0, 0, safeWidth, safeHeight);
+    if ('requestVideoFrameCallback' in video) {
+      (video as HTMLVideoElement & { requestVideoFrameCallback: (cb: () => void) => number }).requestVideoFrameCallback(drawFrame);
+    } else {
+      requestAnimationFrame(drawFrame);
+    }
+  };
+  drawFrame();
+
+  const canvasStream = canvas.captureStream(settings.frameRate ?? 30);
+  const combined = new MediaStream([...canvasStream.getVideoTracks(), ...sourceStream.getAudioTracks()]);
+
+  const cleanup = () => {
+    stopped = true;
+    video.pause();
+    video.srcObject = null;
+    canvasStream.getTracks().forEach((t) => t.stop());
+  };
+
+  return { stream: combined, cleanup };
+}
+
 // §7 — Screen Recording capture, entirely client-side (see the Recording
 // Prisma model's doc comment for why). Only the browser that actually
 // STARTED the recording ever runs a MediaRecorder — everyone else who
@@ -170,7 +235,8 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
         : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
         ? 'video/webm;codecs=vp8,opus'
         : 'video/webm';
-      const recorder = new MediaRecorder(stream, { mimeType });
+      const { stream: recordingStream, cleanup: cleanupSafeStream } = toSafeDimensionStream(stream);
+      const recorder = new MediaRecorder(recordingStream, { mimeType });
       chunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
@@ -178,6 +244,7 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
       };
 
       recorder.onstop = async () => {
+        cleanupSafeStream();
         displayStream?.getTracks().forEach((t) => t.stop());
         displayStream = null;
         // recorder.mimeType is the browser's own authoritative value — it
