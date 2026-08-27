@@ -9,6 +9,11 @@ import '@fontsource/inter/400.css';
 import '@fontsource/inter/500.css';
 import '@fontsource/inter/600.css';
 import '@fontsource/inter/700.css';
+// Login page restyle (Figma kxCY7H7D8ZHzGkMCBDA2Y8, node 4:8) — only the two
+// weights that design specifies for the heading (SemiBold/Bold). Same
+// self-hosted, @font-face-only, no-default-change posture as Inter above.
+import '@fontsource/poppins/600.css';
+import '@fontsource/poppins/700.css';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

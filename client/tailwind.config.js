@@ -19,6 +19,18 @@ export default {
           'primary-light': '#ddb8ff',
           text: '#e1e2e4',
         },
+        // Login page restyle (Figma kxCY7H7D8ZHzGkMCBDA2Y8, node 4:8) —
+        // pulled verbatim from get_design_context's token list ("Text Slate
+        // Color/*") plus the one accent hex used on the button/links.
+        // Scoped to LoginPage.tsx only, same additive posture as `ethereal`.
+        login: {
+          accent: '#717BD8',
+          'text-strong': '#323A46', // Text Slate Color/90 — field labels
+          'text-muted': '#7E8B9E', // Text Slate Color/50 — helper/body copy
+          'text-placeholder': '#CBD1D8', // Text Slate Color/20 — placeholders + input borders
+          'border-soft': '#E0E3E8', // Text Slate Color/10 — Google button border
+          surface: '#FAFAFC', // input field background
+        },
       },
       // Opt-in via `font-ethereal` — NOT applied to `font-sans`/body, so the
       // rest of the app (login, lobby, admin, editor) keeps its current
@@ -26,6 +38,17 @@ export default {
       // this class.
       fontFamily: {
         ethereal: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        // Login page restyle (Figma kxCY7H7D8ZHzGkMCBDA2Y8, node 4:8) — same
+        // opt-in posture as `ethereal` above, scoped to LoginPage.tsx only.
+        // `login-heading` (Poppins) for the "Welcome to KaiSpace" title,
+        // `login-body` (Inter) for everything else on that screen — separate
+        // names so a class typo can't silently fall back to the other family.
+        'login-heading': ['Poppins', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        'login-body': ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      },
+      // The one non-stock radius Figma's login card/fields/buttons all share.
+      borderRadius: {
+        login: '6.361px',
       },
     },
   },
