@@ -1,4 +1,4 @@
-import { PeopleFill } from 'react-bootstrap-icons';
+import { Icon } from '@iconify/react';
 import { Tooltip } from '@/components/ui/Tooltip';
 
 interface ParticipantsToggleButtonProps {
@@ -28,11 +28,11 @@ export function ParticipantsToggleButton({ open, onToggle }: ParticipantsToggleB
         onClick={onToggle}
         className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
           open
-            ? 'bg-purple-600 text-white'
-            : 'bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800 border border-purple-100 dark:border-gray-700 shadow-sm'
+            ? 'bg-login-accent text-white'
+            : 'bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800 border border-login-border-soft dark:border-gray-700 shadow-sm'
         }`}
       >
-        <PeopleFill size={14} />
+        <Icon icon="clarity:users-solid" width={14} height={14} />
       </button>
     </Tooltip>
   );

@@ -19,12 +19,12 @@ export function MapZoomControl() {
   const effectiveMinZoom = hasFeatureAccess(localRole, 'presence:full_view') ? MIN_MAP_ZOOM : MIN_MAP_ZOOM + 0.1;
 
   return (
-    <div className="flex items-center gap-0.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-100 dark:border-gray-700 shadow-sm rounded-lg px-1.5 py-2">
+    <div className="font-login-body flex items-center gap-0.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-login-border-soft dark:border-gray-700 shadow-sm rounded-lg px-1.5 py-2">
       <Tooltip label="Perkecil Peta" detail="Atur seberapa dekat tampilan peta." side="bottom">
         <button
           onClick={() => stepMapZoom(-1)}
           disabled={zoom <= effectiveMinZoom}
-          className="w-4 h-4 flex items-center justify-center rounded hover:bg-purple-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300 text-xs font-bold leading-none cursor-pointer"
+          className="w-4 h-4 flex items-center justify-center rounded hover:bg-login-surface dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300 text-xs font-bold leading-none cursor-pointer"
         >
           −
         </button>
@@ -41,7 +41,7 @@ export function MapZoomControl() {
         <button
           onClick={() => stepMapZoom(1)}
           disabled={zoom >= MAX_MAP_ZOOM}
-          className="w-4 h-4 flex items-center justify-center rounded hover:bg-purple-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300 text-xs font-bold leading-none cursor-pointer"
+          className="w-4 h-4 flex items-center justify-center rounded hover:bg-login-surface dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed text-gray-600 dark:text-gray-300 text-xs font-bold leading-none cursor-pointer"
         >
           +
         </button>

@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useMemo, memo } from 'react';
-import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff, Grid3x3GapFill } from 'react-bootstrap-icons';
+import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff } from 'react-bootstrap-icons';
+import { Icon } from '@iconify/react';
 import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
@@ -574,9 +575,9 @@ export function VideoGrid({ localStream, localScreenStream, remoteStreams, remot
         <Tooltip label="Meeting View" detail="Buka tampilan video-call layar penuh.">
           <button
             onClick={onToggleMeetingView}
-            className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+            className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-login-border-soft dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-login-accent dark:hover:text-purple-300 cursor-pointer"
           >
-            <Grid3x3GapFill size={11} />
+            <Icon icon="bi:grid-1x2-fill" width={11} height={11} />
           </button>
         </Tooltip>
         <Tooltip label="Tampilkan Tile Kamera" detail="Tampilkan lagi strip video yang disembunyikan.">
@@ -610,9 +611,9 @@ export function VideoGrid({ localStream, localScreenStream, remoteStreams, remot
     <Tooltip label="Meeting View" detail="Buka tampilan video-call layar penuh.">
       <button
         onClick={onToggleMeetingView}
-        className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+        className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-login-border-soft dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-login-accent dark:hover:text-purple-300 cursor-pointer"
       >
-        <Grid3x3GapFill size={11} />
+        <Icon icon="bi:grid-1x2-fill" width={11} height={11} />
       </button>
     </Tooltip>
   );

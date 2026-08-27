@@ -19,7 +19,7 @@ export function ConnectionIndicator() {
   const advice = selfVerdictMessage(verdict);
 
   return (
-    <div className="flex flex-col gap-1 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-100 dark:border-gray-700 shadow-sm rounded-lg px-3 py-2 max-w-[19rem]">
+    <div className="font-login-body flex flex-col gap-1 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-login-border-soft dark:border-gray-700 shadow-sm rounded-lg px-3 py-2 max-w-[19rem]">
       <div className="flex items-center gap-3 pointer-events-none">
         <div className="flex items-center gap-1.5">
           <span
@@ -50,7 +50,7 @@ export function ConnectionIndicator() {
             and both prompted the same question. A dash keeps the slot where
             the eye already expects it and says "not applicable" rather than
             "zero", which is the honest state. */}
-        <div className="w-px h-4 bg-purple-100 dark:bg-gray-700" />
+        <div className="w-px h-4 bg-login-border-soft dark:bg-gray-700" />
         {verdict.total > 0 ? (
           <SignalBars
             level={verdict.level}
@@ -65,7 +65,7 @@ export function ConnectionIndicator() {
             —
           </span>
         )}
-        <div className="w-px h-4 bg-purple-100 dark:bg-gray-700" />
+        <div className="w-px h-4 bg-login-border-soft dark:bg-gray-700" />
         <span className="text-gray-700 dark:text-gray-300 text-xs">
           {playerCount} {playerCount === 1 ? 'player' : 'players'} online
         </span>
