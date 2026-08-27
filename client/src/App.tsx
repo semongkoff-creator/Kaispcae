@@ -1939,7 +1939,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           Panduan; "Playing as" was dropped entirely (the player's own
           name is already visible elsewhere — video tile, participant
           list, etc.). */}
-      <div className="absolute top-14 left-16 flex items-start gap-2 pointer-events-none">
+      {/* top-4 (not top-14) — aligns this row with the Sidebar rail's own
+          top-4 hamburger button instead of sitting a row below it, matching
+          the reference wireframe where both live in the same top strip. */}
+      <div className="absolute top-4 left-16 flex items-start gap-2 pointer-events-none">
         {/* Peserta toggle — moved here from the bottom meeting-control bar
             (see that bar's own comment) so it sits directly left of
             Soundboard, matching the same icon-button-that-opens-a-panel

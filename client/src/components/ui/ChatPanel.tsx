@@ -543,7 +543,7 @@ export function ChatPanel({
             onClick={() => onToggleOpen(!open)}
             className="font-login-body bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl px-3 py-2 rounded-lg text-sm text-login-accent dark:text-purple-300 hover:brightness-110 border border-login-border-soft dark:border-white/10 shadow-lg shadow-purple-500/10 cursor-pointer inline-flex items-center gap-1.5"
           >
-            <img src="/assets/img/icons/message.svg" width={14} height={14} alt="" /> {open ? 'Hide' : 'Chat'}
+            <img src="/assets/img/icons/message.svg" width={14} height={14} alt="" /> {open ? 'Hide' : 'Message'}
             {!open && totalUnread > 0 && (
               <span className="ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold inline-flex items-center justify-center">
                 {totalUnread > 99 ? '99+' : totalUnread}
