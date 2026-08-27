@@ -1161,13 +1161,18 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const [scalePanelOpen, setScalePanelOpen] = useState(false);
   const avatarScale = useEditorStore((s) => s.doc?.avatarScale) ?? 1;
   const uploadReferenceImage = async () => {
-    const f = await pickFile('image/png,image/jpeg');
+    // Same WebP/SVG treatment as Import Image just above — accepted here
+    // too, via the same admin-gated uploadRoomAsset route rather than the
+    // general uploadMedia (see that function's own comment for why). This
+    // panel's canvas render is drawReferenceImage() below, drawImage()
+    // same as any custom asset, so SVG renders exactly the same way.
+    const f = await pickFile('image/png,image/jpeg,image/webp,image/svg+xml');
     if (!f) return;
-    if (!['image/png', 'image/jpeg'].includes(f.type)) { await showAlert('Hanya file PNG atau JPG yang diperbolehkan.'); return; }
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(f.type)) { await showAlert('Hanya file PNG, JPG, WebP, atau SVG yang diperbolehkan.'); return; }
     if (f.size > MAX_IMPORT_BYTES) { await showAlert(`Ukuran file maksimal ${MAX_IMPORT_BYTES / 1024 / 1024}MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
     setRefBusy(true); setRefErr('');
     try {
-      const { url } = await api.uploadMedia(f, slug);
+      const { url } = await api.uploadRoomAsset(f, slug);
       const doc = useEditorStore.getState().doc;
       const mapW = (doc?.width ?? MAP_WIDTH) * TILE_SIZE, mapH = (doc?.height ?? MAP_HEIGHT) * TILE_SIZE;
       // Default: cover the whole current map, half-transparent, visible —
