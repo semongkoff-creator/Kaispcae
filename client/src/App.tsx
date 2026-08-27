@@ -78,7 +78,6 @@ import { GlobalModal } from './components/ui/GlobalModal';
 import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
 import { AwayReasonModal } from './components/ui/AwayReasonModal';
 import { ActivityFeed } from './components/ui/ActivityFeed';
-import { PresenceButton } from './components/avatar/PresenceButton';
 import { PendingRequestToast } from './components/ui/PendingRequestToast';
 import { SpotlightNotice } from './components/ui/SpotlightNotice';
 import { RemoteHelpBanner } from './components/ui/RemoteHelpBanner';
@@ -1967,14 +1966,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         {!simplifiedView && (
           <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
         )}
-        {/* Status (WFO/WFH/Cuti/dll) and "back to my seat" — the reference
-            design's top-left pill (annotated: smiley icon = status, chair
-            icon = back to my seat, 24×24). Both already existed elsewhere
-            (Sidebar's bottom cluster / hasMySeat block) — moved here rather
-            than duplicated, same handlers/state as before. */}
-        <div className="pointer-events-auto">
-          <PresenceButton manualStatus={manualStatus} onPick={handlePresencePick} open={activePanel === 'status'} onToggle={() => openPanel('status')} variant="sidebar" />
-        </div>
+        {/* Status picker removed from here — merged into MemberListPanel
+            per this round's feedback ("status sama member jadi satu"), so
+            it's no longer duplicated in two places. "Back to my seat"
+            stays — the reference wireframe's pill still shows it here. */}
         {hasMySeat && (
           <Tooltip label="Ke Kursi Saya" detail="Teleport langsung ke kursi tetapmu di room ini.">
             <button
@@ -2603,6 +2598,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           currentRoomSlug={roomSlug}
           emitRosterListRequest={emitRosterListRequest}
           onClose={closePanel}
+          manualStatus={manualStatus}
+          onPickPresence={handlePresencePick}
         />
       )}
 

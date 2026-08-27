@@ -1,14 +1,21 @@
-import { useEffect, useState } from 'react';
-import { X, CircleFill } from 'react-bootstrap-icons';
+import { useEffect, useRef, useState } from 'react';
+import { X, CircleFill, ChevronDown } from 'react-bootstrap-icons';
 import { api, ApiError } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { Avatar } from '@/components/Messenger/chatVisuals';
+import { MANUAL_STATUSES, ManualStatus, PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
 
 interface MemberListPanelProps {
   localUserId: string;
   currentRoomSlug: string;
   emitRosterListRequest: () => void;
   onClose: () => void;
+  // Status picker merged into this panel per the reference design ("status
+  // sama member jadi satu") — same data/handler App.tsx's own top-left-pill
+  // PresenceButton used, that standalone button removed now that this is
+  // its one home.
+  manualStatus: ManualStatus;
+  onPickPresence: (status: ManualStatus) => void;
 }
 
 // QA (Presence checklist item #8, "Member list akurat") — the full workspace
@@ -19,10 +26,21 @@ interface MemberListPanelProps {
 // room in the workspace — that's the "lokasi ruang" half of the checklist
 // item. A guest never opens this (see Sidebar's isGuest gate) — guests have
 // no User row, so they can't appear in api.getWorkspacePeople() either.
-export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRequest, onClose }: MemberListPanelProps) {
+export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRequest, onClose, manualStatus, onPickPresence }: MemberListPanelProps) {
   const [people, setPeople] = useState<{ id: string; displayName: string }[] | null>(null);
   const [error, setError] = useState('');
   const roster = useGameStore((s) => s.roster);
+  const [statusPickerOpen, setStatusPickerOpen] = useState(false);
+  const statusRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!statusPickerOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (statusRef.current && !statusRef.current.contains(e.target as Node)) setStatusPickerOpen(false);
+    };
+    document.addEventListener('mousedown', onDown, true);
+    return () => document.removeEventListener('mousedown', onDown, true);
+  }, [statusPickerOpen]);
 
   useEffect(() => {
     emitRosterListRequest();
@@ -64,6 +82,41 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
           <button onClick={onClose} title="Tutup" className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer">
             <X size={18} />
           </button>
+        </div>
+
+        {/* Status picker merged in here per this round's feedback — same
+            manualStatus/onPickPresence App.tsx already threads to the
+            (now-removed) standalone PresenceButton. */}
+        <div className="flex items-center gap-2 px-5 pb-3 shrink-0">
+          <span className="text-xs text-gray-500 dark:text-gray-400">Status</span>
+          <div className="relative" ref={statusRef}>
+            <button
+              onClick={() => setStatusPickerOpen((v) => !v)}
+              className="flex items-center gap-1.5 bg-login-accent text-white text-xs font-medium pl-3 pr-2 py-1 rounded-full cursor-pointer"
+            >
+              {PRESENCE_LABEL[manualStatus]}
+              <ChevronDown size={11} />
+            </button>
+            {statusPickerOpen && (
+              <div
+                className="absolute top-full left-0 mt-1 w-40 bg-white dark:bg-gray-800 rounded-xl border border-purple-100 dark:border-gray-700 shadow-xl p-2 z-10"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                {MANUAL_STATUSES.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => { onPickPresence(s); setStatusPickerOpen(false); }}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-left cursor-pointer ${
+                      manualStatus === s ? 'bg-purple-600 text-white' : 'text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    <span className="w-4 text-center shrink-0">{s === 'available' ? '🟢' : PRESENCE_EMOJI[s]}</span>
+                    {PRESENCE_LABEL[s]}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {error && <p className="px-5 text-xs text-red-500 mb-2">{error}</p>}
