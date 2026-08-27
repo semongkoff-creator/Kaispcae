@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { XLg, XCircleFill, Tools, BoxArrowRight, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, LockFill, UnlockFill, Buildings, ClockHistory, DoorOpenFill, DoorClosedFill, Link45deg, HourglassSplit, SpeakerFill } from 'react-bootstrap-icons';
+import { XLg, XCircleFill, Tools, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, LockFill, UnlockFill, Buildings, ClockHistory, DoorOpenFill, DoorClosedFill, Link45deg, HourglassSplit, SpeakerFill } from 'react-bootstrap-icons';
 
 // Real KaiSpace icon set (client/kaispace_icon.rar, extracted 2026-08-27) —
 // fixed-color SVGs (not currentColor-recolorable like the Iconify set they
@@ -156,10 +156,10 @@ interface SidebarProps {
   onPauseRecording: () => void;
   onResumeRecording: () => void;
 
-  // Back to the room list (Lobby) without logging out — distinct from
-  // onLogout below, which clears the session entirely.
+  // Back to the room list (Lobby) without logging out. Logout itself is no
+  // longer a rail icon here — see the removal comment further down; it's
+  // reachable via Settings' own "Akun" section instead.
   onLeaveRoom: () => void;
-  onLogout: () => void;
   onOpenSettings: () => void;
 
   // QA (Booking popup close button) — shown whenever this user has an
@@ -262,7 +262,6 @@ export function Sidebar({
   onPauseRecording,
   onResumeRecording,
   onLeaveRoom,
-  onLogout,
   onOpenSettings,
   hasActiveBooking,
   onReopenBookingNotice,
@@ -679,11 +678,10 @@ export function Sidebar({
           {theme === 'dark' ? <SunFill size={14} /> : <MoonFill size={14} />}
         </SidebarIcon>
       </Tooltip>
-      <Tooltip label="Logout" detail="Keluar dari akunmu." side="right">
-        <SidebarIcon onClick={onLogout} className="text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500">
-          <BoxArrowRight size={14} />
-        </SidebarIcon>
-      </Tooltip>
+      {/* Logout rail icon removed per the reference design — it was a true
+          duplicate: SettingsPanel's own "Akun" section already has a full
+          Logout flow (with confirm dialog), reachable via the gear icon
+          above. */}
       {/* Profile — moved to the very bottom of the rail (was above Ghost
           mode/Settings) per the reference design, which shows the user's
           own avatar as the last item, below theme/logout. QA (Akses tamu
