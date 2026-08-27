@@ -1,5 +1,4 @@
 import { useRef, useEffect } from 'react';
-import { CircleFill } from 'react-bootstrap-icons';
 import { MANUAL_STATUSES, ManualStatus, PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
 
 interface PresenceButtonProps {
@@ -49,7 +48,12 @@ export function PresenceButton({ manualStatus, onPick, open, onToggle, variant =
           manualStatus !== 'available' ? 'bg-purple-50 dark:bg-gray-700' : 'hover:bg-purple-50 dark:hover:bg-gray-700'
         } text-purple-700 dark:text-purple-300`}
       >
-        {manualStatus === 'available' ? <CircleFill size={10} className="text-green-500" /> : <span className="text-xs leading-none">{PRESENCE_EMOJI[manualStatus]}</span>}
+        {/* Reference design shows a fixed smiley icon here (not a per-status
+            dot/emoji, which is also hard to read at this size) — the
+            dynamic emoji-per-status badge convention (this file's own
+            header comment) still drives the dropdown rows below and the
+            avatar/participant-list badges elsewhere. */}
+        <img src="/assets/img/icons/emoticon.svg" width={14} height={14} alt="" />
       </button>
 
       {open && (

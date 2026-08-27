@@ -75,7 +75,6 @@ import { ParticipantPanel } from './components/ui/ParticipantPanel';
 import { PlayerCard } from './components/ui/PlayerCard';
 import { ReportUserModal } from './components/ui/ReportUserModal';
 import { GlobalModal } from './components/ui/GlobalModal';
-import { SoundboardPanel } from './components/ui/SoundboardPanel';
 import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
 import { AwayReasonModal } from './components/ui/AwayReasonModal';
 import { ActivityFeed } from './components/ui/ActivityFeed';
@@ -1960,17 +1959,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             <ParticipantsToggleButton open={activePanel === 'participants'} onToggle={() => openPanel('participants')} />
           </div>
         )}
+        {/* Soundboard moved to the Sidebar rail (see that file's own
+            comment) — the reference design's top-left pill doesn't include
+            it, and SoundboardPanel's trigger+popover are one component, so
+            moving its mount point there was cleaner than trying to hide
+            just this trigger while keeping the popover anchored here. */}
         {!simplifiedView && (
-          <>
-            {/* QA (Akses tamu checklist item 2, "Guest terbatas") — Soundboard
-                playback is now also server-rejected for guests
-                (roomHandler.ts's SOUNDBOARD_PLAY), so hiding the panel too
-                avoids a dead "nothing happens when I click" button. */}
-            {!isGuest && (
-              <SoundboardPanel roomSlug={roomSlug} emitSoundboardPlay={emitSoundboardPlay} open={activePanel === 'soundboard'} onToggle={() => openPanel('soundboard')} onClose={closePanel} />
-            )}
-            <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
-          </>
+          <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
         )}
         {/* Status (WFO/WFH/Cuti/dll) and "back to my seat" — the reference
             design's top-left pill (annotated: smiley icon = status, chair
@@ -2320,6 +2315,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleDoorOverride={() => emitDoorOverride(!doorOverride)}
         soundboardActive={activePanel === 'soundboard'}
         onToggleSoundboard={() => openPanel('soundboard')}
+        onCloseSoundboard={closePanel}
+        emitSoundboardPlay={emitSoundboardPlay}
         chatPanelOpen={channelChat.chatPanelOpen}
         onToggleChatPanel={() => channelChat.setChatPanelOpen(!channelChat.chatPanelOpen)}
         canManageGuests={isAdmin}

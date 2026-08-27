@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
-import { XLg, XCircleFill, Tools, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, LockFill, UnlockFill, Buildings, ClockHistory, DoorOpenFill, DoorClosedFill, Link45deg, HourglassSplit, SpeakerFill, ChatDotsFill } from 'react-bootstrap-icons';
+import { XLg, XCircleFill, Tools, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, LockFill, UnlockFill, Buildings, ClockHistory, DoorOpenFill, DoorClosedFill, Link45deg, HourglassSplit, ChatDotsFill } from 'react-bootstrap-icons';
+import { SoundboardPanel } from './SoundboardPanel';
 
 // Real KaiSpace icon set (client/kaispace_icon.rar, extracted 2026-08-27) —
 // fixed-color SVGs (not currentColor-recolorable like the Iconify set they
@@ -59,11 +60,13 @@ interface SidebarProps {
   canDoorOverride: boolean;
   onToggleDoorOverride: () => void;
 
-  // Rail toggle for the SoundboardPanel already rendered in App.tsx's
-  // top-left pill — same activePanel('soundboard') state, just a second
-  // entry point (see this file's own rail block for details).
+  // SoundboardPanel now renders here directly (moved from App.tsx's
+  // top-left pill — see this file's own rail block for why). Reuses the
+  // roomSlug prop already declared below (RecordingControl needs it too).
   soundboardActive: boolean;
   onToggleSoundboard: () => void;
+  onCloseSoundboard: () => void;
+  emitSoundboardPlay: (soundId: string) => void;
 
   // Rail toggle for ChatPanel (the bottom-right "Message" button/Global
   // Chat panel) — reference design shows a chat icon in the rail's bottom
@@ -226,6 +229,8 @@ export function Sidebar({
   onToggleDoorOverride,
   soundboardActive,
   onToggleSoundboard,
+  onCloseSoundboard,
+  emitSoundboardPlay,
   chatPanelOpen,
   onToggleChatPanel,
   canManageGuests,
@@ -630,19 +635,14 @@ export function Sidebar({
           fork has no Cuti feature to map the request.svg rail slot to, so
           it's left unfilled here (Permintaan Bergabung stays reachable
           from the flyout instead, same as it always was). */}
-      {/* Speaker slot annotated as Soundboard — no dedicated speaker SVG in
-          the extracted asset pack, so this reuses SpeakerFill, the same
-          icon SoundboardPanel's own trigger already uses. Same
-          activePanel state as the SoundboardPanel instance rendered in
-          App.tsx's top-left pill (that's where the actual popover
-          appears; this is just a second toggle for it, same pattern as
-          other promoted icons). */}
+      {/* Speaker slot annotated as Soundboard — moved here from App.tsx's
+          top-left pill (see that file's own comment): the reference design
+          doesn't include Soundboard in that pill, and SoundboardPanel
+          renders its own trigger+popover as one component, so this is the
+          real component now, not a second toggle for a copy mounted
+          elsewhere. */}
       {!isGuest && !simplifiedView && (
-        <Tooltip label="Soundboard" detail="Putar soundboard untuk semua orang di room ini." side="right">
-          <SidebarIcon active={soundboardActive} onClick={onToggleSoundboard}>
-            <SpeakerFill size={15} />
-          </SidebarIcon>
-        </Tooltip>
+        <SoundboardPanel roomSlug={roomSlug} emitSoundboardPlay={emitSoundboardPlay} open={soundboardActive} onToggle={onToggleSoundboard} onClose={onCloseSoundboard} />
       )}
       {/* The reference design's "+" rail slot is annotated "button add
           apps" — no such feature (an app-marketplace-style integration
