@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { isUserInLockedZone, isZoneLocked, mayEnterZone, zoneKeyholderOf, admitUserToZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
-import { getCachedZones } from '../store/roomStore';
+import { getCachedZones, getCachedDoorAreaRects } from '../store/roomStore';
 import { Server, Socket } from 'socket.io';
 import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, findSpawnPixel, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, DoorAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveDoorAreaPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH, RosterEntry, RosterUpdate, Zone } from '@kaispace/shared';
 import {
@@ -18,7 +18,7 @@ import { recordResponseIfPending } from '../lib/pokeResponse';
 import { refreshManagerCache, broadcastAnalyticsActivity } from './analyticsFeed';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { redactInteractiveSecrets, redactDoorPasswords, redactDoorAreaPasswords } from '../lib/redactFurniture';
-import { unlockDoor, unlockDoorArea, clearUnlockedDoorsForRoom } from './doorLock';
+import { unlockDoor, unlockDoorArea, clearUnlockedDoorsForRoom, isDoorLockedForSocket } from './doorLock';
 import { recordSupersede } from './sessionFlap';
 import { getNearbyRecipients } from './proximityBroadcast';
 import { releaseScreenShareOnLeave } from './rtcHandler';
@@ -1849,6 +1849,43 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     return best;
   }
 
+  // Bug fix — a teleport destination behind a locked (password) door had no
+  // check at all: PLAYER_MOVE/PLAYER_TELEPORT_TO (movementHandler.ts) both
+  // already refuse to walk THROUGH a locked door, but a Team
+  // Location/bookmark placed anywhere past one skipped the password
+  // entirely, since teleport never walks the tiles in between.
+  //
+  // A locked door isn't the same kind of block as a wall — it's a real,
+  // working door, just closed. Per product decision, teleport lands the
+  // requester just OUTSIDE it (still visibly near the destination, still
+  // has to solve the password to actually get in) rather than a flat
+  // refusal — a plain wall/desk block stays a refusal (see the
+  // isTileBlocked check below, unchanged).
+  //
+  // Expanding ring search (not a 4-neighbor check like findAdjacentFreeTile)
+  // because a Door AREA can be several tiles wide — the nearest open tile
+  // outside it can be more than one step away. Capped at 8 tiles out; a
+  // door area larger than that would be unusual, and this only runs once
+  // per teleport, not a hot path.
+  function findTileOutsideLockedDoor(tiles: RoomTile[][], room: string, socketId: string, tileX: number, tileY: number, doorAreas: DoorAreaRect[], overrideActive: boolean): { x: number; y: number } | null {
+    const MAX_RADIUS = 8;
+    for (let radius = 0; radius <= MAX_RADIUS; radius++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dy = -radius; dy <= radius; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue; // ring only — smaller radii already tried
+          const x = tileX + dx;
+          const y = tileY + dy;
+          if (isTileBlocked(tiles, x, y)) continue;
+          const px = x * TILE_SIZE + TILE_SIZE / 2;
+          const py = y * TILE_SIZE + TILE_SIZE / 2;
+          if (isDoorLockedForSocket(socketId, room, tiles, x, y, px, py, doorAreas, overrideActive)) continue;
+          return { x, y };
+        }
+      }
+    }
+    return null;
+  }
+
   // §4 — Teleport. Resolves the real x/y from the location's OWN stored
   // data (DB lookup by id, scoped to this room) rather than trusting
   // whatever coordinates a client might supply directly — same
@@ -1929,8 +1966,8 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         return;
       }
 
-      const pixelX = target.x * TILE_SIZE + TILE_SIZE / 2;
-      const pixelY = target.y * TILE_SIZE + TILE_SIZE / 2;
+      let pixelX = target.x * TILE_SIZE + TILE_SIZE / 2;
+      let pixelY = target.y * TILE_SIZE + TILE_SIZE / 2;
       // Skipped for kind 'seat' — a chair tile is meant to be stood/sat on
       // by design (the ordinary sit flow already puts a player there with
       // no server-side tile-blocked check at all, see PLAYER_SIT's handler
@@ -1955,6 +1992,33 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       if (destZone && isZoneLocked(room, destZone.id) && !mayEnterZone(room, destZone.id, uid)) {
         socket.emit('admin:error', { message: 'Zona tujuan sedang dikunci' });
         return;
+      }
+
+      // Door lock (password-protected door tile/area) — a genuinely
+      // different kind of block than the wall/desk check above. A real
+      // locked door doesn't erase the destination, it just stays shut:
+      // land just outside it instead of refusing outright or silently
+      // walking straight through. Falls back to a flat refusal only if no
+      // open tile exists within the search radius (a pathological map).
+      if (tiles) {
+        const doorAreas = getCachedDoorAreaRects(room);
+        const overrideActive = isDoorOverrideActive(room);
+        if (isDoorLockedForSocket(socket.id, room, tiles, target.x, target.y, pixelX, pixelY, doorAreas, overrideActive)) {
+          const outside = findTileOutsideLockedDoor(tiles, room, socket.id, target.x, target.y, doorAreas, overrideActive);
+          if (!outside) {
+            socket.emit('admin:error', { message: 'Pintu tujuan terkunci' });
+            return;
+          }
+          target = outside;
+          pixelX = outside.x * TILE_SIZE + TILE_SIZE / 2;
+          pixelY = outside.y * TILE_SIZE + TILE_SIZE / 2;
+          // A redirected 'seat' teleport no longer lands ON the seat — the
+          // whole point was that it's behind a locked door. Leaving
+          // seatFurnitureId set would tell the client (useSocket.ts's
+          // PLAYER_TELEPORTED handler) to sit the player down at THIS
+          // (non-seat) spot instead, landing them mid-sit in a doorway.
+          seatFurnitureId = undefined;
+        }
       }
 
       updatePlayerPosition(room, socket.id, pixelX, pixelY, 'down');

@@ -2,7 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
 import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isDoorTile, isPointInImpassableArea, doesRectOverlapImpassableArea, movementHitboxBounds, DOOR_HITBOX_HALF_PX, shouldIsolateZoneAudio, RoomTile, JumpEvent, NudgeEvent, PlayerMovePayload, PlayerMovedPayload, PlayerStoppedPayload } from '@kaispace/shared';
 import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas, getCachedDoorAreaRects, getCachedZones, getCachedPlayers } from '../store/roomStore';
-import { isDoorUnlocked, isDoorAreaUnlocked, clearUnlockedDoors } from './doorLock';
+import { clearUnlockedDoors, isDoorLockedForSocket } from './doorLock';
 import { isDoorOverrideActive } from './roomHandler';
 import { createStoppedPayload } from './movementPayload';
 import { socketRateLimit } from '../middleware/rateLimit';
@@ -116,26 +116,11 @@ function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string,
   const half = isDoorTile(tiles, tileX, tileY) ? DOOR_HITBOX_HALF_PX : TILE_SIZE / 2 - 2;
   const { left, top, right, bottom } = movementHitboxBounds(pixelX, pixelY, half);
   if (doesRectOverlapImpassableArea(getCachedImpassableAreas(room), left, top, right, bottom)) return true;
-  const tile = tiles[tileY]?.[tileX];
-  if (tile?.type === 'door' && tile.doorPasswordEnabled && tile.doorPassword) {
-    // Item #9 — emergency override lets everyone through every door in this
-    // room, bypassing the normal per-socket unlock entirely.
-    if (isDoorOverrideActive(room)) return false;
-    return !isDoorUnlocked(socketId, room, tileX, tileY);
-  }
-  // Follow-up — "Door Area" tool, the resizable-area sibling of the
-  // per-tile check just above. Reuses isPointInImpassableArea AS-IS (same
-  // pixel-space rect shape, see mapLayers.ts's DoorAreaRect) against only
-  // the subset of door areas that are actually still locked for THIS
-  // socket — an unlocked or override-bypassed one is simply left out of
-  // the list handed in, rather than teaching isPointInImpassableArea a new
-  // per-socket concept it has no business knowing about.
-  if (!isDoorOverrideActive(room)) {
-    const lockedDoorAreas = getCachedDoorAreaRects(room).filter(
-      (r) => r.doorPasswordEnabled && r.doorPassword && !isDoorAreaUnlocked(socketId, room, r.id),
-    );
-    if (lockedDoorAreas.length > 0 && isPointInImpassableArea(lockedDoorAreas, pixelX, pixelY)) return true;
-  }
+  // Door tile password + Door Area password — extracted to doorLock.ts's
+  // isDoorLockedForSocket so TELEPORT_REQUEST (roomHandler.ts) can ask the
+  // exact same question without duplicating this logic (it used to have no
+  // door-lock awareness at all).
+  if (isDoorLockedForSocket(socketId, room, tiles, tileX, tileY, pixelX, pixelY, getCachedDoorAreaRects(room), isDoorOverrideActive(room))) return true;
   if (isTileOccupiedInPrivateArea(room, tileX, tileY, socketId)) return true;
   return false;
 }
