@@ -2611,6 +2611,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onClose={closePanel}
           manualStatus={manualStatus}
           onPickPresence={handlePresencePick}
+          hasMySeat={hasMySeat}
+          onMySeat={handleMySeat}
         />
       )}
 

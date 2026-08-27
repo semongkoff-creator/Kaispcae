@@ -15,6 +15,12 @@ interface MemberListPanelProps {
   // its one home.
   manualStatus: ManualStatus;
   onPickPresence: (status: ManualStatus) => void;
+  // "My Seat" quick action shown next to the Status pill — reference
+  // design's row has two buttons, not one. Same hasMySeat/onMySeat App.tsx
+  // already has for its own top-left-pill button; this is a second entry
+  // point to the identical action, not a new feature.
+  hasMySeat: boolean;
+  onMySeat: () => void;
 }
 
 // QA (Presence checklist item #8, "Member list akurat") — the full workspace
@@ -25,7 +31,7 @@ interface MemberListPanelProps {
 // room in the workspace — that's the "lokasi ruang" half of the checklist
 // item. A guest never opens this (see Sidebar's isGuest gate) — guests have
 // no User row, so they can't appear in api.getWorkspacePeople() either.
-export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRequest, onClose, manualStatus, onPickPresence }: MemberListPanelProps) {
+export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRequest, onClose, manualStatus, onPickPresence, hasMySeat, onMySeat }: MemberListPanelProps) {
   const [people, setPeople] = useState<{ id: string; displayName: string }[] | null>(null);
   const [error, setError] = useState('');
   const roster = useGameStore((s) => s.roster);
@@ -116,6 +122,16 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
               </div>
             )}
           </div>
+          {hasMySeat && (
+            <button
+              onClick={onMySeat}
+              title="Ke Kursi Saya"
+              className="flex items-center gap-1 bg-login-surface dark:bg-gray-700 text-login-accent dark:text-purple-300 text-xs font-medium px-2 py-1 rounded-full cursor-pointer"
+            >
+              <img src="/assets/img/icons/back_to_seat.svg" width={12} height={12} alt="" />
+              My Seat
+            </button>
+          )}
         </div>
 
         {/* Search — reference design shows a search bar between Status and
