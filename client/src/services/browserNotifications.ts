@@ -109,7 +109,7 @@ export function notifyNewMessage(title: string, text: string, onClick?: () => vo
   const settings = getNotificationSettings();
   if (!settings.browserNotifOn || !isNotificationSupported() || Notification.permission !== 'granted') return;
 
-  const n = new Notification(title, { body: text, tag: 'meetkai-chat', icon: '/assets/img/favico.png' });
+  const n = new Notification(title, { body: text, tag: 'meetkai-chat', icon: '/assets/img/favicon-kaispace.png' });
   n.onclick = () => { window.focus(); onClick?.(); };
   if (settings.soundOn) playNotificationSound();
 }
@@ -136,7 +136,7 @@ export function notifyNudge(nudgerName: string): void {
   const settings = getNotificationSettings();
   if (!settings.browserNotifOn || !isNotificationSupported() || Notification.permission !== 'granted') return;
 
-  const n = new Notification('Disenggol!', { body, tag: 'meetkai-nudge', icon: '/assets/img/favico.png' });
+  const n = new Notification('Disenggol!', { body, tag: 'meetkai-nudge', icon: '/assets/img/favicon-kaispace.png' });
   // Was missing entirely — unlike notifyNewMessage above, clicking the OS
   // popup did nothing at all, not even bring the tab back to front. A nudge
   // exists specifically to pull someone back to the app from another
