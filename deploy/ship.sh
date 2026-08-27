@@ -23,6 +23,7 @@
 #   ./deploy/ship.sh                 typecheck, test, push, deploy, verify
 #   ./deploy/ship.sh --dry-run       print every step, run none of them
 #   ./deploy/ship.sh --skip-tests    when you already ran them
+#   ./deploy/ship.sh --pull          take teammates' commits without being asked
 #   ./deploy/ship.sh -- --no-build   pass the rest through to deploy.sh
 #
 set -euo pipefail
@@ -37,12 +38,14 @@ PROBE="${SHIP_PROBE:-$SITE/@kaitech}"
 
 DRY=0
 RUN_TESTS=1
+AUTO_PULL=0
 PASSTHRU=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run)     DRY=1; shift ;;
     --skip-tests)  RUN_TESTS=0; shift ;;
+    --pull)        AUTO_PULL=1; shift ;;
     --host)        HOST="$2"; shift 2 ;;
     -h|--help)     sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     --)            shift; PASSTHRU=("$@"); break ;;
@@ -73,13 +76,38 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
 fi
 ok "branch $BRANCH, working tree bersih"
 
-# Behind the remote means someone else pushed. Rebasing here silently would
-# deploy their work as though it were yours, without you having read it.
+# Behind the remote means someone else pushed. Rebasing silently would deploy
+# their work as though it were yours, without you having read it — so their
+# commits are printed first and the pull is offered, not assumed.
+#
+# Offered rather than refused: on this repo several people push to main every
+# day, and a guard that only ever says "go run another command" is a guard
+# people learn to route around. Showing the work and asking keeps the part
+# that matters (you saw it) without the part that does not (typing it again).
 git fetch --quiet origin "$BRANCH"
 behind="$(git rev-list --count "HEAD..origin/$BRANCH")"
 if [[ "$behind" != "0" ]]; then
-  git log --oneline "HEAD..origin/$BRANCH" >&2
-  die "$behind commit dari orang lain belum ada di lokalmu. Jalankan 'git pull --rebase', baca perubahannya, lalu ulangi."
+  printf '\n%s%s commit dari orang lain belum ada di lokalmu:%s\n' "$BOLD" "$behind" "$OFF"
+  git --no-pager log --oneline --format='  %h  %an  %s' "HEAD..origin/$BRANCH"
+
+  if [[ "$AUTO_PULL" == "1" ]]; then
+    reply=y
+  elif [[ -t 0 ]]; then
+    printf '\nTarik dan lanjutkan? Tes akan dijalankan ulang di atas hasil gabungannya. [y/N] '
+    read -r reply
+  else
+    die "$behind commit tertinggal, dan tidak ada terminal untuk bertanya. Jalankan 'git pull --rebase' lalu ulangi, atau pakai --pull."
+  fi
+
+  case "$reply" in
+    [yY]*) ;;
+    *) die "dibatalkan. Jalankan 'git pull --rebase', baca perubahannya, lalu ulangi." ;;
+  esac
+
+  # --rebase, so your commits stay on top and the history has no merge bubble
+  # nobody asked for. A conflict stops here rather than being guessed at.
+  run git pull --rebase origin "$BRANCH" || die "rebase berhenti — selesaikan konfliknya, lalu jalankan ini lagi."
+  ok "$behind commit ditarik"
 fi
 
 ahead="$(git rev-list --count "origin/$BRANCH..HEAD")"
