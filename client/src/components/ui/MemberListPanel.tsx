@@ -77,9 +77,14 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
   const orgLabel = currentRoomSlug.charAt(0).toUpperCase() + currentRoomSlug.slice(1);
 
   return (
-    <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onMouseDown={onClose}>
+    // Docked flush against the sidebar rail (top-0 left-12 bottom-0),
+    // matching the Room Features flyout's own treatment — not a centered
+    // modal. "Ini malah ketengah" (this round's feedback): the reference
+    // never showed it centered, that was this component's old style
+    // bleeding through since only the CONTENT was restyled before now.
+    <div className="fixed inset-0 z-[100]" onMouseDown={onClose}>
       <div
-        className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 w-full max-w-sm max-h-[80vh] flex flex-col"
+        className="fixed top-0 left-12 bottom-0 w-80 bg-white dark:bg-gray-800 shadow-2xl shadow-purple-100/50 dark:shadow-black/30 border-r border-login-border-soft dark:border-gray-700 flex flex-col"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
