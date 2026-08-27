@@ -502,34 +502,15 @@ export function Sidebar({
                 <MenuRow icon={<XCircleFill size={15} />} label="Cabut Guest Link Terakhir" onClick={closeAnd(onRevokeLastGuestLink)} />
               </Tooltip>
             )}
-            {/* QA #9/#10 — CEO/admin-only text broadcast, the text
-                counterpart to Spotlight (voice). One-shot action like Guest
-                Link above — App.tsx's handleBroadcast prompts for the text. */}
-            {canBroadcast && (
-              <Tooltip label="Broadcast" detail="Kirim pengumuman teks ke semua orang di room ini." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<IconImg name="announce" />} label="Broadcast" onClick={closeAnd(onBroadcast)} />
-              </Tooltip>
-            )}
+            {/* Broadcast, Teleport, Add Media — promoted to persistent rail
+                icons above; removed here to avoid duplication. */}
             {isAdmin && (
               <Tooltip label="Edit Room" detail="Buka Room Editor untuk mengubah tata letak. (Khusus admin.)" side="right" wrapperClassName="w-full">
                 <MenuRow icon={<Tools size={15} />} label="Edit Room" onClick={closeAnd(onOpenRoomEditor)} />
               </Tooltip>
             )}
-            {canTeleport && (
-              <Tooltip label="Teleport" detail="Pindah cepat ke lokasi tersimpan." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<IconImg name="teleport" />} label="Teleport" active={showTeleportPanel} onClick={closeAnd(onToggleTeleport)} />
-              </Tooltip>
-            )}
 
             <MenuDivider />
-            {/* QA (Akses tamu checklist item 2, "Guest terbatas") — was
-                already a dead end for a guest (mediaHandler.ts/noteHandler.ts
-                aren't registered for guest sockets at all), just never hidden. */}
-            {!isGuest && (
-              <Tooltip label="Tambah Media" detail="Tempel gambar, video, atau file ke dalam room." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<IconImg name="add_media" />} label="Add Media" active={showAddMediaPanel} onClick={closeAnd(onToggleAddMedia)} />
-              </Tooltip>
-            )}
 
             {/* Screen recording — restored here after a brief detour to a
                 standalone top-of-screen control (commit 829cd166 moved it
@@ -601,17 +582,10 @@ export function Sidebar({
           </SidebarIcon>
         </Tooltip>
       )}
-      {!isGuest && !isRestrictedAccount && (
+      {!isGuest && (
         <Tooltip label="Absensi" detail="Lihat riwayat & status absensimu." side="right">
-          <SidebarIcon active={larkAttendanceActive} onClick={onToggleLarkAttendance}>
+          <SidebarIcon active={attendanceViewActive} onClick={onToggleAttendanceView}>
             <ClockHistory size={16} />
-          </SidebarIcon>
-        </Tooltip>
-      )}
-      {!isGuest && isDefaultOrg && !isRestrictedAccount && (
-        <Tooltip label="Daily Task" detail="Buka daftar tugas harianmu." side="right">
-          <SidebarIcon active={dailyTaskActive} onClick={onToggleDailyTask}>
-            <IconImg name="add_task" size={16} />
           </SidebarIcon>
         </Tooltip>
       )}
@@ -630,10 +604,21 @@ export function Sidebar({
         </Tooltip>
       )}
       {isAdmin && (
-        <Tooltip label="Permintaan Bergabung" detail="Lihat & proses permintaan masuk yang menunggu. (Khusus admin.)" side="right">
-          <SidebarIcon active={joinQueueActive} onClick={onToggleJoinQueue}>
-            <IconImg name="request" size={16} />
-          </SidebarIcon>
+        <Tooltip
+          label={pendingJoinCount > 0 ? `Permintaan bergabung (${pendingJoinCount})` : 'Permintaan Bergabung'}
+          detail="Lihat & proses permintaan masuk yang menunggu. (Khusus admin.)"
+          side="right"
+        >
+          <div className="relative">
+            <SidebarIcon active={joinQueueActive} onClick={onToggleJoinQueue}>
+              <IconImg name="request" size={16} />
+            </SidebarIcon>
+            {pendingJoinCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                {pendingJoinCount > 9 ? '9+' : pendingJoinCount}
+              </span>
+            )}
+          </div>
         </Tooltip>
       )}
       {!isGuest && (

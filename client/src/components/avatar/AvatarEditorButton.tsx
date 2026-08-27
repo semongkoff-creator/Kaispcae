@@ -13,7 +13,11 @@ export function AvatarEditorButton({ onClick, variant = 'standalone' }: AvatarEd
     return (
       <button
         onClick={onClick}
-        title="Edit Avatar"
+        // Framed as "Profile" (not "Edit Avatar") per the ZEP reference —
+        // clicking your own profile is where character editing lives,
+        // rather than a dedicated standalone icon. Same onClick/modal as
+        // before; only the entry point's label changed.
+        title="Profile"
         className="w-8 h-8 rounded-lg flex items-center justify-center text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-700 transition-all cursor-pointer"
       >
         {/* Figma workspace restyle (kxCY7H7D8ZHzGkMCBDA2Y8, node 6:200) — sidebar
