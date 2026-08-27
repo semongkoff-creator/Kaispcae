@@ -617,13 +617,8 @@ export function Sidebar({
 
       {/* "Ke Kursi Saya" and PresenceButton (Status WFO/WFH/dll) moved to
           App.tsx's top-left pill per the reference design — removed here
-          to avoid duplication. */}
-
-      {/* QA (Akses tamu checklist item 2) — a guest's avatar edits already
-          never persisted (PUT /users/me/avatar 401s and is swallowed, see
-          App.tsx's persistAvatar) since they have no User row to save to —
-          offering the editor at all was misleading, not just extraneous. */}
-      {!isGuest && <AvatarEditorButton onClick={onEditAvatar} variant="sidebar" />}
+          to avoid duplication. Profile (AvatarEditorButton) moved further
+          down — see the comment by its new position, right after Logout. */}
 
       {/* Ghost mode + Notification Settings — moved here from the meeting
           toolbar (previously HiddenButton/NotificationSettings in App.tsx's
@@ -689,6 +684,14 @@ export function Sidebar({
           <BoxArrowRight size={14} />
         </SidebarIcon>
       </Tooltip>
+      {/* Profile — moved to the very bottom of the rail (was above Ghost
+          mode/Settings) per the reference design, which shows the user's
+          own avatar as the last item, below theme/logout. QA (Akses tamu
+          checklist item 2) — a guest's avatar edits already never
+          persisted (PUT /users/me/avatar 401s and is swallowed, see
+          App.tsx's persistAvatar) since they have no User row to save to —
+          offering the editor at all was misleading, not just extraneous. */}
+      {!isGuest && <AvatarEditorButton onClick={onEditAvatar} variant="sidebar" />}
     </div>
   );
 }
