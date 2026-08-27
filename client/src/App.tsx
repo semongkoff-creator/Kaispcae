@@ -2254,7 +2254,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         statusPickerOpen={activePanel === 'status'}
         onToggleStatusPicker={() => openPanel('status')}
         isAdmin={isAdmin}
-        onOpenRoomEditor={() => window.open(`/?roomEditor=${encodeURIComponent(roomSlug)}`, '_blank', 'noopener')}
+        // Bare `/` only ever worked because the app used to own the whole
+        // domain — on kaispace.io that root path now serves the marketing
+        // landing site instead (deploy/kaispace/nginx-host.conf), so this new
+        // tab would land there with nothing to read `?roomEditor=` at all.
+        // `/_platform` is the same reserved-for-the-app utility path the
+        // OAuth-return fix already established for this exact class of bug
+        // (see server/src/lib/oauthReturn.ts) — the query param is read from
+        // window.location.search regardless of pathname, so this works
+        // identically on office.dev-kaitech.com too.
+        onOpenRoomEditor={() => window.open(`/_platform?roomEditor=${encodeURIComponent(roomSlug)}`, '_blank', 'noopener')}
         canTeleport={roleAtLeast(localRole, 'member')}
         showTeleportPanel={showTeleportPanel}
         onToggleTeleport={() => openPanel('teleport')}
@@ -3520,9 +3529,11 @@ function MainApp() {
   return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => { setRoomSlug(null); setRoomNameConfirmedFor(null); }} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={playerName || user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} onUpdatePreferences={updatePreferences} onDisplayNameChange={(n) => { setPlayerName(n); updateDisplayName(n); }} onFullNameChange={updateFullName} />;
 }
 
-// ZEP Room Editor opens in its own tab as /?roomEditor=<slug> (a query param on
-// the root path so the SPA index.html always loads — same scheme as ?join, no
-// nginx SPA-fallback dependency). The tab shares localStorage, so it's the SAME
+// ZEP Room Editor opens in its own tab as /_platform?roomEditor=<slug> (a
+// query param read from window.location.search below, so any app-reserved
+// pathname works — /_platform rather than bare `/` since kaispace.io's
+// nginx routes root `/` to the marketing landing site, not this app; see
+// onOpenRoomEditor in App.tsx). The tab shares localStorage, so it's the SAME
 // session as the main tab (no new login, no single-device supersede). A tiny
 // wrapper picks the page WITHOUT conditional hooks in either component.
 export default function App() {
