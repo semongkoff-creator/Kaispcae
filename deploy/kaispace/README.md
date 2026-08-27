@@ -128,6 +128,29 @@ docker compose ps
 curl -s http://127.0.0.1:8090/api/health; echo
 ```
 
+## 4b. Deploy berikutnya, dari laptop
+
+Setelah pemasangan awal selesai, rilis berikutnya tidak perlu SSH manual:
+
+```bash
+./deploy/ship.sh
+```
+
+Dijalankan dari klon lokalmu. Urutannya: pastikan branch benar dan working
+tree bersih, jalankan typecheck dan seluruh tes, push, lalu SSH ke server dan
+menjalankan `deploy/deploy.sh` di sana — dan terakhir membaca bundle yang
+benar-benar dilayani situs untuk membuktikan isinya berubah.
+
+Pemeriksaan terakhir itu bukan hiasan: pernah terjadi server melayani build
+dari sebelum tiga commit ter-merge, semuanya melaporkan sukses, dan baru
+ketahuan setelah membaca JavaScript yang tersaji.
+
+```bash
+./deploy/ship.sh --dry-run      # tampilkan semua langkah, jalankan yang aman saja
+./deploy/ship.sh -- --no-build  # sisanya diteruskan ke deploy.sh
+SHIP_HOST=kaispace              # alias SSH tujuan (default: kaispace)
+```
+
 ## 5. Landing page
 
 ```bash
