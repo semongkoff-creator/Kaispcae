@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { RecordCircleFill, StopCircleFill, PauseFill, PlayCircleFill } from 'react-bootstrap-icons';
+import { Tooltip } from '@/components/ui/Tooltip';
 
 interface RecordAreaPanelProps {
   canRecord: boolean;
@@ -71,12 +72,29 @@ export function RecordAreaPanel({ canRecord, hasTarget, isRecordingMine, isPause
   if (!hasTarget) return null;
 
   return (
-    <button
-      onClick={onStart}
-      title="Mulai rekam"
-      className="absolute top-16 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 text-xs font-medium border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer pointer-events-auto"
-    >
-      <RecordCircleFill size={14} /> Start Recording
-    </button>
+    <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 pointer-events-auto">
+      {/* Real report: two zone-triggered recordings in a row failed within
+          ~15 seconds of starting — turned out the browser's own
+          screen/tab picker appeared (as it always does — no web API can
+          skip this) and got cancelled/dismissed, since this button is
+          deliberately one-click with no heads-up beforehand (unlike the
+          Sidebar's recording flow, whose title prompt explicitly warns
+          "pilih Tab ini"). This Tooltip is the closest equivalent warning
+          that doesn't reintroduce a blocking prompt — only reaches someone
+          who hovers first, which a cancelled picker doesn't retroactively
+          fix, but it's the same tradeoff every other one-click button in
+          this app (e.g. MeetingControl's "Start Meeting") already makes. */}
+      <Tooltip
+        label="Mulai Rekam"
+        detail='Browser bakal minta pilih layar/tab — pilih "Tab ini" (This Tab). Kalau di situ kamu klik Cancel atau tutup dialognya, rekaman otomatis gagal.'
+      >
+        <button
+          onClick={onStart}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 text-xs font-medium border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer"
+        >
+          <RecordCircleFill size={14} /> Start Recording
+        </button>
+      </Tooltip>
+    </div>
   );
 }
