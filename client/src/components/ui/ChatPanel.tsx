@@ -555,7 +555,12 @@ export function ChatPanel({
 
       {open && (
         <div
-          className="absolute bottom-16 right-4 z-50 w-80 h-[28rem] bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-xl border border-login-border-soft dark:border-white/10 shadow-2xl shadow-purple-500/10 flex flex-col pointer-events-auto"
+          // Lower opacity than the other "Ethereal Collaboration" panels
+          // (95% -> 70%) per this round's feedback — the reference design
+          // wants this panel reading as floating over the map, not a solid
+          // card. backdrop-blur-xl stays, so text underneath the panel
+          // doesn't bleed through and hurt legibility.
+          className="absolute bottom-16 right-4 z-50 w-80 h-[28rem] bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl rounded-xl border border-login-border-soft dark:border-white/10 shadow-2xl shadow-purple-500/10 flex flex-col pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
