@@ -274,9 +274,18 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
   };
 
   return (
-    <div className="w-screen h-screen overflow-y-auto bg-gradient-to-br from-white to-purple-50 dark:from-gray-900 dark:to-gray-950 text-gray-900 dark:text-gray-100">
-      <header className="px-6 py-3.5 flex items-center justify-between border-b border-purple-100 dark:border-gray-800 backdrop-blur-sm">
-        <h1 className="text-xl font-bold tracking-tight text-gray-900 dark:text-gray-100">KaiSpace</h1>
+    <div className="w-screen h-screen overflow-y-auto bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100">
+      <header className="px-6 py-3.5 flex items-center justify-between border-b border-login-border-soft dark:border-gray-800 backdrop-blur-sm">
+        <div className="flex items-center gap-1.5">
+          {/* Small inline SVG mark, not a hotlinked/external asset — an
+              approximation of the two-diamond wordmark accent from the
+              reference; no exact source asset was available to pull. */}
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
+            <rect x="2" y="7" width="12" height="12" rx="2.5" fill="#717BD8" transform="rotate(45 8 13)" />
+            <rect x="9" y="3" width="9" height="9" rx="2" fill="#717BD8" opacity="0.55" transform="rotate(45 13.5 7.5)" />
+          </svg>
+          <h1 className="font-login-heading text-xl font-bold tracking-tight text-gray-900 dark:text-gray-100 lowercase">KaiSpace</h1>
+        </div>
 
         {/* User dropdown — Figma shows only plain "Name ▾", no avatar and no
             separate theme-toggle icon sitting beside it (both existed as
@@ -298,33 +307,33 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
               <div
                 ref={userMenuRef}
                 style={{ position: 'fixed', top: userMenuPos.top, right: userMenuPos.right }}
-                className="w-52 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-purple-100 dark:border-gray-700 py-1.5 z-50"
+                className="w-52 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-login-border-soft dark:border-gray-700 py-1.5 z-50"
               >
-                <div className="flex items-center gap-2.5 px-3.5 py-2 border-b border-purple-50 dark:border-gray-700">
+                <div className="flex items-center gap-2.5 px-3.5 py-2 border-b border-login-border-soft dark:border-gray-700">
                   {myPhoto ? (
                     <img src={myPhoto} alt="" className="w-7 h-7 rounded-full object-cover shrink-0 shadow-sm" />
                   ) : (
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-fuchsia-500 flex items-center justify-center text-white text-[11px] font-bold shrink-0 shadow-sm">
+                    <div className="w-7 h-7 rounded-full bg-login-accent flex items-center justify-center text-white text-[11px] font-bold shrink-0 shadow-sm">
                       {userInitials}
                     </div>
                   )}
                   <div className="min-w-0">
                     <p className="text-gray-800 dark:text-gray-100 text-sm font-medium truncate">{user.displayName}</p>
-                    <p className={`text-[10px] font-semibold uppercase tracking-wide ${isAdmin ? 'text-purple-500 dark:text-purple-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                    <p className={`text-[10px] font-semibold uppercase tracking-wide ${isAdmin ? 'text-login-accent dark:text-purple-400' : 'text-gray-400 dark:text-gray-500'}`}>
                       {isAdmin ? 'Admin' : 'Member'}
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={onToggleTheme}
-                  className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                  className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-login-surface dark:hover:bg-gray-700 cursor-pointer"
                 >
                   {theme === 'dark' ? <SunFill size={13} /> : <MoonFill size={13} />}
                   {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
                 </button>
                 <button
                   onClick={() => { setShowUserMenu(false); setShowSettings(true); }}
-                  className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                  className="w-full flex items-center gap-2 px-3.5 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-login-surface dark:hover:bg-gray-700 cursor-pointer"
                 >
                   <GearFill size={13} /> Settings
                 </button>
@@ -361,13 +370,13 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
           </div>
         )}
         {lastRoom && (
-          <div className="flex items-center justify-between bg-purple-50 dark:bg-gray-800 border border-purple-100 dark:border-gray-700 rounded-xl px-4 py-3 mb-6">
+          <div className="flex items-center justify-between bg-login-surface dark:bg-gray-800 border border-login-border-soft dark:border-gray-700 rounded-xl px-4 py-3 mb-6">
             <p className="text-gray-700 dark:text-gray-300 text-sm">
               Continue where you left off — <span className="font-semibold">{lastRoom.name}</span>
             </p>
             <button
               onClick={() => onJoinRoom(lastRoom.slug)}
-              className="bg-[#3B1E54] hover:bg-[#4A1E6D] text-white text-xs font-medium px-3 py-1.5 rounded-lg cursor-pointer"
+              className="bg-login-accent hover:brightness-110 text-white text-xs font-medium px-3 py-1.5 rounded-lg cursor-pointer"
             >
               Rejoin
             </button>
@@ -394,27 +403,31 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
             </button>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          {/* flex-wrap — Search/Join/Create previously overflowed past the
+              viewport edge at mobile widths instead of wrapping to a new
+              line (the outer row already wraps this whole group, but the
+              group itself didn't wrap its own children). */}
+          <div className="flex flex-wrap items-center gap-2.5">
             <div className="relative">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 pointer-events-none" />
               <input
                 value={search} onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search Spaces" maxLength={50}
-                className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg pl-8 pr-3 py-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 w-48 shadow-sm"
+                className="font-login-body bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg pl-8 pr-3 py-2 outline-none border border-login-border-soft dark:border-gray-700 focus:border-login-accent w-48 shadow-sm"
               />
             </div>
 
             <div className="relative">
               <button
                 onClick={() => setShowJoinInput((v) => !v)}
-                className="flex items-center gap-1.5 bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/40 dark:hover:bg-purple-900/60 text-[#3B1E54] dark:text-purple-300 text-sm font-medium px-3.5 py-2 rounded-lg cursor-pointer whitespace-nowrap"
+                className="font-login-body flex items-center gap-1.5 bg-login-surface hover:bg-login-border-soft dark:bg-purple-900/40 dark:hover:bg-purple-900/60 text-login-accent dark:text-purple-300 text-sm font-medium px-3.5 py-2 rounded-lg cursor-pointer whitespace-nowrap"
               >
                 <BoxArrowInRight size={13} /> Join with Code
               </button>
               {showJoinInput && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowJoinInput(false)} />
-                  <div className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-purple-100 dark:border-gray-700 p-3 z-50">
+                  <div className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-login-border-soft dark:border-gray-700 p-3 z-50">
                     <label className="text-gray-500 dark:text-gray-400 text-xs block mb-1.5">Room code</label>
                     <div className="flex gap-2">
                       <input
@@ -422,11 +435,11 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                         value={joinCode} onChange={(e) => setJoinCode(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleJoinByCode()}
                         placeholder="Enter code..." maxLength={30}
-                        className="flex-1 bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg px-3 py-2 outline-none border border-purple-100 dark:border-gray-600 focus:border-purple-500"
+                        className="flex-1 bg-login-surface dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg px-3 py-2 outline-none border border-login-text-placeholder dark:border-gray-600 focus:border-login-accent"
                       />
                       <button
                         onClick={handleJoinByCode}
-                        className="bg-[#3B1E54] hover:bg-[#4A1E6D] text-white text-sm font-medium px-3 py-2 rounded-lg cursor-pointer"
+                        className="bg-login-accent hover:brightness-110 text-white text-sm font-medium px-3 py-2 rounded-lg cursor-pointer"
                       >
                         Go
                       </button>
@@ -437,13 +450,13 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
             </div>
 
             {isAdmin && (
-              <button onClick={() => setShowCreate(!showCreate)} className="bg-[#3B1E54] hover:bg-[#4A1E6D] text-white text-sm font-medium px-4 py-2 rounded-lg cursor-pointer whitespace-nowrap">+ Create Space</button>
+              <button onClick={() => setShowCreate(!showCreate)} className="font-login-body bg-login-accent hover:brightness-110 text-white text-sm font-medium px-4 py-2 rounded-lg cursor-pointer whitespace-nowrap">+ Create Space</button>
             )}
           </div>
         </div>
 
         {showCreate && isAdmin && (
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 mb-6 border border-purple-100 dark:border-gray-700 shadow-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 mb-6 border border-login-border-soft dark:border-gray-700 shadow-sm">
             <div className="flex gap-3 items-end mb-3">
               <div className="flex-1">
                 <label className="text-gray-500 dark:text-gray-400 text-xs block mb-1">Room Name</label>
@@ -453,7 +466,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                   onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
                   placeholder="My Awesome Room"
                   maxLength={50}
-                  className={`w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg px-3 py-2 outline-none border focus:border-purple-500 ${nameError ? 'border-red-300 ring-1 ring-red-200' : 'border-purple-100 dark:border-gray-600'}`}
+                  className={`w-full bg-login-surface dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg px-3 py-2 outline-none border focus:border-login-accent ${nameError ? 'border-red-300 ring-1 ring-red-200' : 'border-login-text-placeholder dark:border-gray-600'}`}
                 />
                 {nameError && <p className="text-red-500 text-[11px] mt-1">Type a room name first</p>}
               </div>
@@ -467,7 +480,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                   onClick={() => setRoomTemplate(tpl.id)}
                   title={tpl.description}
                   className={`flex-1 text-left px-3 py-2 rounded-lg border cursor-pointer transition-all ${
-                    roomTemplate === tpl.id ? 'bg-purple-50 dark:bg-gray-700 border-purple-400 ring-1 ring-purple-300' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 hover:border-purple-200'
+                    roomTemplate === tpl.id ? 'bg-login-surface dark:bg-gray-700 border-login-accent ring-1 ring-login-accent/30' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 hover:border-login-border-soft'
                   }`}
                 >
                   <span className="text-xs font-medium text-gray-700 dark:text-gray-200 block">{tpl.name}</span>
@@ -482,7 +495,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                   key={opt.value}
                   onClick={() => setRoomTheme(opt.value)}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-left cursor-pointer transition-all ${
-                    roomTheme === opt.value ? 'bg-purple-50 dark:bg-gray-700 border-purple-400 ring-1 ring-purple-300' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 hover:border-purple-200'
+                    roomTheme === opt.value ? 'bg-login-surface dark:bg-gray-700 border-login-accent ring-1 ring-login-accent/30' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 hover:border-login-border-soft'
                   }`}
                 >
                   <div
@@ -500,7 +513,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
             {roomTheme === 'scifi-office' && (
               <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-2">
                 Uses art from Space Station 14 (CC-BY-SA 3.0).{' '}
-                <button onClick={() => setShowCredits(true)} className="text-purple-500 hover:text-purple-700 underline cursor-pointer">Credits</button>
+                <button onClick={() => setShowCredits(true)} className="text-login-accent hover:brightness-110 underline cursor-pointer">Credits</button>
               </p>
             )}
           </div>
@@ -535,24 +548,15 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
               <div
                 key={room.id}
                 onClick={handleJoinClick}
-                className={`rounded-xl border shadow-sm transition-all ${
-                  isConfirmingDelete
-                    ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 ring-2 ring-red-200 dark:ring-red-800'
-                    : 'bg-white dark:bg-gray-800 border-purple-100 dark:border-gray-700 hover:border-purple-300 hover:shadow-md cursor-pointer'
-                }`}
+                // Figma's card has no surrounding box at all — the cover
+                // image (rounded on all four corners) and the name/menu row
+                // both sit directly on the page background, not inside a
+                // bordered/shadowed container. isConfirmingDelete gets its
+                // own small red-tinted row below instead of tinting a card
+                // background that no longer exists.
+                className={`transition-all ${isConfirmingDelete ? '' : 'cursor-pointer group'}`}
               >
-                {/* A room with no coverImage set yet still shows the Figma
-                    reference's own literal "COVER IMG" placeholder.
-                    overflow-hidden + rounded-t-xl moved here from the card's
-                    outer div — the "..." menu below opens BELOW the button
-                    (top-full), and the outer div clipping it there cut the
-                    dropdown down to a barely-visible sliver poking out of
-                    the card's bottom edge instead of showing it. This is the
-                    only child that actually needs its own corners clipped
-                    (the cover image/gradient); the outer div's rounded-xl
-                    alone already reads as rounded since nothing else here
-                    has a background that would bleed past it. */}
-                <div className="relative aspect-[16/9] rounded-t-xl bg-gradient-to-br from-[#3B1E54] to-[#4A1E6D] flex items-center justify-center overflow-hidden">
+                <div className="relative aspect-[16/9] rounded-xl bg-login-accent flex items-center justify-center overflow-hidden ring-1 ring-transparent group-hover:ring-login-accent/60 transition-all">
                   {room.coverImage ? (
                     // object-contain, not cover — a cover can be any aspect
                     // ratio (a wide logo wordmark, a photo, etc.); cropping
@@ -573,9 +577,9 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                     <span className="text-white text-[10px] font-medium">{room.playerCount}</span>
                   </span>
                 </div>
-                <div className="px-4 py-3.5 flex items-center justify-between">
+                <div className="mt-2 flex items-center justify-between">
                   {isConfirmingDelete ? (
-                    <div className="flex items-center justify-between w-full text-xs">
+                    <div className="flex items-center justify-between w-full text-xs bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">
                       <span className="text-red-600 dark:text-red-400 font-medium">Delete this room?</span>
                       <div className="flex gap-2">
                         <button onClick={(e) => { e.stopPropagation(); handleDelete(room.slug); setDeletingSlug(null); }} className="text-[10px] font-semibold text-white bg-red-500 hover:bg-red-600 px-2 py-1 rounded cursor-pointer">Confirm</button>
@@ -584,7 +588,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                     </div>
                   ) : (
                     <>
-                      <h3 className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{room.name}</h3>
+                      <h3 className="font-login-body font-semibold text-sm text-gray-900 dark:text-gray-100 truncate">{room.name}</h3>
                       {/* "Ganti Cover" (any global admin — cover is a
                           room-presentation thing, same accountRole:'admin'
                           gate as "+ Create Space" above) and Delete
@@ -594,14 +598,14 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                         <div className="relative shrink-0">
                           <button
                             onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(isMenuOpen ? null : room.slug); }}
-                            className="w-6 h-6 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                            className="w-6 h-6 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-login-surface dark:hover:bg-gray-700 cursor-pointer"
                           >
                             <ThreeDotsVertical size={14} />
                           </button>
                           {isMenuOpen && (
                             <>
                               <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); }} />
-                              <div className="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-purple-100 dark:border-gray-700 py-1 z-50">
+                              <div className="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-login-border-soft dark:border-gray-700 py-1 z-50">
                                 {/* Rename — same gate as the "..." button itself
                                     (owner OR global admin), matching what the
                                     server's room:update check actually allows
@@ -610,14 +614,14 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                                     routes/rooms.ts's PATCH /:slug/name). */}
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); handleRename(room.slug, room.name); }}
-                                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-login-surface dark:hover:bg-gray-700 cursor-pointer"
                                 >
                                   <PencilFill size={11} /> Rename
                                 </button>
                                 {isAdmin && (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); handleCoverButtonClick(room.slug); }}
-                                    className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                                    className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-login-surface dark:hover:bg-gray-700 cursor-pointer"
                                   >
                                     <Image size={11} /> Ganti Cover
                                   </button>
@@ -633,7 +637,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                                 {isAdmin && room.coverImage && (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); handleRemoveCover(room.slug); }}
-                                    className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                                    className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-login-surface dark:hover:bg-gray-700 cursor-pointer"
                                   >
                                     <XCircleFill size={11} /> Hapus Cover
                                   </button>
@@ -647,7 +651,7 @@ export function Lobby({ user, onJoinRoom, onLogout, theme, onToggleTheme, onUpda
                                 {isAdmin && (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setOpenMenuSlug(null); handleDuplicate(room.slug, room.name); }}
-                                    className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                                    className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-login-surface dark:hover:bg-gray-700 cursor-pointer"
                                   >
                                     <Files size={11} /> Salin Room
                                   </button>
