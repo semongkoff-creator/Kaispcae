@@ -77,14 +77,15 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
   const orgLabel = currentRoomSlug.charAt(0).toUpperCase() + currentRoomSlug.slice(1);
 
   return (
-    // Docked flush against the sidebar rail (top-0 left-12 bottom-0),
-    // matching the Room Features flyout's own treatment — not a centered
-    // modal. "Ini malah ketengah" (this round's feedback): the reference
-    // never showed it centered, that was this component's old style
-    // bleeding through since only the CONTENT was restyled before now.
+    // A floating rounded card ("ngambang" — this round's feedback: the
+    // flush/docked treatment from last round was an overcorrection),
+    // anchored near the top-left next to the rail rather than dead-center
+    // of the screen (the "ketengah" complaint from the round before that).
+    // Capped height + its own scroll, not full viewport height — a real
+    // floating card, not a docked panel.
     <div className="fixed inset-0 z-[100]" onMouseDown={onClose}>
       <div
-        className="fixed top-0 left-12 bottom-0 w-80 bg-white dark:bg-gray-800 shadow-2xl shadow-purple-100/50 dark:shadow-black/30 border-r border-login-border-soft dark:border-gray-700 flex flex-col"
+        className="absolute top-4 left-16 w-80 max-h-[85vh] bg-white dark:bg-gray-800 rounded-2xl shadow-2xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 flex flex-col"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
