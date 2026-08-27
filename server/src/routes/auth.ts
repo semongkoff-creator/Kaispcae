@@ -87,7 +87,15 @@ const REFRESH_THRESHOLD_SECONDS = 3 * 24 * 60 * 60; // 3 days
 // stays tight since account creation is a rare, admin-driven action, not
 // something many real users do concurrently.
 const registerRateLimit = rateLimit(15 * 60 * 1000, 10); // 10 attempts / 15 min / IP
-const loginRateLimit = rateLimit(15 * 60 * 1000, 30); // 30 attempts / 15 min / IP
+// refundOnSuccess: the budget is for WRONG guesses. Counting correct ones too
+// is what turned "everybody please reload" into "nobody past the 30th can get
+// back in" for an office of ~89 people behind one NAT IP — every one of them
+// typing a password that works. A brute-forcer only produces failures, and
+// those still count in full, so the ceiling that matters is unchanged.
+//
+// 60 rather than 30 on top of that: the refund lands on 'finish', so a burst
+// arriving together still holds its slots briefly, all at once.
+const loginRateLimit = rateLimit(15 * 60 * 1000, 60, { refundOnSuccess: true });
 
 // POST /auth/register
 auth.post('/register', registerRateLimit, validate(registerSchema), async (req, res: Response) => {
