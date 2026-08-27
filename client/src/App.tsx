@@ -2293,6 +2293,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         roomFeaturesActive={activePanel === 'roomFeatures'}
         onToggleRoomFeatures={() => openPanel('roomFeatures')}
         onCloseRoomFeatures={() => { if (useGameStore.getState().activePanel === 'roomFeatures') closePanel(); }}
+        roomDisplayName={roomSlug.charAt(0).toUpperCase() + roomSlug.slice(1)}
         onOpenSettings={() => openPanel('settings')}
         hasActiveBooking={zoneLock.zoneQueueTicket?.mode === 'booking'}
         onReopenBookingNotice={() => setBookingNoticeDismissed(false)}

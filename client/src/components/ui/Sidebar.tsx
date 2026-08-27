@@ -27,6 +27,9 @@ interface SidebarProps {
   roomFeaturesActive: boolean;
   onToggleRoomFeatures: () => void;
   onCloseRoomFeatures: () => void;
+  // Reference design's flyout header shows the room's own name (e.g.
+  // "Kaitech Group") instead of the generic "Room Features" label.
+  roomDisplayName: string;
 
   onEditAvatar: () => void;
   // QA #1/#6/#7 — reopens the first-run walkthrough (App.tsx's TutorialModal,
@@ -208,6 +211,7 @@ export function Sidebar({
   roomFeaturesActive,
   onToggleRoomFeatures,
   onCloseRoomFeatures,
+  roomDisplayName,
   onEditAvatar,
   onOpenTutorial,
   onOpenMemberList,
@@ -312,18 +316,35 @@ export function Sidebar({
         </Tooltip>
 
         {roomFeaturesActive && (
+          // Reference design: a full-height panel flush against the rail
+          // (no left-full ml-2 gap, no rounded-xl/shadow-2xl floating-card
+          // look) — was a small max-h-[85vh] floating card before. Content
+          // list unchanged per this round's explicit confirmation — only
+          // the shell changed.
           <div
-            className="absolute top-0 left-full ml-2 w-64 max-h-[85vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-login-border-soft dark:border-gray-700 p-2 z-50"
+            className="fixed top-0 left-12 bottom-0 w-64 overflow-y-auto bg-white dark:bg-gray-900 border-l-4 border-l-login-accent border-r border-login-border-soft dark:border-gray-700 p-2 z-50 flex flex-col"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-2 py-1.5 mb-1">
-              <span className="font-login-body text-gray-900 dark:text-gray-100 text-sm font-semibold">Room Features</span>
+              <span className="font-login-body text-gray-900 dark:text-gray-100 text-sm font-semibold">{roomDisplayName}</span>
               <Tooltip label="Tutup" detail="Tutup panel Room Features." side="right">
                 <button onClick={onCloseRoomFeatures} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
                   <XLg size={14} />
                 </button>
               </Tooltip>
             </div>
+
+            {/* Invite — same entry point as the top-right Invite button
+                (handleCreateGuestLink), now also surfaced here per the
+                reference design. */}
+            {canManageGuests && (
+              <button
+                onClick={closeAnd(onCreateGuestLink)}
+                className="mx-2 mb-2 flex items-center justify-center gap-1.5 bg-login-accent hover:brightness-110 text-white text-sm font-medium py-2 rounded-lg shadow-sm cursor-pointer"
+              >
+                <IconImg name="invite_user" size={14} /> Invite
+              </button>
+            )}
 
             {/* Opens the ZEP-style User Guide (App.tsx's UserGuidePanel) —
                 distinct from the mandatory first-run TutorialModal (shown
@@ -552,6 +573,14 @@ export function Sidebar({
             <p className="px-2 py-1 mt-1 text-[9px] text-gray-300 dark:text-gray-600 border-t border-gray-100 dark:border-gray-800">
               debug: isGuest={String(isGuest)} role={localRole}
             </p>
+
+            {/* Exit Space — same "Kembali ke Daftar Room" action the rail's
+                own icon already triggers, pinned to the bottom of this
+                panel per the reference design. mt-auto works here because
+                the panel is flex flex-col with a bounded height. */}
+            <Tooltip label="Kembali ke Daftar Room" detail="Keluar dari room ini, kembali ke Lobby." wrapperClassName="mt-auto w-full">
+              <MenuRow icon={<IconImg name="exit_space" />} label="Exit Space" onClick={closeAnd(onLeaveRoom)} />
+            </Tooltip>
           </div>
         )}
       </div>
