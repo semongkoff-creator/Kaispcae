@@ -1,4 +1,4 @@
-import { EmojiSmile } from 'react-bootstrap-icons';
+import { Icon } from '@iconify/react';
 import { Tooltip } from '@/components/ui/Tooltip';
 
 interface EmojiButtonProps {
@@ -21,11 +21,11 @@ export function EmojiButton({ open, onToggle }: EmojiButtonProps) {
         onClick={onToggle}
         className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
           open
-            ? 'bg-purple-600 border-purple-500 shadow-purple-500/30'
-            : 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
+            ? 'bg-login-accent border-login-accent shadow-purple-500/30'
+            : 'bg-white/90 dark:bg-gray-800/90 border-login-border-soft dark:border-white/10 shadow-purple-500/10'
         }`}
       >
-        <EmojiSmile className={open ? 'text-white' : 'text-purple-700 dark:text-purple-300'} size={16} />
+        <Icon icon="ic:baseline-insert-emoticon" width={16} height={16} className={open ? 'text-white' : 'text-login-accent dark:text-purple-300'} />
       </button>
     </Tooltip>
   );

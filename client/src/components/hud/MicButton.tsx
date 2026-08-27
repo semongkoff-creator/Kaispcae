@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { MicFill, MicMuteFill } from 'react-bootstrap-icons';
+import { MicMuteFill } from 'react-bootstrap-icons';
+import { Icon } from '@iconify/react';
 import { isTypingTarget } from '@/utils/hotkeys';
 import { Tooltip } from '@/components/ui/Tooltip';
 
@@ -38,11 +39,11 @@ export function MicButton({ muted, onToggle }: MicButtonProps) {
         // on-spec, untouched.
         className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
           muted
-            ? 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
-            : 'bg-purple-600 border-purple-500 shadow-purple-500/30'
+            ? 'bg-white/90 dark:bg-gray-800/90 border-login-border-soft dark:border-white/10 shadow-purple-500/10'
+            : 'bg-login-accent border-login-accent shadow-purple-500/30'
         }`}
       >
-        {muted ? <MicMuteFill className="text-red-500" size={16} /> : <MicFill className="text-white" size={16} />}
+        {muted ? <MicMuteFill className="text-red-500" size={16} /> : <Icon icon="bi:mic-fill" width={16} height={16} className="text-white" />}
         {muted && (
           <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-pulse" />
         )}

@@ -36,7 +36,7 @@ export function HandButton({ raised, onToggle }: HandButtonProps) {
         className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
           raised
             ? 'bg-amber-400 border-amber-300 shadow-amber-400/30'
-            : 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
+            : 'bg-white/90 dark:bg-gray-800/90 border-login-border-soft dark:border-white/10 shadow-purple-500/10'
         }`}
       >
         {/* User-supplied icon (checked react-bootstrap-icons' full hand set
@@ -57,7 +57,7 @@ export function HandButton({ raised, onToggle }: HandButtonProps) {
         <span
           role="img"
           aria-label=""
-          className={`w-4 h-4 ${raised ? 'bg-white animate-bounce' : 'bg-purple-700 dark:bg-purple-300'}`}
+          className={`w-4 h-4 ${raised ? 'bg-white animate-bounce' : 'bg-login-accent dark:bg-purple-300'}`}
           style={{
             maskImage: 'url(/assets/img/raise-hand-icon.png)',
             maskSize: 'contain',
