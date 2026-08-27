@@ -581,6 +581,71 @@ export function Sidebar({
         )}
       </div>
 
+      {/* Promoted from the Room Features flyout above to persistent rail
+          icons — the reference wireframe shows these directly in the rail
+          rather than behind the hamburger. Each button reuses the exact
+          same handler/active-state/gating as its still-present flyout row
+          (nothing removed there) — a second entry point, same pattern as
+          the top-right notification bell/Invite button added earlier. */}
+      {canBroadcast && (
+        <Tooltip label="Broadcast" detail="Kirim pengumuman teks ke semua orang di room ini." side="right">
+          <SidebarIcon onClick={onBroadcast}>
+            <IconImg name="announce" size={16} />
+          </SidebarIcon>
+        </Tooltip>
+      )}
+      {canTeleport && (
+        <Tooltip label="Teleport" detail="Pindah cepat ke lokasi tersimpan." side="right">
+          <SidebarIcon active={showTeleportPanel} onClick={onToggleTeleport}>
+            <IconImg name="teleport" size={16} />
+          </SidebarIcon>
+        </Tooltip>
+      )}
+      {!isGuest && !isRestrictedAccount && (
+        <Tooltip label="Absensi" detail="Lihat riwayat & status absensimu." side="right">
+          <SidebarIcon active={larkAttendanceActive} onClick={onToggleLarkAttendance}>
+            <ClockHistory size={16} />
+          </SidebarIcon>
+        </Tooltip>
+      )}
+      {!isGuest && isDefaultOrg && !isRestrictedAccount && (
+        <Tooltip label="Daily Task" detail="Buka daftar tugas harianmu." side="right">
+          <SidebarIcon active={dailyTaskActive} onClick={onToggleDailyTask}>
+            <IconImg name="add_task" size={16} />
+          </SidebarIcon>
+        </Tooltip>
+      )}
+      {!isGuest && (
+        <Tooltip label="Kalender" detail="Buka kalender jadwal tim." side="right">
+          <SidebarIcon active={calendarViewActive} onClick={onToggleCalendarView}>
+            <IconImg name="calendar" size={16} />
+          </SidebarIcon>
+        </Tooltip>
+      )}
+      {!isGuest && (
+        <Tooltip label="Analitik Saya" detail="Lihat ringkasan aktivitas & produktivitasmu." side="right">
+          <SidebarIcon active={myAnalyticsActive} onClick={onToggleMyAnalytics}>
+            <IconImg name="stat" size={16} />
+          </SidebarIcon>
+        </Tooltip>
+      )}
+      {isAdmin && (
+        <Tooltip label="Permintaan Bergabung" detail="Lihat & proses permintaan masuk yang menunggu. (Khusus admin.)" side="right">
+          <SidebarIcon active={joinQueueActive} onClick={onToggleJoinQueue}>
+            <IconImg name="request" size={16} />
+          </SidebarIcon>
+        </Tooltip>
+      )}
+      {!isGuest && (
+        <Tooltip label="Add Media" detail="Tempel gambar, video, atau file ke dalam room." side="right">
+          <SidebarIcon active={showAddMediaPanel} onClick={onToggleAddMedia}>
+            <IconImg name="add_media" size={16} />
+          </SidebarIcon>
+        </Tooltip>
+      )}
+
+      <SidebarDivider />
+
       {hasMySeat && (
         <Tooltip label="Ke Kursi Saya" detail="Teleport langsung ke kursi tetapmu di room ini." side="right">
           <SidebarIcon onClick={onMySeat}>
