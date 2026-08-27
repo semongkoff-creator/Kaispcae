@@ -1966,10 +1966,21 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         {!simplifiedView && (
           <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
         )}
-        {/* Status picker removed from here — merged into MemberListPanel
-            per this round's feedback ("status sama member jadi satu"), so
-            it's no longer duplicated in two places. "Back to my seat"
-            stays — the reference wireframe's pill still shows it here. */}
+        {/* Status — clarified this round: the icon stays here, but now
+            opens the SAME Member panel that now has the Status row built
+            in (see MemberListPanel.tsx), instead of its own separate
+            dropdown. One destination, two entry points — not two
+            different UIs for the same thing. */}
+        {!isGuest && (
+          <Tooltip label="Status" detail="Lihat & ubah statusmu, dan siapa saja yang online.">
+            <button
+              onClick={() => openPanel('memberList')}
+              className="pointer-events-auto w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800 border border-login-border-soft dark:border-gray-700 shadow-sm"
+            >
+              <img src="/assets/img/icons/emoticon.svg" width={14} height={14} alt="" />
+            </button>
+          </Tooltip>
+        )}
         {hasMySeat && (
           <Tooltip label="Ke Kursi Saya" detail="Teleport langsung ke kursi tetapmu di room ini.">
             <button
