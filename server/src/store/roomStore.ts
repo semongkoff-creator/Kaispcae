@@ -142,17 +142,42 @@ export function getCachedPlayers(roomId: string): Avatar[] {
   return mergeLivePlayerMovement(roomId, memoryStore[memoryKey(roomId)] || []);
 }
 
+/**
+ * Persist the roster — with transient motion stripped back out.
+ *
+ * getPlayers() returns the roster with live movement MERGED over it, and
+ * nearly every writer here does read-modify-write on that result: fetch the
+ * array, change one field on one player, hand the whole array back. So a
+ * player who happened to be walking at that instant had `isMoving: true`
+ * written into durable storage as a side effect of somebody else's avatar
+ * update — and once there, nothing clears it. clearLivePlayerMovement only
+ * empties the live map; the merge no longer has anything to correct, because
+ * the stored row itself now claims motion.
+ *
+ * The visible result is an avatar standing perfectly still while everyone who
+ * joins or refreshes sees them running on the spot, forever. It survives the
+ * stale-mover sweep too: that only looks at players it saw go quiet, and this
+ * one stopped properly.
+ *
+ * The roster is the at-rest truth and the live map is the moving truth. This
+ * keeps them from bleeding into each other in the one place every write has
+ * to pass through, rather than asking nine call sites to remember.
+ */
 export async function setPlayers(roomId: string, players: Avatar[]): Promise<void> {
+  const durable = players.map((p) =>
+    p.isMoving || p.isRunning ? { ...p, isMoving: false, isRunning: false } : p,
+  );
+
   const r = await getRedis();
   if (r) {
     try {
-      await r.set(`room:${roomId}:players`, JSON.stringify(players));
+      await r.set(`room:${roomId}:players`, JSON.stringify(durable));
     } catch {
       // ignore, memory store handles it below
     }
   }
 
-  memoryStore[memoryKey(roomId)] = players;
+  memoryStore[memoryKey(roomId)] = durable;
 }
 
 export async function addPlayer(roomId: string, player: Avatar): Promise<void> {
