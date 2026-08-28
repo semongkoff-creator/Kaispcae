@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import { Paperclip, Image, CameraVideoFill, FileEarmarkFill } from 'react-bootstrap-icons';
 import { Tooltip } from './Tooltip';
 
@@ -19,6 +19,11 @@ interface AttachmentMenuButtonProps {
   // Optional longer copy for the Tooltip popover (see Tooltip.tsx's own
   // `detail` doc comment) — callers that don't pass one just get the label.
   detail?: string;
+  // Trigger glyph override — defaults to the Paperclip every existing caller
+  // (ChatPanel, MessengerApp) already renders. The in-call toolbar's "Add
+  // Media" button (App.tsx) passes its own add_media.svg to match the
+  // Figma reference icon instead of introducing a second picker component.
+  icon?: ReactNode;
 }
 
 const OPTIONS: { label: string; accept: string; Icon: typeof Image }[] = [
@@ -28,7 +33,7 @@ const OPTIONS: { label: string; accept: string; Icon: typeof Image }[] = [
   { label: 'Dokumen', accept: '', Icon: FileEarmarkFill },
 ];
 
-export function AttachmentMenuButton({ onFile, disabled, buttonClassName, iconSize = 16, title = 'Lampirkan', detail }: AttachmentMenuButtonProps) {
+export function AttachmentMenuButton({ onFile, disabled, buttonClassName, iconSize = 16, title = 'Lampirkan', detail, icon }: AttachmentMenuButtonProps) {
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -66,7 +71,7 @@ export function AttachmentMenuButton({ onFile, disabled, buttonClassName, iconSi
           disabled={disabled}
           className={buttonClassName}
         >
-          <Paperclip size={iconSize} />
+          {icon ?? <Paperclip size={iconSize} />}
         </button>
       </Tooltip>
 

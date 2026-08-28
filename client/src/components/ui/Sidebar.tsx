@@ -68,13 +68,6 @@ interface SidebarProps {
   onCloseSoundboard: () => void;
   emitSoundboardPlay: (soundId: string) => void;
 
-  // Rail toggle for ChatPanel (the bottom-right "Message" button/Global
-  // Chat panel) — reference design shows a chat icon in the rail's bottom
-  // cluster (near Settings/Profile); same underlying open state, just a
-  // second entry point, not a separate chat surface.
-  chatPanelOpen: boolean;
-  onToggleChatPanel: () => void;
-
   // Guest Link & Ruang Tunggu — admin-only, prompt-based (see App.tsx's
   // handleCreateGuestLink). No "current state" to reflect here (unlike Lock
   // Room/Door Override above) — this just fires an action, it isn't a toggle.
@@ -231,8 +224,6 @@ export function Sidebar({
   onToggleSoundboard,
   onCloseSoundboard,
   emitSoundboardPlay,
-  chatPanelOpen,
-  onToggleChatPanel,
   canManageGuests,
   onCreateGuestLink,
   onRevokeLastGuestLink,
@@ -327,7 +318,7 @@ export function Sidebar({
           // list unchanged per this round's explicit confirmation — only
           // the shell changed.
           <div
-            className="fixed top-0 left-12 bottom-0 w-64 overflow-y-auto bg-white dark:bg-gray-900 border-l-4 border-l-login-accent border-r border-login-border-soft dark:border-gray-700 p-2 z-50 flex flex-col"
+            className="fixed top-0 left-12 bottom-0 w-64 overflow-y-auto bg-white dark:bg-gray-900 border-l border-purple-100 dark:border-gray-700 border-r border-login-border-soft dark:border-gray-700 p-2 z-50 flex flex-col"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-2 py-1.5 mb-1">
@@ -694,12 +685,14 @@ export function Sidebar({
           Daftar Room") — reference design adds a Chat icon right before
           Pengaturan in this same bottom cluster, so the anchor now starts
           here instead, keeping Chat, Pengaturan, Kembali, Theme, and
-          Profile packed together as one tight group. Reuses ChatPanel's
-          own open state (channelChat.chatPanelOpen in App.tsx) — same
-          panel the bottom-right "Message" button already opens, not a
-          second chat surface. */}
-      <Tooltip label={chatPanelOpen ? 'Tutup Chat' : 'Chat'} detail="Buka panel chat untuk kirim pesan ke channel, zone, atau langsung (DM) ke satu orang." side="right" wrapperClassName="mt-auto">
-        <SidebarIcon active={chatPanelOpen} onClick={onToggleChatPanel}>
+          Profile packed together as one tight group. Opens the full
+          Messenger view (activePanel === 'messenger' in App.tsx) — same
+          component the hamburger flyout's own "Chat" row (below) opens —
+          not the narrower floating ChatPanel (that one stays reachable via
+          the Focus-zone auto-open and its own bottom-right "Message"
+          button; it's a distinct, still-used surface, not replaced here). */}
+      <Tooltip label={messengerViewActive ? 'Tutup Chat' : 'Chat'} detail="Buka tampilan pesan gaya messenger." side="right" wrapperClassName="mt-auto">
+        <SidebarIcon active={messengerViewActive} onClick={onToggleMessengerView}>
           {/* message.svg is a paper-plane/send glyph (confirmed by reading
               its actual path data), not the rounded speech-bubble the
               reference design shows — there's no bubble-shaped icon in the

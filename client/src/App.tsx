@@ -87,10 +87,9 @@ import { MicButton } from './components/hud/MicButton';
 import { HandButton } from './components/hud/HandButton';
 import { playHandRaiseSound, updateSoundboardVolumes } from './services/soundEffects';
 import { CameraButton } from './components/hud/CameraButton';
-import { DeviceMenu } from './components/hud/DeviceMenu';
 import { ScreenShareButton } from './components/hud/ScreenShareButton';
 import { EmojiButton } from './components/hud/EmojiButton';
-import { LeaveButton } from './components/hud/LeaveButton';
+import { AttachmentMenuButton } from './components/ui/AttachmentMenuButton';
 import { Lobby } from './pages/Lobby';
 import { LoginPage } from './pages/LoginPage';
 import { GuestEntry, GuestSession } from './pages/GuestEntry';
@@ -1968,32 +1967,25 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             comment) — the reference design's top-left pill doesn't include
             it, and SoundboardPanel's trigger+popover are one component, so
             moving its mount point there was cleaner than trying to hide
-            just this trigger while keeping the popover anchored here. */}
-        {!simplifiedView && (
-          <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
-        )}
+            just this trigger while keeping the popover anchored here.
+            ActivityFeed (the clock icon that used to live here) moved to
+            the notification bell in the top-right toolbar — see that row
+            below. */}
       </div>
       {!simplifiedView && !isGuest && <MusicPlayerWidget zoneId={currentZone?.id ?? null} />}
 
       <div className="absolute top-4 right-4 flex items-center gap-2">
         <MapZoomControl />
         <ConnectionIndicator />
-        {/* Notification bell — a bell icon exists in the real asset set
-            (notif.svg), so it's back after being deliberately removed from
-            the sidebar rail in an earlier pass (see Sidebar.tsx's own
-            comment on that). Not a new notification-list feature — no such
-            feature exists here — just a second, more visible entry point
-            into the same Settings > Notifikasi section the gear icon
-            already opens (openPanel('settings')), same as the earlier
-            removal comment says that section now owns these toggles. */}
-        {!isGuest && (
-          <button
-            onClick={() => openPanel('settings')}
-            title="Notifikasi"
-            className="w-9 h-9 rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-login-border-soft dark:border-gray-700 shadow-sm flex items-center justify-center cursor-pointer"
-          >
-            <img src="/assets/img/icons/notif.svg" width={16} height={16} alt="" />
-          </button>
+        {/* Notification bell — now the Recent Activity dropdown's entry
+            point (moved here from the clock icon that used to sit in the
+            top-left toolbar; see ActivityFeed.tsx's own comment). It no
+            longer opens Settings > Notifikasi — the gear icon still reaches
+            that section on its own, so nothing was lost by repurposing this
+            button. Same !simplifiedView gate ActivityFeed always had at its
+            old spot (Simplify Mode hides it, same as Soundboard). */}
+        {!simplifiedView && (
+          <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
         )}
         {/* Invite — new top-bar entry point for an existing capability
             (handleCreateGuestLink/canManageGuests below, already wired to
@@ -2304,8 +2296,6 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleSoundboard={() => openPanel('soundboard')}
         onCloseSoundboard={closePanel}
         emitSoundboardPlay={emitSoundboardPlay}
-        chatPanelOpen={channelChat.chatPanelOpen}
-        onToggleChatPanel={() => channelChat.setChatPanelOpen(!channelChat.chatPanelOpen)}
         canManageGuests={isAdmin}
         onCreateGuestLink={handleCreateGuestLink}
         onRevokeLastGuestLink={handleRevokeGuestLink}
@@ -2690,8 +2680,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         {/* ParticipantPanel was deleted — MemberListPanel (rendered above,
             always mounted) is now the one participants surface. Ghost mode
             and Notification Settings moved to Sidebar.tsx (no longer in
-            this bar) — Soundboard/ActivityFeed's own top-left panel spot
-            is untouched, see the top-14 left-16 block above. */}
+            this bar) — Soundboard's own top-left panel spot is untouched,
+            see the top-14 left-16 block above (ActivityFeed moved out of
+            that block to the notification bell in the top-right row). */}
         {/* Fixed dead-centre, always — Messenger/Chat (see MessengerApp.tsx)
             is a pure `position: absolute` overlay docked to the left half of
             the screen; it never participates in layout flow, so it can't
@@ -2719,13 +2710,23 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
               Chat is its own standalone bottom-right button again (see
               ChatPanel.tsx), not part of this bar. */}
           {!isGuest && <HandButton raised={!!localHandRaised} onToggle={handleHandToggle} />}
+          {/* Add Media — reuses AttachmentMenuButton (ChatPanel/MessengerApp's
+              own Gambar/Video/Dokumen picker), not a new upload component.
+              Its onFile is a placeholder: this toolbar has no single "active
+              conversation" of its own to attach to (unlike the chat composer,
+              where AttachmentMenuButton always sends into whatever channel/DM
+              is open) — sending here to whatever channelChat.activeChatTarget
+              happens to be would silently deliver to a conversation the user
+              may not even have open. Wiring the real destination is a product
+              decision, not something to guess at. */}
+          <AttachmentMenuButton
+            onFile={() => showAlert('Add Media belum tersambung ke tujuan manapun — placeholder sampai ada keputusan produk soal file ini dikirim ke mana.')}
+            title="Add Media"
+            detail="Kirim gambar, video, atau dokumen."
+            icon={<img src="/assets/img/icons/add_media.svg" width={16} height={16} alt="" />}
+            buttonClassName="flex items-center justify-center w-10 h-10 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-login-border-soft dark:border-white/10 shadow-lg shadow-purple-500/10 transition-all hover:scale-105 cursor-pointer"
+          />
           {!isGuest && <EmojiButton open={showEmoteWheel} onToggle={() => setShowEmoteWheel((v) => !v)} />}
-          {/* Mic/speaker/camera device picker — was two small carets glued
-              to Mic and Camera, merged into one ⋮ menu (see DeviceMenu.tsx)
-              placed just left of Keluar. */}
-          <DeviceMenu />
-          <div className="w-px h-7 bg-purple-200/50 dark:bg-white/10 mx-0.5" />
-          <LeaveButton onLeave={onLeave} />
         </div>
       </>
       )}

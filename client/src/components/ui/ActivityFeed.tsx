@@ -1,4 +1,3 @@
-import { ClockHistory, ChevronUp, ChevronDown } from 'react-bootstrap-icons';
 import { useGameStore } from '@/stores/gameStore';
 import { Tooltip } from '@/components/ui/Tooltip';
 
@@ -14,32 +13,35 @@ interface ActivityFeedProps {
 // as chat having no server-side history either.
 //
 // Fix panel numpuk, round 2 — open/onToggle now come from the parent
-// (App.tsx, backed by activePanel==='activityFeed'), same controlled shape
-// as SoundboardPanel right next to it. This used to own an unconditional
-// useState(false) with no way for anything outside the component to close
-// it — confirmed live staying open at the same time as Soundboard, which
-// was already correctly activePanel-gated but had no way to know this
-// sibling existed. No close button needed here: reopening the rail icon
-// (the same activePanel toggle-off-if-already-active openPanel gives every
-// other panel) is this component's only way in or out, matching how it
-// behaved before.
+// (App.tsx, backed by activePanel==='activityFeed'). No close button needed
+// here: reopening the trigger (the same activePanel toggle-off-if-already-
+// active openPanel gives every other panel) is this component's only way in
+// or out, matching how it behaved before.
+//
+// Moved from a standalone clock-icon button in the top-left toolbar to the
+// notification bell in the top-right toolbar (App.tsx) — the bell used to
+// only duplicate the gear icon's Settings > Notifikasi shortcut, so this
+// panel's trigger now IS the bell, same open/close state and list markup as
+// before. Anchored top-right (`right-0`) instead of top-left (`left-0`) so
+// the popover opens toward the middle of the screen instead of off the
+// right edge.
 export function ActivityFeed({ open, onToggle }: ActivityFeedProps) {
   const activityEvents = useGameStore((s) => s.activityEvents);
 
   return (
     <div className="relative z-40 pointer-events-auto">
-      <Tooltip label="Aktivitas Terbaru" detail="Lihat aktivitas terbaru tim kamu. (Khusus manajer.)" side="right">
+      <Tooltip label="Aktivitas Terbaru" detail="Lihat aktivitas terbaru tim kamu. (Khusus manajer.)" side="bottom" align="end">
         <button
           onClick={onToggle}
-          className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm px-3 py-2 rounded-lg text-xs text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200 dark:border-gray-600 shadow-sm cursor-pointer inline-flex items-center gap-1.5"
+          className="w-9 h-9 rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-login-border-soft dark:border-gray-700 shadow-sm flex items-center justify-center cursor-pointer"
         >
-          <ClockHistory size={13} /> {open ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+          <img src="/assets/img/icons/notif.svg" width={16} height={16} alt="" />
         </button>
       </Tooltip>
 
       {open && (
         <div
-          className="absolute top-full left-0 mt-2 w-64 max-h-[60vh] bg-white/95 dark:bg-gray-900/95 backdrop-blur-md rounded-xl border border-purple-100 dark:border-gray-700 shadow-2xl flex flex-col pointer-events-auto"
+          className="absolute top-full right-0 mt-2 w-64 max-h-[60vh] bg-white/95 dark:bg-gray-900/95 backdrop-blur-md rounded-xl border border-purple-100 dark:border-gray-700 shadow-2xl flex flex-col pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
