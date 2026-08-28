@@ -145,10 +145,24 @@ Pemeriksaan terakhir itu bukan hiasan: pernah terjadi server melayani build
 dari sebelum tiga commit ter-merge, semuanya melaporkan sukses, dan baru
 ketahuan setelah membaca JavaScript yang tersaji.
 
+Situs marketing ikut dalam perintah yang sama. Repo dan branch-nya berbeda
+(`kaispace_website`, branch `dev-aga`), dan server menariknya langsung dari
+GitHub — klon lokalmu tidak dilibatkan, jadi checkout lokal yang tertinggal di
+branch lama tidak bisa ikut terkirim. Kalau tidak ada commit baru di sana,
+tahapnya dilewati.
+
+Branch-nya dipatok dan diperiksa, bukan dibetulkan otomatis: `main` di repo itu
+tertinggal puluhan commit, dan `git checkout main` yang tak sengaja akan
+memundurkan situs publik berminggu-minggu tanpa satu pun tanda kegagalan.
+
 ```bash
 ./deploy/ship.sh --dry-run      # tampilkan semua langkah, jalankan yang aman saja
+./deploy/ship.sh --app          # repo ini saja
+./deploy/ship.sh --landing      # situs marketing saja
 ./deploy/ship.sh -- --no-build  # sisanya diteruskan ke deploy.sh
+
 SHIP_HOST=kaispace              # alias SSH tujuan (default: kaispace)
+SHIP_LANDING_BRANCH=dev-aga     # branch situs marketing
 ```
 
 ## 5. Landing page

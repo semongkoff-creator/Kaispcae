@@ -20,10 +20,17 @@
 # took reading the deployed JavaScript to notice. A deploy that changes nothing
 # should say so.
 #
+# Two things live behind kaispace.io — the app in this repo, and the marketing
+# site in kaispace_website. They are separate repos on separate branches, and
+# releasing one has always meant remembering the other exists. This does both,
+# and skips whichever has nothing new.
+#
 #   ./deploy/ship.sh                 typecheck, test, push, deploy, verify
 #   ./deploy/ship.sh --dry-run       print every step, run none of them
 #   ./deploy/ship.sh --skip-tests    when you already ran them
 #   ./deploy/ship.sh --pull          take teammates' commits without being asked
+#   ./deploy/ship.sh --app           this repo only
+#   ./deploy/ship.sh --landing       the marketing site only
 #   ./deploy/ship.sh -- --no-build   pass the rest through to deploy.sh
 #
 set -euo pipefail
@@ -36,9 +43,22 @@ SITE="${SHIP_SITE:-https://kaispace.io}"
 # reading / would fingerprint the wrong bundle entirely.
 PROBE="${SHIP_PROBE:-$SITE/@kaitech}"
 
+# The marketing site: a second repo, on its own branch, in its own directory on
+# the same host. Its `main` is a 16 Aug import that predates the real work by
+# dozens of commits, so the branch is pinned here and checked before every
+# build — a stray `git checkout main` there would roll the public site back
+# weeks, and nothing about the build would look wrong while it happened.
+LANDING_DIR="${SHIP_LANDING_DIR:-/var/www/landing}"
+LANDING_BRANCH="${SHIP_LANDING_BRANCH:-dev-aga}"
+# Its bundle sits under a different assets path than the app's, which is what
+# makes the two distinguishable from outside at all.
+LANDING_PROBE="${SHIP_LANDING_PROBE:-$SITE/}"
+
 DRY=0
 RUN_TESTS=1
 AUTO_PULL=0
+DO_APP=1
+DO_LANDING=1
 PASSTHRU=()
 
 while [[ $# -gt 0 ]]; do
@@ -46,8 +66,10 @@ while [[ $# -gt 0 ]]; do
     --dry-run)     DRY=1; shift ;;
     --skip-tests)  RUN_TESTS=0; shift ;;
     --pull)        AUTO_PULL=1; shift ;;
+    --app)         DO_LANDING=0; shift ;;
+    --landing)     DO_APP=0; shift ;;
     --host)        HOST="$2"; shift 2 ;;
-    -h|--help)     sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)     sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     --)            shift; PASSTHRU=("$@"); break ;;
     *)             PASSTHRU+=("$1"); shift ;;
   esac
@@ -63,6 +85,8 @@ run()  {
 }
 
 cd "$(git rev-parse --show-toplevel)"
+
+if [[ "$DO_APP" == "1" ]]; then
 
 # ── 1. Guards ──────────────────────────────────────────────────────────────
 step "Memeriksa keadaan lokal"
@@ -217,6 +241,78 @@ if [[ "$DRY" == "0" && -n "$bundle_before" ]]; then
   ok "bundle baru: $bundle_after"
 fi
 
+fi  # DO_APP
+
+# ── 7. The marketing site ──────────────────────────────────────────────────
+#
+# A different repo on a different branch, pulled straight from GitHub by the
+# server — your own clone of it is never involved, so a local checkout sitting
+# on a stale branch cannot leak into a release.
+if [[ "$DO_LANDING" == "1" ]]; then
+  step "Situs marketing ($LANDING_BRANCH)"
+
+  landing_state="$(ssh "$HOST" bash -s <<REMOTE || true
+set -euo pipefail
+git -C '$LANDING_DIR' rev-parse --abbrev-ref HEAD
+git -C '$LANDING_DIR' fetch --quiet origin '$LANDING_BRANCH'
+git -C '$LANDING_DIR' rev-list --count 'HEAD..origin/$LANDING_BRANCH'
+git -C '$LANDING_DIR' --no-pager log --oneline --format='  %h  %an  %s' 'HEAD..origin/$LANDING_BRANCH'
+REMOTE
+)"
+
+  if [[ -z "$landing_state" ]]; then
+    die "tidak bisa membaca $LANDING_DIR di $HOST. Sudah ter-clone di sana?"
+  fi
+
+  landing_head="$(sed -n '1p' <<<"$landing_state")"
+  landing_behind="$(sed -n '2p' <<<"$landing_state")"
+  landing_log="$(sed -n '3,$p' <<<"$landing_state")"
+
+  # Pinned, and checked rather than corrected: putting the public site back on
+  # the right branch is a decision, not a detail to fix in passing.
+  if [[ "$landing_head" != "$LANDING_BRANCH" ]]; then
+    die "$LANDING_DIR ada di branch '$landing_head', bukan '$LANDING_BRANCH'. Perbaiki di server dulu — 'main' di repo itu tertinggal puluhan commit."
+  fi
+  ok "branch $LANDING_BRANCH"
+
+  if [[ "${landing_behind:-0}" == "0" ]]; then
+    printf '  %stidak ada commit baru — dilewati%s\n' "$DIM" "$OFF"
+  else
+    printf '\n%s%s commit baru di situs marketing:%s\n' "$BOLD" "$landing_behind" "$OFF"
+    printf '%s\n' "$landing_log"
+
+    landing_before="$(curl -fsS --max-time 20 "$LANDING_PROBE" 2>/dev/null | grep -o '/landing-assets/index[^"]*\.js' | head -1 || true)"
+
+    landing_cmd="set -euo pipefail
+git -C '$LANDING_DIR' pull --ff-only origin '$LANDING_BRANCH'
+npm --prefix '$LANDING_DIR' ci --silent
+npm --prefix '$LANDING_DIR' run build"
+
+    if [[ "$DRY" == "1" ]]; then
+      printf '%s  [dry-run] ssh %s <<<%s%s\n' "$DIM" "$HOST" "$landing_cmd" "$OFF"
+    else
+      ssh "$HOST" bash -s <<<"$landing_cmd" || die "build situs marketing gagal."
+    fi
+    ok "terbangun"
+
+    # Same reason as the app's: a build can succeed while the old dist/ is
+    # still what nginx hands out, and nothing about that looks like a failure.
+    if [[ "$DRY" == "0" && -n "$landing_before" ]]; then
+      landing_after="$(curl -fsS --max-time 20 "$LANDING_PROBE" | grep -o '/landing-assets/index[^"]*\.js' | head -1 || true)"
+      if [[ "$landing_after" == "$landing_before" ]]; then
+        die "bundle situs marketing TIDAK berubah ($landing_after) meski ada $landing_behind commit baru."
+      fi
+      ok "bundle baru: ${landing_after:-tidak terbaca}"
+    fi
+  fi
+fi
+
 printf '\n%sSelesai.%s\n' "$GREEN$BOLD" "$OFF"
-printf '%sSemua orang perlu hard-reload (Ctrl+Shift+R) sebelum bisa saling dengar —\n' "$BOLD"
-printf 'yang masih memakai bundle lama tidak akan tersambung ke yang sudah.%s\n' "$OFF"
+
+# Only for the app. The marketing site is static pages with nobody connected to
+# each other, so telling a landing-only release to go interrupt everyone would
+# train people to ignore the one warning that matters.
+if [[ "$DO_APP" == "1" ]]; then
+  printf '%sSemua orang perlu hard-reload (Ctrl+Shift+R) sebelum bisa saling dengar —\n' "$BOLD"
+  printf 'yang masih memakai bundle lama tidak akan tersambung ke yang sudah.%s\n' "$OFF"
+fi
