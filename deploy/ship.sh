@@ -31,6 +31,10 @@
 #   ./deploy/ship.sh --pull          take teammates' commits without being asked
 #   ./deploy/ship.sh --app           this repo only
 #   ./deploy/ship.sh --landing       the marketing site only
+#
+# It runs from your own machine OR from the server, and says which. On the
+# server it skips the push and the tests and just pulls what is already on
+# origin — which is what a teammate without WSL has to work with.
 #   ./deploy/ship.sh -- --no-build   pass the rest through to deploy.sh
 #
 set -euo pipefail
@@ -84,24 +88,38 @@ run()  {
   "$@"
 }
 
-# ── 0. Run this from your own machine, not from the server ─────────────────
+# ── 0. Work out which machine this is ──────────────────────────────────────
 #
-# It deploys BY connecting to $HOST, so on $HOST it would ssh into itself:
-# the guards would read the server's own checkout, the tests would run there,
-# and the whole point — that a broken build never leaves your laptop — is gone.
+# Two honest ways to release, and which one you get depends on where you are:
 #
-# ssh -G resolves the target's address from ~/.ssh/config without connecting,
-# which is cheap enough to check before the test run rather than after it.
+#   from your own machine — test, push, then drive the server over ssh. The
+#     tests are the point: a broken build never leaves your laptop.
+#
+#   on the server itself — pull what is already pushed and build it. No tests,
+#     because the host has no dev dependencies installed (everything is built
+#     inside Docker) and because the code being deployed was pushed from
+#     somewhere that could run them.
+#
+# The second mode is not a fallback, it is what a teammate on Windows without
+# WSL actually has: no bash, no ssh key, no node on PATH. Refusing to run here
+# would leave them with a list of commands to remember, which is the thing this
+# script exists to replace.
+#
+# ssh -G resolves the target from ~/.ssh/config without connecting, so this is
+# settled before anything slow happens.
 target_addr="$(ssh -G "$HOST" 2>/dev/null | awk '/^hostname /{print $2; exit}')"
+ON_SERVER=0
 if [[ -n "${target_addr:-}" ]] && hostname -I 2>/dev/null | tr ' ' '\n' | grep -qx "$target_addr"; then
-  die "ini dijalankan DI $HOST ($target_addr). ship.sh dijalankan dari mesinmu sendiri — dia yang SSH ke sini.
-     Di laptop:  ./deploy/ship.sh
-     Di server, kalau memang perlu manual:
-       aplikasi : git -C /var/www/office pull && /var/www/office/deploy/deploy.sh
-       landing  : git -C /var/www/landing pull && npm --prefix /var/www/landing run build"
+  ON_SERVER=1
 fi
 
-cd "$(git rev-parse --show-toplevel)"
+if [[ "$ON_SERVER" == "1" ]]; then
+  printf '%sDi server (%s) — mode tarik-dan-bangun. Tidak ada push, tidak ada tes.%s\n' "$BOLD" "$HOST" "$OFF"
+  RUN_TESTS=0
+  cd "$APP_DIR"
+else
+  cd "$(git rev-parse --show-toplevel)"
+fi
 
 if [[ "$DO_APP" == "1" ]]; then
 
@@ -131,7 +149,10 @@ if [[ "$behind" != "0" ]]; then
   printf '\n%s%s commit dari orang lain belum ada di lokalmu:%s\n' "$BOLD" "$behind" "$OFF"
   git --no-pager log --oneline --format='  %h  %an  %s' "HEAD..origin/$BRANCH"
 
-  if [[ "$AUTO_PULL" == "1" ]]; then
+  if [[ "$ON_SERVER" == "1" || "$AUTO_PULL" == "1" ]]; then
+    # On the server, being behind is the normal state and pulling is the
+    # entire job — there is nothing here to review that was not already
+    # reviewed wherever it was pushed from.
     reply=y
   elif [[ -t 0 ]]; then
     printf '\nTarik dan lanjutkan? Tes akan dijalankan ulang di atas hasil gabungannya. [y/N] '
@@ -221,23 +242,29 @@ if [[ -n "$bundle_before" ]]; then ok "sekarang: $bundle_before"; else
 fi
 
 # ── 4. Push ────────────────────────────────────────────────────────────────
-if [[ "$ahead" != "0" ]]; then
+# Nothing to push from the server: it is downstream of origin, never upstream.
+if [[ "$ON_SERVER" == "0" && "$ahead" != "0" ]]; then
   step "Push ke origin/$BRANCH"
   run git push origin "$BRANCH"
   ok "terkirim"
 fi
 
-# ── 5. Deploy, on the server ───────────────────────────────────────────────
-step "Deploy di $HOST"
-remote_cmd="set -euo pipefail
+# ── 5. Build and restart ───────────────────────────────────────────────────
+if [[ "$ON_SERVER" == "1" ]]; then
+  step "Deploy di sini"
+  run "$APP_DIR/deploy/deploy.sh" ${PASSTHRU[@]+"${PASSTHRU[@]}"} || die "deploy gagal."
+else
+  step "Deploy di $HOST"
+  remote_cmd="set -euo pipefail
 cd '$APP_DIR'
 git pull --ff-only
 ./deploy/deploy.sh ${PASSTHRU[*]:-}"
 
-if [[ "$DRY" == "1" ]]; then
-  printf '%s  [dry-run] ssh %s <<<%s%s\n' "$DIM" "$HOST" "$remote_cmd" "$OFF"
-else
-  ssh "$HOST" bash -s <<<"$remote_cmd" || die "deploy di server gagal. Keadaan server ada di keluaran di atas."
+  if [[ "$DRY" == "1" ]]; then
+    printf '%s  [dry-run] ssh %s <<<%s%s\n' "$DIM" "$HOST" "$remote_cmd" "$OFF"
+  else
+    ssh "$HOST" bash -s <<<"$remote_cmd" || die "deploy di server gagal. Keadaan server ada di keluaran di atas."
+  fi
 fi
 ok "deploy selesai"
 
@@ -268,7 +295,13 @@ fi  # DO_APP
 if [[ "$DO_LANDING" == "1" ]]; then
   step "Situs marketing ($LANDING_BRANCH)"
 
-  landing_state="$(ssh "$HOST" bash -s <<REMOTE || true
+  # One helper, two transports: on the server the same commands run directly,
+  # so the landing stage does not need a second copy of itself.
+  at_host() {
+    if [[ "$ON_SERVER" == "1" ]]; then bash -s; else ssh "$HOST" bash -s; fi
+  }
+
+  landing_state="$(at_host <<REMOTE || true
 set -euo pipefail
 git -C '$LANDING_DIR' rev-parse --abbrev-ref HEAD
 git -C '$LANDING_DIR' fetch --quiet origin '$LANDING_BRANCH'
@@ -306,9 +339,9 @@ npm --prefix '$LANDING_DIR' ci --silent
 npm --prefix '$LANDING_DIR' run build"
 
     if [[ "$DRY" == "1" ]]; then
-      printf '%s  [dry-run] ssh %s <<<%s%s\n' "$DIM" "$HOST" "$landing_cmd" "$OFF"
+      printf '%s  [dry-run] %s%s\n' "$DIM" "$landing_cmd" "$OFF"
     else
-      ssh "$HOST" bash -s <<<"$landing_cmd" || die "build situs marketing gagal."
+      at_host <<<"$landing_cmd" || die "build situs marketing gagal."
     fi
     ok "terbangun"
 
