@@ -105,11 +105,17 @@ run()  {
 # would leave them with a list of commands to remember, which is the thing this
 # script exists to replace.
 #
-# ssh -G resolves the target from ~/.ssh/config without connecting, so this is
-# settled before anything slow happens.
-target_addr="$(ssh -G "$HOST" 2>/dev/null | awk '/^hostname /{print $2; exit}')"
+# Detected by asking whether the app answers on loopback. Only the machine
+# actually running the stack has it there — everywhere else 127.0.0.1:8090 is
+# nothing at all.
+#
+# An earlier version compared the local IPs against the ssh target resolved
+# from ~/.ssh/config, which worked from a laptop and failed on the server for
+# the obvious reason once you see it: the server has no ssh alias for itself,
+# so the lookup came back empty and it decided it was a laptop.
 ON_SERVER=0
-if [[ -n "${target_addr:-}" ]] && hostname -I 2>/dev/null | tr ' ' '\n' | grep -qx "$target_addr"; then
+if [[ -f "$APP_DIR/deploy/deploy.sh" ]] \
+   && curl -fsS --max-time 3 http://127.0.0.1:8090/api/health >/dev/null 2>&1; then
   ON_SERVER=1
 fi
 
