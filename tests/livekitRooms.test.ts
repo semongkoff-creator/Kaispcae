@@ -163,6 +163,26 @@ test('capture bounds match the mesh, and a cancelled picker is not an error', ()
   assert.ok(/NotAllowedError/.test(service), 'dismissing the OS picker is a choice, not a failure');
 });
 
+test('a share is published as one sharp layer, not a set to downgrade from', () => {
+  // adaptiveStream picks a layer from the size of the viewer's <video>
+  // element. A share in the side strip is a few hundred pixels wide, so it was
+  // handed the quarter-resolution layer and small text became unreadable.
+  // Right trade for a face, wrong one for a screen.
+  assert.ok(/simulcast: false/.test(service), 'no lower layer may exist to fall back to');
+  // Pinning quality per subscription loses to adaptiveStream, which recomputes
+  // from element size on the next update — so that is deliberately NOT how
+  // this is done.
+  assert.equal(/setVideoQuality/.test(service), false);
+});
+
+test('the share bitrate is raised above the default for text', () => {
+  const m = service.match(/maxBitrate: ([0-9_]+)/);
+  assert.ok(m, 'the encoding should be explicit, not left to the default');
+  assert.ok(Number(m![1].replace(/_/g, '')) >= 3_000_000, 'LiveKit defaults to 2.5 Mbps at 1080p15');
+  // Frames are the thing a screen share can afford to lose; resolution is not.
+  assert.ok(/maxFramerate: 15/.test(service));
+});
+
 // ── Fase D: wired into the app ─────────────────────────────────────────────
 
 test('the branch lives in useWebRTC, so App never sees two implementations', () => {

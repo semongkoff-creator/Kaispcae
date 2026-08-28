@@ -329,13 +329,42 @@ class LiveKitService {
     const room = this.room;
     if (!room) return { success: false, error: 'Belum tersambung ke room media.' };
     try {
-      await room.localParticipant.setScreenShareEnabled(enabled, {
-        // Matches the mesh's own capture bounds (webrtcService's
-        // SCREEN_SHARE_CONSTRAINTS): a shared screen is mostly static text, so
-        // resolution is what keeps it readable and frames are what can be
-        // dropped when the link is tight.
-        resolution: { width: 1920, height: 1080, frameRate: 15 },
-      });
+      await room.localParticipant.setScreenShareEnabled(
+        enabled,
+        {
+          // Matches the mesh's own capture bounds (webrtcService's
+          // SCREEN_SHARE_CONSTRAINTS): a shared screen is mostly static text,
+          // so resolution is what keeps it readable and frames are what can be
+          // dropped when the link is tight.
+          resolution: { width: 1920, height: 1080, frameRate: 15 },
+        },
+        {
+          // No simulcast, which is why a share stopped being legible.
+          //
+          // The room runs adaptiveStream, and it picks a layer from the SIZE
+          // OF THE <video> ELEMENT the viewer is rendering into. A share in
+          // the side strip is a few hundred pixels wide, so it was handed the
+          // quarter-resolution layer and 11px code became a grey smear. That
+          // is the right trade for a face — a 96px camera thumbnail has no use
+          // for 1080p — and the wrong one for a screen, where being readable
+          // IS the feature.
+          //
+          // Pinning quality per subscription was the other option and loses:
+          // adaptiveStream recomputes from element size on the next update and
+          // takes it back, so it would fight on every resize. With one layer
+          // published there is simply nothing blurrier to fall back to.
+          //
+          // The cost is real and deliberate: a viewer on a weak link can no
+          // longer be quietly given a smaller version. They get this or they
+          // stutter. A share nobody can read has already failed, so stuttering
+          // and sharp beats smooth and useless.
+          simulcast: false,
+          // 4 Mbps against LiveKit's 2.5 default for h1080fps15. Text is
+          // unforgiving of compression in a way faces are not — and at 15fps
+          // this is a third of what the same bitrate would cost at 30.
+          screenShareEncoding: { maxBitrate: 4_000_000, maxFramerate: 15 },
+        },
+      );
       return { success: true };
     } catch (err) {
       // The user dismissing the OS picker lands here and is not a failure
