@@ -293,6 +293,18 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       setStreamsVersion((v) => v + 1);
     });
     livekitService.setOnSpeakingChange((identity, speaking) => {
+      // Bug: the local participant's own speaking edges were falling into
+      // setPlayerSpeaking (the REMOTE-peers Set) like everyone else's —
+      // unlike the webrtcService wiring above, which special-cases id ===
+      // 'local' into setLocalSpeaking. LiveKit has no 'local' sentinel of
+      // its own (identity is the account id, per this block's own comment),
+      // so localSpeaking silently never became true on LiveKit rooms: MicButton's
+      // green speaking state (and anything else reading localSpeaking) was
+      // dead code there, even though the plumbing itself was correct.
+      if (identity === authUserId) {
+        setLocalSpeaking(speaking);
+        return;
+      }
       const id = playerIdFor(identity);
       if (id) setPlayerSpeaking(id, speaking);
     });

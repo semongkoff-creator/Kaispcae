@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Mic, MicFill, MicMuteFill } from 'react-bootstrap-icons';
 import { isTypingTarget } from '@/utils/hotkeys';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { DeviceCaret } from './DeviceCaret';
@@ -40,30 +41,32 @@ export function MicButton({ muted, onToggle }: MicButtonProps) {
       >
         <button
           onClick={onToggle}
-          // Live/unmuted = green ring (matches the reference design's
-          // green "mic is live" state, and the mic_on.svg icon itself is
-          // already green-tinted) instead of the purple "Ethereal
-          // Collaboration" active fill other toolbar buttons use — mic is
-          // the one control where "on" needs its own distinct color, not
-          // the generic active-panel purple. Muted keeps the glass
-          // surface + red icon/ring, unchanged. Actively speaking (Figma's
-          // green mic dot) layers a stronger glow + pulse on top of the
-          // same green ring, rather than a separate look — idle-unmuted is
-          // untouched.
+          // Three distinct states, not two — clarified after the first pass
+          // (a ring around an always-green icon) turned out unclear live:
+          // idle/unmuted is neutral gray (glass surface, no ring), actively
+          // speaking fills the icon in green (MicFill, matching MicMuteFill's
+          // already-established "outline vs filled" pairing elsewhere in the
+          // app — MiniMode/MemberListPanel/VideoGrid/ParticipantActionsMenu
+          // all use MicMuteFill for muted), and muted swaps to the same
+          // slashed MicMuteFill glyph everywhere else uses, in red — not the
+          // plain mic.svg + red ring this used before.
           className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer bg-white/90 dark:bg-gray-800/90 ${
             muted
               ? 'border-login-border-soft dark:border-white/10 shadow-purple-500/10'
               : speaking
               ? 'border-green-500 shadow-green-500/40'
-              : 'border-green-500 shadow-green-500/20'
+              : 'border-login-border-soft dark:border-white/10 shadow-purple-500/10'
           }`}
         >
-          <img src={`/assets/img/icons/${muted ? 'mic' : 'mic_on'}.svg`} width={16} height={16} alt="" />
           {muted ? (
-            <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-pulse" />
+            <MicMuteFill size={16} className="text-red-500" />
+          ) : speaking ? (
+            <MicFill size={16} className="text-green-500" />
           ) : (
-            <div className={`absolute inset-0 rounded-full border-2 border-green-500 ${speaking ? 'animate-pulse' : ''}`} />
+            <Mic size={16} className="text-gray-500 dark:text-gray-400" />
           )}
+          {muted && <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-pulse" />}
+          {speaking && <div className="absolute inset-0 rounded-full border-2 border-green-500 animate-pulse" />}
         </button>
       </Tooltip>
       <DeviceCaret kind="mic" label="Mikrofon" />
