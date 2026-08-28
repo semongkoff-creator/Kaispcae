@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { CameraVideoFill, PersonWalking, X, MegaphoneFill, MicMuteFill, Search, VolumeMuteFill, ChevronDown, ChevronRight } from 'react-bootstrap-icons';
+import { CameraVideoFill, PersonWalking, X, MegaphoneFill, MicMuteFill, Search, VolumeMuteFill, ChevronDown, ChevronRight, ArrowRight } from 'react-bootstrap-icons';
 import { roleAtLeast, Role, WorkMode } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { PRESENCE_LABEL, PRESENCE_EMOJI, PARTICIPANT_GROUP_ORDER, MANUAL_STATUSES, ManualStatus } from '@/data/presence';
@@ -286,6 +286,9 @@ export function MemberListPanel({ remoteStreams, roomSlug, isMicMuted, isGuest, 
                 onClick={() => setStatusPickerOpen((v) => !v)}
                 className="flex items-center gap-1.5 bg-login-accent text-white text-xs font-medium pl-3 pr-2 py-1 rounded-full cursor-pointer"
               >
+                <span className="text-sm leading-none">
+                  {manualStatus === 'available' ? '🟢' : PRESENCE_EMOJI[manualStatus]}
+                </span>
                 {PRESENCE_LABEL[manualStatus]}
                 <ChevronDown size={11} />
               </button>
@@ -313,10 +316,10 @@ export function MemberListPanel({ remoteStreams, roomSlug, isMicMuted, isGuest, 
               <button
                 onClick={onMySeat}
                 title="Ke Kursi Saya"
-                className="flex items-center gap-1 bg-login-surface dark:bg-gray-700 text-login-accent dark:text-purple-300 text-xs font-medium px-2 py-1 rounded-full cursor-pointer"
+                className="flex items-center gap-1 bg-indigo-100 dark:bg-gray-700 text-indigo-600 dark:text-indigo-300 text-xs font-medium pl-3 pr-2.5 py-1.5 rounded-full cursor-pointer"
               >
-                <img src="/assets/img/icons/back_to_seat.svg" width={12} height={12} alt="" />
                 My Seat
+                <ArrowRight size={11} />
               </button>
             )}
           </div>
