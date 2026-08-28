@@ -5,7 +5,6 @@ import fs from 'fs';
 import { getPrisma } from '../lib/prisma';
 import { SocketEvents, createRoomLayoutFromTemplate, findZoneEntryTile, hasFeatureAccess, LayerData, layerDataToLegacy, findSpawnPixel, TILE_SIZE, MediaType, MediaPayload, SoundboardSoundData, SOUNDBOARD_MAX_DURATION_MS, SOUNDBOARD_MAX_FILE_BYTES, AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@kaispace/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
-import { DEFAULT_ORG_ID } from '../lib/defaultOrg';
 import { resolveRoomRole } from '../lib/roles';
 import { findRoomInOrg } from '../lib/orgScope';
 import { canEnterRoom } from '../lib/roomMembership';
@@ -85,22 +84,13 @@ rooms.get('/rooms', authenticateToken, async (req: AuthRequest, res: Response) =
       return res.json({ rooms: [] });
     }
     const prisma = getPrisma();
-    // Temporary Lobby declutter during the DCM rollout, Kaitech org only —
-    // every other room still exists and is still directly enterable by slug/
-    // link (GET /rooms/:slug and JOIN_ROOM are untouched); this only narrows
-    // what shows up in the Lobby LIST. Revert by deleting this constant and
-    // the ternary branch below that references it, falling back to the
-    // plain isPublic query for every org including Kaitech.
-    const ACTIVE_KAITECH_ROOM_SLUGS = ['kaitech', 'dcm'];
     // DCM restricted accounts — a restricted account's Lobby shows exactly
     // one room (or zero, if it's since been deleted), never the org's full
     // public list.
     const roomList = await prisma.room.findMany({
       where: req.restrictedToRoomId
         ? { id: req.restrictedToRoomId, organizationId: req.organizationId }
-        : req.organizationId === DEFAULT_ORG_ID
-          ? { isPublic: true, organizationId: req.organizationId, slug: { in: ACTIVE_KAITECH_ROOM_SLUGS } }
-          : { isPublic: true, organizationId: req.organizationId },
+        : { isPublic: true, organizationId: req.organizationId },
       include: {
         owner: { select: { displayName: true } },
       },
