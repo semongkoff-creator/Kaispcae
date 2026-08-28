@@ -155,6 +155,30 @@ Branch-nya dipatok dan diperiksa, bukan dibetulkan otomatis: `main` di repo itu
 tertinggal puluhan commit, dan `git checkout main` yang tak sengaja akan
 memundurkan situs publik berminggu-minggu tanpa satu pun tanda kegagalan.
 
+### Dari server, untuk yang tidak memakai WSL
+
+`ship.sh` mengenali dirinya sedang di server dan berganti mode: menarik apa
+yang sudah ada di origin lalu membangunnya. Tanpa push, tanpa tes — host ini
+tidak punya dependensi dev sama sekali (semuanya dibangun di dalam Docker),
+dan kode yang di-deploy sudah didorong dari tempat yang bisa menjalankan tes.
+
+Ada symlink `ship` di PATH, jadi tidak perlu tahu di mana repo aplikasi
+berada — berguna untuk yang hanya mengurus situs marketing:
+
+```bash
+ship            # aplikasi + landing
+ship --landing  # situs marketing saja
+```
+
+Symlink-nya dipasang sekali dengan:
+
+```bash
+ln -sfn /var/www/office/deploy/ship.sh /usr/local/bin/ship
+```
+
+Karena symlink dan bukan salinan, dia ikut terbarui setiap kali repo aplikasi
+ditarik — tidak ada versi kedua yang bisa tertinggal.
+
 ```bash
 ./deploy/ship.sh --dry-run      # tampilkan semua langkah, jalankan yang aman saja
 ./deploy/ship.sh --app          # repo ini saja
