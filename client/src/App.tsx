@@ -90,7 +90,6 @@ import { CameraButton } from './components/hud/CameraButton';
 import { DeviceMenu } from './components/hud/DeviceMenu';
 import { ScreenShareButton } from './components/hud/ScreenShareButton';
 import { EmojiButton } from './components/hud/EmojiButton';
-import { ParticipantsToggleButton } from './components/hud/ParticipantsToggleButton';
 import { LeaveButton } from './components/hud/LeaveButton';
 import { Lobby } from './pages/Lobby';
 import { LoginPage } from './pages/LoginPage';
@@ -1940,40 +1939,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           top-4 hamburger button instead of sitting a row below it, matching
           the reference wireframe where both live in the same top strip. */}
       <div className="absolute top-4 left-16 flex items-start gap-2 pointer-events-none">
-        {/* Peserta toggle — moved here from the bottom meeting-control bar
-            (see that bar's own comment) so it sits directly left of
-            Soundboard, matching the same icon-button-that-opens-a-panel
-            convention already used by Soundboard/ActivityFeed. Kept on its
-            own !moduleOpen/!screenShareMaximized gate — identical to its
-            old bottom-bar condition — rather than folding into the
-            !simplifiedView block below: Simplify hides Soundboard/
-            ActivityFeed/MusicPlayer but the meeting-participation controls
-            (mic/camera/.../Peserta) stay reachable during Simplify, exactly
-            as before this move. Wrapped in its own pointer-events-auto div
-            since this row's pointer-events-none only gets overridden by
-            children that opt back in (Tooltip's own wrapper div doesn't). */}
-        {!moduleOpen && !screenShareMaximized && (
-          <div className="pointer-events-auto">
-            {/* Repointed to the unified `memberList` panel — Participants
-                and Member/Status used to be two separate surfaces
-                (activePanel === 'participants' vs 'memberList'); now
-                there's only one, and this is its third entry point. */}
-            <ParticipantsToggleButton open={activePanel === 'memberList'} onToggle={() => openPanel('memberList')} />
-          </div>
-        )}
-        {/* Soundboard moved to the Sidebar rail (see that file's own
-            comment) — the reference design's top-left pill doesn't include
-            it, and SoundboardPanel's trigger+popover are one component, so
-            moving its mount point there was cleaner than trying to hide
-            just this trigger while keeping the popover anchored here. */}
-        {!simplifiedView && (
-          <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
-        )}
-        {/* Status — clarified this round: the icon stays here, but now
-            opens the SAME Member panel that now has the Status row built
-            in (see MemberListPanel.tsx), instead of its own separate
-            dropdown. One destination, two entry points — not two
-            different UIs for the same thing. */}
+        {/* Status — opens the unified Member/Employee List panel
+            (MemberListPanel.tsx), which has the Status row built in. This
+            is now the only toolbar entry point into that panel here (the
+            dedicated people-icon toggle was removed — Status already
+            reaches the same destination). */}
         {!isGuest && (
           <Tooltip label="Status" detail="Lihat & ubah statusmu, dan siapa saja yang online.">
             <button
@@ -1993,6 +1963,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
               <img src="/assets/img/icons/back_to_seat.svg" width={14} height={14} alt="" />
             </button>
           </Tooltip>
+        )}
+        {/* Soundboard moved to the Sidebar rail (see that file's own
+            comment) — the reference design's top-left pill doesn't include
+            it, and SoundboardPanel's trigger+popover are one component, so
+            moving its mount point there was cleaner than trying to hide
+            just this trigger while keeping the popover anchored here. */}
+        {!simplifiedView && (
+          <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
         )}
       </div>
       {!simplifiedView && !isGuest && <MusicPlayerWidget zoneId={currentZone?.id ?? null} />}
