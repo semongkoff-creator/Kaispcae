@@ -72,6 +72,26 @@ docker compose ps
 curl -fsS http://127.0.0.1:8091/api/health
 ```
 
+## Menambahkan akun DCM setelah deploy
+
+`DCM_Password_List.xlsx` sengaja diabaikan Git dan tidak ikut Docker image,
+karena memuat password. Setelah deploy aplikasi selesai, salin file itu secara
+sementara dari root proyek di VPS ke container `server`, jalankan seed, lalu
+hapus lagi dari container:
+
+```bash
+cd /var/www/office
+SERVER_ID="$(docker compose ps -q server)"
+test -n "$SERVER_ID"
+docker cp DCM_Password_List.xlsx "$SERVER_ID:/app/DCM_Password_List.xlsx"
+docker compose exec -T server npx tsx server/scripts/seedDcmAccounts.ts
+docker compose exec -T server rm -f /app/DCM_Password_List.xlsx
+```
+
+Jalankan ini hanya setelah build yang membawa `server/scripts` sudah aktif.
+Script bersifat idempoten: akun yang sudah ada tidak dibuat ulang atau password-
+nya tidak diubah. Jangan memasukkan spreadsheet ke `git add` atau ke Dockerfile.
+
 Deploy ini rebuild `server` dan `nginx`, jadi perubahan backend Socket.IO, build frontend Vite, dan `nginx/nginx.conf` ikut naik.
 
 ## Dry Run

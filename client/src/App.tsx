@@ -2613,6 +2613,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onPickPresence={handlePresencePick}
           hasMySeat={hasMySeat}
           onMySeat={handleMySeat}
+          isGuest={isGuest}
+          emitFollowRequest={emitFollowRequest}
+          emitFollowUnfollow={emitFollowUnfollow}
+          emitSummonUser={emitSummonUser}
+          emitSlap={emitSlap}
+          onStartDm={channelChat.startDm}
+          onReport={(userId, name) => setReportTarget({ userId, name })}
+          emitKick={emitKick}
+          emitForceMute={emitForceMute}
+          emitForcePull={emitForcePull}
+          emitSpotlight={emitSpotlight}
         />
       )}
 
