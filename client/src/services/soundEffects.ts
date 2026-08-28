@@ -17,6 +17,10 @@ const NUDGE_SRC = '/assets/sfx/slap.mp3';
 const NUDGE_STRONG_SRC = '/assets/sfx/slap.mp3';
 const SLAP_SRC = '/assets/sfx/slap.mp3';
 const HAND_RAISE_SRC = '/assets/sfx/hand-raise.mp3';
+// Room-wide announcement chime — the airport-PA call that plays before an
+// admin broadcast appears. 4.8s long, and deliberately not waited out in
+// full: see AnnouncementTicker's ANNOUNCE_LEAD_IN_MS.
+const ANNOUNCE_SRC = '/assets/sounds/announce/airport-call.mp3';
 
 // Preload one element per clip so the file is fetched/decoded up front; we
 // clone it per play so rapid repeats overlap instead of cutting each other
@@ -37,6 +41,7 @@ if (typeof window !== 'undefined') {
   preload(NUDGE_STRONG_SRC);
   preload(SLAP_SRC);
   preload(HAND_RAISE_SRC);
+  preload(ANNOUNCE_SRC);
 }
 
 function playClip(src: string, volume: number): void {
@@ -77,6 +82,19 @@ export function playSlapSound(emphasized = false): void {
 // gentle volume and sound-setting gate as before via playClip.
 export function playHandRaiseSound(): void {
   playClip(HAND_RAISE_SRC, 0.35);
+}
+
+// The chime before a room-wide announcement (AnnouncementTicker). Louder than
+// the other clips because it is doing a specific job — turning heads before
+// text arrives — and quieter than 1.0 because it is 4.8 seconds of PA chime
+// and lands unannounced.
+//
+// Gated on the sound setting like every other incoming event. Someone who
+// turned notification sounds off chose not to be interrupted by audio, and
+// nothing is lost by honouring it: the ticker itself is unmissable, running
+// across the top of the screen with or without the chime.
+export function playAnnouncementSound(): void {
+  playClip(ANNOUNCE_SRC, 0.7);
 }
 
 // Soundboard — unlike the fixed clips above, the src here is dynamic (one of

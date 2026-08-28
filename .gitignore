@@ -37,3 +37,9 @@ DCM_Password_List.xlsx
 /*.sql
 *.sql.gz
 *-uploads.tar.gz
+
+# Windows NTFS alternate-data-stream markers, created whenever a downloaded
+# file is copied into WSL. They sit next to the real file as
+# "<name>:Zone.Identifier", carry nothing but the download's origin URL, and
+# would otherwise ride along with every asset added this way.
+*:Zone.Identifier

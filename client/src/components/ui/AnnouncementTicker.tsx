@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { VolumeUpFill } from 'react-bootstrap-icons';
 import { useGameStore } from '@/stores/gameStore';
+import { playAnnouncementSound } from '@/services/soundEffects';
 
 // Pixels per second the text travels. Slow enough to read comfortably at a
 // glance, brisk enough that a short announcement doesn't linger. Reading
@@ -14,6 +15,16 @@ const LOOPS = 2;
 const STATIC_MS_PER_WORD = 260;
 const STATIC_MIN_MS = 4000;
 const STATIC_MAX_MS = 25000;
+
+// How long the chime rings before the text appears.
+//
+// Not the clip's full 4.8 seconds. An announcement is usually the thing
+// somebody most needs to read, and holding a blank screen for five seconds to
+// finish playing a jingle gets that backwards. This is the length of the
+// attention-getting part; the rest of the chime rings out underneath the text,
+// which is what a real PA system does — the voice starts while the bell is
+// still fading.
+const ANNOUNCE_LEAD_IN_MS = 1800;
 
 function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined'
@@ -37,6 +48,8 @@ export function AnnouncementTicker() {
   const textRef = useRef<HTMLSpanElement>(null);
   const [travel, setTravel] = useState<number | null>(null);
   const [reduced, setReduced] = useState(prefersReducedMotion);
+  // Whether this message's chime has had its head start yet.
+  const [revealed, setRevealed] = useState(false);
 
   // A preference can change mid-session (OS setting, or a browser toggle).
   useEffect(() => {
@@ -47,13 +60,30 @@ export function AnnouncementTicker() {
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
+  const messageKey = current ? `${current.sentAt}:${current.text}` : null;
+
+  // Chime first, text second.
+  //
+  // Driven by which message is CURRENT rather than by the socket event, so a
+  // queued announcement chimes when its own turn comes. Chiming on arrival
+  // would fire it while the previous message is still scrolling — sound and
+  // text describing different announcements at the same moment.
+  useEffect(() => {
+    if (!messageKey) { setRevealed(false); return; }
+    setRevealed(false);
+    playAnnouncementSound();
+    const timer = setTimeout(() => setRevealed(true), ANNOUNCE_LEAD_IN_MS);
+    return () => clearTimeout(timer);
+  }, [messageKey]);
+
   // Measure before paint, so the strip never shows a frame at the wrong
   // offset. Re-measured per message because the distance depends on that
   // message's own width — and on the viewport, which is why a resize has to
   // redo it too.
-  const messageKey = current ? `${current.sentAt}:${current.text}` : null;
   useLayoutEffect(() => {
-    if (!messageKey || reduced) { setTravel(null); return; }
+    // Nothing is in the DOM until the chime's lead-in is over, so measuring
+    // before that would read null refs once and never run again.
+    if (!messageKey || reduced || !revealed) { setTravel(null); return; }
     const measure = () => {
       const strip = stripRef.current;
       const text = textRef.current;
@@ -66,30 +96,31 @@ export function AnnouncementTicker() {
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [messageKey, reduced]);
+  }, [messageKey, reduced, revealed]);
 
   // Reduced motion has no animation to end, so its dismissal is on a timer
   // sized to how long the text takes to read.
   useEffect(() => {
-    if (!current || !reduced) return;
+    if (!current || !reduced || !revealed) return;
     const words = current.text.trim().split(/\s+/).length;
     const ms = Math.min(STATIC_MAX_MS, Math.max(STATIC_MIN_MS, words * STATIC_MS_PER_WORD));
     const timer = setTimeout(dismiss, ms);
     return () => clearTimeout(timer);
-  }, [current, reduced, dismiss]);
+  }, [current, reduced, revealed, dismiss]);
 
   // Safety net for the animated path. `animationend` is the normal exit, but
   // it never fires if the element is display:none'd by a background tab
   // throttling animations, or if the measurement somehow yielded nothing —
   // and a stuck head-of-queue would block every later announcement forever.
   useEffect(() => {
-    if (!current || reduced) return;
+    if (!current || reduced || !revealed) return;
     const seconds = travel ? (travel / SCROLL_SPEED_PX_PER_SEC) * LOOPS : 0;
     const timer = setTimeout(dismiss, (seconds + 5) * 1000);
     return () => clearTimeout(timer);
-  }, [current, reduced, travel, dismiss]);
+  }, [current, reduced, revealed, travel, dismiss]);
 
-  if (!current) return null;
+  // The chime is playing; the strip arrives when it has had its head start.
+  if (!current || !revealed) return null;
 
   const body = (
     <>
