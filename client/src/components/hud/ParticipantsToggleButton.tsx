@@ -5,17 +5,18 @@ interface ParticipantsToggleButtonProps {
   onToggle: () => void;
 }
 
-// Toolbar entry point for ParticipantPanel — previously anchored in the
-// bottom meeting-control bar (circular, w-10 h-10, its own separate look),
-// now relocated to the top-left rail beside Soundboard/ActivityFeed (see
-// App.tsx). Restyled to match that rail's own button convention exactly
-// (w-8 h-8 rounded-lg, same open/closed color pair — see
+// Toolbar entry point for MemberListPanel (which absorbed ParticipantPanel
+// entirely — see that file's own header comment) — previously anchored in
+// the bottom meeting-control bar (circular, w-10 h-10, its own separate
+// look), now relocated to the top-left rail beside Soundboard/ActivityFeed
+// (see App.tsx). Restyled to match that rail's own button convention
+// exactly (w-8 h-8 rounded-lg, same open/closed color pair — see
 // SoundboardPanel.tsx's identical button) now that this is its only home,
 // rather than carrying the old bottom-bar circular style into a row where
-// every other icon is a boxy square. Calls the exact same toggle
-// (openPanel('participants'), see App.tsx) so open/close behavior is
-// unchanged, only the look moved. The online-count badge stays inside
-// ParticipantPanel's own header (shown once the panel is open) rather than
+// every other icon is a boxy square. Calls openPanel('memberList') — the
+// same panel the Status icon and the Room Features flyout's "Member" row
+// also open, all three now sharing one destination. The online-count
+// badge stays inside the panel's own header (shown once open) rather than
 // duplicated here from a second store read.
 export function ParticipantsToggleButton({ open, onToggle }: ParticipantsToggleButtonProps) {
   return (

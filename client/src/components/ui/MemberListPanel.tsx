@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { createPortal } from 'react-dom';
-import { CameraVideoFill, PersonWalking, MagnetFill, ChatDotsFill, PersonDashFill, X, ThreeDotsVertical, HandIndexThumbFill, MegaphoneFill, MicMuteFill, GeoAltFill, Search, VolumeMuteFill, VolumeUpFill, FlagFill, ChevronDown, ChevronRight } from 'react-bootstrap-icons';
+import { CameraVideoFill, PersonWalking, X, MegaphoneFill, MicMuteFill, Search, VolumeMuteFill, ChevronDown, ChevronRight } from 'react-bootstrap-icons';
 import { roleAtLeast, Role, WorkMode } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
-import { PRESENCE_LABEL, PRESENCE_EMOJI, PARTICIPANT_GROUP_ORDER } from '@/data/presence';
+import { PRESENCE_LABEL, PRESENCE_EMOJI, PARTICIPANT_GROUP_ORDER, MANUAL_STATUSES, ManualStatus } from '@/data/presence';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { showConfirm } from '@/stores/modalStore';
 import { api, OrgMember } from '@/services/api';
@@ -11,30 +10,7 @@ import { formatRelativeTimeId, formatExactDateTimeId } from '@/utils/relativeTim
 import { SignalBars } from '@/components/ui/SignalBars';
 import type { PeerQuality } from '@/services/connectionQuality';
 import { subscribeConnectionQuality, getPeerQualitySnapshot } from '@/stores/connectionQuality';
-
-// One labelled row inside a participant's action menu. Icon plus wording,
-// because five bare icons crowded into a row said nothing until you hovered
-// each one to find out what it did. `detail` is optional, longer copy shown
-// via the shared Tooltip component — the row's own `label` text already
-// identifies the action, so this is only for the extra "what this actually
-// does" line, same split every other Tooltip caller uses.
-function MenuItem({ icon, label, onClick, danger, detail }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean; detail?: string }) {
-  return (
-    <Tooltip label={label} detail={detail} wrapperClassName="w-full">
-      <button
-        onClick={onClick}
-        className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left cursor-pointer transition-colors ${
-          danger
-            ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30'
-            : 'text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'
-        }`}
-      >
-        <span className="shrink-0 w-4 flex justify-center">{icon}</span>
-        {label}
-      </button>
-    </Tooltip>
-  );
-}
+import { ParticipantActionsMenu } from '@/components/ParticipantActionsMenu';
 
 interface MemberListPanelProps {
   remoteStreams: Map<string, MediaStream>;
@@ -98,11 +74,27 @@ interface MemberListPanelProps {
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
+
+  // Status picker + "My Seat" — merged in from the old MemberListPanel per
+  // "status sama member jadi satu" (this panel is now the one destination
+  // both Status and Member/Participants entry points open). manualStatus/
+  // onPickPresence drive the same status dropdown PresenceButton used to
+  // own; hasMySeat/onMySeat are the same "Ke Kursi Saya" action the rail
+  // icon and the old top-left-pill button already call elsewhere.
+  manualStatus: ManualStatus;
+  onPickPresence: (status: ManualStatus) => void;
+  hasMySeat: boolean;
+  onMySeat: () => void;
+  // Requests a fresh ROSTER_SNAPSHOT on open — playerRecords already carries
+  // live presence, but this panel used to also nudge the server for an
+  // up-to-date snapshot the moment it's opened (same call the old
+  // MemberListPanel made).
+  emitRosterListRequest: () => void;
 }
 
 const MAX_VIDEO_THUMBS = 3;
 
-export function MemberListPanel({ remoteStreams, roomSlug, isMicMuted, isGuest, localAccountName, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, onReport, emitKick, emitForceMute, emitForcePull, emitSpotlight, open, onToggle, onClose }: MemberListPanelProps) {
+export function MemberListPanel({ remoteStreams, roomSlug, isMicMuted, isGuest, localAccountName, emitFollowRequest, emitFollowUnfollow, emitSummonUser, emitSlap, onStartDm, onReport, emitKick, emitForceMute, emitForcePull, emitSpotlight, open, onToggle, onClose, manualStatus, onPickPresence, hasMySeat, onMySeat, emitRosterListRequest }: MemberListPanelProps) {
   // Drawer side follows the same flag App.tsx uses to switch between
   // VideoGrid (map HUD) and MeetingView (App.tsx:1119) — read directly
   // rather than threaded as a prop, same as the other store slices below.
@@ -168,7 +160,21 @@ export function MemberListPanel({ remoteStreams, roomSlug, isMicMuted, isGuest, 
       console.error('[MemberListPanel] failed to load room participants (Offline section):', e);
       setOfflineLoadError(true);
     });
-  }, [open, roomSlug]);
+    emitRosterListRequest();
+  }, [open, roomSlug, emitRosterListRequest]);
+
+  // Status picker — same dropdown PresenceButton used to own, now merged
+  // into this panel's header row.
+  const [statusPickerOpen, setStatusPickerOpen] = useState(false);
+  const statusRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!statusPickerOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (statusRef.current && !statusRef.current.contains(e.target as Node)) setStatusPickerOpen(false);
+    };
+    document.addEventListener('mousedown', onDown, true);
+    return () => document.removeEventListener('mousedown', onDown, true);
+  }, [statusPickerOpen]);
 
   // A player's live room role (see gameStore's applyAdminChanged) — keyed by
   // account id, the authoritative source, rather than the per-record isAdmin
@@ -237,47 +243,100 @@ export function MemberListPanel({ remoteStreams, roomSlug, isMicMuted, isGuest, 
     (onlineGroups.get(status) ?? onlineGroups.get('available')!).push(p);
   }
 
+  // Reference design's "OrgLabel N/M" section label — org name (capitalized
+  // room slug — no separate configured display-name field exists) + online/
+  // total counts, using the counts this panel already computes for its own
+  // Online/Offline sections rather than a second fetch.
+  const orgLabel = roomSlug.charAt(0).toUpperCase() + roomSlug.slice(1);
+  const totalMembers = totalOnline + offlineMembers.length;
+
   return (
     <>
       {open && (
         <div
-          // Full-height drawer: left edge (after the Sidebar rail, w-12)
-          // over the map HUD, right edge over Meeting View — the common
-          // "participants panel" placement for a meeting layout. `fixed`
-          // (not absolute) so it spans the real viewport height regardless
-          // of any ancestor's own height/scroll.
-          className={`fixed inset-y-0 z-50 w-80 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl shadow-2xl shadow-purple-500/10 flex flex-col pointer-events-auto animate-fade-in ${
-            meetingViewActive
-              ? 'right-0 border-l border-purple-200/50 dark:border-white/10'
-              : 'left-12 border-r border-purple-200/50 dark:border-white/10'
+          // A floating rounded card ("ngambang"), not a flush full-height
+          // drawer — anchored near the top rather than dead-centre, but
+          // still switching sides with meetingViewActive (existing
+          // ParticipantPanel behavior: left over the map HUD, right over
+          // Meeting View), same as the old full-height drawer did.
+          className={`fixed top-4 z-50 w-80 max-h-[85vh] bg-white dark:bg-gray-800 rounded-2xl shadow-2xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 flex flex-col pointer-events-auto animate-fade-in ${
+            meetingViewActive ? 'right-4' : 'left-16'
           }`}
           onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          <div className="p-3 border-b border-purple-100 dark:border-gray-700 flex items-center justify-between">
-            <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">Participants</span>
-            <Tooltip label="Tutup" detail="Tutup panel Peserta.">
+          <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
+            <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Employee List</h2>
+            <Tooltip label="Tutup" detail="Tutup panel ini.">
               <button
                 onClick={onClose}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
+                className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer"
               >
-                <X size={14} />
+                <X size={18} />
               </button>
             </Tooltip>
           </div>
 
+          {/* Status picker + My Seat — merged in from the old
+              MemberListPanel ("status sama member jadi satu"). */}
+          <div className="flex items-center gap-2 px-5 pb-3 shrink-0">
+            <span className="text-xs text-gray-500 dark:text-gray-400">Status</span>
+            <div className="relative" ref={statusRef}>
+              <button
+                onClick={() => setStatusPickerOpen((v) => !v)}
+                className="flex items-center gap-1.5 bg-login-accent text-white text-xs font-medium pl-3 pr-2 py-1 rounded-full cursor-pointer"
+              >
+                {PRESENCE_LABEL[manualStatus]}
+                <ChevronDown size={11} />
+              </button>
+              {statusPickerOpen && (
+                <div
+                  className="absolute top-full left-0 mt-1 w-40 bg-white dark:bg-gray-800 rounded-xl border border-purple-100 dark:border-gray-700 shadow-xl p-2 z-10"
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  {MANUAL_STATUSES.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => { onPickPresence(s); setStatusPickerOpen(false); }}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-left cursor-pointer ${
+                        manualStatus === s ? 'bg-purple-600 text-white' : 'text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      <span className="w-4 text-center shrink-0">{s === 'available' ? '🟢' : PRESENCE_EMOJI[s]}</span>
+                      {PRESENCE_LABEL[s]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {hasMySeat && (
+              <button
+                onClick={onMySeat}
+                title="Ke Kursi Saya"
+                className="flex items-center gap-1 bg-login-surface dark:bg-gray-700 text-login-accent dark:text-purple-300 text-xs font-medium px-2 py-1 rounded-full cursor-pointer"
+              >
+                <img src="/assets/img/icons/back_to_seat.svg" width={12} height={12} alt="" />
+                My Seat
+              </button>
+            )}
+          </div>
+
           {(remotePlayers.length > 0 || offlineMembers.length > 0) && (
-            <div className="px-3 pt-2 pb-1 relative">
-              <Search size={11} className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <div className="px-5 pb-3 shrink-0 relative">
+              <Search size={13} className="absolute left-8 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 pointer-events-none" />
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Cari nama..."
-                className="w-full pl-6 pr-2 py-1 rounded-md bg-purple-50 dark:bg-gray-800 border border-purple-100 dark:border-gray-700 text-xs outline-none focus:border-purple-400 dark:focus:border-purple-500 text-gray-700 dark:text-gray-200 placeholder:text-gray-400"
+                placeholder="Search Member"
+                className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-login-border-soft dark:border-gray-700 bg-login-surface dark:bg-gray-900 text-gray-900 dark:text-gray-100 outline-none focus:border-login-accent"
               />
             </div>
           )}
+
+          <p className="px-5 pb-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 shrink-0">
+            {orgLabel} {totalOnline}/{totalMembers}
+          </p>
 
           {videoThumbs.length > 0 && (
             <div className="p-2 border-b border-purple-100 dark:border-gray-700 flex gap-1.5 flex-wrap">
@@ -494,59 +553,6 @@ function ParticipantRow({
   // !p.isGuest && onStartDm below) rather than duplicating that guard.
   isGuest?: boolean;
 }) {
-  // Menu coordinates in viewport space, measured from the trigger when it
-  // opens. null = closed.
-  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
-  const menuOpen = menuPos !== null;
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const popRef = useRef<HTMLDivElement>(null);
-
-  // Closing needs BOTH refs: the menu lives in a portal on document.body, so
-  // as far as the DOM tree is concerned a click inside it is outside the row.
-  // Checking only one would make the menu dismiss itself the instant you
-  // tried to click one of its own items.
-  const closeMenu = useCallback(() => setMenuPos(null), []);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: PointerEvent) => {
-      const t = e.target as Node;
-      if (!triggerRef.current?.contains(t) && !popRef.current?.contains(t)) closeMenu();
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMenu(); };
-    // Position is measured once on open, so any scroll or resize would leave
-    // the menu floating away from its row — close instead of chasing it.
-    document.addEventListener('pointerdown', onDown, true);
-    document.addEventListener('keydown', onKey);
-    window.addEventListener('resize', closeMenu);
-    window.addEventListener('scroll', closeMenu, true);
-    return () => {
-      document.removeEventListener('pointerdown', onDown, true);
-      document.removeEventListener('keydown', onKey);
-      window.removeEventListener('resize', closeMenu);
-      window.removeEventListener('scroll', closeMenu, true);
-    };
-  }, [menuOpen, closeMenu]);
-
-  const openMenu = () => {
-    const el = triggerRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const MENU_W = 176; // w-44
-    const MENU_H = 190; // generous estimate; only used to decide flip direction
-    // Flip above the trigger when there isn't room below, and keep the right
-    // edge on screen — a participant near the bottom of a tall list would
-    // otherwise get a menu running off the viewport.
-    const openUp = r.bottom + MENU_H > window.innerHeight && r.top > MENU_H;
-    const right = Math.max(8, Math.min(window.innerWidth - r.right, window.innerWidth - MENU_W - 8));
-    setMenuPos({ top: openUp ? r.top - MENU_H - 4 : r.bottom + 4, right });
-  };
-
-  // Every action wrapped so the menu closes as soon as one is chosen —
-  // leaving it open over a row whose state just changed reads as if the
-  // click didn't register.
-  const pick = (fn?: () => void) => () => { closeMenu(); fn?.(); };
-  const hasActions = !isLocal && (onFollow || onUnfollow || onSummon || onSlap || onToggleMute || onMessage || onReport || onKick || onForceMute || onForcePull || onSpotlight || onLocate);
-
   return (
     <div className="flex items-center justify-between px-2 py-1 rounded bg-purple-50/50 dark:bg-gray-700/50">
       <div className="flex items-center gap-2 min-w-0">
@@ -622,102 +628,24 @@ function ParticipantRow({
             </button>
           </Tooltip>
         )}
-        {hasActions && (
-          <>
-            <Tooltip label={`Aksi untuk ${name}`} detail="Buka menu aksi untuk orang ini.">
-            <button
-              ref={triggerRef}
-              onClick={() => (menuOpen ? closeMenu() : openMenu())}
-              className={`cursor-pointer rounded px-0.5 ${menuOpen ? 'text-purple-600 bg-purple-100 dark:bg-gray-600' : 'text-gray-400 dark:text-gray-500 hover:text-purple-600'}`}
-            >
-              <ThreeDotsVertical size={13} />
-            </button>
-            </Tooltip>
-            {menuPos && createPortal(
-              // Rendered on document.body, NOT inside the row. An absolutely
-              // positioned menu is clipped by any ancestor whose overflow
-              // isn't visible, and the participant list is overflow-y-auto —
-              // so the menu was being cut off AND counted as scrollable
-              // content, which is what made the scrollbar appear. z-index
-              // cannot fix clipping; only leaving the container can.
-              //
-              // position: fixed alone would not have been enough either: the
-              // panel uses backdrop-blur, and backdrop-filter establishes a
-              // containing block, so a fixed child would still be trapped
-              // inside it.
-              <div
-                ref={popRef}
-                style={{ top: menuPos.top, right: menuPos.right }}
-                className="fixed z-[60] w-44 py-1 rounded-lg bg-white dark:bg-gray-800 border border-purple-200 dark:border-gray-600 shadow-xl overflow-hidden"
-              >
-                {onLocate && (
-                  <MenuItem icon={<GeoAltFill size={12} />} label="Temukan" detail="Pusatkan kamera ke posisi orang ini di peta." onClick={pick(onLocate)} />
-                )}
-                {!isFollowingThem && onFollow && (
-                  <MenuItem icon={<PersonWalking size={12} />} label="Ikuti" detail="Ikuti otomatis ke mana pun orang ini berjalan." onClick={pick(onFollow)} />
-                )}
-                {onSummon && (
-                  <MenuItem icon={<MagnetFill size={12} />} label="Panggil ke sini" detail="Undang orang ini ke lokasimu — dia harus menyetujui dulu." onClick={pick(onSummon)} />
-                )}
-                {onForcePull && (
-                  <MenuItem
-                    icon={<MagnetFill size={12} />}
-                    label="Tarik Paksa"
-                    detail="Pindahkan orang ini ke lokasimu langsung, tanpa persetujuan."
-                    danger
-                    onClick={pick(async () => { if (await showConfirm(`Tarik paksa ${name} ke sini? Tidak perlu persetujuan dia — beda dari "Panggil ke sini".`, { danger: true })) onForcePull(); })}
-                  />
-                )}
-                {onSlap && (
-                  <MenuItem icon={<HandIndexThumbFill size={12} />} label="Colek (sadarkan)" detail="Getarkan avatar orang ini sebentar untuk menarik perhatiannya." onClick={pick(onSlap)} />
-                )}
-                {onToggleMute && (
-                  <MenuItem
-                    icon={isMuted ? <VolumeUpFill size={12} /> : <VolumeMuteFill size={12} />}
-                    label={isMuted ? 'Batalkan bisukan' : 'Bisukan'}
-                    detail="Cuma mengubah suara yang KAMU dengar — mic orang ini tetap aktif untuk orang lain."
-                    onClick={pick(onToggleMute)}
-                  />
-                )}
-                {onMessage && (
-                  <MenuItem icon={<ChatDotsFill size={11} />} label="Kirim pesan" detail="Buka percakapan DM 1-on-1 dengan orang ini." onClick={pick(onMessage)} />
-                )}
-                {onSpotlight && (
-                  <MenuItem
-                    icon={<MegaphoneFill size={11} />}
-                    label={spotlightActive ? 'Matikan Spotlight' : 'Nyalakan Spotlight'}
-                    detail="Jadikan orang ini tampilan utama di Meeting View semua orang."
-                    onClick={pick(onSpotlight)}
-                  />
-                )}
-                {onReport && (
-                  <MenuItem icon={<FlagFill size={11} />} label="Laporkan" detail="Laporkan perilaku orang ini ke admin workspace." danger onClick={pick(onReport)} />
-                )}
-                {(onForceMute || onKick) && (
-                  <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
-                )}
-                {onForceMute && (
-                  <MenuItem
-                    icon={<MicMuteFill size={12} />}
-                    label="Matikan Mic (Admin)"
-                    detail="Matikan mic orang ini secara paksa — dia bisa menyalakannya lagi sendiri."
-                    danger
-                    onClick={pick(async () => { if (await showConfirm(`Matikan mic ${name}? Dia bisa nyalain lagi sendiri kapan saja.`, { danger: true })) onForceMute(); })}
-                  />
-                )}
-                {onKick && (
-                  <MenuItem
-                    icon={<PersonDashFill size={12} />}
-                    label="Keluarkan"
-                    detail="Keluarkan orang ini dari room — dia bisa masuk lagi kapan saja."
-                    danger
-                    onClick={pick(async () => { if (await showConfirm(`Keluarkan ${name} dari room ini? Dia bisa masuk lagi kapan saja.`, { danger: true })) onKick(); })}
-                  />
-                )}
-              </div>,
-              document.body,
-            )}
-          </>
+        {!isLocal && (
+          <ParticipantActionsMenu
+            name={name}
+            isFollowingThem={isFollowingThem}
+            isMuted={isMuted}
+            spotlightActive={spotlightActive}
+            onLocate={onLocate}
+            onFollow={onFollow}
+            onSummon={onSummon}
+            onForcePull={onForcePull}
+            onSlap={onSlap}
+            onToggleMute={onToggleMute}
+            onMessage={onMessage}
+            onSpotlight={onSpotlight}
+            onReport={onReport}
+            onForceMute={onForceMute}
+            onKick={onKick}
+          />
         )}
         {isLocal && <span className="text-gray-400 dark:text-gray-500 text-[10px]">Kamu</span>}
       </div>

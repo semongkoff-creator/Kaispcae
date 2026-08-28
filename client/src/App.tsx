@@ -71,7 +71,6 @@ import { TutorialModal } from './components/ui/TutorialModal';
 import { UserGuidePanel } from './components/ui/UserGuidePanel';
 import { StatusPickModal } from './components/ui/StatusPickModal';
 import { MemberListPanel } from './components/ui/MemberListPanel';
-import { ParticipantPanel } from './components/ui/ParticipantPanel';
 import { PlayerCard } from './components/ui/PlayerCard';
 import { ReportUserModal } from './components/ui/ReportUserModal';
 import { GlobalModal } from './components/ui/GlobalModal';
@@ -1955,7 +1954,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             children that opt back in (Tooltip's own wrapper div doesn't). */}
         {!moduleOpen && !screenShareMaximized && (
           <div className="pointer-events-auto">
-            <ParticipantsToggleButton open={activePanel === 'participants'} onToggle={() => openPanel('participants')} />
+            {/* Repointed to the unified `memberList` panel — Participants
+                and Member/Status used to be two separate surfaces
+                (activePanel === 'participants' vs 'memberList'); now
+                there's only one, and this is its third entry point. */}
+            <ParticipantsToggleButton open={activePanel === 'memberList'} onToggle={() => openPanel('memberList')} />
           </div>
         )}
         {/* Soundboard moved to the Sidebar rail (see that file's own
@@ -2603,29 +2606,42 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
       {userGuideActive && <UserGuidePanel onClose={closePanel} />}
 
-      {memberListActive && (
-        <MemberListPanel
-          localUserId={authUserId}
-          currentRoomSlug={roomSlug}
-          emitRosterListRequest={emitRosterListRequest}
-          onClose={closePanel}
-          manualStatus={manualStatus}
-          onPickPresence={handlePresencePick}
-          hasMySeat={hasMySeat}
-          onMySeat={handleMySeat}
-          isGuest={isGuest}
-          emitFollowRequest={emitFollowRequest}
-          emitFollowUnfollow={emitFollowUnfollow}
-          emitSummonUser={emitSummonUser}
-          emitSlap={emitSlap}
-          onStartDm={channelChat.startDm}
-          onReport={(userId, name) => setReportTarget({ userId, name })}
-          emitKick={emitKick}
-          emitForceMute={emitForceMute}
-          emitForcePull={emitForcePull}
-          emitSpotlight={emitSpotlight}
-        />
-      )}
+      {/* MemberListPanel is now the ONE participants surface — merged in
+          everything ParticipantPanel had (video thumbnails, room-scoped
+          Offline section, leave badges, hand-raised/speaking/signal/
+          follower badges, the ⋮ action menu) on top of its own newer style
+          (Status/My Seat row, "OrgLabel N/M" label). Always rendered (not
+          wrapped in {memberListActive && ...}) so its internal
+          meetingViewActive-transition effect keeps working while closed,
+          same as ParticipantPanel's own always-mounted pattern before this
+          merge. Three entry points now open the same `memberList` panel:
+          the Status icon, the flyout's "Member" row, and the top-left
+          pill's Participants toggle (see that button's own prop change). */}
+      <MemberListPanel
+        remoteStreams={remoteStreams}
+        roomSlug={roomSlug}
+        isMicMuted={isMicMuted}
+        emitRosterListRequest={emitRosterListRequest}
+        open={memberListActive}
+        onToggle={() => openPanel('memberList')}
+        onClose={closePanel}
+        manualStatus={manualStatus}
+        onPickPresence={handlePresencePick}
+        hasMySeat={hasMySeat}
+        onMySeat={handleMySeat}
+        isGuest={isGuest}
+        localAccountName={currentUser.name}
+        emitFollowRequest={emitFollowRequest}
+        emitFollowUnfollow={emitFollowUnfollow}
+        emitSummonUser={emitSummonUser}
+        emitSlap={emitSlap}
+        onStartDm={channelChat.startDm}
+        onReport={(userId, name) => setReportTarget({ userId, name })}
+        emitKick={emitKick}
+        emitForceMute={emitForceMute}
+        emitForcePull={emitForcePull}
+        emitSpotlight={emitSpotlight}
+      />
 
       {meetingViewActive ? (
         <MeetingView
@@ -2693,14 +2709,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       )}
       {!moduleOpen && !screenShareMaximized && (
       <>
-        {/* ParticipantPanel now positions itself as a full-height drawer
-            (left over the map HUD, right over Meeting View — see its own
-            file), no longer a toolbar-anchored popover, so it no longer
-            needs a positioning wrapper here. Ghost mode and Notification
-            Settings moved to Sidebar.tsx (no longer in this bar) —
-            Soundboard/ActivityFeed's own top-left panel spot is untouched,
-            see the top-14 left-16 block above. */}
-        <ParticipantPanel remoteStreams={remoteStreams} roomSlug={roomSlug} isMicMuted={isMicMuted} isGuest={isGuest} localAccountName={currentUser.name} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} onReport={(userId, name) => setReportTarget({ userId, name })} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
+        {/* ParticipantPanel was deleted — MemberListPanel (rendered above,
+            always mounted) is now the one participants surface. Ghost mode
+            and Notification Settings moved to Sidebar.tsx (no longer in
+            this bar) — Soundboard/ActivityFeed's own top-left panel spot
+            is untouched, see the top-14 left-16 block above. */}
         {/* Fixed dead-centre, always — Messenger/Chat (see MessengerApp.tsx)
             is a pure `position: absolute` overlay docked to the left half of
             the screen; it never participates in layout flow, so it can't
