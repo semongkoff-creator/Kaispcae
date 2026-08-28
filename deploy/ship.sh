@@ -84,6 +84,23 @@ run()  {
   "$@"
 }
 
+# ── 0. Run this from your own machine, not from the server ─────────────────
+#
+# It deploys BY connecting to $HOST, so on $HOST it would ssh into itself:
+# the guards would read the server's own checkout, the tests would run there,
+# and the whole point — that a broken build never leaves your laptop — is gone.
+#
+# ssh -G resolves the target's address from ~/.ssh/config without connecting,
+# which is cheap enough to check before the test run rather than after it.
+target_addr="$(ssh -G "$HOST" 2>/dev/null | awk '/^hostname /{print $2; exit}')"
+if [[ -n "${target_addr:-}" ]] && hostname -I 2>/dev/null | tr ' ' '\n' | grep -qx "$target_addr"; then
+  die "ini dijalankan DI $HOST ($target_addr). ship.sh dijalankan dari mesinmu sendiri — dia yang SSH ke sini.
+     Di laptop:  ./deploy/ship.sh
+     Di server, kalau memang perlu manual:
+       aplikasi : git -C /var/www/office pull && /var/www/office/deploy/deploy.sh
+       landing  : git -C /var/www/landing pull && npm --prefix /var/www/landing run build"
+fi
+
 cd "$(git rev-parse --show-toplevel)"
 
 if [[ "$DO_APP" == "1" ]]; then
