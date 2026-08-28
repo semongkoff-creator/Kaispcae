@@ -20,9 +20,12 @@
 # took reading the deployed JavaScript to notice. A deploy that changes nothing
 # should say so.
 #
-# Two things live behind kaispace.io — the app in this repo, and the marketing
-# site in kaispace_website. They are separate repos on separate branches, and
-# releasing one has always meant remembering the other exists. This does both,
+# Two things live behind kaispace.io, on separate repos and separate branches:
+#
+#   app      this repo             branch dev-ui
+#   landing  kaispace_website      branch dev-aga
+#
+# Releasing one has always meant remembering the other exists. This does both,
 # and skips whichever has nothing new.
 #
 #   ./deploy/ship.sh                 typecheck, test, push, deploy, verify
@@ -41,7 +44,13 @@ set -euo pipefail
 
 HOST="${SHIP_HOST:-kaispace}"
 APP_DIR="${SHIP_APP_DIR:-/var/www/office}"
-BRANCH="${SHIP_BRANCH:-main}"
+# What production actually runs. Not main: the app deploys from dev-ui and the
+# marketing site from dev-aga, and the deploy target is the thing worth naming
+# here — a default of main would mean every release either goes out from the
+# wrong branch or has to be corrected by hand every time.
+#
+# main is where these two are expected to converge; it is not what is served.
+BRANCH="${SHIP_BRANCH:-dev-ui}"
 SITE="${SHIP_SITE:-https://kaispace.io}"
 # The app is served under a tenant path; the marketing site owns the root, so
 # reading / would fingerprint the wrong bundle entirely.
