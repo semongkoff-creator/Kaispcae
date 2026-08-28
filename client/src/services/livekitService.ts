@@ -6,9 +6,12 @@ import {
   type RemoteTrack,
   type RemoteParticipant,
   type RemoteTrackPublication,
+  ConnectionQuality,
   type LocalTrackPublication,
 } from 'livekit-client';
 import { api } from './api';
+import type { PeerQuality, QualityLevel, SelfVerdict } from './connectionQuality';
+import { publishConnectionQuality, clearConnectionQuality } from '@/stores/connectionQuality';
 
 // The LiveKit half of the media layer. Lives BESIDE webrtcService rather than
 // replacing it: which one a room uses is decided by livekitRooms.ts, and a
@@ -57,6 +60,7 @@ class LiveKitService {
   private onRemoteStreamEnded: ((identity: string) => void) | null = null;
   private onRemoteScreenStream: RemoteStreamCb | null = null;
   private onRemoteScreenEnded: ((identity: string) => void) | null = null;
+  private playerIdFor: ((identity: string) => string | null) | null = null;
   private onSpeakingChange: SpeakingCb | null = null;
   private onConnectionChange: ConnectionCb | null = null;
 
@@ -65,6 +69,20 @@ class LiveKitService {
   // Named to match webrtcService's own pair, so App wires both paths identically.
   setOnRemoteScreenStream(cb: RemoteStreamCb) { this.onRemoteScreenStream = cb; }
   setOnRemoteScreenEnded(cb: (identity: string) => void) { this.onRemoteScreenEnded = cb; }
+  /**
+   * How to turn a LiveKit identity into the player id the UI keys on.
+   *
+   * The same boundary the remote streams cross, and for the same reason: this
+   * layer knows account ids, everything downstream knows player ids. Supplied
+   * by App rather than looked up here, so the media service stays unaware the
+   * game store exists.
+   *
+   * Without it the quality map is keyed by account id, MemberListPanel looks
+   * up by player id, every lookup misses, and the bars read "no measurement"
+   * while being fully populated — the failure that looks exactly like the one
+   * this fixes.
+   */
+  setPlayerIdResolver(fn: (identity: string) => string | null) { this.playerIdFor = fn; }
   setOnSpeakingChange(cb: SpeakingCb) { this.onSpeakingChange = cb; }
   setOnConnectionChange(cb: ConnectionCb) { this.onConnectionChange = cb; }
 
@@ -134,6 +152,9 @@ class LiveKitService {
     const room = this.room;
     this.room = null;
     this.roomSlug = null;
+    // Leaving a room must not carry its peers into the next one — same reason
+    // webrtcService clears this on teardown.
+    clearConnectionQuality();
     if (room) await room.disconnect();
     this.onConnectionChange?.('disconnected');
   }
@@ -186,7 +207,74 @@ class LiveKitService {
     this.screenStreams.delete(identity);
   }
 
+  /**
+   * LiveKit's own verdict, in the shape the signal bars already read.
+   *
+   * The mesh derived this from getStats() on every peer connection — RTT,
+   * jitter, loss, the encoder's own limitation reason — and none of that
+   * exists here, because none of those connections exist. So the bars sat at
+   * "no measurement" for every room on this path: the strip showed a dash and
+   * looked like a broken feature rather than a missing one.
+   *
+   * The SFU already computes this centrally and reports it per participant,
+   * which is both cheaper than walking a stats graph per peer and, for the
+   * local verdict, more honest: the mesh could never tell "my uplink is
+   * saturated" from "theirs is" with one connection to measure, and refused to
+   * guess below a peer count. The server sees every publisher and has no such
+   * problem.
+   *
+   * No 'fair' tier: LiveKit reports Excellent/Good/Poor/Lost, and painting its
+   * Good — which means a perfectly usable link — as a warning colour would
+   * teach people to ignore the one state that matters.
+   */
+  private static toQuality(q: ConnectionQuality): { level: QualityLevel; bars: 0 | 1 | 2 | 3 } {
+    switch (q) {
+      case ConnectionQuality.Excellent: return { level: 'good', bars: 3 };
+      case ConnectionQuality.Good:      return { level: 'good', bars: 2 };
+      case ConnectionQuality.Poor:      return { level: 'poor', bars: 1 };
+      // Lost is not "no data" — it is the worst possible reading, and zero
+      // bars is reserved for not having measured yet.
+      case ConnectionQuality.Lost:      return { level: 'poor', bars: 1 };
+      default:                          return { level: 'unknown', bars: 0 };
+    }
+  }
+
+  private publishQuality(room: Room): void {
+    const peers = new Map<string, PeerQuality>();
+    let affected = 0;
+    for (const [identity, participant] of room.remoteParticipants) {
+      // Keyed by player id, because that is what MemberListPanel looks up.
+      const id = this.playerIdFor?.(identity);
+      if (!id) continue;
+      const { level, bars } = LiveKitService.toQuality(participant.connectionQuality);
+      // relayed: the mesh read this off the nominated ICE candidate pair. Here
+      // every stream goes through the SFU by definition, so the distinction
+      // the mesh drew — direct versus TURN — has no meaning to carry over.
+      peers.set(id, { level, bars, relayed: false });
+      if (level === 'poor') affected++;
+    }
+
+    const own = LiveKitService.toQuality(room.localParticipant.connectionQuality);
+    const self: SelfVerdict = {
+      // LiveKit reports that a link is bad, never why. 'degraded' says exactly
+      // that; claiming 'cpu' or 'bandwidth' would be inventing a diagnosis,
+      // and this is the field that sends someone off to reset a router.
+      cause: own.level === 'good' ? 'ok' : own.level === 'poor' ? 'degraded' : 'unknown',
+      level: own.level,
+      affected,
+      total: peers.size,
+    };
+
+    publishConnectionQuality(peers, self);
+  }
+
   private wireEvents(room: Room): void {
+    // Reported by the server rather than polled, so there is no timer here and
+    // nothing to tune.
+    room.on(RoomEvent.ConnectionQualityChanged, () => this.publishQuality(room));
+    room.on(RoomEvent.ParticipantConnected, () => this.publishQuality(room));
+    room.on(RoomEvent.ParticipantDisconnected, () => this.publishQuality(room));
+
     room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, pub: RemoteTrackPublication, participant: RemoteParticipant) => {
       // identity is the KaiSpace user id — see the token endpoint, which sets
       // it deliberately so a LiveKit participant can be matched back to a

@@ -264,6 +264,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       return null;
     };
 
+    // The same translation the streams use, handed to the service so it can
+    // key connection quality by player id too — MemberListPanel looks it up
+    // that way, and an account-id key misses on every lookup.
+    livekitService.setPlayerIdResolver(playerIdFor);
+
     livekitService.setOnRemoteStream((identity, stream) => {
       const id = playerIdFor(identity);
       if (!id) return;

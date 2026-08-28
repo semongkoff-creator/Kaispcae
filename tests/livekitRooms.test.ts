@@ -183,6 +183,36 @@ test('the share bitrate is raised above the default for text', () => {
   assert.ok(/maxFramerate: 15/.test(service));
 });
 
+test('the signal bars get a reading on this path too', () => {
+  // The mesh derived quality from getStats() on every peer connection. None of
+  // those connections exist here, so the bars sat at "no measurement" for every
+  // LiveKit room — a dash, which reads as a broken feature rather than a
+  // missing one.
+  assert.ok(/publishConnectionQuality\(peers, self\)/.test(service));
+  assert.ok(/RoomEvent\.ConnectionQualityChanged/.test(service), 'reported by the server, not polled');
+  // Leaving a room must not carry its peers into the next one.
+  assert.ok(/clearConnectionQuality\(\)/.test(service));
+});
+
+test('quality is keyed by player id, not account id', () => {
+  const app = readFileSync(resolve('client/src/App.tsx'), 'utf8');
+  const panel = readFileSync(resolve('client/src/components/ui/MemberListPanel.tsx'), 'utf8');
+
+  // MemberListPanel looks up peerQuality.get(p.id) — a player id. Publishing
+  // under the LiveKit identity would miss on every lookup and leave the bars
+  // empty while being fully populated: the same symptom this fixes.
+  assert.ok(/peerQuality\.get\(p\.id\)/.test(panel), 'the lookup key is the player id');
+  assert.ok(/this\.playerIdFor\?\.\(identity\)/.test(service), 'so the service must translate');
+  assert.ok(/setPlayerIdResolver\(playerIdFor\)/.test(app), 'and App supplies the translation');
+});
+
+test('LiveKit reports that a link is bad, never why', () => {
+  // SelfCause carries 'cpu' and 'bandwidth', and the mesh could fill them from
+  // the encoder's own limitation reason. Nothing here can, and this is the
+  // field that sends somebody off to reset a router.
+  assert.ok(/cause: own\.level === 'good' \? 'ok' : own\.level === 'poor' \? 'degraded'/.test(service));
+});
+
 // ── Fase D: wired into the app ─────────────────────────────────────────────
 
 test('the branch lives in useWebRTC, so App never sees two implementations', () => {
