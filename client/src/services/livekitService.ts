@@ -48,6 +48,11 @@ export interface ProximityEntry {
  */
 const MAX_VIDEO_SUBSCRIPTIONS = 6;
 
+// How often the connection-quality reading is re-published. Matches the mesh's
+// own sampling cadence, which is what ConnectionIndicator's comment already
+// describes to the reader.
+const QUALITY_REPUBLISH_MS = 5000;
+
 type RemoteStreamCb = (identity: string, stream: MediaStream) => void;
 type SpeakingCb = (identity: string, speaking: boolean) => void;
 type ConnectionCb = (state: 'connecting' | 'connected' | 'disconnected' | 'failed') => void;
@@ -61,6 +66,7 @@ class LiveKitService {
   private onRemoteScreenStream: RemoteStreamCb | null = null;
   private onRemoteScreenEnded: ((identity: string) => void) | null = null;
   private playerIdFor: ((identity: string) => string | null) | null = null;
+  private qualityTimer: ReturnType<typeof setInterval> | null = null;
   private onSpeakingChange: SpeakingCb | null = null;
   private onConnectionChange: ConnectionCb | null = null;
 
@@ -152,6 +158,10 @@ class LiveKitService {
     const room = this.room;
     this.room = null;
     this.roomSlug = null;
+    if (this.qualityTimer) {
+      clearInterval(this.qualityTimer);
+      this.qualityTimer = null;
+    }
     // Leaving a room must not carry its peers into the next one — same reason
     // webrtcService clears this on teardown.
     clearConnectionQuality();
@@ -269,11 +279,32 @@ class LiveKitService {
   }
 
   private wireEvents(room: Room): void {
-    // Reported by the server rather than polled, so there is no timer here and
-    // nothing to tune.
+    // Once immediately, so a steady room is not waiting on a change that never
+    // comes. Harmless if the roster has not arrived — the timer below retries.
+    this.publishQuality(room);
+
     room.on(RoomEvent.ConnectionQualityChanged, () => this.publishQuality(room));
     room.on(RoomEvent.ParticipantConnected, () => this.publishQuality(room));
     room.on(RoomEvent.ParticipantDisconnected, () => this.publishQuality(room));
+
+    // Those three events are not enough on their own, which is how the bars
+    // stayed at a dash after being wired up.
+    //
+    // ConnectionQualityChanged fires on CHANGE. Join a room where everyone is
+    // already present and every link is steady, and it may never fire at all —
+    // the first reading, the one that turns the dash into bars, never happens.
+    //
+    // And even a well-timed event can land too early to be usable: quality is
+    // keyed by player id, which comes from the game roster over the socket, on
+    // its own schedule. A participant LiveKit already knows about may not be in
+    // playerRecords yet, so the translation returns null, the map comes out
+    // empty, and nothing schedules a retry.
+    //
+    // A slow repeat settles both without needing to reason about either
+    // ordering. Reading participant.connectionQuality is a property access —
+    // the SFU has already done the measuring — so this costs nothing like the
+    // mesh's getStats() sweep, whose own 5s cadence this matches.
+    this.qualityTimer = setInterval(() => this.publishQuality(room), QUALITY_REPUBLISH_MS);
 
     room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, pub: RemoteTrackPublication, participant: RemoteParticipant) => {
       // identity is the KaiSpace user id — see the token endpoint, which sets

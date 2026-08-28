@@ -194,6 +194,29 @@ test('the signal bars get a reading on this path too', () => {
   assert.ok(/clearConnectionQuality\(\)/.test(service));
 });
 
+test('the first quality reading does not wait for a change that may never come', () => {
+  // Wiring the three events was not enough, and the bars stayed at a dash.
+  // ConnectionQualityChanged fires on CHANGE: join a room where everyone is
+  // already present and every link is steady, and it never fires at all.
+  const at = service.indexOf('room.on(RoomEvent.ConnectionQualityChanged');
+  assert.ok(at > 0);
+  assert.ok(
+    service.slice(Math.max(0, at - 400), at).includes('this.publishQuality(room);'),
+    'quality must be published once on connect, before any event',
+  );
+});
+
+test('a reading that lands before the roster is retried', () => {
+  // Quality is keyed by player id, which arrives over the socket on its own
+  // schedule. A participant LiveKit already knows about may not be in
+  // playerRecords yet — the translation returns null, the map comes out empty,
+  // and without a repeat nothing ever tries again.
+  assert.ok(/setInterval\(\(\) => this\.publishQuality\(room\), QUALITY_REPUBLISH_MS\)/.test(service));
+  assert.ok(/QUALITY_REPUBLISH_MS = 5000/.test(service), 'matching the mesh cadence the UI already documents');
+  // And stopped on the way out, or it outlives the room it was measuring.
+  assert.ok(/clearInterval\(this\.qualityTimer\)/.test(service));
+});
+
 test('quality is keyed by player id, not account id', () => {
   const app = readFileSync(resolve('client/src/App.tsx'), 'utf8');
   const panel = readFileSync(resolve('client/src/components/ui/MemberListPanel.tsx'), 'utf8');
