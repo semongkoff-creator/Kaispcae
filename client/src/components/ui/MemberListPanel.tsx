@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { X, ChevronDown, Search, ArrowRight, Mic, MicMute } from 'react-bootstrap-icons';
+import { X, ChevronDown, Search, ArrowRight, MicMuteFill } from 'react-bootstrap-icons';
+import { roleAtLeast } from '@virtualmeet/shared';
 import { api, ApiError } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { MANUAL_STATUSES, ManualStatus, PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
+import { ParticipantActionsMenu } from '@/components/ParticipantActionsMenu';
 
 interface MemberListPanelProps {
   localUserId: string;
@@ -13,15 +15,62 @@ interface MemberListPanelProps {
   onPickPresence: (status: ManualStatus) => void;
   hasMySeat: boolean;
   onMySeat: () => void;
+  // Same handler set ParticipantPanel already receives from the parent —
+  // threaded through here too so this list's ⋮ menu fires the identical
+  // actions. isGuest gates Summon/Slap the same way it does there.
+  isGuest?: boolean;
+  emitFollowRequest: (targetUserId: string) => void;
+  emitFollowUnfollow: () => void;
+  emitSummonUser: (nickname: string) => void;
+  emitSlap: (nickname: string) => void;
+  onStartDm?: (targetUserId: string) => void;
+  onReport?: (targetUserId: string, name: string) => void;
+  emitKick?: (targetUserId: string) => void;
+  emitForceMute?: (targetUserId: string) => void;
+  emitForcePull?: (targetUserId: string) => void;
+  emitSpotlight?: (targetUserId: string, active: boolean) => void;
 }
 
-export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRequest, onClose, manualStatus, onPickPresence, hasMySeat, onMySeat }: MemberListPanelProps) {
+export function MemberListPanel({
+  localUserId,
+  currentRoomSlug,
+  emitRosterListRequest,
+  onClose,
+  manualStatus,
+  onPickPresence,
+  hasMySeat,
+  onMySeat,
+  isGuest,
+  emitFollowRequest,
+  emitFollowUnfollow,
+  emitSummonUser,
+  emitSlap,
+  onStartDm,
+  onReport,
+  emitKick,
+  emitForceMute,
+  emitForcePull,
+  emitSpotlight,
+}: MemberListPanelProps) {
   const [people, setPeople] = useState<{ id: string; displayName: string }[] | null>(null);
   const [error, setError] = useState('');
   const roster = useGameStore((s) => s.roster);
+  const followInfo = useGameStore((s) => s.followInfo);
+  const mutedUserIds = useGameStore((s) => s.mutedUserIds);
+  const muteUser = useGameStore((s) => s.muteUser);
+  const unmuteUser = useGameStore((s) => s.unmuteUser);
+  const localRole = useGameStore((s) => s.localRole);
   const [statusPickerOpen, setStatusPickerOpen] = useState(false);
   const statusRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState('');
+
+  // Same admin+ gates as ParticipantPanel — Kick/ForceMute/ForcePull/
+  // Spotlight only render for admin+ viewers, everyone else never sees
+  // the option exist (props stay undefined rather than disabled).
+  const canKick = roleAtLeast(localRole, 'admin');
+  const canForceMute = roleAtLeast(localRole, 'admin');
+  const canForcePull = roleAtLeast(localRole, 'admin');
+  const canSpotlight = roleAtLeast(localRole, 'admin');
 
   useEffect(() => {
     if (!statusPickerOpen) return;
@@ -54,16 +103,16 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
     () => (search.trim() ? rows.filter((r) => r.displayName.toLowerCase().includes(search.trim().toLowerCase())) : rows),
     [rows, search],
   );
-  // Split into Online/Offline sections — rows arrive already online-first
-  // sorted, so this is just a partition, not a re-sort.
   const onlineRows = filteredRows.filter((r) => r.presence);
   const offlineRows = filteredRows.filter((r) => !r.presence);
   const orgLabel = currentRoomSlug.charAt(0).toUpperCase() + currentRoomSlug.slice(1);
+  const [onlineOpen, setOnlineOpen] = useState(true);
+  const [offlineOpen, setOfflineOpen] = useState(true);
 
   return (
     <div className="fixed inset-0 z-[100]" onMouseDown={onClose}>
       <div
-        className="absolute top-4 left-16 w-80 max-h-[85vh] bg-white dark:bg-gray-800 rounded-2xl shadow-2xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 flex flex-col"
+        className="fixed top-0 left-12 bottom-0 w-80 bg-white dark:bg-gray-800 shadow-2xl shadow-purple-100/50 dark:shadow-black/30 border-r border-purple-100 dark:border-gray-700 flex flex-col"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-5 pb-4 shrink-0">
@@ -73,7 +122,6 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
           </button>
         </div>
 
-        {/* Status + My Seat row */}
         <div className="flex items-center gap-2 px-5 pb-4 shrink-0">
           <span className="text-sm text-gray-500 dark:text-gray-400">Status</span>
           <div className="relative" ref={statusRef}>
@@ -117,7 +165,6 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
           )}
         </div>
 
-        {/* Search — icon on the right */}
         <div className="px-5 pb-5 shrink-0">
           <div className="relative">
             <input
@@ -149,19 +196,29 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
 
           {onlineRows.length > 0 && (
             <>
-              <p className="pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Online — {onlineRows.length}</p>
-              {onlineRows.map((r) => {
-                // presence.manualStatus / presence.micMuted are the fields
-                // this row needs from gameStore.roster — not wired up yet.
-                // Rendered defensively (icons just don't show) until the
-                // socket payload includes them; swap in the real field
-                // names here once they land.
+              <button
+                onClick={() => setOnlineOpen((v) => !v)}
+                className="w-full flex items-center justify-between pt-1 pb-1 cursor-pointer"
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Online — {onlineRows.length}</span>
+                <ChevronDown size={12} className={`text-gray-400 dark:text-gray-500 transition-transform ${onlineOpen ? '' : '-rotate-90'}`} />
+              </button>
+              {onlineOpen && onlineRows.map((r) => {
+                // presence.manualStatus / presence.micMuted / presence.spotlightActive
+                // are the fields this row needs from gameStore.roster — same
+                // assumption flagged before. Rendered defensively: whatever's
+                // missing just doesn't show, rather than crashing.
                 const status = (r.presence as any)?.manualStatus as ManualStatus | undefined;
                 const micMuted = (r.presence as any)?.micMuted as boolean | undefined;
+                const spotlightActive = (r.presence as any)?.spotlightActive as boolean | undefined;
+                const isFollowingThem = followInfo?.targetUserId === r.id;
+                const isMuted = mutedUserIds.has(r.id);
+                const isLocal = r.id === localUserId;
+
                 return (
                   <div key={r.id} className="flex items-center justify-between gap-3 py-2">
                     <p className="text-sm text-gray-900 dark:text-gray-100 truncate">
-                      {r.displayName}{r.id === localUserId ? ' (kamu)' : ''}
+                      {r.displayName}{isLocal ? ' (kamu)' : ''}
                     </p>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {status && (
@@ -170,11 +227,26 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
                           {PRESENCE_LABEL[status]}
                         </span>
                       )}
-                      {micMuted !== undefined && (
-                        micMuted
-                          ? <MicMute size={13} className="text-red-500" />
-                          : <Mic size={13} className="text-gray-400 dark:text-gray-500" />
+                      {micMuted && <MicMuteFill size={13} className="text-red-500" title="Mic mati" />}
+                      {!isLocal && (
+                        <ParticipantActionsMenu
+                          name={r.displayName}
+                          isFollowingThem={isFollowingThem}
+                          isMuted={isMuted}
+                          spotlightActive={spotlightActive}
+                          onFollow={() => emitFollowRequest(r.id)}
+                          onSummon={isGuest ? undefined : () => emitSummonUser(r.displayName)}
+                          onSlap={isGuest ? undefined : () => emitSlap(r.displayName)}
+                          onToggleMute={() => (isMuted ? unmuteUser(r.id) : muteUser(r.id))}
+                          onMessage={onStartDm ? () => onStartDm(r.id) : undefined}
+                          onReport={isGuest || !onReport ? undefined : () => onReport(r.id, r.displayName)}
+                          onKick={canKick && emitKick ? () => emitKick(r.id) : undefined}
+                          onForceMute={canForceMute && emitForceMute && !micMuted ? () => emitForceMute(r.id) : undefined}
+                          onForcePull={canForcePull && emitForcePull ? () => emitForcePull(r.id) : undefined}
+                          onSpotlight={canSpotlight && emitSpotlight ? () => emitSpotlight(r.id, !spotlightActive) : undefined}
+                        />
                       )}
+                      {isLocal && <span className="text-gray-400 dark:text-gray-500 text-[10px]">Kamu</span>}
                     </div>
                   </div>
                 );
@@ -184,8 +256,14 @@ export function MemberListPanel({ localUserId, currentRoomSlug, emitRosterListRe
 
           {offlineRows.length > 0 && (
             <>
-              <p className="pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Offline — {offlineRows.length}</p>
-              {offlineRows.map((r) => (
+              <button
+                onClick={() => setOfflineOpen((v) => !v)}
+                className="w-full flex items-center justify-between pt-3 pb-1 cursor-pointer"
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Offline — {offlineRows.length}</span>
+                <ChevronDown size={12} className={`text-gray-400 dark:text-gray-500 transition-transform ${offlineOpen ? '' : '-rotate-90'}`} />
+              </button>
+              {offlineOpen && offlineRows.map((r) => (
                 <div key={r.id} className="flex items-center justify-between gap-3 py-2">
                   <p className="text-sm text-gray-900 dark:text-gray-100 truncate">{r.displayName}</p>
                   <p className="text-xs shrink-0 text-gray-400 dark:text-gray-500">Offline</p>
