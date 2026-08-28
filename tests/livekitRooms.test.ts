@@ -288,6 +288,26 @@ test('you can see yourself on both paths', () => {
   }
 });
 
+test('your own tile does not wait for media to exist', () => {
+  const grid = readFileSync(resolve('client/src/components/ui/VideoGrid.tsx'), 'utf8');
+
+  // The mesh captured a getUserMedia stream on join and merely disabled its
+  // tracks, so localStream was non-null from the first frame. On the LiveKit
+  // path a muted mic publishes no track at all, so localStream is genuinely
+  // null until the user unmutes — and a `{localStream && <VideoTile …>}` guard
+  // hid your own tile for the whole session while everyone else's showed.
+  assert.equal(
+    /\{localStream && \(\s*<VideoTile/.test(grid), false,
+    'the local tile must not be gated on having a stream',
+  );
+  // Being in the room earns a tile; VideoTile picks video or initials from
+  // cameraOff. Same rule buildVideoTiles already applies to remote tiles.
+  assert.ok(/const showAvatar = .*isLocal \? !!cameraOff/.test(grid));
+  // And it has to count, or a room where nobody has media yet totals zero and
+  // the grid returns null — taking the tile with it.
+  assert.ok(/const totalTiles = 1 \+/.test(grid));
+});
+
 test('a local preview stream keeps its identity across renders', () => {
   // App reads these during render. A fresh MediaStream per call gives the
   // <video> a new object every frame, which resets srcObject and leaves the

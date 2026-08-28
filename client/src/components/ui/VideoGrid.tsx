@@ -548,7 +548,10 @@ export function VideoGrid({ localStream, localScreenStream, remoteStreams, remot
   const featured = [...screenEntries, ...cameraEntries].find((s) => s.key === featuredKey) ?? null;
   const otherScreens = screenEntries.filter((s) => s.key !== featured?.key);
 
-  const totalTiles = (localStream ? 1 : 0) + (localScreenStream ? 1 : 0) + videoTiles.length
+  // The local tile is unconditional now, so it always counts — otherwise a
+  // room where nobody has media yet totals 0 and the whole grid returns null,
+  // taking the tile this change exists to show with it.
+  const totalTiles = 1 + (localScreenStream ? 1 : 0) + videoTiles.length
     + videoTiles.filter((t) => t.screenStream).length;
 
   // Nothing to show (or nothing to hide) — same "don't render a control for
@@ -621,9 +624,21 @@ export function VideoGrid({ localStream, localScreenStream, remoteStreams, remot
   // are, so there's no second copy to keep in sync.
   const cameraTiles = (
     <>
-      {localStream && (
-        <VideoTile name="You" avatarName={profiles.get(localUserId)?.name || localName} photoUrl={profiles.get(localUserId)?.photo ?? undefined} stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} onEnlarge={() => setFeaturedKey('local-camera')} />
-      )}
+      {/* Always, not only when a local stream exists.
+          On the mesh, initMedia captured a getUserMedia stream on join and
+          simply disabled its tracks, so localStream was non-null from the
+          first frame and this guard never had a false case to expose. On the
+          LiveKit path nothing is published until the user unmutes — a muted
+          mic publishes no track at all — so localStream is legitimately null
+          and this hid your own tile for the whole session while everyone
+          else's showed.
+
+          VideoTile already handles it: for isLocal it decides between video
+          and initials from cameraOff, not from whether a stream arrived (see
+          its showAvatar). This is the same rule buildVideoTiles applies to
+          remote tiles, and for the same reason — being in the room is what
+          earns a tile, not having media flowing yet. */}
+      <VideoTile name="You" avatarName={profiles.get(localUserId)?.name || localName} photoUrl={profiles.get(localUserId)?.photo ?? undefined} stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} onEnlarge={() => setFeaturedKey('local-camera')} />
       {videoTiles.map((tile) => {
         const uid = playerRecords[tile.id]?.userId;
         return (
