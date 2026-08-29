@@ -7,7 +7,7 @@ import {
   CONSENT_REQUEST_TIMEOUT_MS,
   RemoteHelpRespondPayload,
   RemoteHelpCredentialPayload,
-} from '@virtualmeet/shared';
+} from '@kaispace/shared';
 import { getPlayerName } from './roomHandler';
 import { getPlayers } from '../store/roomStore';
 import { getPrisma } from '../lib/prisma';

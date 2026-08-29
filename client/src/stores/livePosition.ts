@@ -1,4 +1,4 @@
-import { Direction } from '@virtualmeet/shared';
+import { Direction } from '@kaispace/shared';
 
 // The local avatar's position, live, outside React.
 //

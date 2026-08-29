@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { MutableRefObject } from 'react';
-import { TILE_SIZE, WorkMode } from '@virtualmeet/shared';
+import { TILE_SIZE, WorkMode } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { livePos } from '@/stores/livePosition';
 import { findZoneAt } from '@/hooks/useProximity';

@@ -8,7 +8,7 @@
 // restart or leak across rooms, so the key is room-scoped (a door at the
 // same x,y in a different room is a different door).
 
-import { RoomTile, DoorAreaRect, isPointInImpassableArea } from '@virtualmeet/shared';
+import { RoomTile, DoorAreaRect, isPointInImpassableArea } from '@kaispace/shared';
 
 const unlockedDoors = new Map<string, Set<string>>(); // socketId -> Set of "room:x:y"
 

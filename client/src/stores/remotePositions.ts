@@ -36,7 +36,7 @@ const targets = new Map<string, MovementSnapshot[]>();
 // When interpolateRemotePositions last ran, for the catch-up limiter below.
 let lastInterpolatedAt = 0;
 
-import { PLAYER_RUN_SPEED, TILE_SIZE } from '@virtualmeet/shared';
+import { PLAYER_RUN_SPEED, TILE_SIZE } from '@kaispace/shared';
 
 // Rendering trails receipt by this much so there is always a snapshot on
 // either side of the render time to interpolate between; without it every
@@ -192,7 +192,7 @@ export function pendingSnapshotCount(): number {
 // here lets the render loop read it directly (it was already copying it into
 // a ref) while React consumers that genuinely re-render on it — the video
 // grid, the meeting view — keep using the state copy in App.
-let proximity: import('@virtualmeet/shared').ProximityPlayer[] = [];
+let proximity: import('@kaispace/shared').ProximityPlayer[] = [];
 
 // React consumers of the snapshot (the video grid, the meeting view, PiP).
 //
@@ -221,10 +221,10 @@ export function notifyProximityChanged(): void {
   for (const listener of proximityListeners) listener();
 }
 
-export function setProximitySnapshot(next: import('@virtualmeet/shared').ProximityPlayer[]): void {
+export function setProximitySnapshot(next: import('@kaispace/shared').ProximityPlayer[]): void {
   proximity = next;
 }
 
-export function getProximitySnapshot(): import('@virtualmeet/shared').ProximityPlayer[] {
+export function getProximitySnapshot(): import('@kaispace/shared').ProximityPlayer[] {
   return proximity;
 }

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { ProximityPlayer } from '@virtualmeet/shared';
+import { ProximityPlayer } from '@kaispace/shared';
 import { getProximitySnapshot, subscribeProximity } from '@/stores/remotePositions';
 
 /**

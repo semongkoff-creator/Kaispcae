@@ -10,7 +10,7 @@
 // jogging on the spot forever, with nothing in the system to clean it up —
 // the flag only ever cleared on an explicit stop or on disconnect.
 //
-// Standalone module, no socket.io or @virtualmeet/shared imports, matching
+// Standalone module, no socket.io or @kaispace/shared imports, matching
 // movementPayload.ts and movementSequence.ts — that is what keeps this
 // directly testable (the shared barrel pulls in an ESM build of rrule that
 // the test runner can't load).

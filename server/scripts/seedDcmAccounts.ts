@@ -21,7 +21,7 @@ import ExcelJS from 'exceljs';
 import { getPrisma } from '../src/lib/prisma';
 import { ensureGroupConversation } from '../src/lib/conversations';
 import { DEFAULT_ORG_ID } from '../src/lib/defaultOrg';
-import { createRoomLayoutFromTemplate } from '@virtualmeet/shared';
+import { createRoomLayoutFromTemplate } from '@kaispace/shared';
 
 const SLUG = 'dcm';
 const ROOM_NAME = 'DCM';

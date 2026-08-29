@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, expandOccurrences, findZoneEntryTile, TILE_SIZE, type Occurrence } from '@virtualmeet/shared';
+import { SocketEvents, expandOccurrences, findZoneEntryTile, TILE_SIZE, type Occurrence } from '@kaispace/shared';
 import { getPlayers, updatePlayerPosition, getCachedTiles, getCachedZones, getCachedImpassableAreas } from '../store/roomStore';
 import { isZoneLocked, admitUserToZone } from './zoneLock';
 

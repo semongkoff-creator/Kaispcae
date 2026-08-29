@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { XLg, ChatDotsFill, PersonWalking, ArrowRepeat, Display } from 'react-bootstrap-icons';
-import { AvatarConfig } from '@virtualmeet/shared';
+import { AvatarConfig } from '@kaispace/shared';
 import { Avatar } from '@/components/Messenger/chatVisuals';
 
 interface PlayerCardProps {
