@@ -32,13 +32,13 @@ export function CameraButton({ enabled, onToggle }: CameraButtonProps) {
       >
         <button
           onClick={onToggle}
-          // Same active-state convention as MicButton: camera on = solid purple
-          // (the capability is actively broadcasting), off = glass + red icon.
-          className={`flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
-            enabled
-              ? 'bg-login-accent border-login-accent shadow-purple-500/30'
-              : 'bg-white/90 dark:bg-gray-800/90 border-login-border-soft dark:border-white/10 shadow-purple-500/10'
-          }`}
+          // Flat/borderless toolbar restyle (see MicButton's own comment) —
+          // no per-button background pill any more. camera.svg is already
+          // the same dark gray (#6E6D72) every other flat icon in this bar
+          // uses, so "on" needs no extra styling; "off" keeps its existing
+          // red icon (no background color to lose here — it was never
+          // colored by state, only "on" had the purple pill).
+          className="flex items-center justify-center w-10 h-10 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
         >
           {/* No "camera off" variant exists in the real asset set — kept the
               existing red react-bootstrap-icons glyph for that state. */}

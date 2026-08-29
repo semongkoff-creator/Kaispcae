@@ -26,13 +26,26 @@ export function ScreenShareButton({ sharing, onToggle }: ScreenShareButtonProps)
     >
       <button
         onClick={onToggle}
-        className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
-          sharing ? 'bg-login-accent border-login-accent shadow-purple-500/30' : 'bg-white/90 dark:bg-gray-800/90 border-login-border-soft dark:border-white/10 shadow-purple-500/10'
-        }`}
+        // The one exception to the rest of this bar's flat/borderless icons
+        // (see MicButton's own comment on that restyle) — this button keeps
+        // a solid dark fill in BOTH states, not just while sharing, per the
+        // reference design. rounded-xl (a real rounded square), not
+        // rounded-full like every circular button this bar used to have.
+        className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gray-800 dark:bg-gray-900 shadow-md transition-all hover:scale-105 hover:bg-gray-700 dark:hover:bg-gray-800 cursor-pointer"
       >
-        {sharing ? <DisplayFill className="text-white" size={16} /> : <img src="/assets/img/icons/share_screen.svg" width={16} height={16} alt="" />}
+        {sharing ? (
+          <DisplayFill className="text-white" size={16} />
+        ) : (
+          // share_screen.svg is two-tone by default (dark gray monitor body,
+          // white arrow) — meant for a light background. brightness-0 invert
+          // flattens it to a solid white silhouette instead, matching
+          // "white icon on the dark square" (same filter trick used
+          // elsewhere for icons that need forcing to white — see the
+          // top-left pill's Status/My Seat buttons in App.tsx).
+          <img src="/assets/img/icons/share_screen.svg" width={16} height={16} alt="" className="brightness-0 invert" />
+        )}
         {sharing && (
-          <div className="absolute inset-0 rounded-full border-2 border-purple-400 animate-pulse" />
+          <div className="absolute inset-0 rounded-xl border-2 border-purple-400 animate-pulse" />
         )}
       </button>
     </Tooltip>

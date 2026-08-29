@@ -2717,7 +2717,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             z-index comment) — flipped from an earlier version where this
             bar stayed on top and clickable through the overlap; that read
             as the toolbar barging in front of chat, not a feature. */}
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2">
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-4 py-2.5">
           <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
           <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
           <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
@@ -2730,7 +2730,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
               gate as this bar, just relocated, not removed from the set.
               Chat is its own standalone bottom-right button again (see
               ChatPanel.tsx), not part of this bar. */}
-          {!isGuest && <HandButton raised={!!localHandRaised} onToggle={handleHandToggle} />}
+          {/* Divider — separates the three call controls above (mic/camera/
+              share) from the group/raise-hand/emoji cluster below, per the
+              reference design. */}
+          <div className="w-px h-5 bg-gray-200 dark:bg-gray-600 shrink-0" />
           {/* Add Media — reuses AttachmentMenuButton (ChatPanel/MessengerApp's
               own Gambar/Video/Dokumen picker), not a new upload component.
               Its onFile is a placeholder: this toolbar has no single "active
@@ -2745,8 +2748,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             title="Add Media"
             detail="Kirim gambar, video, atau dokumen."
             icon={<img src="/assets/img/icons/add_media.svg" width={16} height={16} alt="" />}
-            buttonClassName="flex items-center justify-center w-10 h-10 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-login-border-soft dark:border-white/10 shadow-lg shadow-purple-500/10 transition-all hover:scale-105 cursor-pointer"
+            buttonClassName="flex items-center justify-center w-10 h-10 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
           />
+          {/* Raise Hand — moved here (after the group icon, before emoji)
+              per the reference layout; same handler/behavior as before,
+              only its position and (via HandButton's own restyle) its
+              background changed. */}
+          {!isGuest && <HandButton raised={!!localHandRaised} onToggle={handleHandToggle} />}
           {!isGuest && <EmojiButton open={showEmoteWheel} onToggle={() => setShowEmoteWheel((v) => !v)} />}
         </div>
       </>

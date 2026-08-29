@@ -41,32 +41,23 @@ export function MicButton({ muted, onToggle }: MicButtonProps) {
       >
         <button
           onClick={onToggle}
-          // Three distinct states, not two — clarified after the first pass
-          // (a ring around an always-green icon) turned out unclear live:
-          // idle/unmuted is neutral gray (glass surface, no ring), actively
-          // speaking fills the icon in green (MicFill, matching MicMuteFill's
-          // already-established "outline vs filled" pairing elsewhere in the
-          // app — MiniMode/MemberListPanel/VideoGrid/ParticipantActionsMenu
-          // all use MicMuteFill for muted), and muted swaps to the same
-          // slashed MicMuteFill glyph everywhere else uses, in red — not the
-          // plain mic.svg + red ring this used before.
-          className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer bg-white/90 dark:bg-gray-800/90 ${
-            muted
-              ? 'border-login-border-soft dark:border-white/10 shadow-purple-500/10'
-              : speaking
-              ? 'border-green-500 shadow-green-500/40'
-              : 'border-login-border-soft dark:border-white/10 shadow-purple-500/10'
-          }`}
+          // Flat/borderless toolbar restyle — no per-button background pill
+          // any more (that's now the shared outer bar's job, see App.tsx),
+          // just a plain glyph plus a subtle hover tint like every other
+          // flat button in this bar. The three-state COLOR distinction this
+          // already had is kept exactly (muted=red, speaking=green) — only
+          // the *resting* (unmuted, not speaking) color changed, from the
+          // old glass-pill gray to the same plain dark gray/black every
+          // other flat icon in the bar uses.
+          className="relative flex items-center justify-center w-10 h-10 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
         >
           {muted ? (
             <MicMuteFill size={16} className="text-red-500" />
           ) : speaking ? (
             <MicFill size={16} className="text-green-500" />
           ) : (
-            <Mic size={16} className="text-gray-500 dark:text-gray-400" />
+            <Mic size={16} className="text-gray-700 dark:text-gray-300" />
           )}
-          {muted && <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-pulse" />}
-          {speaking && <div className="absolute inset-0 rounded-full border-2 border-green-500 animate-pulse" />}
         </button>
       </Tooltip>
       <DeviceCaret kind="mic" label="Mikrofon" />

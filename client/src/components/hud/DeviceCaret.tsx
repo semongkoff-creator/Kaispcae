@@ -62,7 +62,12 @@ export function DeviceCaret({ kind, label }: DeviceCaretProps) {
             e.stopPropagation();
             setOpen((v) => !v);
           }}
-          className="flex items-center justify-center w-5 h-10 rounded-r-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-l-0 border-login-border-soft dark:border-white/10 text-gray-500 dark:text-gray-300 hover:bg-login-surface dark:hover:bg-gray-700 cursor-pointer -ml-1"
+          // Flat/borderless toolbar restyle — this used to visually fuse
+          // onto its sibling Mic/Camera button as one glass pill (rounded
+          // only on the right, no left border, negative margin closing the
+          // gap). That pill doesn't exist any more (see MicButton's own
+          // comment), so this is just its own small flat hit target now.
+          className="flex items-center justify-center w-5 h-10 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer -ml-1.5"
         >
           <ChevronDown size={10} />
         </button>
