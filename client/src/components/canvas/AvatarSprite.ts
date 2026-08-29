@@ -1,5 +1,5 @@
 import { Avatar, BodyShape, Accessory, Expression, Direction, TILE_SIZE } from '@kaispace/shared';
-import { drawSpriteFrame } from '@/utils/spriteLoader';
+import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
 import { measureTextCached } from './textMetrics';
 import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
 import { truncateName } from '@/utils/truncateName';
@@ -483,23 +483,32 @@ function drawPremadeAvatar(
 // ─── Custom uploaded character ─────────────────────────────────────
 //
 // A user-supplied sprite sheet, unlike the Character Generator/premade packs
-// above: 4 directions x 4 walk frames as separate pre-cropped, already-
+// above: 4 directions x N walk frames as separate pre-cropped, already-
 // transparent PNGs (client/public/assets/characters/custom/<id>/
-// <direction>_<0-3>.png), not one packed grid sheet. No idle-specific or
-// sit-specific art exists for this kind of source — both fall back to frame
-// 0 (a natural standing pose), the same fallback posture the LimeZu pack
-// itself uses for ITS OWN gaps (e.g. 'down'/'left' sit poses there reuse
-// idle). No flipX mirroring either: unlike LimeZu's sit pose (which only has
-// 'right'/'up' art and mirrors 'right' for 'left'), this source has real
-// frames for all four directions.
+// <direction>_<0..N-1>.png), not one packed grid sheet. No flipX mirroring:
+// unlike LimeZu's sit pose (which only has 'right'/'up' art and mirrors
+// 'right' for 'left'), every custom character added so far has real frames
+// for all four directions.
+//
+// Frame count AND which frames actually look like walking (as opposed to a
+// standing/idle-ish pose baked in as one of the numbered frames) differ per
+// character — this is upload-sourced art, not a designed sprite pack, so
+// there's no single convention to assume. office-worker-1's frame 0 is a
+// distinct feet-together standing pose while 1/2/3 are near-duplicate
+// mid-stride poses (confirmed by inspecting the actual frames); cycling
+// through all 4 while moving meant every lap visibly snapped back to a dead
+// stop. schoolgirl-1, by contrast, has a real 3-phase alternating gait for
+// left/right (checked the same way) — excluding a frame there would throw
+// away a walk cycle that already works. So walk frames are an explicit
+// per-character list rather than a single "skip frame 0" rule; idle/sit
+// (no dedicated art for either) always falls back to frame 0, the same
+// fallback posture the LimeZu pack itself uses for its own gaps.
 const CUSTOM_BASE = '/assets/characters/custom';
-// Every frame was cropped to the SAME shared bounding box (see the
-// processing script this asset went through) — 106x232 for office-worker-1.
-// If a differently-sized custom character is ever added, this stops being a
-// single shared constant; cross that bridge when it happens.
-const CUSTOM_FRAME_WIDTH = 106;
-const CUSTOM_FRAME_HEIGHT = 232;
-const CUSTOM_FRAMES_PER_DIRECTION = 4;
+const CUSTOM_WALK_FRAMES: Record<string, number[]> = {
+  'office-worker-1': [1, 2, 3],
+  'schoolgirl-1': [0, 1, 2],
+};
+const CUSTOM_DEFAULT_WALK_FRAMES = [0, 1, 2, 3];
 
 function drawCustomAvatar(
   ctx: CanvasRenderingContext2D,
@@ -512,25 +521,34 @@ function drawCustomAvatar(
   isRunning: boolean,
   displaySize: number = SPRITE_DISPLAY_SIZE,
 ): boolean {
-  const animating = isMoving;
+  const walkFrames = CUSTOM_WALK_FRAMES[customSpriteId] ?? CUSTOM_DEFAULT_WALK_FRAMES;
   const frameMs = isRunning ? RUN_FRAME_MS : WALK_FRAME_MS;
-  const frame = animating ? Math.floor(timestamp / frameMs) % CUSTOM_FRAMES_PER_DIRECTION : 0;
+  const frame = isMoving ? walkFrames[Math.floor(timestamp / frameMs) % walkFrames.length] : 0;
+  const src = `${CUSTOM_BASE}/${customSpriteId}/${direction}_${frame}.png`;
+
+  // Dimensions read from the loaded image itself, not a hardcoded per-
+  // character constant — every character's frames are their own size (this
+  // one cropped to a shared bbox per character, not a shared size ACROSS
+  // characters), and drawSpriteFrame needs a known cellWidth/cellHeight
+  // upfront, which only getSpriteImage's already-decoded <img> can give.
+  const img = getSpriteImage(src);
+  if (!img) return false;
 
   // Match LimeZu's rendered HEIGHT (not width) so this character doesn't
   // read as freakishly tall/short next to everyone else — this source art's
-  // own aspect ratio (106x232, tall and narrow) is very different from
-  // LimeZu's (32x44), so reusing displaySize as the WIDTH like
-  // drawPremadeAvatar does would make this character over 50% taller than
-  // its neighbors at the same displaySize. Deriving width from height (this
-  // sheet's own ratio) instead keeps on-screen height consistent across
-  // every avatar in the room.
+  // own aspect ratio is very different from LimeZu's (32x44), so reusing
+  // displaySize as the WIDTH like drawPremadeAvatar does would make a
+  // tall/narrow custom character read as much taller than its neighbors at
+  // the same displaySize. Deriving width from height (this image's own
+  // ratio) instead keeps on-screen height consistent across every avatar in
+  // the room, whatever that character's native proportions are.
   const displayHeight = displaySize * (FRAME_VISUAL_HEIGHT / FRAME_SIZE);
-  const displayWidth = displayHeight * (CUSTOM_FRAME_WIDTH / CUSTOM_FRAME_HEIGHT);
+  const displayWidth = displayHeight * (img.naturalWidth / img.naturalHeight);
   const dx = Math.round(cx - displayWidth / 2);
   const dy = Math.round(cy + displaySize / 2 - displayHeight);
 
-  return drawSpriteFrame(ctx, `${CUSTOM_BASE}/${customSpriteId}/${direction}_${frame}.png`, {
-    srcX: 0, srcY: 0, cellWidth: CUSTOM_FRAME_WIDTH, cellHeight: CUSTOM_FRAME_HEIGHT,
+  return drawSpriteFrame(ctx, src, {
+    srcX: 0, srcY: 0, cellWidth: img.naturalWidth, cellHeight: img.naturalHeight,
     dx, dy, dWidth: displayWidth, dHeight: displayHeight,
   });
 }

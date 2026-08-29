@@ -477,4 +477,5 @@ export const PREMADE_CHARACTERS: string[] = [
 // box and background-removed (see AvatarSprite.ts's drawCustomAvatar).
 export const CUSTOM_CHARACTERS: string[] = [
   "office-worker-1",
+  "schoolgirl-1",
 ];
