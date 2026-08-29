@@ -27,14 +27,18 @@ export function ScreenShareButton({ sharing, onToggle }: ScreenShareButtonProps)
       <button
         onClick={onToggle}
         // The one exception to the rest of this bar's flat/borderless icons
-        // (see MicButton's own comment on that restyle) — this button keeps
-        // a solid fill in BOTH states, not just while sharing. Round (not
-        // the earlier rounded-square) and the app's own accent blue
-        // (login-accent, #717BD8 — already used everywhere else in this app
-        // for "active/accent" fills, not a new one-off color), matching the
-        // reference screenshot exactly rather than the dark-square guess
-        // from the previous pass.
-        className="relative flex items-center justify-center w-9 h-9 rounded-full bg-login-accent shadow-md transition-all hover:scale-105 hover:brightness-110 cursor-pointer"
+        // (see MicButton's own comment on that restyle) — a solid filled
+        // ROUNDED-SQUARE (back to this from a circle — a later reference
+        // crop showed clearly rounded corners, not a full circle, matching
+        // the very first description of this button before two rounds of
+        // guessing at shape/color from cropped screenshots). Fill color
+        // follows the app's own established gray/green pair (mic.svg
+        // #6E6D72 / mic_on.svg #54D678 — see MicButton): gray at rest, green
+        // while actively sharing, mirroring how Mic itself distinguishes
+        // idle from active.
+        className={`relative flex items-center justify-center w-9 h-9 rounded-xl shadow-md transition-all hover:scale-105 hover:brightness-110 cursor-pointer ${
+          sharing ? 'bg-[#54D678]' : 'bg-[#6E6D72]'
+        }`}
       >
         {sharing ? (
           <DisplayFill className="text-white" size={15} />
@@ -42,13 +46,13 @@ export function ScreenShareButton({ sharing, onToggle }: ScreenShareButtonProps)
           // share_screen.svg is two-tone by default (dark gray monitor body,
           // white arrow) — meant for a light background. brightness-0 invert
           // flattens it to a solid white silhouette instead, matching
-          // "white icon on the accent circle" (same filter trick used
+          // "white icon on the filled square" (same filter trick used
           // elsewhere for icons that need forcing to white — see the
           // top-left pill's Status/My Seat buttons in App.tsx).
           <img src="/assets/img/icons/share_screen.svg" width={15} height={15} alt="" className="brightness-0 invert" />
         )}
         {sharing && (
-          <div className="absolute inset-0 rounded-full border-2 border-purple-300 animate-pulse" />
+          <div className="absolute inset-0 rounded-xl border-2 border-green-300 animate-pulse" />
         )}
       </button>
     </Tooltip>

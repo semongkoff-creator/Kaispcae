@@ -2717,12 +2717,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             z-index comment) — flipped from an earlier version where this
             bar stayed on top and clickable through the overlap; that read
             as the toolbar barging in front of chat, not a feature. */}
-        {/* Border thickened + switched to the app's own accent blue
-            (login-accent) and the whole bar tightened up (gap-3->gap-2,
-            px-4->px-3) to match the reference screenshot — the previous
-            pass's subtle purple-200/60 hairline and looser spacing read as
-            noticeably bigger/looser than the actual target. */}
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border-2 border-login-accent/70 dark:border-login-accent/50 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2">
+        {/* Border reverted from the accent-blue guess a previous pass made —
+            that blue almost certainly came from a Figma canvas selection
+            outline on the reference screenshot, not real UI (confirmed by
+            Screen Share also turning out to be gray/green, not blue, per
+            the app's own mic.svg/mic_on.svg color pair — see
+            ScreenShareButton's own comment). Back to a plain neutral
+            hairline; the tightened gap/padding from that same pass stays,
+            since compactness itself wasn't in question. */}
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2">
           <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
           <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
           <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />

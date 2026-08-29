@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Mic, MicFill, MicMuteFill } from 'react-bootstrap-icons';
+import { MicMuteFill } from 'react-bootstrap-icons';
 import { isTypingTarget } from '@/utils/hotkeys';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { DeviceCaret } from './DeviceCaret';
@@ -52,11 +52,22 @@ export function MicButton({ muted, onToggle }: MicButtonProps) {
           className="relative flex items-center justify-center w-9 h-9 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
         >
           {muted ? (
+            // No dedicated "muted" asset exists in the real icon pack (only
+            // mic.svg/mic_on.svg, gray/green — see the other two branches),
+            // so this one stays a react-bootstrap-icons glyph in red — the
+            // same MicMuteFill every other muted-mic indicator in this app
+            // already uses (MiniMode/MemberListPanel/VideoGrid/
+            // ParticipantActionsMenu).
             <MicMuteFill size={15} className="text-red-500" />
           ) : speaking ? (
-            <MicFill size={15} className="text-green-500" />
+            // mic_on.svg is already the exact green (#54D678) this app's own
+            // asset pack uses for "on/active" — using the real file instead
+            // of a react-icons approximation.
+            <img src="/assets/img/icons/mic_on.svg" width={15} height={15} alt="" />
           ) : (
-            <Mic size={15} className="text-gray-700 dark:text-gray-300" />
+            // mic.svg is already the same dark gray (#6E6D72) every other
+            // resting icon in this bar uses.
+            <img src="/assets/img/icons/mic.svg" width={15} height={15} alt="" />
           )}
         </button>
       </Tooltip>
