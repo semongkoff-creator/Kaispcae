@@ -162,10 +162,10 @@ auth.post('/register', registerRateLimit, validate(registerSchema), async (req, 
 // Organization AND its founding admin User atomically. This is the only
 // self-serve way to get a new org today; OrgInvite (lib/orgInvite.ts)
 // only grows membership within an org that already exists. Deliberately
-// reuses authRateLimit (not a separate limiter) — this mints a new
+// reuses registerRateLimit (not a separate limiter) — this mints a new
 // tenant AND a new account in one request, at least as abuse-sensitive
 // as plain registration.
-auth.post('/create-organization', authRateLimit, validate(createOrganizationSchema), async (req, res: Response) => {
+auth.post('/create-organization', registerRateLimit, validate(createOrganizationSchema), async (req, res: Response) => {
   try {
     const { orgName, email, password, displayName } = req.body;
     const prisma = getPrisma();
