@@ -1964,9 +1964,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           <Tooltip label="Status" detail="Lihat & ubah statusmu, dan siapa saja yang online.">
             <button
               onClick={() => openPanel('memberList')}
-              className="pointer-events-auto w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800 border border-login-border-soft dark:border-gray-700 shadow-sm"
+              className="pointer-events-auto w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer bg-green-500 hover:bg-green-600 shadow-sm"
             >
-              <img src="/assets/img/icons/emoticon.svg" width={14} height={14} alt="" />
+              {/* brightness-0 invert forces the icon's own baked-in dark-gray
+                  fill to pure white — emoticon.svg is shared with ChatPanel/
+                  EmojiButton, so recoloring the asset itself would repaint
+                  those too; this filter only affects this one <img>. */}
+              <img src="/assets/img/icons/emoticon.svg" width={14} height={14} alt="" className="brightness-0 invert" />
             </button>
           </Tooltip>
         )}
@@ -1974,9 +1978,9 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           <Tooltip label="Ke Kursi Saya" detail="Teleport langsung ke kursi tetapmu di room ini.">
             <button
               onClick={handleMySeat}
-              className="pointer-events-auto w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800 border border-login-border-soft dark:border-gray-700 shadow-sm"
+              className="pointer-events-auto w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer bg-green-500 hover:bg-green-600 shadow-sm"
             >
-              <img src="/assets/img/icons/back_to_seat.svg" width={14} height={14} alt="" />
+              <img src="/assets/img/icons/back_to_seat.svg" width={14} height={14} alt="" className="brightness-0 invert" />
             </button>
           </Tooltip>
         )}

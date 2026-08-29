@@ -92,6 +92,8 @@ export function drawAvatar(
     renderedSprite = drawPremadeAvatar(ctx, cx, cy, config.premadeId, avatar.direction, avatar.isMoving, timestamp, !!avatar.isRunning, spriteSize, !!avatar.isSitting);
   } else if (config?.spriteMode === 'layered' && config.bodyId) {
     renderedSprite = drawLayeredAvatar(ctx, cx, cy, config, avatar.direction, avatar.isMoving, timestamp, !!avatar.isRunning, spriteSize, !!avatar.isSitting);
+  } else if (config?.spriteMode === 'custom' && config.customSpriteId) {
+    renderedSprite = drawCustomAvatar(ctx, cx, cy, config.customSpriteId, avatar.direction, avatar.isMoving, timestamp, !!avatar.isRunning, spriteSize);
   }
 
   if (!renderedSprite) {
@@ -476,6 +478,61 @@ function drawPremadeAvatar(
   });
   if (flipX) ctx.restore();
   return drew;
+}
+
+// ─── Custom uploaded character ─────────────────────────────────────
+//
+// A user-supplied sprite sheet, unlike the Character Generator/premade packs
+// above: 4 directions x 4 walk frames as separate pre-cropped, already-
+// transparent PNGs (client/public/assets/characters/custom/<id>/
+// <direction>_<0-3>.png), not one packed grid sheet. No idle-specific or
+// sit-specific art exists for this kind of source — both fall back to frame
+// 0 (a natural standing pose), the same fallback posture the LimeZu pack
+// itself uses for ITS OWN gaps (e.g. 'down'/'left' sit poses there reuse
+// idle). No flipX mirroring either: unlike LimeZu's sit pose (which only has
+// 'right'/'up' art and mirrors 'right' for 'left'), this source has real
+// frames for all four directions.
+const CUSTOM_BASE = '/assets/characters/custom';
+// Every frame was cropped to the SAME shared bounding box (see the
+// processing script this asset went through) — 106x232 for office-worker-1.
+// If a differently-sized custom character is ever added, this stops being a
+// single shared constant; cross that bridge when it happens.
+const CUSTOM_FRAME_WIDTH = 106;
+const CUSTOM_FRAME_HEIGHT = 232;
+const CUSTOM_FRAMES_PER_DIRECTION = 4;
+
+function drawCustomAvatar(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  customSpriteId: string,
+  direction: Direction,
+  isMoving: boolean,
+  timestamp: number,
+  isRunning: boolean,
+  displaySize: number = SPRITE_DISPLAY_SIZE,
+): boolean {
+  const animating = isMoving;
+  const frameMs = isRunning ? RUN_FRAME_MS : WALK_FRAME_MS;
+  const frame = animating ? Math.floor(timestamp / frameMs) % CUSTOM_FRAMES_PER_DIRECTION : 0;
+
+  // Match LimeZu's rendered HEIGHT (not width) so this character doesn't
+  // read as freakishly tall/short next to everyone else — this source art's
+  // own aspect ratio (106x232, tall and narrow) is very different from
+  // LimeZu's (32x44), so reusing displaySize as the WIDTH like
+  // drawPremadeAvatar does would make this character over 50% taller than
+  // its neighbors at the same displaySize. Deriving width from height (this
+  // sheet's own ratio) instead keeps on-screen height consistent across
+  // every avatar in the room.
+  const displayHeight = displaySize * (FRAME_VISUAL_HEIGHT / FRAME_SIZE);
+  const displayWidth = displayHeight * (CUSTOM_FRAME_WIDTH / CUSTOM_FRAME_HEIGHT);
+  const dx = Math.round(cx - displayWidth / 2);
+  const dy = Math.round(cy + displaySize / 2 - displayHeight);
+
+  return drawSpriteFrame(ctx, `${CUSTOM_BASE}/${customSpriteId}/${direction}_${frame}.png`, {
+    srcX: 0, srcY: 0, cellWidth: CUSTOM_FRAME_WIDTH, cellHeight: CUSTOM_FRAME_HEIGHT,
+    dx, dy, dWidth: displayWidth, dHeight: displayHeight,
+  });
 }
 
 // ─── Body shapes ──────────────────────────────────────────────────

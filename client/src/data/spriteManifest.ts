@@ -471,3 +471,10 @@ export const PREMADE_CHARACTERS: string[] = [
   "Premade_Character_32x32_19.png",
   "Premade_Character_32x32_20.png",
 ];
+
+// Folder names within client/public/assets/characters/custom/<id>/ — each
+// holding {down,left,right,up}_{0..3}.png, pre-cropped to a shared bounding
+// box and background-removed (see AvatarSprite.ts's drawCustomAvatar).
+export const CUSTOM_CHARACTERS: string[] = [
+  "office-worker-1",
+];

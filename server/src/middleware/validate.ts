@@ -68,6 +68,7 @@ export const avatarUpdateSchema = z.object({
   hairId: z.string().optional(),
   spriteAccessoryId: z.string().optional(),
   premadeId: z.string().optional(),
+  customSpriteId: z.string().optional(),
 });
 
 // specs/2026-08-21-full-name-field-design.md — no `.min(1)`: an empty

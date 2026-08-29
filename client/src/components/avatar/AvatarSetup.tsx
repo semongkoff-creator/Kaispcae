@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Tools, LightningFill, PersonSquare, Trash3 } from 'react-bootstrap-icons';
+import { Tools, LightningFill, PersonSquare, Trash3, Images } from 'react-bootstrap-icons';
 import { AvatarConfig, SpriteMode } from '@kaispace/shared';
 import { drawAvatar } from '@/components/canvas/AvatarSprite';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
@@ -14,6 +14,7 @@ import {
   GENERATOR_HAIRSTYLES,
   GENERATOR_ACCESSORIES,
   PREMADE_CHARACTERS,
+  CUSTOM_CHARACTERS,
 } from '@/data/spriteManifest';
 
 // Cycles through `options`, wrapping around. When `allowNone` is set, an
@@ -151,6 +152,9 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId, initi
       if (tab === 'premade' && !prev.premadeId) {
         return { ...prev, spriteMode: tab, premadeId: PREMADE_CHARACTERS[0] };
       }
+      if (tab === 'custom' && !prev.customSpriteId) {
+        return { ...prev, spriteMode: tab, customSpriteId: CUSTOM_CHARACTERS[0] };
+      }
       return { ...prev, spriteMode: tab };
     });
   }, []);
@@ -166,6 +170,13 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId, initi
     setConfig((prev) => ({
       ...prev,
       premadeId: cycleOption(PREMADE_CHARACTERS, prev.premadeId, dir, false),
+    }));
+  }, []);
+
+  const cycleCustom = useCallback((dir: 1 | -1) => {
+    setConfig((prev) => ({
+      ...prev,
+      customSpriteId: cycleOption(CUSTOM_CHARACTERS, prev.customSpriteId, dir, false),
     }));
   }, []);
 
@@ -281,6 +292,14 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId, initi
           >
             <LightningFill size={12} /> Quick Pick
           </button>
+          <button
+            onClick={() => setTab('custom')}
+            className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all inline-flex items-center justify-center gap-1.5 ${
+              config.spriteMode === 'custom' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+          >
+            <Images size={12} /> Custom
+          </button>
         </div>
 
         {config.spriteMode === 'premade' ? (
@@ -293,6 +312,18 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId, initi
             />
             <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-2 leading-relaxed">
               Ready-made character combos — no need to mix layers yourself.
+            </p>
+          </Section>
+        ) : config.spriteMode === 'custom' ? (
+          <Section label="Character">
+            <CyclePicker
+              label="Custom Character"
+              value={describeSelection(CUSTOM_CHARACTERS, config.customSpriteId, false)}
+              onPrev={() => cycleCustom(-1)}
+              onNext={() => cycleCustom(1)}
+            />
+            <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-2 leading-relaxed">
+              Uploaded character art.
             </p>
           </Section>
         ) : (

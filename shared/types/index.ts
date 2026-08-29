@@ -13,8 +13,12 @@ export type Expression = 'neutral' | 'happy' | 'cool' | 'thinking' | 'sleepy';
 // How the avatar is rendered on canvas. 'shape' is the original hand-drawn
 // canvas primitive avatar; 'layered' composites pixel-art PNG sprites
 // (body/eyes/outfit/hair/accessory) from the Character Generator asset pack;
-// 'premade' uses a ready-made character from the free 16x16 pack.
-export type SpriteMode = 'shape' | 'layered' | 'premade';
+// 'premade' uses a ready-made character from the free 16x16 pack; 'custom'
+// uses an uploaded character sheet — 4 directions x 4 walk frames as
+// separate pre-cropped transparent PNGs, not a single packed grid sheet
+// (see AvatarSprite.ts's drawCustomAvatar for why: no idle/sit rows exist in
+// that source art, unlike the Character Generator pack's LimeZu layout).
+export type SpriteMode = 'shape' | 'layered' | 'premade' | 'custom';
 
 export interface AvatarConfig {
   // Legacy shape-drawn avatar (kept so old saved configs keep working)
@@ -37,6 +41,9 @@ export interface AvatarConfig {
   // Filename prefix within client/public/assets/characters/premade/free-pack-16x16/
   // (used when spriteMode === 'premade')
   premadeId?: string;
+  // Folder name within client/public/assets/characters/custom/<id>/, holding
+  // {down,left,right,up}_{0..3}.png (used when spriteMode === 'custom')
+  customSpriteId?: string;
 }
 
 // Represents a player avatar in the virtual space
