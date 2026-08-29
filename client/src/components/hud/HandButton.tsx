@@ -37,7 +37,7 @@ export function HandButton({ raised, onToggle }: HandButtonProps) {
         // the amber background pill is gone; "raised" is now carried by the
         // icon's own color + bounce (matching how Mic carries muted/
         // speaking via icon color alone, not a ring or fill any more).
-        className="relative flex items-center justify-center w-10 h-10 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+        className="relative flex items-center justify-center w-9 h-9 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
       >
         {/* User-supplied icon (checked react-bootstrap-icons' full hand set
             previously — HandIndex*, HandThumbs*, PersonRaisedHand — none read

@@ -49,14 +49,14 @@ export function MicButton({ muted, onToggle }: MicButtonProps) {
           // the *resting* (unmuted, not speaking) color changed, from the
           // old glass-pill gray to the same plain dark gray/black every
           // other flat icon in the bar uses.
-          className="relative flex items-center justify-center w-10 h-10 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+          className="relative flex items-center justify-center w-9 h-9 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
         >
           {muted ? (
-            <MicMuteFill size={16} className="text-red-500" />
+            <MicMuteFill size={15} className="text-red-500" />
           ) : speaking ? (
-            <MicFill size={16} className="text-green-500" />
+            <MicFill size={15} className="text-green-500" />
           ) : (
-            <Mic size={16} className="text-gray-700 dark:text-gray-300" />
+            <Mic size={15} className="text-gray-700 dark:text-gray-300" />
           )}
         </button>
       </Tooltip>

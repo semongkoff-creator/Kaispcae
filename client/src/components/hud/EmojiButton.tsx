@@ -21,9 +21,9 @@ export function EmojiButton({ open, onToggle }: EmojiButtonProps) {
         // Flat/borderless toolbar restyle (see MicButton's own comment) —
         // no purple-when-open pill any more; emoticon.svg is already the
         // same dark gray every other flat icon in this bar uses.
-        className="flex items-center justify-center w-10 h-10 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+        className="flex items-center justify-center w-9 h-9 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
       >
-        <img src="/assets/img/icons/emoticon.svg" width={16} height={16} alt="" />
+        <img src="/assets/img/icons/emoticon.svg" width={15} height={15} alt="" />
       </button>
     </Tooltip>
   );

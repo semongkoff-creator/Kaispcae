@@ -67,7 +67,7 @@ export function DeviceCaret({ kind, label }: DeviceCaretProps) {
           // only on the right, no left border, negative margin closing the
           // gap). That pill doesn't exist any more (see MicButton's own
           // comment), so this is just its own small flat hit target now.
-          className="flex items-center justify-center w-5 h-10 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer -ml-1.5"
+          className="flex items-center justify-center w-5 h-9 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer -ml-1.5"
         >
           <ChevronDown size={10} />
         </button>

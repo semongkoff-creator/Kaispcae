@@ -2717,7 +2717,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             z-index comment) — flipped from an earlier version where this
             bar stayed on top and clickable through the overlap; that read
             as the toolbar barging in front of chat, not a feature. */}
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-4 py-2.5">
+        {/* Border thickened + switched to the app's own accent blue
+            (login-accent) and the whole bar tightened up (gap-3->gap-2,
+            px-4->px-3) to match the reference screenshot — the previous
+            pass's subtle purple-200/60 hairline and looser spacing read as
+            noticeably bigger/looser than the actual target. */}
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border-2 border-login-accent/70 dark:border-login-accent/50 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2">
           <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
           <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
           <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
@@ -2747,8 +2752,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             onFile={() => showAlert('Add Media belum tersambung ke tujuan manapun — placeholder sampai ada keputusan produk soal file ini dikirim ke mana.')}
             title="Add Media"
             detail="Kirim gambar, video, atau dokumen."
-            icon={<img src="/assets/img/icons/add_media.svg" width={16} height={16} alt="" />}
-            buttonClassName="flex items-center justify-center w-10 h-10 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+            icon={<img src="/assets/img/icons/add_media.svg" width={15} height={15} alt="" />}
+            buttonClassName="flex items-center justify-center w-9 h-9 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
           />
           {/* Raise Hand — moved here (after the group icon, before emoji)
               per the reference layout; same handler/behavior as before,

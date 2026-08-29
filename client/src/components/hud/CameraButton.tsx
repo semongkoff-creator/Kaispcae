@@ -38,11 +38,11 @@ export function CameraButton({ enabled, onToggle }: CameraButtonProps) {
           // uses, so "on" needs no extra styling; "off" keeps its existing
           // red icon (no background color to lose here — it was never
           // colored by state, only "on" had the purple pill).
-          className="flex items-center justify-center w-10 h-10 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+          className="flex items-center justify-center w-9 h-9 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
         >
           {/* No "camera off" variant exists in the real asset set — kept the
               existing red react-bootstrap-icons glyph for that state. */}
-          {enabled ? <img src="/assets/img/icons/camera.svg" width={16} height={16} alt="" /> : <CameraVideoOffFill className="text-red-500" size={16} />}
+          {enabled ? <img src="/assets/img/icons/camera.svg" width={15} height={15} alt="" /> : <CameraVideoOffFill className="text-red-500" size={15} />}
         </button>
       </Tooltip>
       <DeviceCaret kind="camera" label="Kamera" />
