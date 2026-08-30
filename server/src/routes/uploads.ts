@@ -82,15 +82,36 @@ uploads.post('/uploads', authenticateToken, upload.single('file'), async (req: A
 // RECORDING_MAX_DURATION_MS), so it needs a much larger size ceiling than
 // ordinary Add Media uploads — kept as its own multer instance rather than
 // raising the 10MB limit above for everyone.
+const RECORDING_MIME_TYPES = new Set(['video/webm', 'video/mp4']);
+// Bug fix — a mimetype-only check silently rejected almost every REAL
+// recording. A browser recording video+audio together reports a mimeType
+// like `video/webm;codecs=vp8,opus` (an UNQUOTED comma inside the codecs
+// parameter — the normal, expected shape whenever more than one codec is
+// listed, not an edge case). Confirmed directly against this exact multer
+// version: that comma makes the underlying multipart parser misparse the
+// whole Content-Type header, and `file.mimetype` comes back as
+// 'text/plain' — not 'video/webm' with extra params attached, a
+// completely different value with nothing left to loosely match against.
+// `file.originalname` is carried by a SEPARATE header (Content-Disposition)
+// untouched by this, and the client always sets it deterministically
+// (recording.webm/recording.mp4 — see api.ts's uploadRecordingBlob), so
+// checking the extension is what the general Add Media upload above
+// already does for its own (different) mimetype-unreliability reason —
+// same fix shape, different root cause.
+const RECORDING_EXTENSIONS = new Set(['.webm', '.mp4']);
+
 const recordingUpload = multer({
   storage,
   limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB
-  fileFilter: (_req, file, cb) => cb(null, file.mimetype === 'video/webm'),
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, RECORDING_MIME_TYPES.has(file.mimetype) || RECORDING_EXTENSIONS.has(ext));
+  },
 });
 
 uploads.post('/uploads/recording', authenticateToken, recordingUpload.single('file'), async (req: AuthRequest, res: Response) => {
   if (!req.file) {
-    return res.status(400).json({ error: 'No file provided, or not a video/webm recording' });
+    return res.status(400).json({ error: 'No file provided, or not a supported recording format (webm/mp4)' });
   }
   return res.status(201).json({ url: `/api/uploads/${req.file.filename}` });
 });

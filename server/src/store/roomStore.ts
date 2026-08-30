@@ -1,6 +1,7 @@
 import { Avatar, RoomState, AvatarConfig, RoomTile, WorkMode, ImpassableAreaRect, DoorAreaRect, Zone } from '@kaispace/shared';
 import { Redis } from 'ioredis';
 import { clearLivePlayerMovement, mergeLivePlayerMovement, setLivePlayerMovement } from './playerLiveState';
+import { getPrisma } from '../lib/prisma';
 
 // In-memory fallback storage — always works, zero dependencies
 const memoryStore: Record<string, Avatar[]> = {};
@@ -89,6 +90,28 @@ export async function getRedis(): Promise<Redis | null> {
 
 // ─── Player CRUD (Redis or in-memory) ─────────────────────────────
 
+// Startup-only: wipes every room's persisted player-presence entry. A bare
+// server restart (redeploy, crash) tears down every live socket without
+// ever running its 'disconnect' handler, so Redis-persisted
+// `room:<id>:players` entries for whoever was connected at that exact
+// moment survive the restart as permanent ghosts — nothing else ever
+// cleans them up except that SAME account's own next JOIN_ROOM (see
+// roomHandler.ts's stale-entry eviction loop, which only self-heals the
+// rejoining account's own ghost, not anyone else's). A fresh process has
+// zero real connections by definition, so wiping this store at boot is
+// always safe — any browser tab left open elsewhere still reconnects its
+// socket and re-JOIN_ROOMs within seconds regardless.
+export async function clearAllPlayerPresence(): Promise<void> {
+  const r = await getRedis();
+  if (!r) return; // in-memory store is already empty on a fresh process
+  try {
+    const keys = await r.keys('room:*:players');
+    if (keys.length > 0) await r.del(...keys);
+  } catch (e) {
+    console.warn('[roomStore] failed to clear stale player presence on startup:', e);
+  }
+}
+
 export async function getPlayers(roomId: string): Promise<Avatar[]> {
   const r = await getRedis();
   if (r) {
@@ -119,17 +142,42 @@ export function getCachedPlayers(roomId: string): Avatar[] {
   return mergeLivePlayerMovement(roomId, memoryStore[memoryKey(roomId)] || []);
 }
 
+/**
+ * Persist the roster — with transient motion stripped back out.
+ *
+ * getPlayers() returns the roster with live movement MERGED over it, and
+ * nearly every writer here does read-modify-write on that result: fetch the
+ * array, change one field on one player, hand the whole array back. So a
+ * player who happened to be walking at that instant had `isMoving: true`
+ * written into durable storage as a side effect of somebody else's avatar
+ * update — and once there, nothing clears it. clearLivePlayerMovement only
+ * empties the live map; the merge no longer has anything to correct, because
+ * the stored row itself now claims motion.
+ *
+ * The visible result is an avatar standing perfectly still while everyone who
+ * joins or refreshes sees them running on the spot, forever. It survives the
+ * stale-mover sweep too: that only looks at players it saw go quiet, and this
+ * one stopped properly.
+ *
+ * The roster is the at-rest truth and the live map is the moving truth. This
+ * keeps them from bleeding into each other in the one place every write has
+ * to pass through, rather than asking nine call sites to remember.
+ */
 export async function setPlayers(roomId: string, players: Avatar[]): Promise<void> {
+  const durable = players.map((p) =>
+    p.isMoving || p.isRunning ? { ...p, isMoving: false, isRunning: false } : p,
+  );
+
   const r = await getRedis();
   if (r) {
     try {
-      await r.set(`room:${roomId}:players`, JSON.stringify(players));
+      await r.set(`room:${roomId}:players`, JSON.stringify(durable));
     } catch {
       // ignore, memory store handles it below
     }
   }
 
-  memoryStore[memoryKey(roomId)] = players;
+  memoryStore[memoryKey(roomId)] = durable;
 }
 
 export async function addPlayer(roomId: string, player: Avatar): Promise<void> {
@@ -421,6 +469,13 @@ export function getCachedZoneRestriction(roomSlug: string, zoneId: string): { mi
 // handleLeave) and consulted on JOIN_ROOM so refreshing/reconnecting
 // resumes where the player left off instead of always resetting to the
 // room's spawn tile (see the "Move" spec's explicit reconnect-persist rule).
+//
+// NOTE: despite the field name, every caller in this codebase actually
+// passes the room's SLUG here, not its Room.id — this map has always used
+// the slug as an opaque string key, which works fine for an in-memory
+// lookup. The DB fallback below resolves slug -> real Room.id internally
+// so every existing call site (save AND read) keeps passing the slug
+// completely unchanged.
 interface LastKnownPosition {
   roomId: string;
   x: number;
@@ -430,14 +485,48 @@ interface LastKnownPosition {
 
 const lastKnownPosition = new Map<string, LastKnownPosition>();
 
-export function saveLastKnownPosition(userId: string, roomId: string, x: number, y: number, direction: string): void {
-  lastKnownPosition.set(userId, { roomId, x, y, direction });
+// Bug fix — this used to be the ONLY copy of this data, so a server restart
+// (every deploy) silently reset every player back to the room's spawn tile
+// on their next join, even though nothing about a normal mid-session
+// reconnect changed. Now write-through: the in-memory Map updates
+// synchronously (nothing here needs to wait on it), and the DB upsert runs
+// alongside, fire-and-forget — a transient DB hiccup must never affect the
+// disconnect/leave path it's called from.
+export function saveLastKnownPosition(userId: string, roomSlug: string, x: number, y: number, direction: string): void {
+  lastKnownPosition.set(userId, { roomId: roomSlug, x, y, direction });
+  getPrisma().room.findUnique({ where: { slug: roomSlug }, select: { id: true } })
+    .then((room) => {
+      if (!room) return undefined;
+      return getPrisma().roomLastPosition.upsert({
+        where: { roomId_userId: { roomId: room.id, userId } },
+        create: { roomId: room.id, userId, x, y, direction },
+        update: { x, y, direction },
+      });
+    })
+    .catch((e) => console.error('[roomStore] failed to persist last known position:', e));
 }
 
 // Only returns a position if it's for THIS room — a player who last left
 // from a different room should still spawn fresh, not appear at their old
 // coordinates in an unrelated map.
-export function getLastKnownPosition(userId: string, roomId: string): LastKnownPosition | undefined {
+//
+// Async now: the in-memory Map answers instantly whenever it has the entry
+// (the common case — anything saved since this server last started), and
+// only falls back to a DB query when it doesn't, i.e. right after a
+// restart before this user's next disconnect/leave re-warms the cache.
+export async function getLastKnownPosition(userId: string, roomSlug: string): Promise<LastKnownPosition | undefined> {
   const entry = lastKnownPosition.get(userId);
-  return entry && entry.roomId === roomId ? entry : undefined;
+  if (entry && entry.roomId === roomSlug) return entry;
+  try {
+    const room = await getPrisma().room.findUnique({ where: { slug: roomSlug }, select: { id: true } });
+    if (!room) return undefined;
+    const row = await getPrisma().roomLastPosition.findUnique({ where: { roomId_userId: { roomId: room.id, userId } } });
+    if (!row) return undefined;
+    const restored: LastKnownPosition = { roomId: roomSlug, x: row.x, y: row.y, direction: row.direction };
+    lastKnownPosition.set(userId, restored);
+    return restored;
+  } catch (e) {
+    console.error('[roomStore] getLastKnownPosition DB fallback failed:', e);
+    return undefined;
+  }
 }

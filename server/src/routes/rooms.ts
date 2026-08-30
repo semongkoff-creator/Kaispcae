@@ -13,12 +13,13 @@ import { isValidMediaPayload, isUploadUrl } from '../socket/mediaHandler';
 import { redactInteractiveSecrets, redactDoorPasswords, redactDoorAreaPasswords } from '../lib/redactFurniture';
 import { deleteUploadedFile, storage as uploadStorage } from './uploads';
 import { setCachedTiles, setCachedImpassableAreas, setCachedDoorAreaRects, setCachedZones, getPlayers, updatePlayerPosition } from '../store/roomStore';
+import { zonesOfRoom } from './roomMembers';
 
 // Client shape for a MapMediaObject row (mirrors mediaHandler.toClientShape).
 function mediaShape(r: { id: string; roomId: string; type: string; x: number; y: number; createdBy: string; createdByName: string; createdAt: Date; expiresAt: Date | null; payload: unknown }) {
   return { id: r.id, roomId: r.roomId, type: r.type, x: r.x, y: r.y, createdBy: r.createdBy, createdByName: r.createdByName, createdAt: r.createdAt.toISOString(), expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null, payload: (r.payload as MediaPayload) ?? {} };
 }
-import { validate, createRoomSchema, renameRoomSchema, avatarUpdateSchema } from '../middleware/validate';
+import { validate, createRoomSchema, renameRoomSchema, avatarUpdateSchema, fullNameSchema } from '../middleware/validate';
 import { ensureGroupConversation } from '../lib/conversations';
 
 const rooms = Router();
@@ -70,9 +71,26 @@ function generateSlug(name: string): string {
 rooms.get('/rooms', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
+    // DCM restricted accounts — undefined means authenticateToken's own
+    // lookup threw and this account's restriction status was never actually
+    // resolved (see AuthRequest's restrictedToRoomId comment); that must NOT
+    // be treated the same as null (confirmed unrestricted). In practice the
+    // organizationId guard just above already rejects on this same
+    // underlying failure (both fields come from one query in
+    // authenticateToken), but this doesn't depend on that coupling holding
+    // forever — an empty list here is the same shape the client already
+    // handles for "your one allowed room was deleted" (see comment below).
+    if (req.restrictedToRoomId === undefined) {
+      return res.json({ rooms: [] });
+    }
     const prisma = getPrisma();
+    // DCM restricted accounts — a restricted account's Lobby shows exactly
+    // one room (or zero, if it's since been deleted), never the org's full
+    // public list.
     const roomList = await prisma.room.findMany({
-      where: { isPublic: true, organizationId: req.organizationId },
+      where: req.restrictedToRoomId
+        ? { id: req.restrictedToRoomId, organizationId: req.organizationId }
+        : { isPublic: true, organizationId: req.organizationId },
       include: {
         owner: { select: { displayName: true } },
       },
@@ -125,6 +143,18 @@ rooms.get('/rooms/:slug', authenticateToken, async (req: AuthRequest, res: Respo
     if (!room || room.organizationId !== req.organizationId) {
       return res.status(404).json({ error: 'Room not found' });
     }
+    // DCM restricted accounts — same "can't tell 404 from wrong-access"
+    // posture as the org check just above. undefined means the auth lookup
+    // threw and this account's restriction status was never resolved — that
+    // must NOT be treated the same as null (confirmed unrestricted), so it
+    // fails closed unconditionally rather than falling through to the
+    // ordinary id-match check below.
+    if (req.restrictedToRoomId === undefined) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    if (req.restrictedToRoomId && room.id !== req.restrictedToRoomId) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
 
     return res.json({
       id: room.id,
@@ -141,6 +171,31 @@ rooms.get('/rooms/:slug', authenticateToken, async (req: AuthRequest, res: Respo
   } catch (err) {
     console.error('[rooms] get error:', err);
     return res.status(500).json({ error: 'Failed to get room' });
+  }
+});
+
+// GET /api/rooms/:slug/zones — lightweight, read-only list of this room's
+// 'meeting'-type Zones, for the Calendar event form's Meeting Area picker.
+// Deliberately NOT admin-gated like /rooms/:slug/editor-data (room:update) —
+// any org member scheduling a meeting needs to read this, not just admins.
+rooms.get('/rooms/:slug/zones', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
+    const prisma = getPrisma();
+    const room = await prisma.room.findUnique({
+      where: { slug: req.params.slug },
+      select: { organizationId: true, zones: true, layerData: true },
+    });
+    if (!room || room.organizationId !== req.organizationId) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+    const zones = zonesOfRoom(room);
+    return res.json({
+      zones: zones.filter((z) => z.type === 'meeting').map((z) => ({ id: z.id, name: z.name })),
+    });
+  } catch (err) {
+    console.error('[rooms] zones error:', err);
+    return res.status(500).json({ error: 'Failed to get zones' });
   }
 });
 
@@ -339,6 +394,18 @@ rooms.put('/rooms/:slug/editor/layers', authenticateToken, async (req: AuthReque
           }
           return o;
         })
+        // Banner tile-effect (Fitur: free-angle rotation) — bannerRotationDeg
+        // is the one genuinely new field this feature adds; same fail-soft
+        // posture as capacity below (drop the bad value, keep the rest of
+        // the piece) rather than rejecting the whole object over it.
+        .map((o) => {
+          const obj = o as { bannerRotationDeg?: unknown };
+          if (obj.bannerRotationDeg == null) return o;
+          if (typeof obj.bannerRotationDeg !== 'number' || !Number.isFinite(obj.bannerRotationDeg)) {
+            return { ...obj, bannerRotationDeg: undefined };
+          }
+          return { ...obj, bannerRotationDeg: ((Math.round(obj.bannerRotationDeg) % 360) + 360) % 360 };
+        })
         .slice(0, 2000) as LayerData['objects'];
     };
     if ('objects' in body) { const o = sanitizeObjs(body.objects); if (o) layerData.objects = o; }
@@ -536,6 +603,58 @@ rooms.delete('/rooms/:slug/editor/media/:id', authenticateToken, async (req: Aut
   } catch (err) { console.error('[rooms] editor media delete error:', err); return res.status(500).json({ error: 'Failed' }); }
 });
 
+// Import Image (Fitur 15) SVG/WebP support — a separate, admin-gated multer
+// instance + route, NOT the general POST /uploads used by chat attachments,
+// room covers, Add Media, etc. That shared route deliberately excludes SVG
+// everywhere (see uploads.ts's own comment: "excludes anything that can
+// carry an XSS payload when rendered inline") because ANY authenticated org
+// member can hit it, with no per-room role check at all — widening it would
+// have handed every member, not just admins, a way to get an SVG hosted and
+// URL'd by this server. This route instead requires room:update (admin or
+// owner), the exact same gate as editor-data/editor/layers/editor/media
+// above, so only someone who could already edit this room's map can import
+// an SVG through it.
+//
+// Same "reuse uploads.ts's disk storage + its existing GET /uploads/:filename
+// to serve the file back" pattern as the Soundboard upload below — no new
+// serving route, no Drive path (kept disk-only, same as Soundboard). That
+// serving route's isInlineable allowlist deliberately does NOT include .svg,
+// so it always comes back with Content-Disposition: attachment — the one
+// thing that stops an uploaded SVG's embedded <script> from executing if
+// someone is ever navigated straight to its file URL. That header has no
+// effect on how this app actually USES the imported asset: Room Editor
+// custom assets are only ever drawn via canvas drawImage() (spriteLoader.ts),
+// which reads the response body directly and ignores Content-Disposition
+// entirely — so SVG tiles render normally while staying protected.
+const roomAssetUpload = multer({
+  storage: uploadStorage,
+  limits: { fileSize: 100 * 1024 * 1024 }, // matches Import Image's own MAX_IMPORT_BYTES
+  fileFilter: (_req, file, cb) => {
+    const ext = file.originalname.slice(file.originalname.lastIndexOf('.')).toLowerCase();
+    const okMime = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(file.mimetype);
+    const okExt = ['.png', '.jpg', '.jpeg', '.webp', '.svg'].includes(ext);
+    cb(null, okMime || okExt);
+  },
+});
+
+rooms.post('/rooms/:slug/editor/asset', authenticateToken, roomAssetUpload.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'File tidak valid — hanya PNG/JPG/WebP/SVG.' });
+    const prisma = getPrisma();
+    const room = await findRoomInOrg(prisma, req.params.slug, req.organizationId);
+    if (!room) { fs.unlink(req.file.path, () => {}); return res.status(404).json({ error: 'Room not found' }); }
+    const role = await resolveRoomRole(prisma, req.userId!, room.id, room.ownerId, room.organizationId);
+    if (!hasFeatureAccess(role, 'room:update')) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(403).json({ error: 'Admin role required to import an asset into this room' });
+    }
+    return res.status(201).json({ url: `/api/uploads/${req.file.filename}`, fileName: req.file.originalname });
+  } catch (err) {
+    console.error('[rooms] editor asset upload error:', err);
+    return res.status(500).json({ error: 'Failed to upload asset' });
+  }
+});
+
 // Soundboard — LISTING is open to any approved member (canEnterRoom, same
 // "may this user even be in this room" check the socket join path uses).
 // UPLOADING a new custom sound is admin+ (see shared/permissions.ts's
@@ -717,7 +836,10 @@ rooms.post('/rooms', authenticateToken, validate(createRoomSchema), async (req: 
     if (layout.zones.length > 0) {
       await prisma.teleportLocation.createMany({
         data: layout.zones.map((zone, index) => {
-          const point = findZoneEntryTile(layout.tiles, zone);
+          // Templates are pre-authored with no admin-drawn Impassable Areas
+          // yet (those only exist once someone edits the room afterward), so
+          // [] is genuinely accurate here, not just a shortcut.
+          const point = findZoneEntryTile(layout.tiles, zone, [], TILE_SIZE);
           return { roomId: room.id, name: zone.name, x: point.x, y: point.y, orderIndex: index, createdBy: req.userId! };
         }),
       });
@@ -795,7 +917,13 @@ rooms.post('/rooms/:slug/duplicate', authenticateToken, async (req: AuthRequest,
     if (zones.length > 0 && tiles.length > 0) {
       await prisma.teleportLocation.createMany({
         data: zones.map((zone, index) => {
-          const point = findZoneEntryTile(tiles as any, zone as any);
+          // [] — this legacy-format-only path (see comment above) has no
+          // derived Impassable Area rects available from `source` to check
+          // against; a copied room whose source has admin-drawn ones could
+          // still pre-fill a Team Location inside one, same as before this
+          // function gained the parameter. Narrower/lower-stakes than the
+          // live-teleport case this fix targets — not addressed here.
+          const point = findZoneEntryTile(tiles as any, zone as any, [], TILE_SIZE);
           return { roomId: room.id, name: zone.name, x: point.x, y: point.y, orderIndex: index, createdBy: req.userId! };
         }),
       });
@@ -854,6 +982,28 @@ rooms.put('/users/me/avatar', authenticateToken, validate(avatarUpdateSchema), a
   } catch (err) {
     console.error('[rooms] avatar save error:', err);
     return res.status(500).json({ error: 'Failed to save avatar' });
+  }
+});
+
+// PUT /api/users/me/full-name — specs/2026-08-21-full-name-field-design.md.
+// Deliberately its OWN route, not folded into PUT /users/me/avatar above:
+// that route stores its ENTIRE request body as avatarConfig verbatim —
+// reusing it here would nest fullName inside that JSON blob instead of
+// writing the real User.fullName column. This route writes fullName and
+// NOTHING else. An empty string clears it back to null (fullName is an
+// optional, explicitly-clearable field, not a required one).
+rooms.put('/users/me/full-name', authenticateToken, validate(fullNameSchema), async (req: AuthRequest, res: Response) => {
+  try {
+    const prisma = getPrisma();
+    const trimmed = req.body.name.trim();
+    await prisma.user.update({
+      where: { id: req.userId },
+      data: { fullName: trimmed || null },
+    });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[rooms] full name save error:', err);
+    return res.status(500).json({ error: 'Failed to save full name' });
   }
 });
 

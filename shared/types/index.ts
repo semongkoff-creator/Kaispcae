@@ -13,8 +13,12 @@ export type Expression = 'neutral' | 'happy' | 'cool' | 'thinking' | 'sleepy';
 // How the avatar is rendered on canvas. 'shape' is the original hand-drawn
 // canvas primitive avatar; 'layered' composites pixel-art PNG sprites
 // (body/eyes/outfit/hair/accessory) from the Character Generator asset pack;
-// 'premade' uses a ready-made character from the free 16x16 pack.
-export type SpriteMode = 'shape' | 'layered' | 'premade';
+// 'premade' uses a ready-made character from the free 16x16 pack; 'custom'
+// uses an uploaded character sheet — 4 directions x 4 walk frames as
+// separate pre-cropped transparent PNGs, not a single packed grid sheet
+// (see AvatarSprite.ts's drawCustomAvatar for why: no idle/sit rows exist in
+// that source art, unlike the Character Generator pack's LimeZu layout).
+export type SpriteMode = 'shape' | 'layered' | 'premade' | 'custom';
 
 export interface AvatarConfig {
   // Legacy shape-drawn avatar (kept so old saved configs keep working)
@@ -37,6 +41,9 @@ export interface AvatarConfig {
   // Filename prefix within client/public/assets/characters/premade/free-pack-16x16/
   // (used when spriteMode === 'premade')
   premadeId?: string;
+  // Folder name within client/public/assets/characters/custom/<id>/, holding
+  // {down,left,right,up}_{0..3}.png (used when spriteMode === 'custom')
+  customSpriteId?: string;
 }
 
 // Represents a player avatar in the virtual space
@@ -549,6 +556,14 @@ export enum SocketEvents {
   ZONE_LOCK_SET = 'zone:lock_set',
   ZONE_LOCK_UPDATED = 'zone:lock_updated',
   ZONE_LOCKED_DENIED = 'zone:locked_denied',
+  // A CalendarEvent's optional meetkaiPassword gate — a DIFFERENT mechanism
+  // from ZONE_LOCK_SET above (no live keyholder; checked automatically
+  // against the event's own stored password during its [start, end] window).
+  // Never fires for an invited attendee of that same event — see
+  // zoneHandler.ts's ZONE_ENTER.
+  ZONE_PASSWORD_REQUIRED = 'zone:password_required',
+  ZONE_PASSWORD_SUBMIT = 'zone:password_submit',
+  ZONE_PASSWORD_RESULT = 'zone:password_result',
   ZONE_KNOCK = 'zone:knock',
   ZONE_KNOCK_REQUEST = 'zone:knock_request',
   ZONE_KNOCK_DECIDE = 'zone:knock_decide',
@@ -587,6 +602,18 @@ export enum SocketEvents {
   RELEASE_SEAT = 'seat:release',
   SEAT_CLAIMS_UPDATED = 'seat:claims_updated',
   SEAT_CLAIM_DENIED = 'seat:claim_denied',
+  // Trying to claim a seat someone else already holds no longer redirects
+  // silently to the nearest free desk — it asks the current OWNER, exactly
+  // the same single-keyholder-decides shape as ZONE_KNOCK/DECIDE above (not
+  // an admin fan-out: nobody but the owner has any say over their own seat).
+  // Falls back to the old silent-redirect behavior only if the owner isn't
+  // currently connected — there's no one to ask.
+  SEAT_CLAIM_REQUEST = 'seat:claim_request',
+  SEAT_CLAIM_REQUESTED = 'seat:claim_requested',
+  SEAT_CLAIM_DECIDE = 'seat:claim_decide',
+  SEAT_CLAIM_DECIDED = 'seat:claim_decided',
+  SEAT_CLAIM_REQUEST_CANCEL = 'seat:claim_request_cancel',
+  SEAT_CLAIM_REQUEST_CANCELLED = 'seat:claim_request_cancelled',
 
   ROOM_UPDATE = 'room:update',
   ROOM_UPDATED = 'room:updated',
@@ -647,6 +674,34 @@ export enum SocketEvents {
   FOLLOW_UPDATED = 'follow:updated',
   FOLLOWER_CHANGED = 'follow:follower_changed',
 
+  // Minta Bantuan Remote (specs/2026-08-17-remote-help-via-rustdesk-design.md)
+  // — KaiSpace only brokers the consent handshake and a one-time credential
+  // relay for an out-of-app RustDesk remote-help session; it never performs
+  // any remote control itself. Same consent shape as Follow/Summon: REQUEST
+  // asks the server to start a request, relayed to the target as INCOMING,
+  // the target's accept/decline comes back as RESPOND, and the requester
+  // (the helper) learns the outcome via RESULT. Once accepted, the target
+  // submits their own RustDesk ID+password once via CREDENTIAL — relayed
+  // straight to the helper's socket only, never stored anywhere. Either
+  // side ends the (KaiSpace-tracked) session at any time via END — this
+  // ends KaiSpace's own bookkeeping/notification only, never the actual
+  // RustDesk connection, which only RustDesk's own client can end.
+  REMOTE_HELP_REQUEST = 'remotehelp:request',
+  REMOTE_HELP_INCOMING = 'remotehelp:incoming',
+  REMOTE_HELP_RESPOND = 'remotehelp:respond',
+  REMOTE_HELP_RESULT = 'remotehelp:result',
+  REMOTE_HELP_CREDENTIAL = 'remotehelp:credential',
+  // Final-review Fix 3 — confirms to the SUBMITTER'S OWN socket that the
+  // credential actually reached the helper's socket (the relay above has
+  // several silent early-return paths server-side — no active session,
+  // wrong role, empty string, unroutable helper — and telling someone their
+  // RustDesk password was delivered when it was actually dropped is exactly
+  // the failure this consent-brokering feature must not have). No payload —
+  // a pure signal; the client's existing REMOTE_HELP_END listener already
+  // covers every failure path instead of needing a second cleanup event.
+  REMOTE_HELP_CREDENTIAL_ACK = 'remotehelp:credential_ack',
+  REMOTE_HELP_END = 'remotehelp:end',
+
   // §5 — Summon. Requires the target's consent before moving them: SUMMON_USER
   // asks the server to start a request rather than teleporting immediately;
   // the server relays it to the target as SUMMON_REQUEST, and the target's
@@ -676,6 +731,11 @@ export enum SocketEvents {
   FORCE_PULL = 'force_pull:pull',
   FORCE_PULL_RESULT = 'force_pull:result',
   FORCE_PULLED = 'force_pull:pulled',
+
+  // A CalendarEvent's meetingAutoJoinSweep.ts fired for its own target —
+  // told directly to this one socket, distinct from the room-wide
+  // PLAYER_TELEPORTED broadcast everyone else's client also receives.
+  MEETING_AUTO_JOINED = 'meeting:auto_joined',
 
   // A10 — Slap/Tap ("colek"): a lightweight, ephemeral attention-nudge to one
   // person (vibrate + soft sound + shake + toast). SLAP is the sender's request
@@ -1115,6 +1175,49 @@ export interface FollowResultPayload {
   reason?: 'declined' | 'timeout' | 'offline';
 }
 
+// Remote-help consent — same shape as Follow's, plus a 'busy' reason (the
+// target already has an active remote-help session with someone else).
+export interface RemoteHelpRequestPayload {
+  requestId: string;
+  actorUserId: string;
+  actorName: string;
+}
+
+export interface RemoteHelpRespondPayload {
+  requestId: string;
+  accept: boolean;
+}
+
+export interface RemoteHelpResultPayload {
+  targetName: string;
+  accepted: boolean;
+  // 'helper-busy' (final-review Fix 4) — distinct from 'busy': that one
+  // means the TARGET already has an active session with someone else;
+  // 'helper-busy' means the REQUESTER (the would-be helper) is already
+  // active helping a different target and can't open a second concurrent
+  // session (see remoteHelpHandler.ts's REMOTE_HELP_REQUEST handler).
+  reason?: 'declined' | 'timeout' | 'offline' | 'busy' | 'helper-busy';
+}
+
+// The target's own RustDesk ID+password, relayed once to the helper's
+// socket only — the server never persists this anywhere (see
+// remoteHelpHandler.ts's REMOTE_HELP_CREDENTIAL handler). Split into two
+// fields (rather than one freeform string) so the helper's client can build
+// a `rustdesk://<id>` deep link from the ID alone — the ID is not a secret
+// (RustDesk shows it plainly on its own home screen), so it's safe to embed
+// in a clickable link; the password never goes into a link/URL of any kind,
+// only a copy-to-clipboard button, so it never lands in browser/OS history.
+export interface RemoteHelpCredentialPayload {
+  rustdeskId: string;
+  password: string;
+}
+
+// Sent to whichever party did NOT click "Selesai" (or disconnected), so
+// their banner can clear with a clear reason instead of just vanishing.
+export interface RemoteHelpEndPayload {
+  endedByName: string;
+}
+
 // §6 — Add Media. One table/type union with `type` as discriminator, per
 // the spec's own "MapMediaObject" model — 'portal' and 'screenshot' are
 // deliberately absent, see the SocketEvents doc comment above for why.
@@ -1316,12 +1419,51 @@ export const TRANSLUCENT_THRESHOLD = PROXIMITY_THRESHOLD;
 // genuine walk-away.
 export const DISCONNECT_DEBOUNCE_MS = 1000;
 
+// QA (Load checklist item 3, "War Room share massal") — max simultaneous
+// screen shares per room. Lives here rather than only server-side because
+// BOTH ends check it now: the client screens locally (synchronously, off
+// the RTC_SCREEN_SHARE announcements it already tracks) so a full room
+// never even opens the OS picker, and the server re-checks authoritatively
+// since the local count can only see peers this client is connected to.
+// Two copies of the number that could drift apart is exactly the bug this
+// placement avoids.
+//
+// Lowered 4 -> 1 after four simultaneous shares took people's VOICE away in
+// production, which is the opposite of what the priority markings were meant
+// to guarantee. The reason they could not protect it: networkPriority only
+// arbitrates WITHIN one RTCPeerConnection, and a mesh gives every peer its
+// own. A presenter's microphone to one person competes with their screen to
+// the other twelve with no priority relationship between those connections at
+// all — the office uplink arbitrates, and it knows nothing about WebRTC.
+//
+// The arithmetic says the same thing. mediaBudget's aggregate is per
+// PRESENTER, so it has no idea anyone else is sharing: in a 14-person room one
+// share is ~9 Mbps up, and four is ~36 Mbps out of one office link, while
+// every viewer decodes four 1080p streams at once.
+//
+// 1 is the honest number for a mesh, and matches what comparable products
+// allow. It goes back up once media runs through an SFU, where a presenter
+// uploads once and the server fans out — the cap exists because of the
+// topology, not because of the product.
+export const MAX_SCREEN_SHARES_PER_ROOM = 1;
+
 // §6 — mirrors the spec's own three-state enum name
 // (full_visible/translucent/not_visible) for computeVisibility's result.
 export type VisibilityStatus = 'full_visible' | 'translucent' | 'not_visible';
 
 export interface ProximityPlayer {
   id: string;
+  // The account behind this player, when there is one.
+  //
+  // The id above is the socket/player id, which is what the mesh keyed peer
+  // connections on. LiveKit identifies participants by ACCOUNT id instead —
+  // deliberately, since a socket id changes on every reconnect and a
+  // participant would come back as a stranger — so the SFU path needs both,
+  // and this is the only place that already knows the pairing.
+  //
+  // Optional because a guest joined through an invite link has no account at
+  // all (see roomHandler.ts's JOIN_ROOM guest branch).
+  userId?: string;
   distanceTiles: number;
   visibility: VisibilityStatus;
   // true when connected because both players share a private Zone (see
@@ -1435,6 +1577,18 @@ export interface Furniture {
   flipV?: boolean;
   sizePercent?: { w: number; h: number };
   offsetPx?: { x: number; y: number };
+  // Free-angle rotation for kind:'banner' ONLY (degrees, 0-360, either
+  // direction of travel around 360 is fine since it's applied as a plain
+  // CSS rotate()) — deliberately a SEPARATE field from `rotation` above,
+  // which every other placed piece uses and which is hard-snapped to 90°
+  // steps (see GameCanvas's ROTATION_FRONT / computeSitFacingDirection,
+  // which assume exactly those 4 values for seat-facing math). A banner is
+  // never isInteractable/sittable, so it never touches that lookup — giving
+  // it its own field means "let a banner tilt to any angle" can never
+  // accidentally loosen the type every other furniture piece's rotation
+  // relies on. Absent = 0 (upright), same "as authored" convention as
+  // `rotation`.
+  bannerRotationDeg?: number;
   // ZEP's "Name" / "Hide object name" — an admin-chosen label, distinct from
   // any interactiveConfig text. Read by InteractiveObjectModal's title, and
   // by 'show_name' below (interactiveType === 'show_name' reveals THIS same
@@ -1615,8 +1769,12 @@ export interface InteractiveApiCallResultPayload {
 // (label required to look right); 'desk'/'focus' render a small floating
 // pill label instead; 'general' (or no type, for zones created before this
 // field existed) keeps the plain dashed-outline + centered name that was
-// already there.
-export type ZoneType = 'meeting' | 'desk' | 'focus' | 'general';
+// already there; 'record' (Room Editor's "Record Area" tool) renders like
+// 'general' in-game but is what App.tsx keys off of to show RecordAreaPanel's
+// Start/Pause/Stop screen-recording panel while the local avatar stands
+// inside it — deliberately unconnected to 'meeting'/Lark VC, and never
+// audio-isolating (see shouldIsolateZoneAudio below).
+export type ZoneType = 'meeting' | 'desk' | 'focus' | 'general' | 'record';
 
 // Live lock state of one zone, broadcast to the room so every client can draw
 // the padlock and know who to knock on. `allowedUserIds` is the admit list the
@@ -1658,6 +1816,17 @@ export interface ZoneKnockRequest {
   userId: string;
   playerId: string;
   playerName: string;
+}
+
+// A request to take over someone else's already-claimed seat — the OWNER's
+// own card to decide (see SocketEvents.SEAT_CLAIM_REQUESTED). playerId is
+// the requester's live socket id, needed to route SEAT_CLAIM_DECIDED back to
+// them specifically, same role it plays in ZoneKnockRequest above.
+export interface SeatClaimRequest {
+  seatId: string;
+  requesterUserId: string;
+  playerId: string;
+  requesterName: string;
 }
 
 export interface GuestJoinRequest {
@@ -1712,6 +1881,25 @@ export interface Zone {
   // and capacity checks above — a zone can be member-only AND separately
   // locked/capacity-limited at the same time.
   memberOnly?: boolean;
+  // Bug fix — a Map Location whose admin answered "kedap suara: YA" when
+  // creating it gets audioIsolated:true, making it byte-for-byte
+  // indistinguishable from a genuine Private Area once converted to a Zone
+  // (audioIsolated was the only signal label-suppression logic had to go
+  // on — see GameCanvas.tsx's own suppressPrivateLabel). Isolation and
+  // "should this area's name always stay visible" are independent
+  // questions (a Map Location can isolate audio AND still be meant as a
+  // named, always-labeled pin), so this is tracked as its own explicit
+  // flag rather than inferred from audioIsolated. Set only for the Room
+  // Editor's 'Map location' tool (mapLayers.ts's layerDataToLegacy).
+  isMapLocation?: boolean;
+}
+
+const LARGE_DESK_ZONE_AUDIO_AREA_TILES = 144;
+
+export function shouldIsolateZoneAudio(zone: Pick<Zone, 'audioIsolated' | 'type' | 'width' | 'height'>): boolean {
+  if (zone.audioIsolated != null) return zone.audioIsolated;
+  if (zone.type === 'desk' && zone.width * zone.height > LARGE_DESK_ZONE_AUDIO_AREA_TILES) return false;
+  return true;
 }
 
 // Chat. When zoneId is set, the message is private to that zone — the
@@ -1979,7 +2167,7 @@ export interface RoomUpdatePayload {
 
 export { createDefaultOfficeLayout, createCorporateOfficeLayout, findSpawnPixel, createRoomLayoutFromTemplate, ROOM_TEMPLATES } from '../defaultRoomLayout';
 export type { RoomTemplateId } from '../defaultRoomLayout';
-export { BLOCKED_TILES, isTileBlocked, isDoorTile, findZoneEntryTile, findAdjacentFreeTile, isPointInImpassableArea, doesRectOverlapImpassableArea } from '../tileCollision';
+export { BLOCKED_TILES, isTileBlocked, isDoorTile, findZoneEntryTile, findAdjacentFreeTile, isPointInImpassableArea, doesRectOverlapImpassableArea, DOOR_HITBOX_HALF_PX, movementHitboxBounds } from '../tileCollision';
 // ZEP Room Editor — Potong 1 layered map format + legacy adaptors.
 export { MAP_FORMAT_VERSION, legacyToLayerData, layerDataToLegacy, AVATAR_SCALE_MIN, AVATAR_SCALE_MAX, getImpassableAreaRects, getDoorAreaRects } from '../mapLayers';
 export type { LayerData, TileEffect, AreaEffect, CustomAssetEntry, ReferenceImageData, ImpassableAreaRect, DoorAreaRect } from '../mapLayers';
@@ -1999,5 +2187,5 @@ export type { EditScope, RecurringMaster, Occurrence } from '../recurrence';
 export { expandOccurrences, truncateRuleBefore, normaliseRule, describeRule } from '../recurrence';
 export type { DocRole, DocAction, DocCtx } from '../docPermissions';
 export { docRoleAtLeast, canDoc, DOC_ROLE_LABELS } from '../docPermissions';
-export type { WorkspaceRole, WorkspaceAction, WorkspaceCtx } from '../workspacePermissions';
-export { canWorkspace, WORKSPACE_ACTIONS, WORKSPACE_ROLE_LABELS } from '../workspacePermissions';
+export type { WorkspaceRole, WorkspaceAction, WorkspaceCtx, EmploymentType } from '../workspacePermissions';
+export { canWorkspace, WORKSPACE_ACTIONS, WORKSPACE_ROLE_LABELS, EMPLOYMENT_TYPE_LABELS } from '../workspacePermissions';

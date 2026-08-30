@@ -1,9 +1,9 @@
 import { randomUUID } from 'crypto';
-import { isUserInLockedZone, zoneKeyholderOf, admitUserToZone } from './zoneLock';
+import { isUserInLockedZone, isZoneLocked, mayEnterZone, zoneKeyholderOf, admitUserToZone } from './zoneLock';
 import { zoneIdOfSocket, getSocketIdsInZone } from './zoneHandler';
-import { getCachedZones } from '../store/roomStore';
+import { getCachedZones, getCachedDoorAreaRects } from '../store/roomStore';
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, findSpawnPixel, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, DoorAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveDoorAreaPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH, RosterEntry, RosterUpdate } from '@kaispace/shared';
+import { SocketEvents, Avatar, AvatarConfig, RoomTile, RoomUpdatePayload, RoomTheme, RoomTemplateId, Notice, Role, FeatureKey, TeleportRequest, hasFeatureAccess, isTileBlocked, createDefaultOfficeLayout, findAdjacentFreeTile, findSpawnPixel, TILE_SIZE, TRANSLUCENT_THRESHOLD, CONSENT_REQUEST_TIMEOUT_MS, SummonRespondPayload, WorkMode, LayerData, layerDataToLegacy, ImpassableAreaRect, DoorAreaRect, InteractivePasswordCheckPayload, InteractiveDoorPasswordCheckPayload, InteractiveDoorAreaPasswordCheckPayload, InteractiveChoiceCheckPayload, InteractiveApiCallPayload, InteractiveChangeObjectPayload, SoundboardPlayPayload, SOUNDBOARD_COOLDOWN_MS, AWAY_REASON_MAX_LENGTH, RosterEntry, RosterUpdate, Zone } from '@kaispace/shared';
 import {
   addPlayer, removePlayer, getPlayers, getRoomState, updatePlayerAvatarConfig, updatePlayerHand, updatePlayerMic, updatePlayerHidden, updatePlayerWorkMode, updatePlayerSpotlight, updatePlayerSitting,
   setCachedTiles, getCachedTiles, setCachedImpassableAreas, setCachedDoorAreaRects, setCachedZones, getCachedFurnitureIds, setCachedFurnitureIds, saveLastKnownPosition, getLastKnownPosition, updatePlayerPosition,
@@ -18,11 +18,14 @@ import { recordResponseIfPending } from '../lib/pokeResponse';
 import { refreshManagerCache, broadcastAnalyticsActivity } from './analyticsFeed';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { redactInteractiveSecrets, redactDoorPasswords, redactDoorAreaPasswords } from '../lib/redactFurniture';
-import { unlockDoor, unlockDoorArea, clearUnlockedDoorsForRoom } from './doorLock';
+import { unlockDoor, unlockDoorArea, clearUnlockedDoorsForRoom, isDoorLockedForSocket } from './doorLock';
+import { recordSupersede } from './sessionFlap';
 import { getNearbyRecipients } from './proximityBroadcast';
+import { releaseScreenShareOnLeave } from './rtcHandler';
 import { sanitizeChat } from '../middleware/validate';
 import { GUEST_LINK_REVOKED, GUEST_LINK_REVOKED_MESSAGE } from '../middleware/auth';
 import { findAssignedSeat } from './furnitureHandler';
+import { getClaimedSeatPosition } from './seatClaim';
 
 const canChangeAdmin = socketRateLimit(3); // max 3 admin grant/revoke calls/sec per socket
 const canTeleport = socketRateLimit(2); // max 2 teleport requests/sec per socket
@@ -786,6 +789,32 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         return;
       }
 
+      // DCM restricted accounts — same "reads as not-found, never a distinct
+      // reason that would confirm the room exists" posture as the org check
+      // just above. approvalRoom is already fetched; if the lookup itself
+      // failed (approvalRoom null), fail CLOSED here specifically for a
+      // restricted account — unlike the general "can't tell, treat as
+      // walk-in" fallback a few lines up, a restricted account must never
+      // get the benefit of the doubt on an unreadable room.
+      const enteringRestrictedToRoomId = (socket.data as { restrictedToRoomId?: string | null }).restrictedToRoomId;
+      // undefined means the handshake's own auth query threw and this
+      // account's restriction status was never actually resolved —
+      // deliberately NOT treated the same as null (confirmed unrestricted).
+      // An unconfirmed status fails CLOSED unconditionally, regardless of
+      // which room is being joined or whether that room's own lookup
+      // (approvalRoom) succeeded — the alternative (falling through to the
+      // ordinary "unreadable room, treat as walk-in" fallback a few lines
+      // up) would let a genuinely restricted account slip through during a
+      // rare coincidence of two independent transient failures.
+      if (enteringUid && enteringRestrictedToRoomId === undefined) {
+        socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'not-found' });
+        return;
+      }
+      if (enteringUid && enteringRestrictedToRoomId && approvalRoom?.id !== enteringRestrictedToRoomId) {
+        socket.emit(SocketEvents.JOIN_DENIED, { roomSlug: room, reason: 'not-found' });
+        return;
+      }
+
       // QA (Akses ruang checklist item 1) — restrictedAccess must be
       // checked regardless of requiresApproval's own value: they're
       // independent flags (a room could be restrictedAccess=true but
@@ -884,6 +913,28 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     if (previousSocketId && previousSocketId !== socket.id) {
       const previousSocket = io.sockets.sockets.get(previousSocketId);
       if (previousSocket) {
+        // Two live sockets for one account trading the takeover back and forth
+        // costs the WHOLE ROOM a join and a leave per round (see
+        // sessionFlap.ts). The client half of that is fixed — a superseded
+        // socket stops reconnecting — but only for clients that have loaded
+        // the fix, and one person on a stale tab is enough to keep every other
+        // client churning. So past a threshold the server stops honouring the
+        // takeover: the incumbent keeps the account and the newcomer is turned
+        // away, which is the choice that broadcasts NOTHING to the room.
+        if (recordSupersede(uid)) {
+          console.warn('[room] session flapping for uid', uid, '— refusing the newcomer, keeping the live socket');
+          // Undo the little this handler has already done for the newcomer so
+          // its DISCONNECT is a no-op: the handler bails on `!room`, so
+          // clearing currentRoom is what keeps a leave from being broadcast
+          // for a player who was never announced in the first place.
+          playerNames.delete(socket.id);
+          playerColors.delete(socket.id);
+          socket.leave(room);
+          currentRoom = null;
+          socket.emit(SocketEvents.SESSION_TAKEN_OVER);
+          socket.disconnect(true);
+          return;
+        }
         previousSocket.data.supersededByNewerTab = true;
         previousSocket.emit(SocketEvents.SESSION_TAKEN_OVER);
         previousSocket.disconnect(true);
@@ -927,7 +978,7 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // 'guest' regardless of anything this could add to adminUserIds).
     try {
       if (!isGuest) {
-        const account = await getPrisma().user.findUnique({ where: { id: uid }, select: { accountRole: true, memberVerifiedAt: true, workspaceRole: true } });
+        const account = await getPrisma().user.findUnique({ where: { id: uid }, select: { accountRole: true, memberVerifiedAt: true, workspaceRole: true, restrictedToRoomId: true } });
         if (account?.accountRole === 'admin') rs.adminUserIds.add(uid);
         // Guest-tier for self-registered accounts nobody has vouched for —
         // POST /auth/register is public (anyone can hit it), so a manual
@@ -940,7 +991,13 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // schema.prisma. Only clamps the DEFAULT — an admin explicitly
         // promoting the account (workspaceRole/accountRole, or a room-level
         // staff/admin grant, both checked above/below this) always wins.
-        if (account && !account.memberVerifiedAt && account.accountRole !== 'admin' && account.workspaceRole !== 'admin') {
+        // Exempt DCM-style restricted accounts (restrictedToRoomId set) from
+        // this clamp — that field can only ever be set by a deliberate
+        // admin/script DB write, never by any self-service path, so it's a
+        // stronger vouch than self-registration and can't reopen the bypass
+        // this clamp exists to close. Kept in sync with roles.ts's
+        // resolveRoomRole (see its own comment).
+        if (account && !account.memberVerifiedAt && account.accountRole !== 'admin' && account.workspaceRole !== 'admin' && !account.restrictedToRoomId) {
           rs.restrictedTierUserIds.add(uid);
         } else {
           rs.restrictedTierUserIds.delete(uid);
@@ -1078,16 +1135,15 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     // Point markers via layerDataToLegacy's kind:'startingPoint' → 'spawn'
     // conversion. It also already returns its own (3,3) fallback, so the
     // old hardcoded `?? {...}` here is redundant and dropped.
-    const remembered = getLastKnownPosition(uid, room);
+    const remembered = await getLastKnownPosition(uid, room);
     let spawn = remembered ?? findSpawnPixel(tiles);
 
     // A member with a permanently-assigned seat in THIS room
     // (Furniture.assignedToUserId, see furnitureHandler.ts's FURNITURE_ASSIGN)
     // always spawns there instead — overriding both the remembered position
     // and the Starting Point default, so it's true every single join, not
-    // just the first one / the one right after a server restart clears
-    // getLastKnownPosition's in-memory map. "You have your own desk" is a
-    // more deliberate, durable signal than either. Guests can never have one
+    // just the first one. "You have your own desk" is a more deliberate,
+    // durable signal than either. Guests can never have one
     // (furniture:assign is member-only), so this is always a no-op for them.
     // Furniture.x/y are tile coordinates, same as every other spawn source
     // here — converted the same way findSpawnPixel/the near-placement block
@@ -1097,6 +1153,20 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       ? { x: assignedSeat.x * TILE_SIZE + TILE_SIZE / 2, y: assignedSeat.y * TILE_SIZE + TILE_SIZE / 2 }
       : null;
     if (assignedSeatPixel) spawn = assignedSeatPixel;
+
+    // Bug fix — a self-claimed "Kursi Diklaim" seat (seatClaim.ts, player-
+    // chosen during play, distinct from the admin-granted assignedSeat
+    // above) previously had no effect on spawn at all, only ever landing
+    // someone back there by coincidence via `remembered` (and only if they
+    // happened to still be standing on it the instant they disconnected).
+    // Slots in below assignedSeat (an admin-granted desk still wins if
+    // somehow both exist) but above the plain remembered/Starting-Point
+    // fallback — same "durable intentional signal beats last-known-
+    // position" reasoning already used for assignedSeat.
+    if (!assignedSeatPixel && dbRoom) {
+      const claimedSeat = await getClaimedSeatPosition(room, dbRoom.id, uid);
+      if (claimedSeat) spawn = { x: claimedSeat.x * TILE_SIZE + TILE_SIZE / 2, y: claimedSeat.y * TILE_SIZE + TILE_SIZE / 2 };
+    }
 
     // "Spawn near whoever let you in" — consumed at most once per admit/
     // approve decision (see markSpawnNearUser's own doc comment), so an
@@ -1169,6 +1239,18 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       x: spawn.x, y: spawn.y, direction: (remembered?.direction as Avatar['direction']) || 'down',
       color, isMoving: false, avatarConfig: avatarConfig || undefined,
       isAdmin, userId: uid, isGuest: isGuest || undefined,
+      // Bug fix — useWebRTC.ts's local mic always starts muted on join
+      // (isMicMuted's own useState(true)), but that was never announced to
+      // the room: a fresh join's PLAYER_JOINED/ROOM_STATE entry carried no
+      // micMuted at all, so every OTHER client's playerRecords for this
+      // player read `undefined` (renders as unmuted) until this player's
+      // own first manual mic toggle ever fired PLAYER_MIC — in practice,
+      // often not until they actually spoke and unmuted. Hardcoded true
+      // here for a genuinely fresh join. A reconnect (same uid rejoining
+      // while a stale entry still lingers) overwrites this further below,
+      // once the stale-entry eviction loop can read that entry's real
+      // last-known micMuted — see its own comment for why.
+      micMuted: true,
     };
 
     console.log(`[room] ${newPlayer.name} (${socket.id}) uid=${uid} ${isAdmin ? isMasterAdmin ? '⭐' : '👑' : ''} joined ${room}`);
@@ -1202,6 +1284,16 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
       const existing = await getPlayers(room);
       for (const ghost of existing) {
         if (ghost.userId === uid && ghost.id !== socket.id) {
+          // Bug fix — this loop runs on EVERY JOIN_ROOM for an account that
+          // still has a lingering entry, which includes an ordinary
+          // reconnect (brief socket drop mid-call), not just a genuinely
+          // fresh join. newPlayer.micMuted was hardcoded to true above
+          // unconditionally, so a reconnect while actively unmuted and
+          // talking got its mic forced back to "muted" for everyone else's
+          // display — their real audio track never actually muted, only the
+          // room's broadcast state did. Carry the ghost's last known
+          // micMuted forward instead of clobbering it.
+          newPlayer.micMuted = ghost.micMuted;
           await removePlayer(room, ghost.id);
           io.to(room).emit(SocketEvents.PLAYER_LEFT, ghost.id);
           // Also detach the ghost socket from the room if it somehow still
@@ -1737,6 +1829,63 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     persistCeoGrant(room, data.targetUserId, false);
   });
 
+  // Bug fix — teleport had no zone-lock awareness at all, unlike every other
+  // way a player's position/membership can change (Summon/Follow/RemoteHelp
+  // all check isUserInLockedZone against their TARGET before moving them;
+  // regular walking's ZONE_ENTER checks mayEnterZone before granting zone
+  // membership). Teleport is self-directed, so both checks below apply to
+  // the REQUESTER's own state rather than someone else's. Mirrors client's
+  // useProximity.ts findZoneAt (smallest zone wins) but against a TILE
+  // position, not a pixel one — teleport targets are already tile
+  // coordinates by the time this runs, so no conversion is needed.
+  function findZoneAtTile(zones: Zone[], tileX: number, tileY: number): Zone | undefined {
+    let best: Zone | undefined;
+    let bestArea = Infinity;
+    for (const z of zones) {
+      if (tileX < z.x || tileX >= z.x + z.width || tileY < z.y || tileY >= z.y + z.height) continue;
+      const area = z.width * z.height;
+      if (area < bestArea) { best = z; bestArea = area; }
+    }
+    return best;
+  }
+
+  // Bug fix — a teleport destination behind a locked (password) door had no
+  // check at all: PLAYER_MOVE/PLAYER_TELEPORT_TO (movementHandler.ts) both
+  // already refuse to walk THROUGH a locked door, but a Team
+  // Location/bookmark placed anywhere past one skipped the password
+  // entirely, since teleport never walks the tiles in between.
+  //
+  // A locked door isn't the same kind of block as a wall — it's a real,
+  // working door, just closed. Per product decision, teleport lands the
+  // requester just OUTSIDE it (still visibly near the destination, still
+  // has to solve the password to actually get in) rather than a flat
+  // refusal — a plain wall/desk block stays a refusal (see the
+  // isTileBlocked check below, unchanged).
+  //
+  // Expanding ring search (not a 4-neighbor check like findAdjacentFreeTile)
+  // because a Door AREA can be several tiles wide — the nearest open tile
+  // outside it can be more than one step away. Capped at 8 tiles out; a
+  // door area larger than that would be unusual, and this only runs once
+  // per teleport, not a hot path.
+  function findTileOutsideLockedDoor(tiles: RoomTile[][], room: string, socketId: string, tileX: number, tileY: number, doorAreas: DoorAreaRect[], overrideActive: boolean): { x: number; y: number } | null {
+    const MAX_RADIUS = 8;
+    for (let radius = 0; radius <= MAX_RADIUS; radius++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dy = -radius; dy <= radius; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue; // ring only — smaller radii already tried
+          const x = tileX + dx;
+          const y = tileY + dy;
+          if (isTileBlocked(tiles, x, y)) continue;
+          const px = x * TILE_SIZE + TILE_SIZE / 2;
+          const py = y * TILE_SIZE + TILE_SIZE / 2;
+          if (isDoorLockedForSocket(socketId, room, tiles, x, y, px, py, doorAreas, overrideActive)) continue;
+          return { x, y };
+        }
+      }
+    }
+    return null;
+  }
+
   // §4 — Teleport. Resolves the real x/y from the location's OWN stored
   // data (DB lookup by id, scoped to this room) rather than trusting
   // whatever coordinates a client might supply directly — same
@@ -1750,6 +1899,17 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
     const room = currentRoom; if (!room) return;
     const uid = findUserIdBySocket(socket.id);
     if (!uid || !data || (data.kind !== 'admin' && data.kind !== 'bookmark' && data.kind !== 'seat')) return;
+
+    // The lock seals the door BOTH ways (see zoneLock.ts's isSealedIn doc
+    // comment) — someone shut inside a locked zone stays put until it's
+    // unlocked, the same rule already enforced when an admin tries to pull
+    // them out via Summon/Follow/RemoteHelp. Teleport is the requester
+    // moving THEMSELVES, so without this check it was the one remaining way
+    // to walk out of a room that was supposedly sealed.
+    if (isUserInLockedZone(room, uid, zoneIdOfSocket(socket.id))) {
+      socket.emit('admin:error', { message: 'Kamu sedang di zona yang dikunci, tidak bisa teleport sampai dibuka' });
+      return;
+    }
 
     try {
       const prisma = getPrisma();
@@ -1806,8 +1966,8 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         return;
       }
 
-      const pixelX = target.x * TILE_SIZE + TILE_SIZE / 2;
-      const pixelY = target.y * TILE_SIZE + TILE_SIZE / 2;
+      let pixelX = target.x * TILE_SIZE + TILE_SIZE / 2;
+      let pixelY = target.y * TILE_SIZE + TILE_SIZE / 2;
       // Skipped for kind 'seat' — a chair tile is meant to be stood/sat on
       // by design (the ordinary sit flow already puts a player there with
       // no server-side tile-blocked check at all, see PLAYER_SIT's handler
@@ -1819,6 +1979,46 @@ export function registerRoomHandlers(io: Server, socket: Socket) {
         // player where they were rather than forcing them into a wall.
         socket.emit('admin:error', { message: 'That location is blocked and can’t be teleported to right now' });
         return;
+      }
+
+      // Same enforcement zoneHandler.ts's ZONE_ENTER already applies to
+      // ordinary walking — a teleport landing someone inside a locked zone
+      // they aren't admitted to would otherwise be a second, unguarded door
+      // into the exact room the lock exists to keep people out of. Checked
+      // for every kind (including 'seat') since an assigned seat that
+      // happens to sit inside a since-locked zone is no more reachable this
+      // way than any other point in it.
+      const destZone = findZoneAtTile(getCachedZones(room), target.x, target.y);
+      if (destZone && isZoneLocked(room, destZone.id) && !mayEnterZone(room, destZone.id, uid)) {
+        socket.emit('admin:error', { message: 'Zona tujuan sedang dikunci' });
+        return;
+      }
+
+      // Door lock (password-protected door tile/area) — a genuinely
+      // different kind of block than the wall/desk check above. A real
+      // locked door doesn't erase the destination, it just stays shut:
+      // land just outside it instead of refusing outright or silently
+      // walking straight through. Falls back to a flat refusal only if no
+      // open tile exists within the search radius (a pathological map).
+      if (tiles) {
+        const doorAreas = getCachedDoorAreaRects(room);
+        const overrideActive = isDoorOverrideActive(room);
+        if (isDoorLockedForSocket(socket.id, room, tiles, target.x, target.y, pixelX, pixelY, doorAreas, overrideActive)) {
+          const outside = findTileOutsideLockedDoor(tiles, room, socket.id, target.x, target.y, doorAreas, overrideActive);
+          if (!outside) {
+            socket.emit('admin:error', { message: 'Pintu tujuan terkunci' });
+            return;
+          }
+          target = outside;
+          pixelX = outside.x * TILE_SIZE + TILE_SIZE / 2;
+          pixelY = outside.y * TILE_SIZE + TILE_SIZE / 2;
+          // A redirected 'seat' teleport no longer lands ON the seat — the
+          // whole point was that it's behind a locked door. Leaving
+          // seatFurnitureId set would tell the client (useSocket.ts's
+          // PLAYER_TELEPORTED handler) to sit the player down at THIS
+          // (non-seat) spot instead, landing them mid-sit in a doorway.
+          seatFurnitureId = undefined;
+        }
       }
 
       updatePlayerPosition(room, socket.id, pixelX, pixelY, 'down');
@@ -2621,6 +2821,11 @@ async function handleLeave(io: Server, socket: Socket, room: string | null) {
 
   removePlayer(room, socket.id);
   io.to(room).emit(SocketEvents.PLAYER_LEFT, socket.id);
+  // Must run BEFORE socket.leave() — it broadcasts to `room`, and a socket
+  // that has already left can't. Covers every explicit-leave path (back to
+  // lobby, portal travel, logout, kick, superseded tab); the hard-drop path
+  // is handled by rtcHandler's own 'disconnecting' listener.
+  releaseScreenShareOnLeave(socket, room);
   socket.leave(room);
   await broadcastRoomCount(io, room);
   playerNames.delete(socket.id);

@@ -1,4 +1,5 @@
 import { PencilFill } from 'react-bootstrap-icons';
+import { Icon } from '@iconify/react';
 
 interface AvatarEditorButtonProps {
   onClick: () => void;
@@ -12,10 +13,17 @@ export function AvatarEditorButton({ onClick, variant = 'standalone' }: AvatarEd
     return (
       <button
         onClick={onClick}
-        title="Edit Avatar"
-        className="w-8 h-8 rounded-lg flex items-center justify-center text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-700 transition-all cursor-pointer"
+        // Framed as "Profile" (not "Edit Avatar") per the ZEP reference —
+        // clicking your own profile is where character editing lives,
+        // rather than a dedicated standalone icon. Same onClick/modal as
+        // before; only the entry point's label changed.
+        title="Profile"
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-700 transition-all cursor-pointer"
       >
-        <PencilFill size={14} />
+        {/* Figma workspace restyle (kxCY7H7D8ZHzGkMCBDA2Y8, node 6:200) — sidebar
+            variant only; the standalone floating button below keeps its
+            original icon, not requested for this pass. */}
+        <Icon icon="solar:user-bold" width={14} height={14} />
       </button>
     );
   }

@@ -42,11 +42,14 @@ export interface CalendarEventDto {
   roomName?: string | null;
   visibility?: 'default' | 'private';
   meetkaiRoomSlug?: string | null;
+  meetkaiZoneId?: string | null;
+  meetkaiPassword?: string | null;
   attendees?: EventAttendeeDto[];
 }
 
 export interface MeetingRoomDto { id: string; name: string; capacity: number; location: string | null; equipment: string[]; bookableBy: string }
 export interface BusyBlock { start: string; end: string }
+export interface MeetingZoneDto { id: string; name: string }
 
 export interface EventInput {
   title: string;
@@ -61,6 +64,9 @@ export interface EventInput {
   visibility?: 'default' | 'private';
   attendeeIds?: string[];
   reminders?: number[];
+  meetkaiRoomSlug?: string | null;
+  meetkaiZoneId?: string | null;
+  meetkaiPassword?: string | null;
 }
 
 export const calendarApi = {
@@ -93,4 +99,5 @@ export const calendarApi = {
   listRooms: () => req<{ rooms: MeetingRoomDto[] }>('/meeting-rooms'),
   roomBusy: (roomId: string, from: Date, to: Date) =>
     req<{ busy: BusyBlock[] }>(`/meeting-rooms/${roomId}/busy?from=${from.toISOString()}&to=${to.toISOString()}`),
+  listMeetingZones: (roomSlug: string) => req<{ zones: MeetingZoneDto[] }>(`/rooms/${roomSlug}/zones`),
 };

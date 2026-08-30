@@ -1,10 +1,11 @@
 import { useRef, useEffect, useState, useMemo, memo } from 'react';
-import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff, Grid3x3GapFill } from 'react-bootstrap-icons';
+import { MicMuteFill, CameraVideoOffFill, ArrowsFullscreen, FullscreenExit, PlusLg, DashLg, ArrowCounterclockwise, XLg, VolumeUpFill, VolumeMuteFill, DisplayFill, RecordCircleFill, EyeSlashFill, CameraVideoFill, WifiOff } from 'react-bootstrap-icons';
 import { ProximityPlayer, EmoteEvent, EMOTE_EMOJI } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { useProfiles } from '@/hooks/useProfiles';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { ChatAvatar, avatarColor } from './ChatAvatar';
+import { useProximitySnapshot } from '@/hooks/useProximitySnapshot';
 
 // autoPictureInPicture (part of the Picture-in-Picture spec — tells the
 // browser to auto-float this element into native PiP when the tab/app is
@@ -53,7 +54,6 @@ export function latestReaction(
 }
 
 interface VideoGridProps {
-  nearby: ProximityPlayer[];
   localStream: MediaStream | null;
   localScreenStream: MediaStream | null;
   remoteStreams: Map<string, MediaStream>;
@@ -71,6 +71,13 @@ interface VideoGridProps {
   // tile (same as any other nearby player) but VideoTile shows a
   // "connection lost" badge over it instead of a silently frozen picture.
   failedPeerIds?: Set<string>;
+  // Peers whose incoming screen-share frames have stalled (see useWebRTC's
+  // screenStalledPeers) — ICE is still nominally connected, but no new
+  // frames arrived on the last tick. Distinct from failedPeerIds above:
+  // this is "actively trying to recover" (restartIce() in progress), not a
+  // permanent failure, so it gets its own "Menyambung ulang..." overlay
+  // rather than the connection-lost badge.
+  screenStalledPeerIds?: Set<string>;
   // Meeting View entry point — moved here from Sidebar's Room Features
   // dropdown to sit next to the hide/show camera-tiles toggle instead.
   // VideoGrid only ever renders while Meeting View is NOT active, so this
@@ -144,7 +151,7 @@ const MAX_ZOOM = 3;
 // cameraEntries/onEnlarge) — same zoom/pan/maximize behavior works just as
 // well for zooming into a face as it does a shared screen, so this one panel
 // covers both rather than a second hand-maintained copy.
-function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedChange }: { name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean; onClose: () => void; onMaximizedChange?: (maximized: boolean) => void }) {
+function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedChange, stalled }: { name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean; onClose: () => void; onMaximizedChange?: (maximized: boolean) => void; stalled?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [maximized, setMaximizedState] = useState(false);
@@ -439,6 +446,17 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
           style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})${mirror ? ' scaleX(-1)' : ''}` }}
           className="absolute inset-0 w-full h-full object-contain object-top"
         />
+        {/* Screen-share stall recovery — sits over whatever frame the video
+            froze on (never unmounted, so the moment frames resume this just
+            disappears again) instead of leaving a silently frozen/black
+            picture with no explanation. See webrtcService's
+            checkScreenStall/attemptScreenRecovery. */}
+        {stalled && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/55 text-white pointer-events-none">
+            <span className="w-8 h-8 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+            <span className="text-sm font-medium">Menyambung ulang...</span>
+          </div>
+        )}
         {/* The title bar's replacement while maximized — floats over the
             video (z-10, semi-transparent so the picture still reads through
             behind it) instead of pushing it down a row. */}
@@ -452,10 +470,16 @@ function ScreenSharePanel({ name, stream, isLocal, mirror, onClose, onMaximizedC
   );
 }
 
-export function VideoGrid({ nearby, localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds, onToggleMeetingView, onScreenShareMaximizedChange }: VideoGridProps) {
+export function VideoGrid({ localStream, localScreenStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onManualVolumeChange, recordedTargetUserId, isLocalBeingRecorded, failedPeerIds, screenStalledPeerIds, onToggleMeetingView, onScreenShareMaximizedChange }: VideoGridProps) {
+  // Subscribed here rather than received as a prop: App used to hold this
+  // in state, so the proximity tick re-rendered its whole tree several
+  // times a second to deliver a value only this kind of component reads.
+  const nearby = useProximitySnapshot();
   const playerRecords = useGameStore((s) => s.playerRecords);
-  const localPlayer = useGameStore((s) => s.localPlayer);
-  const localHandRaised = localPlayer.handRaised;
+  // Per-field selectors — see ParticipantPanel's note. Subscribing to the whole
+  // localPlayer object re-rendered the entire video grid at 10Hz while walking.
+  const localHandRaised = useGameStore((s) => s.localPlayer.handRaised);
+  const localName = useGameStore((s) => s.localPlayer.name);
   // Speaking state (same source GameCanvas uses to ring an avatar on the
   // map) is deliberately NOT read here any more — VideoTile now selects its
   // own speakingId/isLocal slice directly (see its doc comment), so this
@@ -493,12 +517,12 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // Local and remote shares merged into ONE list, because from the viewer's
   // side they're the same kind of thing — content someone is presenting —
   // and only their prominence should differ, not their source.
-  const screenEntries: { key: string; name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean }[] = [];
+  const screenEntries: { key: string; name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean; peerId?: string }[] = [];
   if (localScreenStream) {
     screenEntries.push({ key: 'local-screen', name: 'Layar Anda', stream: localScreenStream, isLocal: true });
   }
   for (const t of videoTiles) {
-    if (t.screenStream) screenEntries.push({ key: `${t.id}-screen`, name: `Layar ${t.name}`, stream: t.screenStream, isLocal: false });
+    if (t.screenStream) screenEntries.push({ key: `${t.id}-screen`, name: `Layar ${t.name}`, stream: t.screenStream, isLocal: false, peerId: t.id });
   }
 
   // A tile's own enlarge button (see VideoTile's onEnlarge) opens the SAME
@@ -506,7 +530,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // camera and that same person's screen share can never collide on one key.
   // Gated on the tile actually having a stream — same "nothing to enlarge"
   // rule VideoTile itself uses to decide whether to render the button.
-  const cameraEntries: { key: string; name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean }[] = [];
+  const cameraEntries: { key: string; name: string; stream: MediaStream; isLocal: boolean; mirror?: boolean; peerId?: string }[] = [];
   if (localStream && !cameraOff) {
     cameraEntries.push({ key: 'local-camera', name: 'Anda', stream: localStream, isLocal: true, mirror: true });
   }
@@ -524,7 +548,10 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   const featured = [...screenEntries, ...cameraEntries].find((s) => s.key === featuredKey) ?? null;
   const otherScreens = screenEntries.filter((s) => s.key !== featured?.key);
 
-  const totalTiles = (localStream ? 1 : 0) + (localScreenStream ? 1 : 0) + videoTiles.length
+  // The local tile is unconditional now, so it always counts — otherwise a
+  // room where nobody has media yet totals 0 and the whole grid returns null,
+  // taking the tile this change exists to show with it.
+  const totalTiles = 1 + (localScreenStream ? 1 : 0) + videoTiles.length
     + videoTiles.filter((t) => t.screenStream).length;
 
   // Nothing to show (or nothing to hide) — same "don't render a control for
@@ -550,9 +577,9 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
         <Tooltip label="Meeting View" detail="Buka tampilan video-call layar penuh.">
           <button
             onClick={onToggleMeetingView}
-            className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+            className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-login-border-soft dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-login-accent dark:hover:text-purple-300 cursor-pointer"
           >
-            <Grid3x3GapFill size={11} />
+            <img src="/assets/img/icons/view_meeting_grid.svg" width={11} height={11} alt="" />
           </button>
         </Tooltip>
         <Tooltip label="Tampilkan Tile Kamera" detail="Tampilkan lagi strip video yang disembunyikan.">
@@ -586,9 +613,9 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
     <Tooltip label="Meeting View" detail="Buka tampilan video-call layar penuh.">
       <button
         onClick={onToggleMeetingView}
-        className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-purple-200 dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
+        className="pointer-events-auto w-6 h-6 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border border-login-border-soft dark:border-gray-600 shadow-sm flex items-center justify-center text-gray-500 dark:text-gray-400 hover:text-login-accent dark:hover:text-purple-300 cursor-pointer"
       >
-        <Grid3x3GapFill size={11} />
+        <img src="/assets/img/icons/view_meeting_grid.svg" width={11} height={11} alt="" />
       </button>
     </Tooltip>
   );
@@ -597,9 +624,21 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
   // are, so there's no second copy to keep in sync.
   const cameraTiles = (
     <>
-      {localStream && (
-        <VideoTile name="You" avatarName={profiles.get(localUserId)?.name || localPlayer.name} photoUrl={profiles.get(localUserId)?.photo ?? undefined} stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} onEnlarge={() => setFeaturedKey('local-camera')} />
-      )}
+      {/* Always, not only when a local stream exists.
+          On the mesh, initMedia captured a getUserMedia stream on join and
+          simply disabled its tracks, so localStream was non-null from the
+          first frame and this guard never had a false case to expose. On the
+          LiveKit path nothing is published until the user unmutes — a muted
+          mic publishes no track at all — so localStream is legitimately null
+          and this hid your own tile for the whole session while everyone
+          else's showed.
+
+          VideoTile already handles it: for isLocal it decides between video
+          and initials from cameraOff, not from whether a stream arrived (see
+          its showAvatar). This is the same rule buildVideoTiles applies to
+          remote tiles, and for the same reason — being in the room is what
+          earns a tile, not having media flowing yet. */}
+      <VideoTile name="You" avatarName={profiles.get(localUserId)?.name || localName} photoUrl={profiles.get(localUserId)?.photo ?? undefined} stream={localStream} isLocal micMuted={micMuted} cameraOff={cameraOff} isBeingRecorded={isLocalBeingRecorded} handRaised={localHandRaised} reaction={latestReaction(emoteEvents, localPlayerId, now)} onEnlarge={() => setFeaturedKey('local-camera')} />
       {videoTiles.map((tile) => {
         const uid = playerRecords[tile.id]?.userId;
         return (
@@ -640,6 +679,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
           mirror={featured.mirror}
           onClose={() => setFeaturedKey(null)}
           onMaximizedChange={(v) => { setHidden(v); onScreenShareMaximizedChange?.(v); }}
+          stalled={!featured.isLocal && !!featured.peerId && screenStalledPeerIds?.has(featured.peerId)}
         />
       )}
       {/* QA (Load checklist item 3, "War Room share massal") — this column
@@ -705,7 +745,7 @@ export function VideoGrid({ nearby, localStream, localScreenStream, remoteStream
             to tell a shared screen could be opened at all. */}
         {otherScreens.map((s) => (
           <div key={s.key} className="pointer-events-auto relative group/screen">
-            <VideoTile name={s.name} stream={s.stream} isLocal={s.isLocal} isScreen />
+            <VideoTile name={s.name} stream={s.stream} isLocal={s.isLocal} isScreen screenStalled={!s.isLocal && !!s.peerId && screenStalledPeerIds?.has(s.peerId)} />
             {/* wrapperClassName carries the positioning. `!absolute`
                 (important-modifier), not plain `absolute` — Tooltip's own
                 wrapper div hardcodes `relative` as a base class, and
@@ -756,6 +796,7 @@ export const VideoTile = memo(function VideoTile({
   speakingId,
   onEnlarge,
   connectionFailed,
+  screenStalled,
   isGuest,
 }: {
   name: string;
@@ -802,6 +843,12 @@ export const VideoTile = memo(function VideoTile({
   // permanently-failed peer's tile just silently froze on its last frame
   // with no indication anything was wrong.
   connectionFailed?: boolean;
+  // Screen-share stall recovery (see webrtcService's checkScreenStall) —
+  // ICE is still nominally connected, but this tile's incoming frames have
+  // stopped advancing and an automatic restartIce() recovery is in
+  // progress. Only ever set for isScreen tiles (see call sites) — distinct
+  // from connectionFailed above, which means "gave up", not "still trying".
+  screenStalled?: boolean;
   // QA (Akses tamu checklist item 6, "Label Guest") — already shown in
   // ParticipantPanel's list rows; this is the same signal, just also
   // surfaced on the tile itself (the more commonly glanced-at spot).
@@ -881,13 +928,20 @@ export const VideoTile = memo(function VideoTile({
 
   return (
     <div
-      // Speaking ring: a coloured border plus a soft outer glow, in the same
-      // purple the rest of the HUD uses for "active". Drawn with ring/border
-      // colour rather than an extra element so it can't shift the tile's size
-      // and nudge its neighbours every time someone starts talking. The
-      // pulsing GLOW itself lives on a separate overlay now — see the
-      // .speaking-glow span right below — not this div; see its own comment
-      // for why.
+      // Speaking ring: a coloured border plus a soft outer glow. Deliberately
+      // green rather than the HUD's usual purple — this app's chrome (badges,
+      // buttons, the default tile border itself) is purple almost everywhere,
+      // so a purple speaking indicator barely read as distinct; green is also
+      // the near-universal "active mic" convention elsewhere (Meet/Zoom/
+      // Discord). Border width is now a constant border-2 (was border, 1px)
+      // for EVERY tile, speaking or not — bumping it only while speaking
+      // would resize the tile and nudge its neighbours every time someone
+      // starts talking, the exact shift this ring/border-colour (not an
+      // extra element) approach exists to avoid; a permanently thicker
+      // border sidesteps that while still reading as more solid than
+      // before. The pulsing GLOW itself lives on a separate overlay now —
+      // see the .speaking-glow span right below — not this div; see its own
+      // comment for why.
       // h-full flex flex-col on the large path: the tile fills the grid cell
       // it was given, and the video area (flex-1 min-h-0, the only flow
       // child) takes 100% of it — the name tag is an absolute overlay now
@@ -897,8 +951,8 @@ export const VideoTile = memo(function VideoTile({
       // instantly rather than being interpolated; only the border color
       // fades. Narrows what changes when speaking starts, same spirit as
       // moving the glow out below.
-      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border shadow-lg transition-colors duration-300 animate-fade-in group relative ${large ? 'w-full h-full flex flex-col' : 'w-24'} ${
-        speaking ? 'border-purple-500 ring-2 ring-purple-400/60' : 'border-purple-200'
+      className={`pointer-events-auto bg-white/90 backdrop-blur-sm rounded-lg overflow-hidden border-2 shadow-lg transition-colors duration-300 animate-fade-in group relative ${large ? 'w-full h-full flex flex-col' : 'w-24'} ${
+        speaking ? 'border-green-500 ring-2 ring-green-400/60' : 'border-purple-200'
       }`}
       style={{ opacity: translucent ? 0.5 : 1 }}
     >
@@ -973,6 +1027,16 @@ export const VideoTile = memo(function VideoTile({
         <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1 text-white">
           <WifiOff size={large ? 22 : 14} />
           {large && <span className="text-xs">Koneksi terputus</span>}
+        </div>
+      )}
+      {/* Screen-share stall recovery (see webrtcService's checkScreenStall) —
+          same "sits over whatever the tile would otherwise show" placement
+          as connectionFailed above, but its own overlay: this is "still
+          trying to recover" (spinner), not "gave up" (WifiOff). */}
+      {screenStalled && (
+        <div className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center gap-1 text-white">
+          <span className={`rounded-full border-2 border-white/40 border-t-white animate-spin ${large ? 'w-6 h-6' : 'w-4 h-4'}`} />
+          {large && <span className="text-xs">Menyambung ulang...</span>}
         </div>
       )}
       </div>
@@ -1083,9 +1147,9 @@ export const VideoTile = memo(function VideoTile({
         )}
         {speaking && (
           <span className={`flex items-end gap-px shrink-0 ${large ? 'h-2.5' : 'h-1.5'}`}>
-            <span className="w-0.5 h-full bg-purple-400 rounded-full animate-wave-bar" style={{ animationDelay: '0ms' }} />
-            <span className="w-0.5 h-full bg-purple-400 rounded-full animate-wave-bar" style={{ animationDelay: '150ms' }} />
-            <span className="w-0.5 h-full bg-purple-400 rounded-full animate-wave-bar" style={{ animationDelay: '300ms' }} />
+            <span className="w-0.5 h-full bg-green-400 rounded-full animate-wave-bar" style={{ animationDelay: '0ms' }} />
+            <span className="w-0.5 h-full bg-green-400 rounded-full animate-wave-bar" style={{ animationDelay: '150ms' }} />
+            <span className="w-0.5 h-full bg-green-400 rounded-full animate-wave-bar" style={{ animationDelay: '300ms' }} />
           </span>
         )}
       </span>
@@ -1104,7 +1168,7 @@ export const VideoTile = memo(function VideoTile({
           rendering bug. */}
       {hasVolumeSlider && (
         <div
-          className={`absolute left-1 right-1 bottom-1 flex items-center gap-1.5 bg-black/45 backdrop-blur-md rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-150 ${
+          className={`absolute left-1 right-1 bottom-1 flex items-center gap-1.5 bg-black/45 backdrop-blur-md rounded-full overflow-hidden opacity-0 group-hover:opacity-100 transition-opacity duration-150 ${
             large ? 'px-2 py-1' : 'px-1.5 py-0.5'
           }`}
         >

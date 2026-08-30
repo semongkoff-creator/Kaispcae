@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, type ClipboardEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle } from 'react-bootstrap-icons';
+import { XLg, PlusLg, EmojiSmile, Search, SendFill, FileEarmarkFill, Download, TrashFill, PencilFill, PeopleFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, Clipboard } from 'react-bootstrap-icons';
 import { ChannelMessage, Channel, DirectConversationSummary } from '@kaispace/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
@@ -8,6 +8,8 @@ import { GroupMembers } from './GroupMembers';
 import { useProfiles } from '@/hooks/useProfiles';
 import { AttachmentLightbox, type LightboxTarget } from '@/components/ui/AttachmentLightbox';
 import { AttachmentMenuButton } from '@/components/ui/AttachmentMenuButton';
+import { AttachmentTray } from '@/components/ui/AttachmentTray';
+import { usePendingAttachments } from '@/hooks/usePendingAttachments';
 import { renderWithMentions, stripMentionsToPlainText } from '@/utils/mentions';
 
 // §Messenger — the full-screen chat surface, in the same "module panel over
@@ -179,6 +181,9 @@ export function MessengerApp({
   // Bug 10 — attachment preview opens in this in-app lightbox, not a new tab.
   const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
   const [attachError, setAttachError] = useState('');
+  // Paste/attach stage files here first — nothing uploads or sends until
+  // send() drains this. See usePendingAttachments.ts.
+  const pendingAttachments = usePendingAttachments();
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [showMembers, setShowMembers] = useState(false);
@@ -189,10 +194,26 @@ export function MessengerApp({
   // 1s tick so typing indicators lapse on their own — there's no explicit
   // "stopped typing" event, entries just pass their expiry.
   const [, setTick] = useState(0);
+  // Ticks ONLY while there is an unexpired typing entry to expire. It used
+  // to run unconditionally for as long as the surface was up, re-rendering
+  // this whole component once a second forever — and a chat surface is
+  // typically left open, so that was a permanent 1Hz render of one of the
+  // largest components in the app to do nothing at all. Someone starting to
+  // type changes typingByTarget, which restarts this effect; the tick that
+  // notices the last entry lapse stops it again.
+  const anyoneTyping = () =>
+    Object.values(useGameStore.getState().typingByTarget).some((byUser) =>
+      Object.values(byUser).some((expiresAt) => expiresAt > Date.now()),
+    );
   useEffect(() => {
-    const iv = setInterval(() => setTick((t) => t + 1), 1000);
+    if (!anyoneTyping()) return;
+    const iv = setInterval(() => {
+      setTick((t) => t + 1);
+      if (!anyoneTyping()) clearInterval(iv);
+    }, 1000);
     return () => clearInterval(iv);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typingByTarget]);
 
   const rows = useMemo<Row[]>(() => {
     const channelRows: Row[] = channels.map((c) => ({
@@ -252,20 +273,24 @@ export function MessengerApp({
 
   const send = useCallback(() => {
     const t = text.trim();
-    if (!t) return;
-    onSend(t);
+    const attachments = pendingAttachments.items;
+    if (!t && attachments.length === 0) return;
+    if (t) onSend(t);
+    // Each staged attachment goes through onSendFile exactly like a single
+    // manual attach did before — instant optimistic bubble + background
+    // upload per file (see useChannelChat.ts's sendFileMessage). Several
+    // staged files just means several bubbles.
+    attachments.forEach((a) => onSendFile?.(a.file));
+    pendingAttachments.clear();
     setText('');
     setShowEmoji(false);
-  }, [text, onSend]);
+  }, [text, onSend, onSendFile, pendingAttachments]);
 
-  // Bug 6 — mirrors ChatPanel.tsx's handleAttachFile: this used to await the
-  // ENTIRE upload before onSend was even called, so the bubble never showed
-  // until the file had finished uploading. onSendFile (useChannelChat.ts's
-  // sendFileMessage) shows it immediately (local blob: preview) and uploads
-  // in the background — this only keeps the synchronous size pre-check,
-  // which should still reject before any bubble exists. A failed upload/send
-  // shows as that bubble's own status:'failed' with a retry button, not a
-  // generic banner, so `uploading` no longer needs to block the composer.
+  // Paste/attach no longer uploads or sends anything by itself — it only
+  // stages the file into pendingAttachments (rendered as AttachmentTray
+  // below the input) so the user can review, add more, and remove before
+  // committing. The actual upload/send happens in send() once the send
+  // button is pressed (see onSendFile's instant-bubble-then-upload above).
   const handleFile = useCallback(
     (file: File) => {
       setAttachError('');
@@ -273,9 +298,28 @@ export function MessengerApp({
         setAttachError('File terlalu besar (maks 50MB).');
         return;
       }
-      onSendFile?.(file);
+      pendingAttachments.add(file);
     },
-    [onSendFile]
+    [pendingAttachments]
+  );
+
+  // Ctrl+V a screenshot straight into the input, Lark/WhatsApp-style —
+  // mirrors ChatPanel.tsx's own handlePaste, reusing handleFile verbatim
+  // (same size check, same staging) instead of any new upload logic. Only
+  // intercepts when the clipboard actually carries image data; plain text
+  // paste falls through untouched. Multiple pasted images all get staged
+  // together, same as attaching several files manually.
+  const handlePaste = useCallback(
+    (e: ClipboardEvent<HTMLTextAreaElement>) => {
+      const imageFiles = Array.from(e.clipboardData?.items ?? [])
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter((f): f is File => !!f);
+      if (imageFiles.length === 0) return;
+      e.preventDefault();
+      imageFiles.forEach((file) => handleFile(file));
+    },
+    [handleFile]
   );
 
   const loadOlder = useCallback(async () => {
@@ -581,7 +625,7 @@ export function MessengerApp({
                             {m.isPinned && <PinAngleFill size={9} className="text-purple-500" title="Disematkan" />}
                           </span>
                         )}
-                        <div className="group relative">
+                        <div className="group relative min-w-0">
                           {editingId === m.id ? (
                             <div className="flex gap-1.5">
                               <input
@@ -606,7 +650,7 @@ export function MessengerApp({
                             <div
                               onContextMenu={(e) => { e.preventDefault(); setMsgMenu({ x: e.clientX, y: e.clientY, message: m }); }}
                               title="Klik kanan untuk opsi (sematkan, lihat yang sudah baca)"
-                              className={`px-3.5 py-2 rounded-2xl text-sm break-words whitespace-pre-wrap cursor-context-menu ${
+                              className={`px-3.5 py-2 rounded-2xl text-sm break-words whitespace-pre-wrap select-text cursor-context-menu ${
                                 own
                                   ? 'bg-purple-500 text-white rounded-br-md'
                                   : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-bl-md'
@@ -694,6 +738,7 @@ export function MessengerApp({
             {/* ── Composer ───────────────────────────────────────── */}
             <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 px-4 py-3">
               {attachError && <p className="text-xs text-red-500 mb-1.5">{attachError}</p>}
+              <AttachmentTray items={pendingAttachments.items} onRemove={pendingAttachments.remove} />
               {showEmoji && (
                 <div className="mb-2 flex flex-wrap gap-1 p-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
                   {COMMON_EMOJIS.map((e) => (
@@ -733,12 +778,13 @@ export function MessengerApp({
                       send();
                     }
                   }}
+                  onPaste={handlePaste}
                   placeholder={activeRow ? `Kirim pesan ke ${activeRow.title}` : 'Pilih percakapan'}
                   className="flex-1 min-w-0 resize-none bg-transparent text-sm outline-none py-1 max-h-32"
                 />
                 <button
                   onClick={send}
-                  disabled={!text.trim()}
+                  disabled={!text.trim() && pendingAttachments.items.length === 0}
                   className="w-8 h-8 rounded-lg bg-purple-500 hover:bg-purple-600 disabled:opacity-40 disabled:hover:bg-purple-500 text-white inline-flex items-center justify-center shrink-0"
                 >
                   <SendFill size={13} />
@@ -829,6 +875,21 @@ export function MessengerApp({
             style={{ position: 'fixed', left: Math.min(msgMenu.x, window.innerWidth - 220), top: Math.min(msgMenu.y, window.innerHeight - 260) }}
             className="z-[1001] w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 text-xs"
           >
+            {/* Right-click → Copy, same as any desktop chat app — text is
+                already Ctrl+C-selectable (select-text above), but this menu
+                itself preventDefault()s the browser's own native "Copy" item,
+                so without this there was no right-click way to copy at all. */}
+            {msgMenu.message.text && (
+              <button
+                onClick={async () => {
+                  try { await navigator.clipboard.writeText(msgMenu.message.text); } catch { /* clipboard permission denied — text stays selectable via Ctrl+C as a fallback */ }
+                  setMsgMenu(null);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
+              >
+                <Clipboard size={11} /> Salin teks
+              </button>
+            )}
             {isAdmin && (
               <button
                 onClick={() => { onPinMessage?.(msgMenu.message.id, !msgMenu.message.isPinned); setMsgMenu(null); }}

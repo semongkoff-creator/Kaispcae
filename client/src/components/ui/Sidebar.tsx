@@ -1,11 +1,17 @@
 import { ReactNode } from 'react';
-import { List, XLg, XCircleFill, Tools, GeoAltFill, ImageFill, BoxArrowRight, HouseDoorFill, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, RecordCircleFill, LockFill, UnlockFill, ShieldLock, Buildings, CalendarEvent, ClockHistory, ChatDotsFill, PersonCheck, DoorOpenFill, DoorClosedFill, Link45deg, VolumeUpFill, QuestionCircleFill, PeopleFill, BarChartFill, GearFill, HourglassSplit } from 'react-bootstrap-icons';
+import { XLg, XCircleFill, Tools, SunFill, MoonFill, EyeFill, EyeSlashFill, PipFill, LockFill, UnlockFill, Buildings, ClockHistory, DoorOpenFill, DoorClosedFill, Link45deg, HourglassSplit, ChatDotsFill } from 'react-bootstrap-icons';
+import { SoundboardPanel } from './SoundboardPanel';
+
+// Real KaiSpace icon set (client/kaispace_icon.rar, extracted 2026-08-27) —
+// fixed-color SVGs (not currentColor-recolorable like the Iconify set they
+// replace), self-hosted under public/assets/img/icons, never hotlinked.
+function IconImg({ name, size = 15 }: { name: string; size?: number }) {
+  return <img src={`/assets/img/icons/${name}.svg`} width={size} height={size} alt="" className="shrink-0" />;
+}
 import { AvatarEditorButton } from '../avatar/AvatarEditorButton';
-import { PresenceButton } from '../avatar/PresenceButton';
 import { RecordingControl } from './RecordingControl';
 import { ActiveRecordingInfo } from '@/stores/gameStore';
 import { Theme } from '@/hooks/useTheme';
-import { ManualStatus } from '@/data/presence';
 import { Role } from '@kaispace/shared';
 import { Tooltip } from '@/components/ui/Tooltip';
 
@@ -22,6 +28,9 @@ interface SidebarProps {
   roomFeaturesActive: boolean;
   onToggleRoomFeatures: () => void;
   onCloseRoomFeatures: () => void;
+  // Reference design's flyout header shows the room's own name (e.g.
+  // "Kaitech Group") instead of the generic "Room Features" label.
+  roomDisplayName: string;
 
   onEditAvatar: () => void;
   // QA #1/#6/#7 — reopens the first-run walkthrough (App.tsx's TutorialModal,
@@ -35,13 +44,6 @@ interface SidebarProps {
   // TEMPORARY — only for the debug line at the bottom of this menu, see its
   // own comment. Remove alongside it.
   localRole: Role;
-  // Fitur 3B / A11 — manual presence picker (Available/WFH/Focus/In a
-  // meeting/Lunch/Break/Away). 'away' opens the Away-reason popup upstream
-  // (see App.tsx's handlePresencePick) rather than applying immediately,
-  // unlike the others.
-  manualStatus: ManualStatus;
-  onPickPresence: (status: ManualStatus) => void;
-
   isAdmin: boolean;
   // ZEP Room Editor — opens the full-page editor in a new tab. The old overlay
   // editor was retired in Potong 7; this is the only edit path now.
@@ -51,21 +53,20 @@ interface SidebarProps {
   showTeleportPanel: boolean;
   onToggleTeleport: () => void;
 
-  // "My Seat" — only shown once the local player has a furniture item
-  // assigned to them in this room (see Furniture.assignedToUserId and
-  // App.tsx's handleMySeat). One click, no panel — unlike Teleport this
-  // isn't a list to pick from, there's only ever one meaningful answer.
-  // Kept in the always-visible top of the rail, not the features menu: it's
-  // the one action worth reaching without an extra click to open anything.
-  hasMySeat: boolean;
-  onMySeat: () => void;
-
   // Akses & Password Pintu audit item #9 — emergency door override
   // (canDoorOverride gates it to admins/owner; doorOverride reflects the
   // current state).
   doorOverride: boolean;
   canDoorOverride: boolean;
   onToggleDoorOverride: () => void;
+
+  // SoundboardPanel now renders here directly (moved from App.tsx's
+  // top-left pill — see this file's own rail block for why). Reuses the
+  // roomSlug prop already declared below (RecordingControl needs it too).
+  soundboardActive: boolean;
+  onToggleSoundboard: () => void;
+  onCloseSoundboard: () => void;
+  emitSoundboardPlay: (soundId: string) => void;
 
   // Guest Link & Ruang Tunggu — admin-only, prompt-based (see App.tsx's
   // handleCreateGuestLink). No "current state" to reflect here (unlike Lock
@@ -157,11 +158,14 @@ interface SidebarProps {
   roomSlug: string;
   onStartRecording: (targetUserId: string, title: string) => void;
   onStopRecording: () => void;
+  isRecordingPaused: boolean;
+  onPauseRecording: () => void;
+  onResumeRecording: () => void;
 
-  // Back to the room list (Lobby) without logging out — distinct from
-  // onLogout below, which clears the session entirely.
+  // Back to the room list (Lobby) without logging out. Logout itself is no
+  // longer a rail icon here — see the removal comment further down; it's
+  // reachable via Settings' own "Akun" section instead.
   onLeaveRoom: () => void;
-  onLogout: () => void;
   onOpenSettings: () => void;
 
   // QA (Booking popup close button) — shown whenever this user has an
@@ -186,13 +190,15 @@ interface SidebarProps {
 
 // ZEP-style left icon rail. Kept deliberately SHORT — only identity (avatar,
 // status) and the one seat-jump shortcut live here permanently. Everything
-// else (view-mode toggles, room management, recording) used to each be its
-// own icon stacked in this same rail, which read as cluttered once enough
-// features landed in the same session; they now live inside the hamburger
-// "Room Features" menu instead, one labeled row each, opening to the right
-// — same flyout convention Teleport/Add Media already used, just with text
-// labels since a whole LIST of features (unlike one single-purpose icon)
-// needs them to stay scannable.
+// else (view-mode toggles, room management) used to each be its own icon
+// stacked in this same rail, which read as cluttered once enough features
+// landed in the same session; they now live inside the hamburger "Room
+// Features" menu instead, one labeled row each, opening to the right — same
+// flyout convention Teleport/Add Media already used, just with text labels
+// since a whole LIST of features (unlike one single-purpose icon) needs
+// them to stay scannable. (Recording briefly moved out to its own
+// standalone top-of-screen control and back — see this file's own
+// Recording row further below, and commit 829cd166.)
 //
 // z-50 — above MeetingView's z-40 full-screen overlay, so the rail (or its
 // collapsed form below) stays reachable even while Meeting View is active;
@@ -201,22 +207,23 @@ export function Sidebar({
   roomFeaturesActive,
   onToggleRoomFeatures,
   onCloseRoomFeatures,
+  roomDisplayName,
   onEditAvatar,
   onOpenTutorial,
   onOpenMemberList,
   localRole,
-  manualStatus,
-  onPickPresence,
   isAdmin,
   onOpenRoomEditor,
   canTeleport,
   showTeleportPanel,
   onToggleTeleport,
-  hasMySeat,
-  onMySeat,
   doorOverride,
   canDoorOverride,
   onToggleDoorOverride,
+  soundboardActive,
+  onToggleSoundboard,
+  onCloseSoundboard,
+  emitSoundboardPlay,
   canManageGuests,
   onCreateGuestLink,
   onRevokeLastGuestLink,
@@ -260,8 +267,10 @@ export function Sidebar({
   roomSlug,
   onStartRecording,
   onStopRecording,
+  isRecordingPaused,
+  onPauseRecording,
+  onResumeRecording,
   onLeaveRoom,
-  onLogout,
   onOpenSettings,
   hasActiveBooking,
   onReopenBookingNotice,
@@ -280,7 +289,7 @@ export function Sidebar({
     return (
       <div className="absolute left-0 top-0 h-full w-12 z-50 flex flex-col items-center py-3 pointer-events-none">
         <Tooltip label="Tampilkan UI" detail="Munculkan lagi panel HUD yang disembunyikan." side="right">
-          <SidebarIcon onClick={onToggleSimplifiedView} className="pointer-events-auto bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800 shadow-sm border border-purple-100 dark:border-gray-700">
+          <SidebarIcon onClick={onToggleSimplifiedView} className="pointer-events-auto bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800 shadow-sm border border-login-border-soft dark:border-gray-700">
             <EyeFill size={14} />
           </SidebarIcon>
         </Tooltip>
@@ -294,27 +303,44 @@ export function Sidebar({
   };
 
   return (
-    <div className="absolute left-0 top-0 h-full w-12 z-50 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-r border-purple-100 dark:border-gray-700 shadow-sm flex flex-col items-center py-3 gap-0.5 pointer-events-auto">
+    <div className="absolute left-0 top-0 h-full w-12 z-50 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-r border-login-border-soft dark:border-gray-700 shadow-sm flex flex-col items-center py-3 gap-0.5 pointer-events-auto">
       <div className="relative">
         <Tooltip label="Room Features" detail="Buka menu pengaturan & kontrol room." side="right">
           <SidebarIcon active={roomFeaturesActive} onClick={onToggleRoomFeatures}>
-            <List size={16} />
+            <IconImg name="menu" size={16} />
           </SidebarIcon>
         </Tooltip>
 
         {roomFeaturesActive && (
+          // Reference design: a full-height panel flush against the rail
+          // (no left-full ml-2 gap, no rounded-xl/shadow-2xl floating-card
+          // look) — was a small max-h-[85vh] floating card before. Content
+          // list unchanged per this round's explicit confirmation — only
+          // the shell changed.
           <div
-            className="absolute top-0 left-full ml-2 w-64 max-h-[85vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-purple-100 dark:border-gray-700 p-2 z-50"
+            className="fixed top-0 left-12 bottom-0 w-64 overflow-y-auto bg-white dark:bg-gray-900 border-l border-purple-100 dark:border-gray-700 border-r border-login-border-soft dark:border-gray-700 p-2 z-50 flex flex-col"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-2 py-1.5 mb-1">
-              <span className="text-gray-900 dark:text-gray-100 text-sm font-semibold">Room Features</span>
+              <span className="font-login-body text-gray-900 dark:text-gray-100 text-sm font-semibold">{roomDisplayName}</span>
               <Tooltip label="Tutup" detail="Tutup panel Room Features." side="right">
                 <button onClick={onCloseRoomFeatures} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer">
                   <XLg size={14} />
                 </button>
               </Tooltip>
             </div>
+
+            {/* Invite — same entry point as the top-right Invite button
+                (handleCreateGuestLink), now also surfaced here per the
+                reference design. */}
+            {canManageGuests && (
+              <button
+                onClick={closeAnd(onCreateGuestLink)}
+                className="mx-2 mb-2 flex items-center justify-center gap-1.5 bg-login-accent hover:brightness-110 text-white text-sm font-medium py-2 rounded-lg shadow-sm cursor-pointer"
+              >
+                <IconImg name="invite_user" size={14} /> Invite
+              </button>
+            )}
 
             {/* Opens the ZEP-style User Guide (App.tsx's UserGuidePanel) —
                 distinct from the mandatory first-run TutorialModal (shown
@@ -324,7 +350,7 @@ export function Sidebar({
                 should be able to find without already knowing where
                 anything else is. */}
             <Tooltip label="Panduan" detail="Buka panduan cara pakai KaiSpace." side="right" wrapperClassName="w-full">
-              <MenuRow icon={<QuestionCircleFill size={15} />} label="Panduan" onClick={closeAnd(onOpenTutorial)} />
+              <MenuRow icon={<IconImg name="user_guide" />} label="Panduan" onClick={closeAnd(onOpenTutorial)} />
             </Tooltip>
             {/* QA (Presence checklist item #8, "Member list akurat") — a
                 guest has no User row (see server/src/routes/guestInvite.ts),
@@ -332,7 +358,7 @@ export function Sidebar({
                 nothing from opening this either. */}
             {!isGuest && (
               <Tooltip label="Daftar Member" detail="Lihat semua member terdaftar di room ini." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<PeopleFill size={15} />} label="Member" onClick={closeAnd(onOpenMemberList)} />
+                <MenuRow icon={<IconImg name="user_online" />} label="Member" onClick={closeAnd(onOpenMemberList)} />
               </Tooltip>
             )}
             <MenuDivider />
@@ -371,13 +397,13 @@ export function Sidebar({
             </Tooltip>
             {!isGuest && (
               <Tooltip label="Chat" detail="Buka tampilan pesan gaya messenger." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<ChatDotsFill size={15} />} label={messengerViewActive ? 'Tutup Chat' : 'Chat'} active={messengerViewActive} onClick={closeAnd(onToggleMessengerView)} />
+                <MenuRow icon={<IconImg name="message" />} label={messengerViewActive ? 'Tutup Chat' : 'Chat'} active={messengerViewActive} onClick={closeAnd(onToggleMessengerView)} />
               </Tooltip>
             )}
             {isAdmin && (
               <Tooltip label="Permintaan Bergabung" detail="Lihat & proses permintaan masuk yang menunggu. (Khusus admin.)" side="right" wrapperClassName="w-full">
                 <MenuRow
-                  icon={<PersonCheck size={15} />}
+                  icon={<IconImg name="request" />}
                   label={pendingJoinCount > 0 ? `Permintaan bergabung (${pendingJoinCount})` : 'Permintaan bergabung'}
                   active={joinQueueActive}
                   onClick={closeAnd(onToggleJoinQueue)}
@@ -386,7 +412,7 @@ export function Sidebar({
             )}
             {!isGuest && (
               <Tooltip label="Kalender" detail="Buka kalender jadwal tim." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<CalendarEvent size={15} />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
+                <MenuRow icon={<IconImg name="calendar" />} label={calendarViewActive ? 'Tutup Kalender' : 'Kalender'} active={calendarViewActive} onClick={closeAnd(onToggleCalendarView)} />
               </Tooltip>
             )}
             {/* Absensi + Cuti keduanya hidup di AttendanceApp (Cuti adalah tab
@@ -403,12 +429,12 @@ export function Sidebar({
                 why this is NOT nested inside the admin-only Konsol Admin). */}
             {!isGuest && (
               <Tooltip label="Analitik Saya" detail="Lihat ringkasan aktivitas & produktivitasmu." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<BarChartFill size={15} />} label={myAnalyticsActive ? 'Tutup Analitik Saya' : 'Analitik Saya'} active={myAnalyticsActive} onClick={closeAnd(onToggleMyAnalytics)} />
+                <MenuRow icon={<IconImg name="stat" />} label={myAnalyticsActive ? 'Tutup Analitik Saya' : 'Analitik Saya'} active={myAnalyticsActive} onClick={closeAnd(onToggleMyAnalytics)} />
               </Tooltip>
             )}
             {isWorkspaceAdmin && (
               <Tooltip label="Konsol Admin" detail="Buka panel pengelolaan workspace. (Khusus admin.)" side="right" wrapperClassName="w-full">
-                <MenuRow icon={<ShieldLock size={15} />} label={adminViewActive ? 'Tutup Konsol Admin' : 'Konsol Admin'} active={adminViewActive} onClick={closeAnd(onToggleAdminView)} />
+                <MenuRow icon={<IconImg name="admin_panel" />} label={adminViewActive ? 'Tutup Konsol Admin' : 'Konsol Admin'} active={adminViewActive} onClick={closeAnd(onToggleAdminView)} />
               </Tooltip>
             )}
             {isOperator && (
@@ -478,39 +504,37 @@ export function Sidebar({
                 <MenuRow icon={<XCircleFill size={15} />} label="Cabut Guest Link Terakhir" onClick={closeAnd(onRevokeLastGuestLink)} />
               </Tooltip>
             )}
-            {/* QA #9/#10 — CEO/admin-only text broadcast, the text
-                counterpart to Spotlight (voice). One-shot action like Guest
-                Link above — App.tsx's handleBroadcast prompts for the text. */}
-            {canBroadcast && (
-              <Tooltip label="Broadcast" detail="Kirim pengumuman teks ke semua orang di room ini." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<VolumeUpFill size={15} />} label="Broadcast" onClick={closeAnd(onBroadcast)} />
-              </Tooltip>
-            )}
+            {/* Broadcast, Teleport — promoted to persistent rail icons
+                above; removed here to avoid duplication. Add Media is
+                restored below (see the comment further up on why). */}
             {isAdmin && (
               <Tooltip label="Edit Room" detail="Buka Room Editor untuk mengubah tata letak. (Khusus admin.)" side="right" wrapperClassName="w-full">
                 <MenuRow icon={<Tools size={15} />} label="Edit Room" onClick={closeAnd(onOpenRoomEditor)} />
               </Tooltip>
             )}
-            {canTeleport && (
-              <Tooltip label="Teleport" detail="Pindah cepat ke lokasi tersimpan." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<GeoAltFill size={15} />} label="Teleport" active={showTeleportPanel} onClick={closeAnd(onToggleTeleport)} />
-              </Tooltip>
-            )}
-
-            <MenuDivider />
             {/* QA (Akses tamu checklist item 2, "Guest terbatas") — was
                 already a dead end for a guest (mediaHandler.ts/noteHandler.ts
                 aren't registered for guest sockets at all), just never hidden. */}
             {!isGuest && (
               <Tooltip label="Tambah Media" detail="Tempel gambar, video, atau file ke dalam room." side="right" wrapperClassName="w-full">
-                <MenuRow icon={<ImageFill size={15} />} label="Add Media" active={showAddMediaPanel} onClick={closeAnd(onToggleAddMedia)} />
+                <MenuRow icon={<IconImg name="add_media" />} label="Add Media" active={showAddMediaPanel} onClick={closeAnd(onToggleAddMedia)} />
               </Tooltip>
             )}
 
+            <MenuDivider />
+
+            {/* Screen recording — restored here after a brief detour to a
+                standalone top-of-screen control (commit 829cd166 moved it
+                out; this reverts that). variant="sidebar" renders as a
+                compact icon pair (Record, Recordings) anchored at the row's
+                right edge, with its own flyout popovers portaled to
+                document.body — see RecordingControl.tsx's own header
+                comment for why the portal is needed specifically inside
+                this scrollable dropdown. */}
             {canRecord && (
               <div className="flex items-center gap-3 px-3 py-2">
-                <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-purple-50 dark:bg-gray-700 text-purple-600 dark:text-purple-300">
-                  <RecordCircleFill size={15} />
+                <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-login-surface dark:bg-gray-700 text-login-accent dark:text-purple-300">
+                  <IconImg name="record_on" />
                 </span>
                 <span className="flex-1 text-sm text-gray-700 dark:text-gray-200">Recording</span>
                 <div className="flex items-center gap-1 shrink-0">
@@ -519,10 +543,13 @@ export function Sidebar({
                     recordingTargets={recordingTargets}
                     activeRecording={activeRecording}
                     isRecordingMine={isRecordingMine}
+                    isPaused={isRecordingPaused}
                     uploading={recordingUploading}
                     roomSlug={roomSlug}
                     onStart={onStartRecording}
                     onStop={onStopRecording}
+                    onPause={onPauseRecording}
+                    onResume={onResumeRecording}
                   />
                 </div>
               </div>
@@ -542,26 +569,84 @@ export function Sidebar({
             <p className="px-2 py-1 mt-1 text-[9px] text-gray-300 dark:text-gray-600 border-t border-gray-100 dark:border-gray-800">
               debug: isGuest={String(isGuest)} role={localRole}
             </p>
+
+            {/* Exit Space — same "Kembali ke Daftar Room" action the rail's
+                own icon already triggers, pinned to the bottom of this
+                panel per the reference design. mt-auto works here because
+                the panel is flex flex-col with a bounded height. */}
+            <Tooltip label="Kembali ke Daftar Room" detail="Keluar dari room ini, kembali ke Lobby." wrapperClassName="mt-auto w-full">
+              <MenuRow icon={<IconImg name="exit_space" />} label="Exit Space" onClick={closeAnd(onLeaveRoom)} />
+            </Tooltip>
           </div>
         )}
       </div>
 
-      {hasMySeat && (
-        <Tooltip label="Ke Kursi Saya" detail="Teleport langsung ke kursi tetapmu di room ini." side="right">
-          <SidebarIcon onClick={onMySeat}>
-            <span className="text-xs leading-none">🪑</span>
+      {/* Promoted from the Room Features flyout above to persistent rail
+          icons — the reference wireframe shows these directly in the rail
+          rather than behind the hamburger. Each button reuses the exact
+          same handler/active-state/gating as its still-present flyout row
+          (nothing removed there) — a second entry point, same pattern as
+          the top-right notification bell/Invite button added earlier. */}
+      {canBroadcast && (
+        <Tooltip label="Broadcast" detail="Kirim pengumuman teks ke semua orang di room ini." side="right">
+          <SidebarIcon onClick={onBroadcast}>
+            <IconImg name="announce" size={16} />
           </SidebarIcon>
         </Tooltip>
       )}
+      {canTeleport && (
+        <Tooltip label="Teleport" detail="Pindah cepat ke lokasi tersimpan." side="right">
+          <SidebarIcon active={showTeleportPanel} onClick={onToggleTeleport}>
+            <IconImg name="teleport" size={16} />
+          </SidebarIcon>
+        </Tooltip>
+      )}
+      {!isGuest && (
+        <Tooltip label="Absensi" detail="Lihat riwayat & status absensimu." side="right">
+          <SidebarIcon active={attendanceViewActive} onClick={onToggleAttendanceView}>
+            <ClockHistory size={16} />
+          </SidebarIcon>
+        </Tooltip>
+      )}
+      {!isGuest && (
+        <Tooltip label="Kalender" detail="Buka kalender jadwal tim." side="right">
+          <SidebarIcon active={calendarViewActive} onClick={onToggleCalendarView}>
+            <IconImg name="calendar" size={16} />
+          </SidebarIcon>
+        </Tooltip>
+      )}
+      {!isGuest && (
+        <Tooltip label="Analitik Saya" detail="Lihat ringkasan aktivitas & produktivitasmu." side="right">
+          <SidebarIcon active={myAnalyticsActive} onClick={onToggleMyAnalytics}>
+            <IconImg name="stat" size={16} />
+          </SidebarIcon>
+        </Tooltip>
+      )}
+      {/* Annotated in the reference design as "request (cuti,dll)" — this
+          fork has no Cuti feature to map the request.svg rail slot to, so
+          it's left unfilled here (Permintaan Bergabung stays reachable
+          from the flyout instead, same as it always was). */}
+      {/* Speaker slot annotated as Soundboard — moved here from App.tsx's
+          top-left pill (see that file's own comment): the reference design
+          doesn't include Soundboard in that pill, and SoundboardPanel
+          renders its own trigger+popover as one component, so this is the
+          real component now, not a second toggle for a copy mounted
+          elsewhere. */}
+      {!isGuest && !simplifiedView && (
+        <SoundboardPanel roomSlug={roomSlug} emitSoundboardPlay={emitSoundboardPlay} open={soundboardActive} onToggle={onToggleSoundboard} onClose={onCloseSoundboard} />
+      )}
+      {/* The reference design's "+" rail slot is annotated "button add
+          apps" — no such feature (an app-marketplace-style integration
+          picker) exists in this codebase yet, so it's left unbuilt rather
+          than mis-mapped to Add Media (which stays reachable from the
+          flyout instead, restored there). */}
 
       <SidebarDivider />
 
-      {/* QA (Akses tamu checklist item 2) — a guest's avatar edits already
-          never persisted (PUT /users/me/avatar 401s and is swallowed, see
-          App.tsx's persistAvatar) since they have no User row to save to —
-          offering the editor at all was misleading, not just extraneous. */}
-      {!isGuest && <AvatarEditorButton onClick={onEditAvatar} variant="sidebar" />}
-      <PresenceButton manualStatus={manualStatus} onPick={onPickPresence} variant="sidebar" />
+      {/* "Ke Kursi Saya" and PresenceButton (Status WFO/WFH/dll) moved to
+          App.tsx's top-left pill per the reference design — removed here
+          to avoid duplication. Profile (AvatarEditorButton) moved further
+          down — see the comment by its new position, right after Logout. */}
 
       {/* Ghost mode + Notification Settings — moved here from the meeting
           toolbar (previously HiddenButton/NotificationSettings in App.tsx's
@@ -596,20 +681,36 @@ export function Sidebar({
           Settings' own "Notifikasi" section (see SettingsPanel.tsx), which
           reuses the exact same browserNotifications.ts functions rather than
           duplicating them. */}
+      {/* mt-auto moved here (was on "Pengaturan", before that on "Kembali ke
+          Daftar Room") — reference design adds a Chat icon right before
+          Pengaturan in this same bottom cluster, so the anchor now starts
+          here instead, keeping Chat, Pengaturan, Kembali, Theme, and
+          Profile packed together as one tight group. Opens the full
+          Messenger view (activePanel === 'messenger' in App.tsx) — same
+          component the hamburger flyout's own "Chat" row (below) opens —
+          not the narrower floating ChatPanel (that one stays reachable via
+          the Focus-zone auto-open and its own bottom-right "Message"
+          button; it's a distinct, still-used surface, not replaced here). */}
+      <Tooltip label={messengerViewActive ? 'Tutup Chat' : 'Chat'} detail="Buka tampilan pesan gaya messenger." side="right" wrapperClassName="mt-auto">
+        <SidebarIcon active={messengerViewActive} onClick={onToggleMessengerView}>
+          {/* message.svg is a paper-plane/send glyph (confirmed by reading
+              its actual path data), not the rounded speech-bubble the
+              reference design shows — there's no bubble-shaped icon in the
+              extracted asset pack, so this uses ChatDotsFill, the same
+              react-bootstrap-icons glyph this exact toggle used before the
+              icon-pack swap. */}
+          <ChatDotsFill size={14} />
+        </SidebarIcon>
+      </Tooltip>
       <Tooltip label="Pengaturan" detail="Buka pengaturan akun, notifikasi, dan tampilan." side="right">
         <SidebarIcon onClick={onOpenSettings}>
-          <GearFill size={14} />
+          <IconImg name="setting" size={14} />
         </SidebarIcon>
       </Tooltip>
 
-      <Tooltip label="Kembali ke Daftar Room" detail="Keluar dari room ini, kembali ke Lobby." side="right" wrapperClassName="mt-auto">
-        <SidebarIcon
-          onClick={onLeaveRoom}
-          className="text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
-        >
-          <HouseDoorFill size={14} />
-        </SidebarIcon>
-      </Tooltip>
+      {/* "Kembali ke Daftar Room" rail icon removed — now a genuine
+          duplicate of the "Exit Space" row pinned to the bottom of the
+          Room Features flyout panel (see that panel's own comment). */}
       <Tooltip
         label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
         detail="Beralih antara tampilan terang dan gelap."
@@ -617,26 +718,33 @@ export function Sidebar({
       >
         <SidebarIcon
           onClick={onToggleTheme}
-          className="text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800"
+          className="text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800"
         >
           {theme === 'dark' ? <SunFill size={14} /> : <MoonFill size={14} />}
         </SidebarIcon>
       </Tooltip>
-      <Tooltip label="Logout" detail="Keluar dari akunmu." side="right">
-        <SidebarIcon onClick={onLogout} className="text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500">
-          <BoxArrowRight size={14} />
-        </SidebarIcon>
-      </Tooltip>
+      {/* Logout rail icon removed per the reference design — it was a true
+          duplicate: SettingsPanel's own "Akun" section already has a full
+          Logout flow (with confirm dialog), reachable via the gear icon
+          above. */}
+      {/* Profile — moved to the very bottom of the rail (was above Ghost
+          mode/Settings) per the reference design, which shows the user's
+          own avatar as the last item, below theme/logout. QA (Akses tamu
+          checklist item 2) — a guest's avatar edits already never
+          persisted (PUT /users/me/avatar 401s and is swallowed, see
+          App.tsx's persistAvatar) since they have no User row to save to —
+          offering the editor at all was misleading, not just extraneous. */}
+      {!isGuest && <AvatarEditorButton onClick={onEditAvatar} variant="sidebar" />}
     </div>
   );
 }
 
 function SidebarDivider() {
-  return <div className="w-6 border-t border-purple-100 dark:border-gray-700 my-0.5" />;
+  return <div className="w-6 border-t border-login-border-soft dark:border-gray-700 my-0.5" />;
 }
 
 function MenuDivider() {
-  return <div className="my-1.5 border-t border-purple-100 dark:border-gray-700" />;
+  return <div className="my-1.5 border-t border-login-border-soft dark:border-gray-700" />;
 }
 
 // One row inside the "Room Features" flyout — icon-in-a-box + label, same
@@ -669,13 +777,13 @@ function MenuRow({
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
       title={title}
-      className={`w-full flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-all ${
+      className={`font-login-body w-full flex items-center gap-3 px-2 py-2 rounded-lg text-sm transition-all ${
         disabled
           ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-60'
-          : `cursor-pointer ${active ? 'bg-purple-600 text-white' : 'text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700'}`
+          : `cursor-pointer ${active ? 'bg-login-accent text-white' : 'text-gray-700 dark:text-gray-200 hover:bg-login-surface dark:hover:bg-gray-700'}`
       }`}
     >
-      <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${active && !disabled ? 'bg-white/20' : 'bg-purple-50 dark:bg-gray-700 text-purple-600 dark:text-purple-300'} ${disabled ? 'opacity-60' : ''}`}>
+      <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${active && !disabled ? 'bg-white/20' : 'bg-login-surface dark:bg-gray-700 text-login-accent dark:text-purple-300'} ${disabled ? 'opacity-60' : ''}`}>
         {icon}
       </span>
       <span className="flex-1 text-left truncate">{label}</span>
@@ -702,7 +810,7 @@ export function SidebarIcon({
       onClick={onClick}
       title={title}
       className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
-        className || (active ? 'bg-purple-600 text-white' : 'text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-gray-800')
+        className || (active ? 'bg-login-accent text-white' : 'text-login-accent dark:text-purple-300 hover:bg-login-surface dark:hover:bg-gray-800')
       }`}
     >
       {children}

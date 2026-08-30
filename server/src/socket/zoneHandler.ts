@@ -1,11 +1,18 @@
 import { Server, Socket } from 'socket.io';
-import { SocketEvents, hasFeatureAccess } from '@kaispace/shared';
+import { SocketEvents, hasFeatureAccess, expandOccurrences } from '@kaispace/shared';
 import { mayEnterZone, isZoneLocked, isSealedIn } from './zoneLock';
 import { sendMusicStateToSocket } from './musicHandler';
 import { getCachedZones, getCachedZoneRestriction } from '../store/roomStore';
 import { getConnectedAdminSocketIds, getRoleInRoom, isCeoInRoom, getPlayerName, updateRosterZone, broadcastZoneQueueSessionCleared } from './roomHandler';
 import { getPrisma } from '../lib/prisma';
 import { admitCalledEntry, advanceQueue } from '../lib/roomQueue';
+import { isZonePasswordUnlocked, unlockZonePassword } from './doorLock';
+import { socketRateLimit } from '../middleware/rateLimit';
+
+// Throttle brute-force guessing of a meeting Zone's password — same guard,
+// same budget, every other password-check handler in this codebase already
+// uses (roomHandler.ts's canCheckInteractive).
+const canSubmitZonePassword = socketRateLimit(3);
 
 // Actual A/V zone restriction is computed client-side (see useProximity.ts —
 // every client already knows every player's position and the room's zones,
@@ -82,6 +89,48 @@ async function completeActiveZoneQueueEntry(io: Server, roomSlug: string, zoneId
   await prisma.roomQueueEntry.update({ where: { id: entry.id }, data: { status: 'done', completedAt: new Date() } });
   broadcastZoneQueueSessionCleared(io, roomSlug, zoneId);
   await advanceQueue(prisma, dbRoom.id, zoneId);
+}
+
+// The single source of truth for "is a password-protected meeting running in
+// this zone right now" — used by BOTH the ZONE_ENTER gate and
+// ZONE_PASSWORD_SUBMIT, so the two can never disagree about which event (if
+// any) is currently in force.
+//
+// Recurrence-aware: CalendarEvent.start/end are the fixed FIRST-occurrence
+// template for a recurring series (see RecurringMaster's doc comment in
+// shared/recurrence.ts) and never advance — a naive `start <= now <= end`
+// check against the row directly would only ever match occurrence #1, then
+// silently stop gating forever after (the same trap meetingAutoJoinSweep.ts's
+// own query already avoids — see its comment). So this narrows in SQL to
+// "recurring, or not yet finished", then expands occurrences in a window
+// around now instead of trusting the template dates directly.
+async function findActiveGatedMeeting(
+  room: string,
+  zoneId: string,
+): Promise<{ title: string; organizerId: string; meetkaiPassword: string; attendees: { userId: string }[] } | null> {
+  const now = new Date();
+  const candidates = await getPrisma().calendarEvent.findMany({
+    where: {
+      meetkaiRoomSlug: room, meetkaiZoneId: zoneId, meetkaiPassword: { not: null },
+      OR: [{ rrule: { not: null } }, { end: { gte: now } }],
+    },
+    select: {
+      title: true, organizerId: true, meetkaiPassword: true,
+      start: true, end: true, timezone: true, rrule: true, exdates: true,
+      attendees: { select: { userId: true } },
+    },
+  });
+  for (const ev of candidates) {
+    const occs = expandOccurrences(
+      { start: ev.start, end: ev.end, timezone: ev.timezone, rrule: ev.rrule, exdates: ev.exdates },
+      new Date(now.getTime() - 24 * 3600000),
+      new Date(now.getTime() + 24 * 3600000),
+    );
+    if (occs.some((occ) => occ.start <= now && occ.end >= now)) {
+      return { title: ev.title, organizerId: ev.organizerId, meetkaiPassword: ev.meetkaiPassword!, attendees: ev.attendees };
+    }
+  }
+  return null;
 }
 
 export function registerZoneHandlers(io: Server, socket: Socket) {
@@ -189,6 +238,23 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
       }
     }
 
+    // Meeting Zone password (CalendarEvent.meetkaiPassword) — a DIFFERENT
+    // gate from the lock/member-only/capacity checks above: automated
+    // (no live keyholder), scoped to a specific OCCURRENCE's own [start, end]
+    // window, and never applied to the meeting's own people.
+    const activeMeeting = await findActiveGatedMeeting(room, zoneId);
+    if (activeMeeting) {
+      // The organizer counts too — EventAttendee deliberately excludes them
+      // (calendar.ts's create route filters `id !== req.userId`), so checking
+      // attendees alone would prompt the organizer of their OWN meeting for
+      // their own password.
+      const isParticipant = !!uid && (activeMeeting.organizerId === uid || activeMeeting.attendees.some((a) => a.userId === uid));
+      if (!isParticipant && !isZonePasswordUnlocked(socket.id, room, zoneId)) {
+        socket.emit(SocketEvents.ZONE_PASSWORD_REQUIRED, { zoneId, eventTitle: activeMeeting.title });
+        return;
+      }
+    }
+
     socketZone.set(socket.id, { room, zoneId });
     socket.to(room).emit(SocketEvents.ZONE_ENTER, { playerId: socket.id, zoneId });
     // Bug follow-up — the member list's live location, see
@@ -197,6 +263,19 @@ export function registerZoneHandlers(io: Server, socket: Socket) {
     // Fitur 2 correction — a Music Bot track already playing in this zone
     // must start for the joining socket right away, with no click/popup.
     sendMusicStateToSocket(socket, room, zoneId);
+  });
+
+  socket.on(SocketEvents.ZONE_PASSWORD_SUBMIT, async (data: { zoneId: string; password: string }) => {
+    if (!canSubmitZonePassword(socket.id)) return;
+    if (!currentRoom || typeof data?.zoneId !== 'string' || typeof data?.password !== 'string') return;
+    const room = currentRoom;
+    // Same recurrence-aware lookup ZONE_ENTER's own gate uses, so a series
+    // whose occurrence is genuinely running can actually be unlocked.
+    const activeMeeting = await findActiveGatedMeeting(room, data.zoneId);
+    if (!activeMeeting) return; // nothing active to unlock — a stale prompt from before the meeting ended
+    const correct = activeMeeting.meetkaiPassword === data.password;
+    if (correct) unlockZonePassword(socket.id, room, data.zoneId);
+    socket.emit(SocketEvents.ZONE_PASSWORD_RESULT, { zoneId: data.zoneId, correct });
   });
 
   socket.on(SocketEvents.ZONE_EXIT, async (zoneId: string) => {

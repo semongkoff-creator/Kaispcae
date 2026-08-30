@@ -1,0 +1,155 @@
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { resolve, join, basename } from 'node:path';
+import { useGameStore } from '../client/src/stores/gameStore';
+
+let passed = 0;
+function test(name: string, fn: () => void) {
+  try {
+    fn();
+    passed++;
+    console.log(`  PASS  ${name}`);
+  } catch (err) {
+    console.error(`  FAIL  ${name}`);
+    console.error(err instanceof Error ? err.message : err);
+    process.exitCode = 1;
+  }
+}
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) walk(full, out);
+    else if (/\.tsx?$/.test(full)) out.push(full);
+  }
+  return out;
+}
+
+test('walking replaces the localPlayer object, so whole-object selectors re-render at 10Hz', () => {
+  // The fact the guard below exists because of: a position write hands React a
+  // NEW localPlayer object, so anything selecting the object itself re-renders,
+  // even when the field it actually reads is untouched.
+  const store = useGameStore.getState();
+  store.setLocalPlayer({ name: 'Ravka', direction: 'down', isMoving: false });
+  const before = useGameStore.getState().localPlayer;
+  store.setLocalPlayerMoving(100, 200, 'left', false); // direction change → flushes immediately
+  const after = useGameStore.getState().localPlayer;
+  assert.notEqual(before, after, 'a movement write must replace the object (this is the cost being managed)');
+  assert.equal(after.name, before.name, 'while the fields a panel actually reads are unchanged');
+});
+
+test('another player merely walking does not replace playerRecords', () => {
+  // Every PLAYER_MOVED packet carries direction/isMoving. With twenty people
+  // walking that is many times a second, and replacing the map for it
+  // re-rendered App itself — the whole tree — along with the participant
+  // panel, the video grid and GameCanvas.
+  const store = useGameStore.getState();
+  store.setPlayerRecords({});
+  store.upsertPlayer({ id: 'p1', name: 'Ravka', direction: 'down', isMoving: false } as Avatar);
+  const before = useGameStore.getState().playerRecords;
+
+  store.upsertPlayer({ id: 'p1', direction: 'left', isMoving: true, isRunning: true } as Avatar);
+  const after = useGameStore.getState().playerRecords;
+
+  assert.equal(before, after, 'the map identity must survive a movement-only update');
+  // ...while the canvas, which reads the record imperatively, still sees it.
+  assert.equal(after.p1.direction, 'left');
+  assert.equal(after.p1.isMoving, true);
+  assert.equal(after.p1.isRunning, true);
+});
+
+test('a change anyone actually renders still replaces the map', () => {
+  const store = useGameStore.getState();
+  store.setPlayerRecords({});
+  store.upsertPlayer({ id: 'p1', name: 'Ravka', direction: 'down', isMoving: false } as Avatar);
+  const before = useGameStore.getState().playerRecords;
+
+  store.upsertPlayer({ id: 'p1', name: 'Ravka', speaking: true } as Avatar);
+  assert.notEqual(useGameStore.getState().playerRecords, before,
+    'speaking is rendered, so subscribers must be told');
+  assert.equal(useGameStore.getState().playerRecords.p1.speaking, true);
+});
+
+test('movement mixed with a rendered change takes the normal path', () => {
+  const store = useGameStore.getState();
+  store.setPlayerRecords({});
+  store.upsertPlayer({ id: 'p1', name: 'Ravka', direction: 'down', isMoving: false } as Avatar);
+  const before = useGameStore.getState().playerRecords;
+
+  store.upsertPlayer({ id: 'p1', name: 'Ravka', direction: 'up', isMoving: true, isSitting: true } as Avatar);
+  assert.notEqual(useGameStore.getState().playerRecords, before, 'isSitting is rendered — this is not movement-only');
+  assert.equal(useGameStore.getState().playerRecords.p1.direction, 'up');
+});
+
+test('heavy components select localPlayer fields, never the whole object', () => {
+  // Only components that genuinely track POSITION may take the whole object;
+  // for everyone else it means re-rendering ten times a second while any
+  // player walks. That measured as 250-470ms keyboard interactions (INP 512ms)
+  // in production, because GameCanvas — the heaviest component in the app —
+  // was re-rendering purely to copy a value into a ref.
+  const allowed = new Set(['ZoneWatcher.tsx', 'TeleportPanel.tsx']);
+  const offenders: string[] = [];
+  for (const file of walk(resolve('client/src'))) {
+    const source = readFileSync(file, 'utf8');
+    if (/useGameStore\(\s*\(s\)\s*=>\s*s\.localPlayer\s*\)/.test(source) && !allowed.has(basename(file))) {
+      offenders.push(file.replace(resolve('.') + '/', ''));
+    }
+  }
+  assert.deepEqual(offenders, [],
+    `select the fields you read instead: ${offenders.join(', ')}`);
+});
+
+test('GameCanvas keeps its localPlayer ref fresh without subscribing', () => {
+  const source = readFileSync(resolve('client/src/components/canvas/GameCanvas.tsx'), 'utf8');
+  assert.ok(
+    source.includes('useEffect(() => useGameStore.subscribe((s) => { localPlayerRef.current = s.localPlayer; }), [])'),
+    'the ref should be maintained imperatively, so a position write costs no render',
+  );
+  assert.equal(
+    /localPlayerRef\.current = localPlayer;/.test(source), false,
+    'assigning during render is what required the re-render in the first place',
+  );
+});
+
+test('the proximity result is subscribed to, not passed down from App', () => {
+  const app = readFileSync(resolve('client/src/App.tsx'), 'utf8');
+  // Holding this in App state meant the proximity tick — which fires whenever
+  // anyone nearby moves, several times a second — re-rendered App's entire
+  // tree to deliver a value only three components read.
+  assert.equal(/const \[nearby, setNearby\]/.test(app), false,
+    'the proximity result must not live in App state');
+  assert.equal(app.includes('nearby={nearby}'), false,
+    'nor be threaded through props');
+  assert.ok(app.includes('notifyProximityChanged()'), 'the tick should wake subscribers directly');
+
+  for (const file of ['MiniMode', 'MeetingView', 'VideoGrid']) {
+    const source = readFileSync(resolve(`client/src/components/ui/${file}.tsx`), 'utf8');
+    assert.ok(source.includes('useProximitySnapshot()'), `${file} should subscribe for itself`);
+  }
+});
+
+test('WebRTC proximity side effects still run when the rendered snapshot is unchanged', () => {
+  const app = readFileSync(resolve('client/src/App.tsx'), 'utf8');
+  const sideEffectAt = app.indexOf('updateProximityRef.current(next)');
+  const earlyReturnAt = app.indexOf('if (proximityUnchanged(previousProximityRef.current, next)) return;');
+
+  assert.ok(sideEffectAt >= 0, 'the proximity tick must still drive the WebRTC state machine');
+  assert.ok(earlyReturnAt >= 0, 'render/subscriber work should still keep its unchanged fast path');
+  assert.ok(
+    sideEffectAt < earlyReturnAt,
+    'dwell timers, debounced disconnects, and resync-grace expiry are time-based; they must run even when React subscribers do not wake',
+  );
+});
+
+test('the architecture rule is written down where the next person will look', () => {
+  const doc = readFileSync(resolve('project.md'), 'utf8');
+  // Six separate stutter causes came from this one rule being unwritten.
+  assert.ok(doc.includes('Batas React ↔ game loop'), 'project.md should carry the boundary rule');
+  assert.ok(/2x per detik/.test(doc), 'including the concrete threshold, not just a principle');
+});
+
+if (process.exitCode) {
+  process.exit(process.exitCode);
+}
+
+console.log(`\n${passed} store subscription test(s) passed`);

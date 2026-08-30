@@ -16,6 +16,71 @@ interface UseScreenRecordingOptions {
   emitRecordingFinalize: (recordingId: string, fileUrl: string | null) => void;
 }
 
+// Bug fix — Chrome's hardware H.264 encoder corrupts a fixed band of
+// macroblocks on EVERY frame whenever the captured video's height isn't a
+// multiple of 16 (getDisplayMedia — and a remote peer's negotiated
+// resolution — can be any arbitrary size, never guaranteed mod-16).
+// Confirmed directly against a real production recording: captured at
+// 868px height (868 / 16 = 54.25), it decoded with an identical
+// "concealing ~600 MV errors" defect on literally every frame from the
+// first keyframe onward, while a comparison recording captured at a
+// mod-16-safe 912px height decoded perfectly clean. Re-drawing each frame
+// onto a canvas cropped down to the nearest multiple of 16 (at most 15px
+// lost off the right/bottom edge — imperceptible for a screen recording)
+// sidesteps the encoder bug entirely, regardless of source size. Returns
+// the original stream untouched (and a no-op cleanup) when it's already
+// mod-16-safe, so the common case pays no extra canvas/CPU cost.
+function toSafeDimensionStream(sourceStream: MediaStream): { stream: MediaStream; cleanup: () => void } {
+  const videoTrack = sourceStream.getVideoTracks()[0];
+  if (!videoTrack) return { stream: sourceStream, cleanup: () => {} };
+
+  const settings = videoTrack.getSettings();
+  const width = settings.width ?? 0;
+  const height = settings.height ?? 0;
+  const safeWidth = Math.floor(width / 16) * 16;
+  const safeHeight = Math.floor(height / 16) * 16;
+  if (!width || !height || (width === safeWidth && height === safeHeight)) {
+    return { stream: sourceStream, cleanup: () => {} };
+  }
+
+  const video = document.createElement('video');
+  video.muted = true;
+  video.playsInline = true;
+  video.srcObject = new MediaStream([videoTrack]);
+  video.play().catch(() => {});
+
+  const canvas = document.createElement('canvas');
+  canvas.width = safeWidth;
+  canvas.height = safeHeight;
+  const ctx = canvas.getContext('2d', { alpha: false });
+
+  let stopped = false;
+  const drawFrame = () => {
+    if (stopped) return;
+    // Source rect == dest rect (no scale factor) — a direct pixel crop of
+    // the bottom-right edge, not a resize, so there's no blur/interpolation.
+    ctx?.drawImage(video, 0, 0, safeWidth, safeHeight, 0, 0, safeWidth, safeHeight);
+    if ('requestVideoFrameCallback' in video) {
+      (video as HTMLVideoElement & { requestVideoFrameCallback: (cb: () => void) => number }).requestVideoFrameCallback(drawFrame);
+    } else {
+      requestAnimationFrame(drawFrame);
+    }
+  };
+  drawFrame();
+
+  const canvasStream = canvas.captureStream(settings.frameRate ?? 30);
+  const combined = new MediaStream([...canvasStream.getVideoTracks(), ...sourceStream.getAudioTracks()]);
+
+  const cleanup = () => {
+    stopped = true;
+    video.pause();
+    video.srcObject = null;
+    canvasStream.getTracks().forEach((t) => t.stop());
+  };
+
+  return { stream: combined, cleanup };
+}
+
 // §7 — Screen Recording capture, entirely client-side (see the Recording
 // Prisma model's doc comment for why). Only the browser that actually
 // STARTED the recording ever runs a MediaRecorder — everyone else who
@@ -30,6 +95,7 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [myRecordingId, setMyRecordingId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
 
   const stopCapture = useCallback(() => {
     if (timeoutRef.current) {
@@ -39,6 +105,7 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
     if (recorderRef.current && recorderRef.current.state !== 'inactive') {
       recorderRef.current.stop();
     }
+    setIsPaused(false);
   }, []);
 
   // Request a new recording — capture itself only begins once the server
@@ -64,6 +131,36 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
     emitRecordingStop(myRecordingId);
     stopCapture();
   }, [myRecordingId, emitRecordingStop, stopCapture]);
+
+  // Pause/resume — real MediaRecorder.pause()/.resume(), entirely
+  // client-local (no server event, no Recording.status change): the server
+  // has no visibility into the capture pipeline by this feature's own
+  // existing architecture (capture lives only in the recorder's own
+  // browser), and the one-recording-per-room lock is keyed on
+  // status IN ('recording','processing'), unaffected by pause either way.
+  // The wall-clock 80-minute auto-stop timer is cleared while paused and
+  // restarted at FULL duration on resume — a deliberate simplification
+  // (a recording paused/resumed several times can span more than 80 minutes
+  // of wall-clock time since the original Start, though never more than 80
+  // minutes of any single actively-capturing segment) rather than tracking
+  // precise cumulative active time, matching the cap's original purpose of
+  // bounding one unattended capture session.
+  const pauseRecording = useCallback(() => {
+    if (!recorderRef.current || recorderRef.current.state !== 'recording') return;
+    recorderRef.current.pause();
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    setIsPaused(true);
+  }, []);
+
+  const resumeRecording = useCallback(() => {
+    if (!recorderRef.current || recorderRef.current.state !== 'paused') return;
+    recorderRef.current.resume();
+    timeoutRef.current = setTimeout(stopCapture, RECORDING_MAX_DURATION_MS);
+    setIsPaused(false);
+  }, [stopCapture]);
 
   useEffect(() => {
     if (!activeRecording) return;
@@ -93,7 +190,18 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
         // would only ever show my face. The mic track comes from the
         // existing camera/mic stream so my voice is captured too.
         try {
-          displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+          // preferCurrentTab biases the browser's own "choose what to
+          // share" picker toward this tab as the default/highlighted
+          // choice — it does NOT remove the picker (no web API can; every
+          // major browser requires this prompt as a security boundary),
+          // but "this tab" is the one capture-source choice that keeps
+          // recording this tab's content regardless of which OS window or
+          // browser tab later has focus (unlike "Entire Screen" or "a
+          // Window", both of which silently start showing whatever the
+          // user switches to). TypeScript's DOM lib (as pinned in this repo)
+          // doesn't yet type `preferCurrentTab` on DisplayMediaStreamOptions,
+          // so the options object below is cast to add it.
+          displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, preferCurrentTab: true } as DisplayMediaStreamOptions & { preferCurrentTab?: boolean });
           const micTrack = webrtcService.getLocalStream()?.getAudioTracks()[0];
           stream = new MediaStream([...displayStream.getVideoTracks(), ...(micTrack ? [micTrack] : [])]);
         } catch (e) {
@@ -117,8 +225,18 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
         return;
       }
 
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus' : 'video/webm';
-      const recorder = new MediaRecorder(stream, { mimeType });
+      // MP4 first, WebM fallback — isTypeSupported() never throws, so a
+      // browser with no MP4 MediaRecorder support (e.g. Firefox) silently
+      // falls through to the existing WebM chain with zero behavior change.
+      const mimeType = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2')
+        ? 'video/mp4;codecs=avc1,mp4a.40.2'
+        : MediaRecorder.isTypeSupported('video/mp4')
+        ? 'video/mp4'
+        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+        ? 'video/webm;codecs=vp8,opus'
+        : 'video/webm';
+      const { stream: recordingStream, cleanup: cleanupSafeStream } = toSafeDimensionStream(stream);
+      const recorder = new MediaRecorder(recordingStream, { mimeType });
       chunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
@@ -126,9 +244,14 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
       };
 
       recorder.onstop = async () => {
+        cleanupSafeStream();
         displayStream?.getTracks().forEach((t) => t.stop());
         displayStream = null;
-        const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+        // recorder.mimeType is the browser's own authoritative value — it
+        // may normalize/drop codec parameters even if the request above
+        // included them, so this is more reliable than reusing the
+        // `mimeType` const from startCapture.
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'video/webm' });
         chunksRef.current = [];
         setUploading(true);
         try {
@@ -152,6 +275,7 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
         stopCapture();
       });
 
+      setIsPaused(false);
       recorder.start();
       recorderRef.current = recorder;
       setMyRecordingId(activeRecording.recordingId);
@@ -181,7 +305,10 @@ export function useScreenRecording({ activeRecording, localUserId, findSocketIdB
   return {
     requestRecording,
     stopMyRecording,
+    pauseRecording,
+    resumeRecording,
     isRecordingMine: !!myRecordingId,
+    isPaused,
     uploading,
   };
 }

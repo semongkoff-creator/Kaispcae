@@ -73,7 +73,13 @@ async function uploadFile(path: string, file: File, roomSlugOverride?: string): 
 async function uploadRecordingBlob(blob: Blob): Promise<{ url: string }> {
   const token = localStorage.getItem('vm_token');
   const form = new FormData();
-  form.append('file', blob, 'recording.webm');
+  // Extension must match the blob's real container format — the server's
+  // disk storage derives the saved file's on-disk extension from THIS
+  // filename (see routes/uploads.ts's storage.filename), not from the
+  // Content-Type header, so a mismatch here would silently mislabel the
+  // stored file even though the bytes themselves are correct.
+  const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+  form.append('file', blob, `recording.${ext}`);
   const roomSlug = localStorage.getItem('vm_last_room_slug');
   if (roomSlug) form.append('roomSlug', roomSlug);
   const res = await fetch(`${API_BASE}/uploads/recording`, {
@@ -133,6 +139,24 @@ async function downloadRecordingBlob(id: string, filename: string): Promise<void
   URL.revokeObjectURL(url);
 }
 
+// Same authenticated-fetch necessity as downloadRecordingBlob above, but
+// returns an object URL for a <video> element instead of triggering a save.
+// Caller is responsible for URL.revokeObjectURL(...) once the preview is
+// closed (see RecordingControl.tsx) — an object URL otherwise leaks for the
+// tab's lifetime.
+async function previewRecordingBlob(id: string): Promise<string> {
+  const token = localStorage.getItem('vm_token');
+  const res = await fetch(`${API_BASE}/recordings/${id}/preview`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError((body as any).error || `Preview failed: ${res.status}`, res.status);
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 // Customer Service chat — one line in a CsSession's history. `from`
 // distinguishes who actually wrote it (never who it's addressed to).
 export interface CsMessage {
@@ -161,6 +185,12 @@ export interface UserProfile {
   id: string;
   email: string;
   displayName: string;
+  // specs/2026-08-21-full-name-field-design.md — separate from
+  // displayName; null means the account has never had it set (a
+  // manually-registered account that hasn't filled it in yet, or a Lark
+  // account whose profile fetch never returned a name). Shown/editable
+  // only in the Avatar Editor.
+  fullName?: string | null;
   avatarConfig?: any;
   preferences?: UserPreferences | null;
   // Global, account-level role (see shared/permissions.ts's AccountRole) —
@@ -199,6 +229,12 @@ export interface RoomInfo {
   // placeholder block. See routes/rooms.ts's PATCH /rooms/:slug/cover.
   coverImage?: string | null;
 }
+
+// specs/2026-08-21-last-seen-offline-members-design.md — epoch
+// milliseconds (matching the server's explicit Date->getTime() conversion
+// in routes/roomParticipants.ts), null meaning "has never joined a room". Start
+// time of the user's MOST RECENT room activity, not their first-ever join.
+export interface OrgMember { id: string; displayName: string; workspaceRole: 'admin' | 'member'; lastSeenAt: number | null }
 
 export const api = {
   register: (email: string, password: string, displayName: string) =>
@@ -408,6 +444,16 @@ export const api = {
   // Fase 5 (org-resolution) — PUBLIC preview of an org invite (org name +
   // the email/role it's for), shown before the visitor commits to setting
   // a password. Same unauthenticated posture as guestJoin above.
+  // POST /api/livekit/token — the credential for joining this room's SFU
+  // session. Scoped to one room and short-lived, so it is fetched per join
+  // rather than cached: the server re-checks room access every time it mints
+  // one, and a cached token would let a revoked account back in.
+  getLiveKitToken: (roomSlug: string) =>
+    request<{ token: string; url: string; identity: string }>('/livekit/token', {
+      method: 'POST',
+      body: JSON.stringify({ roomSlug }),
+    }),
+
   getOrgInvite: (token: string) =>
     request<{ organizationName: string; email: string; role: string }>(`/org-invites/${token}`),
 
@@ -472,6 +518,16 @@ export const api = {
     request<{ success: boolean }>('/users/me/avatar', {
       method: 'PUT',
       body: JSON.stringify(config),
+    }),
+
+  // specs/2026-08-21-full-name-field-design.md — separate endpoint from
+  // saveAvatar above on purpose: that route stores its whole body as
+  // avatarConfig verbatim, so reusing it here would nest fullName inside
+  // that JSON blob instead of writing the real column.
+  saveFullName: (name: string) =>
+    request<{ success: boolean }>('/users/me/full-name', {
+      method: 'PUT',
+      body: JSON.stringify({ name }),
     }),
 
   // Partial update — merges server-side, so this only needs to send the
@@ -587,6 +643,14 @@ export const api = {
   // (see mediaHandler.ts), not here; this endpoint only handles the binary.
   uploadMedia: (file: File, roomSlug?: string) => uploadFile('/uploads', file, roomSlug),
 
+  // Room Editor's Import Image (Fitur 15) — a separate, admin-gated route
+  // (server/src/routes/rooms.ts) that also accepts SVG/WebP, unlike the
+  // general uploadMedia above (which deliberately excludes SVG — see that
+  // route's own comment). Only usable by whoever can already edit this
+  // room's map; the server re-checks that regardless of what this client
+  // sends.
+  uploadRoomAsset: (file: File, roomSlug: string) => uploadFile(`/rooms/${encodeURIComponent(roomSlug)}/editor/asset`, file, roomSlug),
+
   // Potong 6 — media effects authored from the Room Editor (admin-gated REST,
   // reuses the MapMediaObject system + broadcast).
   getRoomMedia: (slug: string) => request<{ mediaObjects: unknown[] }>(`/rooms/${slug}/editor/media`),
@@ -601,6 +665,8 @@ export const api = {
   getRecordings: (slug: string) => request<{ recordings: Recording[] }>(`/rooms/${slug}/recordings`),
 
   downloadRecording: (id: string, filename: string) => downloadRecordingBlob(id, filename),
+
+  previewRecording: (id: string) => previewRecordingBlob(id),
 
   // Soundboard — GET is a fallback/refresh path; the live list normally
   // arrives via SOUNDBOARD_LIST right after room:state (see useSocket.ts).
@@ -642,4 +708,6 @@ export const api = {
 
   getDMMessages: (conversationId: string, before?: string) =>
     request<{ messages: ChannelMessage[] }>(`/dms/${conversationId}/messages${before ? `?before=${before}` : ''}`),
+
+  getRoomParticipants: (roomSlug: string) => request<{ members: OrgMember[] }>(`/rooms/${roomSlug}/participants`),
 };

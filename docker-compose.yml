@@ -11,6 +11,7 @@ name: office_tenant
 
 services:
   postgres:
+    restart: unless-stopped
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
@@ -24,6 +25,7 @@ services:
       timeout: 5s
       retries: 5
   redis:
+    restart: unless-stopped
     image: redis:7-alpine
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
@@ -31,6 +33,7 @@ services:
       timeout: 5s
       retries: 5
   server:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: server/Dockerfile
@@ -41,6 +44,19 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set — see .env.example}
       CLIENT_URL: ${PUBLIC_URL:-http://localhost:8091}
       CORS_ORIGIN: ${PUBLIC_URL:-http://localhost:8091}
+      # The three the token endpoint needs. routes/livekit.ts refuses to mint
+      # anything unless all three are present, so leaving them out of this
+      # block — as they were — means every room on the LiveKit path fails to
+      # join with "media server not configured", no matter what
+      # VITE_LIVEKIT_ROOMS says. The client-side flag and the server-side
+      # credentials are two halves of one switch; neither works alone.
+      #
+      # This is the same omission the VITE_TURN_* block already cost this repo
+      # once: a variable that exists in .env.example, is read correctly by the
+      # code, and never reaches the container.
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
+      LIVEKIT_URL: ${LIVEKIT_URL:-}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -68,14 +84,40 @@ services:
       redis:
         condition: service_healthy
   nginx:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: client/Dockerfile
       args:
         VITE_SERVER_URL: ${PUBLIC_URL:-http://localhost:8091}
-        VITE_TURN_URL: ""
-        VITE_TURN_USERNAME: ""
-        VITE_TURN_CREDENTIAL: ""
+        # Build args, not runtime env: Vite inlines these at BUILD time, so a
+        # restart never picks a change up here — the image has to be rebuilt.
+        # These were hardcoded to "" while .env carried real values, and that
+        # is the one shape webrtcService.ts's half-configured warning cannot
+        # see (it only fires when SOME of the three are set), so a relay that
+        # was never advertised to any browser looked exactly like a healthy
+        # one. Substituted from .env now, same as every other secret here.
+        # `:-` rather than `:?` on purpose: a TURN-less build is legitimate
+        # for local dev, where STUN-only works fine on a LAN.
+        VITE_TURN_URL: ${VITE_TURN_URL:-}
+        VITE_TURN_USERNAME: ${VITE_TURN_USERNAME:-}
+        VITE_TURN_CREDENTIAL: ${VITE_TURN_CREDENTIAL:-}
+        # RustDesk relay behind Remote Help (see specs/2026-08-17-remote-help-
+        # via-rustdesk-design.md). client/Dockerfile has always declared these
+        # three ARGs, but this file never passed them, so on the prod host they
+        # survived only as an uncommitted local edit — a git checkout there
+        # would have silently switched Remote Help off, with nothing to say so.
+        # Read from .env like everything else here. The values are not secret
+        # either way: a VITE_ var is inlined into the bundle and served to
+        # every browser, so .env buys consistency, not confidentiality.
+        VITE_RUSTDESK_ID_SERVER: ${VITE_RUSTDESK_ID_SERVER:-}
+        VITE_RUSTDESK_RELAY_SERVER: ${VITE_RUSTDESK_RELAY_SERVER:-}
+        VITE_RUSTDESK_KEY: ${VITE_RUSTDESK_KEY:-}
+        # Rooms routed to LiveKit instead of the mesh (see .env.example).
+        # Blank means every room stays on the mesh, which is the shipped
+        # default and the only safe one: the two media paths cannot
+        # interoperate, so this is per-room by construction.
+        VITE_LIVEKIT_ROOMS: ${VITE_LIVEKIT_ROOMS:-}
     ports:
       - '127.0.0.1:8091:80'
     depends_on:

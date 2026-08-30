@@ -23,6 +23,18 @@ model User {
   email                   String                    @unique
   password                String
   displayName             String
+  // specs/2026-08-21-full-name-field-design.md — a separate, purely
+  // additive field from displayName above: the account's real/legal name,
+  // shown/editable only in the Avatar Editor, never used for the nametag,
+  // chat, Participant Panel, or any other surface that already reads
+  // displayName. Auto-populated once from Lark's real profile name for
+  // Lark-authenticated accounts (see lib/statusIntervals.ts's firstSeenAt
+  // for the same "set exactly once, race-safe" pattern this reuses) — set
+  // via an atomic updateMany({where: {id, fullName: null}, ...}) on Lark
+  // login, so a manually-edited value is never silently overwritten. Null
+  // for a manually-registered account until the user fills it in
+  // themselves; never guessed.
+  fullName                String?
   avatarConfig            Json?
   // Lightweight, cross-device UI preferences — e.g. { tooltipsEnabled, notifKinds }.
   // Server-synced by design (Settings feature) so they follow the user between
@@ -49,6 +61,24 @@ model User {
   // PATCH /admin/members/:userId. Read by lib/roles.ts (REST) and
   // socket/roomHandler.ts (sockets) — the two must always agree.
   memberVerifiedAt        DateTime?
+  // specs/2026-08-21-first-seen-offline-members-design.md — the first time
+  // this user ever actually joined a room (their earliest StatusInterval
+  // row's startedAt), NOT when their account was created. Backfilled once
+  // for existing users (see that feature's own migration).
+  // DORMANT as of specs/2026-08-21-last-seen-offline-members-design.md — no
+  // longer written to or read anywhere; superseded by lastSeenAt below for
+  // the Offline list's actual use case. Left in place (not dropped) since
+  // its already-backfilled data isn't reproducible from anything else.
+  firstSeenAt DateTime?
+  // specs/2026-08-21-last-seen-offline-members-design.md — the START time
+  // of this user's MOST RECENT StatusInterval row (i.e. the last time they
+  // joined a room or changed work-mode), NOT the moment they went offline.
+  // Backfilled once for existing users (see this feature's own migration);
+  // overwritten UNCONDITIONALLY every time lib/statusIntervals.ts's
+  // openStatusInterval runs for this user — unlike firstSeenAt above, there
+  // is no "only once" guard, the newest write always wins. Null means
+  // genuinely "has never joined a room" — never a stale/guessed value.
+  lastSeenAt DateTime?
   // Bug 1 — single active session. Random id minted at each successful login
   // and embedded in the JWT as a `sessionId` claim. Auth
   // (REST + socket) rejects a token whose sessionId != this, so logging in on a
@@ -71,6 +101,10 @@ model User {
   // rooms", which is far narrower than "may configure the whole workspace,
   // set shift rules, and read everyone's attendance".
   workspaceRole           String                    @default("member")
+  // Pure label ("who's freelance vs fulltime") — no other feature reads or
+  // branches on this. Same plain-string, app-layer-validated pattern as
+  // workspaceRole above, not a DB enum.
+  employmentType          String                    @default("fulltime")
   // IANA zone (e.g. "Asia/Jakarta"). All timestamps are stored UTC in the DB
   // and rendered in this zone — Calendar and Attendance both depend on it.
   timezone                String                    @default("Asia/Jakarta")
@@ -81,6 +115,16 @@ model User {
   tutorialCompletedAt     DateTime?
   departmentId            String?
   department              Department?               @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  // DCM restricted accounts (docs/superpowers/specs/2026-08-25-dcm-restricted-accounts-design.md)
+  // — null (every account today) means completely unrestricted, no behavior
+  // change. Set = this account may only see/enter this one Room (enforced
+  // in rooms.ts's GET /rooms and GET /rooms/:slug, and roomHandler.ts's
+  // JOIN_ROOM) and never sees a Lark-linked Sidebar item (Sidebar.tsx).
+  // onDelete: SetNull — if the room is ever deleted, the account falls back
+  // to unrestricted rather than pointing at a dangling id; re-restricting
+  // it in that edge case is a separate, later admin decision.
+  restrictedToRoomId      String?
+  restrictedToRoom        Room?                     @relation("RestrictedRoom", fields: [restrictedToRoomId], references: [id], onDelete: SetNull)
   managerId               String?
   manager                 User?                     @relation("UserManager", fields: [managerId], references: [id], onDelete: SetNull)
   reports                 User[]                    @relation("UserManager")
@@ -596,6 +640,20 @@ model CalendarEvent {
   visibility      String  @default("default") // default | private
   // Link back to a MeetKai room session started from this event.
   meetkaiRoomSlug String?
+  // Zone.id (within meetkaiRoomSlug's Room.zones JSON — not a DB FK, Zones
+  // aren't their own table) this event's participants get auto-pulled into
+  // at start time. Null = no auto-join configured for this event.
+  meetkaiZoneId   String?
+  // Optional, plaintext (same posture as door passwords — casual privacy,
+  // not access control against a determined attacker). Gates non-attendees
+  // from walking into meetkaiZoneId while this occurrence is in progress;
+  // invited attendees never see this prompt. Null = zone unrestricted.
+  meetkaiPassword String?
+  // Set once meetingAutoJoinSweep.ts has force-pulled attendees for a given
+  // occurrence, to the occurrence's own start instant — same per-occurrence
+  // dedup shape as EventReminder.lastFiredFor, needed because a recurring
+  // event's occurrences each need their own independent "already fired".
+  lastAutoJoinFiredFor DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -606,6 +664,7 @@ model CalendarEvent {
   @@index([calendarId, start])
   @@index([roomId, start])
   @@index([masterId])
+  @@index([meetkaiRoomSlug, meetkaiZoneId])
 }
 
 model EventAttendee {
@@ -860,6 +919,14 @@ model Room {
   mapFormatVersion  Int?
   invites           RoomInvite[]
   deskNotes         DeskNote[]
+  seatClaims        RoomSeatClaim[]
+  lastPositions     RoomLastPosition[]
+  // Reverse side of User.restrictedToRoomId above — Prisma requires both
+  // directions of a named relation to be declared. Named explicitly
+  // ("RestrictedRoom") because Room already has one unnamed User relation
+  // (owner/ownedRooms below) — a second User<->Room relation makes both
+  // ambiguous to Prisma without a name.
+  restrictedUsers   User[]                    @relation("RestrictedRoom")
 }
 
 // QA #7/#8/#9 — a sticky note placed on the map, same "Add Media, lands at
@@ -883,6 +950,48 @@ model DeskNote {
   text         String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// Bug fix — claimable-seat ownership (Room Editor's 'claimableSeat' tile
+// effect, see server/src/socket/seatClaim.ts) used to live ONLY in an
+// in-memory Map, so it was a standing grant WITHIN a server's lifetime
+// (survived disconnects/reconnects/leaving the room) but never survived an
+// actual server restart — every deploy silently wiped every claimed desk.
+// Persisted here now for the same "survives everything except an explicit
+// release" grant seatClaim.ts's own doc comment already promises; the
+// in-memory Map stays as a fast read-through cache, refreshed from this
+// table on first access per room after a restart.
+model RoomSeatClaim {
+  id        String   @id @default(cuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  seatId    String
+  userId    String
+  userName  String
+  createdAt DateTime @default(now())
+
+  @@unique([roomId, seatId])
+}
+
+// Bug fix — same "in-memory only, wiped every deploy" gap as RoomSeatClaim
+// above, this time for server/src/store/roomStore.ts's lastKnownPosition:
+// a reconnect/refresh mid-session correctly resumed exactly where a player
+// left off (see that file's own doc comment), but a server restart silently
+// reset everyone back to the room's spawn tile. Persisted here as a
+// read-through cache the same way — the in-memory Map answers a lookup
+// instantly whenever it can, this table only gets queried as a fallback
+// when the in-memory entry is missing (i.e. right after a restart).
+model RoomLastPosition {
+  id        String   @id @default(cuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId    String
+  x         Float
+  y         Float
+  direction String
+  updatedAt DateTime @updatedAt
+
+  @@unique([roomId, userId])
 }
 
 // Guest Link & Ruang Tunggu — a room-scoped invite token an admin generates
@@ -1439,6 +1548,7 @@ model StatusInterval {
 
   @@index([userId, startedAt])
   @@index([userId, endedAt])
+  @@index([roomSlug, userId])
 }
 
 // Server-detected proximity ("Connections" in the brief) — deliberately NOT

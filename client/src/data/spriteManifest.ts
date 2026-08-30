@@ -1,6 +1,6 @@
 // Auto-generated from client/public/assets/characters/generator and premade/generator-premade.
 // Regenerate by re-listing those folders if assets are added/removed — see scripts referenced in
-// PROMPT_LANJUTKAN_VIRTUALMEET.md Tahap 2.
+// PROMPT_LANJUTKAN_KAISPACE.md Tahap 2.
 
 export const GENERATOR_BODIES: string[] = [
   "Body_32x32_01.png",
@@ -470,4 +470,12 @@ export const PREMADE_CHARACTERS: string[] = [
   "Premade_Character_32x32_18.png",
   "Premade_Character_32x32_19.png",
   "Premade_Character_32x32_20.png",
+];
+
+// Folder names within client/public/assets/characters/custom/<id>/ — each
+// holding {down,left,right,up}_{0..3}.png, pre-cropped to a shared bounding
+// box and background-removed (see AvatarSprite.ts's drawCustomAvatar).
+export const CUSTOM_CHARACTERS: string[] = [
+  "office-worker-1",
+  "schoolgirl-1",
 ];

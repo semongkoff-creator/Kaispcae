@@ -20,5 +20,15 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/server/dist ./server/dist
 COPY --from=builder /app/server/prisma ./server/prisma
 COPY --from=builder /app/server/package.json ./server/package.json
+# One-off operational scripts are intentionally available in the runtime
+# image. Their credential input (for example DCM_Password_List.xlsx) is never
+# copied here: operators provide it briefly with `docker cp`, run the script,
+# then remove it again.
+#
+# `seedDcmAccounts.ts` imports server helpers and the workspace shared module
+# at runtime through tsx, so copy those source trees alongside the script.
+COPY --from=builder /app/server/scripts ./server/scripts
+COPY --from=builder /app/server/src ./server/src
+COPY --from=builder /app/shared ./shared
 EXPOSE 3001
 CMD ["node", "server/dist/index.js"]

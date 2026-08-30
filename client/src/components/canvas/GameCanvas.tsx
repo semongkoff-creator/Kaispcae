@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
+import { useRef, useEffect, useCallback, useState, useMemo, memo } from 'react';
 import {
   TILE_SIZE,
   MAP_WIDTH,
@@ -8,7 +8,6 @@ import {
   Furniture,
   RoomTile,
   Direction,
-  ProximityPlayer,
   PROXIMITY_THRESHOLD_PX,
   EMOTE_EMOJI,
   JUMP_DURATION_MS,
@@ -18,28 +17,54 @@ import {
   ReferenceImageData,
   Zone,
   doesRectOverlapImpassableArea,
+  ImpassableAreaRect,
   roleAtLeast,
+  shouldIsolateZoneAudio,
 } from '@kaispace/shared';
 import { useGameStore, OVERVIEW_ZOOM_THRESHOLD } from '@/stores/gameStore';
+import { livePos } from '@/stores/livePosition';
+import { livePlayers, remotePos, getProximitySnapshot, interpolateRemotePositions } from '@/stores/remotePositions';
 import { useMovement } from '@/hooks/useMovement';
 import { drawAvatar } from './AvatarSprite';
 import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
+import { truncateName } from '@/utils/truncateName';
 import { PALETTE_BY_ID } from '@/data/themeAssets';
 import { isTileBlocked, isDoorTile } from '@/utils/createDefaultRoom';
 import { findFollowRouteTarget, findTilePath, getCardinalWaypointTarget, isNearWorldPoint, tilePathToWorldWaypoints, type RouteState } from '@/utils/pathfinding';
 import { avatarColor } from '@/components/ui/ChatAvatar';
+import { findZoneAt } from '@/hooks/useProximity';
 // Bug 16-project (Room Editor) — these map-draw helpers were moved verbatim to
 // mapRender.ts so the editor can render the map identically. GameCanvas's usage
 // is unchanged.
 import { drawTile, drawFloorTile, drawWallTile, drawFurnitureLayer, TILE_COLORS } from './mapRender';
 import { drawMiniTileType, drawMiniZoneBackground, MINI_FURNITURE, MINI_WALL_AREA, MINI_DOOR } from './miniRender';
+import { measureTextCached } from './textMetrics';
+import { cullOverlay, setOverlayStyle } from './overlayStyle';
+import { recordFrame, recordPhases, recordSceneCounts } from '@/utils/frameDiag';
+import { getScaledImage } from '@/utils/scaledImage';
 
 // Kept proportional to TILE_SIZE (same ratio as AvatarSprite.ts's own copy of
 // this constant) so decorations positioned relative to it — crown, speaker
 // icon, speech bubble, speaking-pulse ring — stay the same relative distance
 // from the avatar as the sprite itself scales with TILE_SIZE (Fitur 4).
 const AVATAR_RADIUS = TILE_SIZE * (14 / 32);
+// Zone name banners never render smaller than this, regardless of zoom —
+// see the zone-banner positioning loop's own comment for why.
+const MIN_ZONE_LABEL_FONT_PX = 10;
+
+// Nominal on-screen height of a zone-banner pill, in unzoomed pixels — used
+// ONLY to decide whether the banner is still on screen (see overlayStyle.ts's
+// cullOverlay), never to size or position it. Approximate on purpose: the
+// element sizes itself from its own content, and the cull margin is far
+// larger than any error this introduces.
+const ZONE_BANNER_APPROX_H_PX = 24;
+
+// Same idea as ZONE_BANNER_APPROX_H_PX, for the small pin markers (note,
+// file/whiteboard media, claimable seat) and for the much larger inline
+// thumbnail an image/YouTube media marker renders instead of a pin.
+const MARKER_APPROX_SIZE_PX = 40;
+const MEDIA_THUMBNAIL_APPROX_SIZE_PX = 160;
 
 // Shared by both the legacy (approach-direction) and orientation-aware
 // (sitFacing) sit-direction paths in performSit below — one lookup, not two.
@@ -81,16 +106,56 @@ function computeSitFacingDirection(chair: Furniture): Direction {
 // meant to BE the visible map, not a translucent trace guide like in the
 // editor. Drawn on top of the floor/wall tiles (which are fully opaque and
 // would otherwise hide it) but BELOW furniture/avatars, so any real
-// interactive objects or players placed on top stay visible. Camera-offset
-// manually since GameCanvas never uses ctx.translate for panning (unlike
-// RoomEditorPage.tsx's version of this same helper).
-function drawLiveReferenceImage(ctx: CanvasRenderingContext2D, ref: ReferenceImageData | null, cameraX: number, cameraY: number) {
-  if (!ref || !ref.visible) return;
-  const img = getSpriteImage(ref.url);
-  if (!img) return;
+// interactive objects or players placed on top stay visible. Cropped to the
+// viewport: uploaded floor-plan photos can be map-sized bitmaps, so even a
+// pre-scaled copy should not be drawn in full when only one viewport is visible.
+function drawLiveReferenceImage(
+  ctx: CanvasRenderingContext2D,
+  ref: ReferenceImageData | null,
+  cameraX: number,
+  cameraY: number,
+  viewW: number,
+  viewH: number,
+) {
+  if (!ref || !ref.visible || ref.opacity <= 0 || ref.width <= 0 || ref.height <= 0) return;
+  // Pre-scaled if one is ready, the original otherwise (see scaledImage.ts).
+  // A room built from an uploaded floor plan draws this every single frame, and
+  // the source is a photo — thousands of pixels square — being squeezed down to
+  // the map's on-screen size. Doing that per frame was the single most
+  // expensive thing in the render loop, and it dragged the avatar pass down
+  // with it by evicting the character spritesheets from the texture cache.
+  const scaled = getScaledImage(ref.url, ref.width, ref.height);
+  let source: CanvasImageSource | null = scaled;
+  let sourceWidth = scaled?.width ?? 0;
+  let sourceHeight = scaled?.height ?? 0;
+  if (!source) {
+    const img = getSpriteImage(ref.url);
+    if (!img) return;
+    source = img;
+    sourceWidth = img.naturalWidth;
+    sourceHeight = img.naturalHeight;
+  }
+
+  const refLeft = ref.x - cameraX;
+  const refTop = ref.y - cameraY;
+  const refRight = refLeft + ref.width;
+  const refBottom = refTop + ref.height;
+  const drawLeft = Math.max(0, refLeft);
+  const drawTop = Math.max(0, refTop);
+  const drawRight = Math.min(viewW, refRight);
+  const drawBottom = Math.min(viewH, refBottom);
+  if (drawRight <= drawLeft || drawBottom <= drawTop) return;
+
+  const drawW = drawRight - drawLeft;
+  const drawH = drawBottom - drawTop;
+  const sourceX = ((drawLeft - refLeft) / ref.width) * sourceWidth;
+  const sourceY = ((drawTop - refTop) / ref.height) * sourceHeight;
+  const sourceW = (drawW / ref.width) * sourceWidth;
+  const sourceH = (drawH / ref.height) * sourceHeight;
+
   ctx.save();
   ctx.globalAlpha = ref.opacity;
-  ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, ref.x - cameraX, ref.y - cameraY, ref.width, ref.height);
+  ctx.drawImage(source, sourceX, sourceY, sourceW, sourceH, drawLeft, drawTop, drawW, drawH);
   ctx.restore();
 }
 
@@ -101,13 +166,38 @@ function drawLiveReferenceImage(ctx: CanvasRenderingContext2D, ref: ReferenceIma
 // actually isolating" — same convention, not a new one. Meeting rooms are
 // excluded even when isolating: they already have their own full-width
 // label bar + video-call UI, and stacking this effect on top of that wasn't
-// asked for. Focus areas DO get this treatment (label hidden, dimming
-// applied) per the room admin — reversed from an earlier "stay visually
-// normal" pass once they saw a room full of repeated "Focus" pills in
-// practice; see the dimming color split below for why it's not identical
-// to Private Area's.
+// asked for. Focus areas DO get dimmed per the room admin — reversed from
+// an earlier "stay visually normal" pass once they saw a room full of
+// repeated "Focus" pills in practice; see the dimming color split below for
+// why it's not identical to Private Area's. Their banner/label, unlike the
+// dimming, is NOT tied to this function — every named zone always shows its
+// label now (bug fix; this used to also suppress the label for anything
+// isPrivateZone caught, which silently hid Private/Focus/Restricted Area's
+// banners too, not just the intended dimming).
 function isPrivateZone(zone: Zone): boolean {
-  return zone.audioIsolated !== false && zone.type !== 'meeting';
+  return shouldIsolateZoneAudio(zone) && zone.type !== 'meeting';
+}
+
+// Bug fix — a single "word" (no spaces — a long URL, a run-on typo) wider
+// than maxWidth on its own used to become its own line untouched, same as
+// any normal short word: nothing here ever split WITHIN a word, so that one
+// line rendered past the bubble's own drawn width with no visual bound —
+// canvas fillText has no CSS overflow-wrap/word-break equivalent, so that
+// has to happen manually. breakLongWord below does the same greedy-fit walk
+// as the word loop, just character by character instead of word by word,
+// only invoked for the word that actually needs it.
+function breakLongWord(ctx: CanvasRenderingContext2D, word: string, maxWidth: number, lines: string[]): string {
+  let chunk = '';
+  for (const ch of word) {
+    const test = chunk + ch;
+    if (chunk && measureTextCached(ctx, test) >= maxWidth) {
+      lines.push(chunk);
+      chunk = ch;
+    } else {
+      chunk = test;
+    }
+  }
+  return chunk;
 }
 
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
@@ -116,12 +206,12 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   let current = '';
   for (const word of words) {
     const test = current ? `${current} ${word}` : word;
-    if (ctx.measureText(test).width < maxWidth) {
+    if (measureTextCached(ctx, test) < maxWidth) {
       current = test;
-    } else {
-      if (current) lines.push(current);
-      current = word;
+      continue;
     }
+    if (current) lines.push(current);
+    current = measureTextCached(ctx, word) >= maxWidth ? breakLongWord(ctx, word, maxWidth, lines) : word;
   }
   if (current) lines.push(current);
   return lines.length > 0 ? lines : [text.slice(0, 30)];
@@ -132,7 +222,6 @@ interface GameCanvasProps {
   emitStop: (x: number, y: number, direction: string) => void;
   emitJump: () => void;
   emitNudge: (targetId: string) => void;
-  proximityData: ProximityPlayer[];
   micMuted: boolean;
   cameraOn: boolean;
   editorMode: boolean;
@@ -157,7 +246,21 @@ interface GameCanvasProps {
   // (reusing emitTeleportTo above, not a second teleport path).
   emitClaimSeat: (seatId: string) => void;
   emitReleaseSeat: (seatId: string) => void;
+  // Taking over someone ELSE's claimed seat — asks the current owner
+  // instead of the old silent-redirect-to-nearest-free-desk behavior (see
+  // seatClaim.ts's SEAT_CLAIM_REQUEST handler and this file's
+  // pendingSeatClaim confirm dialog below).
+  emitSeatClaimRequest: (seatId: string) => void;
+  emitSeatClaimDecide: (seatId: string, playerId: string, approve: boolean) => void;
+  emitSeatClaimRequestCancel: (seatId: string) => void;
   onMediaOpen: (mediaId: string) => void;
+  // ZEP-style player card — fires instead of the normal walk-to-click when
+  // the click hit-tests against another player's avatar (see onCanvasClick
+  // below). The parent owns the card's own open/closed state and action
+  // wiring; this component only reports WHO was clicked and WHERE on
+  // screen, since it's the one that knows the camera/zoom transform needed
+  // to convert that world position back to a page coordinate.
+  onPlayerClick: (player: Avatar, screenX: number, screenY: number) => void;
   // Fitur 15B — fires when the local player triggers an Interactive Object
   // (Press F in range, or automatic on entering range). The parent looks up
   // the Furniture by id (already has the full furniture list) to read its
@@ -238,6 +341,23 @@ const ANIMATION_FRAME_MS = 120;
 // two tiles away. Media keeps the wider radius — X isn't overloaded.
 const SIT_TILE_RADIUS = 1;
 
+// How long a player has to stand still on a claimable seat's own tile
+// before the claim/request popup offers itself automatically — long enough
+// that just walking through the tile on the way somewhere else never
+// triggers it, per the room admin.
+const SEAT_AUTO_PROMPT_DELAY_MS = 1000;
+
+// Long names were overflowing the seat-claim cards (owner/requester name in
+// the "Kursi ini sudah diklaim...", incoming-request, and "Menunggu
+// persetujuan..." cards) — capped and ellipsized via truncateName.
+const SEAT_CLAIM_NAME_MAX_CHARS = 20;
+
+// Tighter cap for the persistent on-seat marker itself (the small "🪑 name"
+// pill drawn over every claimed seat at all times, not just during the
+// claim flow) — this one has to stay compact since it sits directly on a
+// tile-sized chair icon, not a roomy card.
+const SEAT_MARKER_NAME_MAX_CHARS = 12;
+
 // Hand gesture shown on the NUDGER's own body (not the target) — a fist
 // bump reads as the closest match to "senggol" itself, and deliberately
 // isn't a single-finger pointing hand (👉).
@@ -296,7 +416,7 @@ function getNudgeShakeOffset(startTimestamp: number | undefined, timestamp: numb
   return NUDGE_SHAKE_PX * decay * Math.sin((elapsed / 40) * Math.PI);
 }
 
-export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityData, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, onMediaOpen, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, onDoorAreaPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
+function GameCanvasImpl({ emitMove, emitStop, emitJump, emitNudge, micMuted, cameraOn, editorMode, selectedTileType, selectedPaletteId, onTilePaint, onTileHistoryPush, onFloorPaint, onFurniturePlace, onFurnitureErase, zoneDrawMode, onZoneDrawComplete, bannerPlaceMode, onBannerPlaceComplete, onPortalEnter, emitSit, emitFollowUnfollow, emitTeleportTo, emitClaimSeat, emitReleaseSeat, emitSeatClaimRequest, emitSeatClaimDecide, emitSeatClaimRequestCancel, onMediaOpen, onPlayerClick, onInteractiveTrigger, onNoteOpen, onDoorPasswordTrigger, onDoorAreaPasswordTrigger, lowSpecMode = false, restrictedZoneIds }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
@@ -332,7 +452,17 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // (tile-based) just below.
   const doorAreaRects = useGameStore((s) => s.doorAreaRects);
   const unlockedDoorAreaIds = useGameStore((s) => s.unlockedDoorAreaIds);
-  const localPlayer = useGameStore((s) => s.localPlayer);
+  // NOT subscribed reactively. setLocalPlayerMoving writes a brand-new
+  // localPlayer object every 100ms while the local player walks (see
+  // gameStore.ts), and this component's only use for the value is keeping
+  // localPlayerRef fresh — so a reactive selector here re-rendered the single
+  // heaviest component in the app ten times a second, purely to copy a value
+  // into a ref. Re-rendering GameCanvas re-evaluates every hook in it and
+  // rebuilds every callback; measured against the deployed build, keyboard
+  // interactions were taking 250-470ms (INP 512ms, "poor") the entire time
+  // anyone was walking. The subscription below keeps the ref exactly as fresh
+  // with no render at all.
+  const posEpoch = useGameStore((s) => s.posEpoch);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const theme = useGameStore((s) => s.theme);
   const followInfo = useGameStore((s) => s.followInfo);
@@ -389,7 +519,10 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // gameplay effect.
   const locateHighlightRef = useRef<{ playerId: string; start: number } | null>(null);
   const playerRecordsRef = useRef(useGameStore.getState().playerRecords);
-  const localPlayerRef = useRef(localPlayer);
+  const localPlayerRef = useRef(useGameStore.getState().localPlayer);
+  // Imperative, so a position write costs no render. Registered once; zustand's
+  // subscribe returns its own unsubscribe, which is the effect's cleanup.
+  useEffect(() => useGameStore.subscribe((s) => { localPlayerRef.current = s.localPlayer; }), []);
   const localPlayerIdRef = useRef(localPlayerId);
   const bubblesRef = useRef(speechBubbles);
   // Fitur 15B — momentary display Interactive Object reveals ('show_name',
@@ -458,10 +591,42 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // click. Null = no popup showing. ownerName is only set for the
   // "already taken" wording; a free-looking seat gets the plain variant.
   const [pendingSeatClaim, setPendingSeatClaim] = useState<{ seatId: string; ownerName: string | null } | null>(null);
+  // The draw() loop below is memoized once (empty deps) so it can't close
+  // over pendingSeatClaim's latest value directly — mirrored into a ref the
+  // same way emitSitRef etc. already do, so the auto-prompt check (added
+  // below) knows not to pop a second dialog while one's already open.
+  const pendingSeatClaimRef = useRef(pendingSeatClaim); pendingSeatClaimRef.current = pendingSeatClaim;
+  // Bug fix — claiming used to require a precise click on the seat's small
+  // marker; per the room admin, standing on the seat's own tile should
+  // offer it automatically instead. Debounced (SEAT_AUTO_PROMPT_DELAY_MS)
+  // so just walking THROUGH a seat tile on the way somewhere else doesn't
+  // interrupt movement with a popup — only actually stopping there does.
+  // Tracks the tile currently stood on, when it was entered, and whether
+  // this stay already triggered a prompt (so dismissing it while still
+  // standing there doesn't immediately reopen it — leaving and coming back
+  // resets this).
+  const seatProximityRef = useRef<{ seatId: string; enteredAt: number; prompted: boolean } | null>(null);
   // Live ownership — reactive (not just .getState()) so a marker's label/
   // click-behavior updates the instant someone else claims or releases it.
   const seatClaims = useGameStore((s) => s.seatClaims);
   const localUserId = useGameStore((s) => s.localUserId);
+  // A claimed seat's marker is the "whose desk is this" cue for when the
+  // owner ISN'T there to identify it themselves — so it only needs to show
+  // while they're offline. While they're online (often sitting right there,
+  // overlapping their own avatar/nametag and the desk furniture under it),
+  // the floating label is redundant with their own visible presence and was
+  // reported as visual clutter — hidden entirely in that case, same as a
+  // genuinely unclaimed seat. Reactive subscription (not playerRecordsRef,
+  // which only the imperative draw loop reads) so this updates the instant
+  // someone joins/leaves.
+  const playerRecords = useGameStore((s) => s.playerRecords);
+  // Incoming requests to take over a seat WE own (Izinkan/Tolak cards) and
+  // our own outstanding request on someone else's seat ("menunggu
+  // persetujuan..." card) — see seatClaim.ts's SEAT_CLAIM_REQUEST flow.
+  const seatClaimRequests = useGameStore((s) => s.seatClaimRequests);
+  const removeSeatClaimRequest = useGameStore((s) => s.removeSeatClaimRequest);
+  const pendingSeatClaimRequest = useGameStore((s) => s.pendingSeatClaimRequest);
+  const setPendingSeatClaimRequest = useGameStore((s) => s.setPendingSeatClaimRequest);
   // Floor-plan reference image (see gameStore.ts) — only ever non-null when
   // the admin opted into showInGame; drawn as an overlay, see the draw loop.
   const liveReferenceImage = useGameStore((s) => s.liveReferenceImage);
@@ -504,6 +669,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   // §6 — Add Media markers: same DOM-overlay-positioned-via-transform
   // pattern as zone/banner above, one small clickable pin per object.
   const mediaMarkerRefs = useRef(new Map<string, HTMLDivElement>());
+  const movementCollisionAreasRef = useRef<ImpassableAreaRect[]>([]);
 
   useEffect(() => {
     tilesRef.current = tiles;
@@ -515,7 +681,6 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     followInfoRef.current = followInfo;
     locateRequestRef.current = locateRequest;
     playerRecordsRef.current = useGameStore.getState().playerRecords;
-    localPlayerRef.current = localPlayer;
     localPlayerIdRef.current = localPlayerId;
     bubblesRef.current = speechBubbles;
     momentaryRevealsRef.current = useGameStore.getState().momentaryReveals;
@@ -534,9 +699,23 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     liveReferenceImageRef.current = liveReferenceImage;
     avatarScaleRef.current = avatarScale;
     activeZoneSessionsRef.current = useGameStore.getState().activeZoneSessions;
+    const lockedDoorAreas = doorOverride
+      ? []
+      : doorAreaRects.filter((r) => r.doorPasswordEnabled && !unlockedDoorAreaIds.has(r.id));
+    movementCollisionAreasRef.current = lockedDoorAreas.length > 0
+      ? impassableAreaRects.concat(lockedDoorAreas)
+      : impassableAreaRects;
+    // Deliberately dependency-free: this mirrors ~30 store slices into refs
+    // for the render loop, and every one of them is already a reactive
+    // subscription above, so the component only re-renders when at least one
+    // of them actually changed. Listing them as deps would duplicate that
+    // set with no benefit and one more place to forget to update.
   });
 
-  const proximityRef = useRef(proximityData); proximityRef.current = proximityData;
+  // Read from the module mirror rather than a prop — see
+  // remotePositions.ts's setProximitySnapshot. The draw loop pulls the
+  // current value per frame, so there is nothing to keep in sync here.
+  const proximityRef = { get current() { return getProximitySnapshot(); } };
   const lowSpecModeRef = useRef(lowSpecMode); lowSpecModeRef.current = lowSpecMode;
   const lastDrawTimeRef = useRef(0);
   const micMutedRef = useRef(micMuted); micMutedRef.current = micMuted;
@@ -593,35 +772,33 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     return isDoorTile(t, tileX, tileY);
   }, []);
 
-  const onMoveRef = useRef((x: number, y: number, direction: Direction) => {
-    useGameStore.getState().setLocalPlayer({ x, y, direction, isMoving: true });
+  const onMoveRef = useRef((x: number, y: number, direction: Direction, isRunning = false) => {
+    // livePos every frame, store at most every LOCAL_PLAYER_STORE_INTERVAL_MS
+    // — see livePosition.ts. This used to call setLocalPlayer directly, which
+    // handed React a new localPlayer object 60x/sec and re-rendered App.tsx's
+    // entire tree along with it.
+    useGameStore.getState().setLocalPlayerMoving(x, y, direction, isRunning);
   });
-
-  // "Door Area" — client-side prediction only (the server independently
-  // enforces the same thing authoritatively, see movementHandler.ts's
-  // isBlockedForSocket). Reuses useMovement's existing Impassable Area
-  // collision path AS-IS (same {x,y,w,h} rect shape) rather than teaching it
-  // a new per-socket concept — this just returns the SUBSET of door areas
-  // that are still locked right now, same trick the server's own filter
-  // uses. Item #9 — emergency override mirrors the server's own bypass.
-  const getLockedDoorAreas = useCallback(() => {
-    if (doorOverrideRef.current) return [];
-    return doorAreaRectsRef.current.filter(
-      (r) => r.doorPasswordEnabled && !unlockedDoorAreaIdsRef.current.has(r.id),
-    );
-  }, []);
 
   const { update, setPosition, updateFollow } = useMovement({
     isBlocked,
     onMove: onMoveRef.current,
     isFrozen: () => useGameStore.getState().localPlayer.isSitting === true,
     isDoor,
-    getImpassableAreas: () => [...impassableAreaRectsRef.current, ...getLockedDoorAreas()],
+    getImpassableAreas: () => movementCollisionAreasRef.current,
   });
 
+  // Keyed on posEpoch, NOT on localPlayer.x/y. The store position now lags
+  // the real one by up to LOCAL_PLAYER_STORE_INTERVAL_MS while walking, so
+  // depending on x/y here would feed a stale position back into the movement
+  // system every throttle tick and yank the avatar backwards mid-stride.
+  // posEpoch only advances for genuinely external position changes —
+  // teleport, portal, sit/stand, server correction, restricted-zone bounce —
+  // which are exactly the ones that must override local movement.
   useEffect(() => {
-    setPosition(localPlayer.x, localPlayer.y);
-  }, [localPlayer.x, localPlayer.y, setPosition]);
+    const p = useGameStore.getState().localPlayer;
+    setPosition(p.x, p.y);
+  }, [posEpoch, setPosition]);
 
   // Click a non-blocked tile. Refs so the once-attached listener
   // always reads current values without re-binding.
@@ -671,16 +848,19 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // locked per-tile door already does via isBlocked below — click-to-move,
     // Locate, and Follow must not path straight through a door nobody's
     // unlocked yet.
-    const areas = [...impassableAreaRectsRef.current, ...getLockedDoorAreas()];
+    const areas = movementCollisionAreasRef.current;
     if (areas.length === 0) return false;
     const left = tx * TILE_SIZE;
     const top = ty * TILE_SIZE;
     return doesRectOverlapImpassableArea(areas, left, top, left + TILE_SIZE, top + TILE_SIZE);
-  }, [isBlocked, getLockedDoorAreas]);
+  }, [isBlocked]);
 
   const computeWalkWaypoints = useCallback((targetTileX: number, targetTileY: number) => {
-    const startTileX = Math.floor(localPlayerRef.current.x / TILE_SIZE);
-    const startTileY = Math.floor(localPlayerRef.current.y / TILE_SIZE);
+    // livePos — a click-to-move issued mid-stride must path from where the
+    // avatar IS. The throttled store position can be most of a tile behind
+    // at run speed, which is enough to start the route on the wrong tile.
+    const startTileX = Math.floor(livePos.x / TILE_SIZE);
+    const startTileY = Math.floor(livePos.y / TILE_SIZE);
     // QA follow-up — MAP_WIDTH/MAP_HEIGHT are only the default grid size; a
     // resized room (Room Editor's Resize tool, up to 200x200) is bigger than
     // that, so bounding the pathfind to the fixed constants made any
@@ -698,14 +878,56 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const onCanvasClick = (e: MouseEvent) => {
-      if (editorModeRef.current) return; // never move while editing the room
-      const store = useGameStore.getState();
-      if (store.localPlayer.isSitting) return; // stand up first (movement is frozen)
+    // Shared by both handlers below — converts a mouse event to world
+    // coordinates and checks whether it hit another player's avatar. Same
+    // nearest-within-radius shape as performNudge above, but measured from
+    // the CLICK point rather than the local player, and playerRecordsRef
+    // never contains the local player itself (see gameStore's
+    // setRoomState) — so clicking your own avatar can never match here.
+    // Radius matches the avatar's own visible circle (AVATAR_RADIUS) plus
+    // the same "+6" padding this file already uses elsewhere for
+    // click-friendly rings around it.
+    const resolveClick = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
       const zoom = effectiveZoomRef.current;
       const worldX = (e.clientX - rect.left) / zoom + cameraXRef.current;
       const worldY = (e.clientY - rect.top) / zoom + cameraYRef.current;
+      let clickedPlayer: Avatar | null = null;
+      let bestPlayerDist = Infinity;
+      for (const p of Object.values(playerRecordsRef.current)) {
+        const dist = Math.hypot(p.x - worldX, p.y - worldY);
+        if (dist > AVATAR_RADIUS + 6) continue;
+        if (dist < bestPlayerDist) { bestPlayerDist = dist; clickedPlayer = p; }
+      }
+      return { rect, zoom, worldX, worldY, clickedPlayer };
+    };
+
+    // ZEP-style single click — opens the player card when it lands on
+    // another avatar; otherwise does nothing. Movement moved to double
+    // click (below) specifically so a single click is free for select/
+    // other actions (this one included) without also sending the local
+    // player walking.
+    const onCanvasClick = (e: MouseEvent) => {
+      if (editorModeRef.current) return; // never move/act while editing the room
+      if (useGameStore.getState().localPlayer.isSitting) return; // stand up first (movement is frozen)
+      const { rect, zoom, clickedPlayer } = resolveClick(e);
+      if (!clickedPlayer) return;
+      const screenX = (clickedPlayer.x - cameraXRef.current) * zoom + rect.left;
+      const screenY = (clickedPlayer.y - cameraYRef.current) * zoom + rect.top;
+      onPlayerClick(clickedPlayer, screenX, screenY);
+    };
+
+    // ZEP-style double click — walk-to-click (path-finds to the clicked
+    // tile; landing on a sittable tile sits down same as before, since
+    // that's the existing arrival behavior, untouched here). Re-runs the
+    // same player hit-test first so double-clicking directly on someone's
+    // avatar opens their card (via the two single-click events a native
+    // dblclick is preceded by) without ALSO pathfinding onto their tile.
+    const onCanvasDblClick = (e: MouseEvent) => {
+      if (editorModeRef.current) return;
+      if (useGameStore.getState().localPlayer.isSitting) return;
+      const { worldX, worldY, clickedPlayer } = resolveClick(e);
+      if (clickedPlayer) return;
       const tileX = Math.floor(worldX / TILE_SIZE);
       const tileY = Math.floor(worldY / TILE_SIZE);
       if (tileX < 0 || tileY < 0) return;
@@ -713,9 +935,14 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       cancelActiveFollowForRoute();
       walkTargetRef.current = computeWalkWaypoints(tileX, tileY);
     };
+
     canvas.addEventListener('click', onCanvasClick);
-    return () => canvas.removeEventListener('click', onCanvasClick);
-  }, [isBlocked, computeWalkWaypoints, cancelActiveFollowForRoute]);
+    canvas.addEventListener('dblclick', onCanvasDblClick);
+    return () => {
+      canvas.removeEventListener('click', onCanvasClick);
+      canvas.removeEventListener('dblclick', onCanvasDblClick);
+    };
+  }, [isBlocked, computeWalkWaypoints, cancelActiveFollowForRoute, onPlayerClick]);
 
   // Mouse wheel / trackpad zoom — same factor-per-notch convention as the
   // Room Editor's own wheel handler. preventDefault stops the page itself
@@ -782,9 +1009,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // Refuse if another player is already seated on this exact tile —
     // without this check, two players could both sit at the same spot and
     // their avatars would render fully overlapping each other.
-    const occupied = Object.values(playerRecordsRef.current).some(
-      (p) => p.isSitting && (p.seatFurnitureId === seatId || (p.x === chairCenterX && p.y === chairCenterY)),
-    );
+    const occupied = Object.values(playerRecordsRef.current).some((p) => {
+      if (!p.isSitting) return false;
+      if (p.seatFurnitureId === seatId) return true;
+      const pos = remotePos(p);
+      return pos.x === chairCenterX && pos.y === chairCenterY;
+    });
     if (occupied) {
       // Was a silent no-op before — say why, so a taken seat doesn't read as
       // "sit is broken". Transient banner, same pattern as other HUD notices.
@@ -813,41 +1043,73 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     emitSitRef.current(true, chairCenterX, chairCenterY, sitDirection, seatId);
   }, []);
 
-  // Nudge ("senggol", Z key) — finds whoever's closest to the local player
-  // and asks the server to relay a nudge at them. No local trigger here:
-  // unlike Jump (which animates the presser's own avatar and so needs
-  // zero-latency local feedback), the visual effect lands on the TARGET, so
-  // waiting for the server's broadcast — which reaches the nudger too, see
-  // movementHandler.ts's io.to() — is both simpler (one code path drives
-  // the animation for everyone, including the nudger) and in practice
-  // instant on a same-room socket round trip.
-  //
-  // Deliberately NOT direction-gated: an earlier version only counted
-  // someone standing strictly ahead of the local player's facing direction,
-  // but two people who've walked up to chat almost always end up standing
-  // SIDE BY SIDE facing the same way (e.g. both facing the camera), not one
-  // behind the other — that layout has zero "forward" distance between
-  // them, so the direction check silently found no target every time.
-  // Plain nearest-within-range matches how "senggol" actually gets used.
-  const performNudge = useCallback(() => {
-    const player = localPlayerRef.current;
-    // Matches the visible white "Proximity ring" (PROXIMITY_THRESHOLD_PX,
-    // shared/types/index.ts) instead of its own separate, tighter radius
-    // (was TILE_SIZE * 1.5 = 72px, exactly half the 144px ring) — someone
-    // standing clearly inside the ring everyone can see read as reachable
-    // but was actually out of Z's real range, so it silently no-op'd. Same
-    // "visual circle drifted from the real range" bug PROXIMITY_THRESHOLD_PX
-    // itself was introduced to prevent for the ring's own video/audio
-    // connect distance (see its doc comment) — nudge just wasn't using it.
-    const NUDGE_RANGE_PX = PROXIMITY_THRESHOLD_PX;
+  // Facing-direction unit vectors — used by performNudge below to tell
+  // "in front of me" from "beside/behind me".
+  const NUDGE_DIRECTION_VECTOR: Record<Avatar['direction'], { x: number; y: number }> = {
+    up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 },
+  };
 
-    let target: Avatar | null = null;
-    let bestDist = Infinity;
+  // Nudge ("senggol", Z key) — asks the server to relay a nudge at whoever's
+  // in range. No local trigger here: unlike Jump (which animates the
+  // presser's own avatar and so needs zero-latency local feedback), the
+  // visual effect lands on the TARGET, so waiting for the server's
+  // broadcast — which reaches the nudger too, see movementHandler.ts's
+  // io.to() — is both simpler (one code path drives the animation for
+  // everyone, including the nudger) and in practice instant on a same-room
+  // socket round trip.
+  //
+  // Facing-direction is now a PREFERENCE, not a hard gate. An earlier
+  // version only counted someone standing strictly ahead of the local
+  // player's facing direction, full stop — but two people who've walked up
+  // to chat almost always end up standing SIDE BY SIDE facing the same way
+  // (e.g. both facing the camera), not one behind the other, so a hard
+  // direction gate silently found no target every time in that (extremely
+  // common) layout. This picks whoever's most in front (within a 90° cone
+  // of the facing direction) among in-range players when there is one, and
+  // only falls back to plain nearest-in-range when nobody qualifies as
+  // "in front" — so a deliberate poke at someone you're facing is no
+  // longer just luck-of-the-radius against a bystander standing closer.
+  const performNudge = useCallback(() => {
+    // livePos, not the store: with the store position throttled, a nudge
+    // fired mid-stride would measure range from where the avatar was up to
+    // LOCAL_PLAYER_STORE_INTERVAL_MS ago — enough at run speed to miss
+    // someone standing right next to you.
+    const player = livePos;
+    // Bug fix — this used to match the full video/audio "Proximity ring"
+    // (PROXIMITY_THRESHOLD_PX, 3 tiles/144px) so a target inside that
+    // visible ring could never silently read as "out of range" for nudge.
+    // Per the room admin that made "colek" reach too far — a poke should be
+    // close-contact, not proximity-chat distance — so it's back to its own
+    // tighter radius (1.5 tiles/72px, half the ring). Trade-off: someone
+    // standing near the outer edge of the visible ring can now be just
+    // outside nudge range even though the ring itself suggests they're
+    // "in range" — accepted deliberately this time, not the same drift bug.
+    const NUDGE_RANGE_PX = TILE_SIZE * 1.5;
+    const fwd = NUDGE_DIRECTION_VECTOR[player.direction];
+
+    let nearest: Avatar | null = null;
+    let nearestDist = Infinity;
+    let inFront: Avatar | null = null;
+    let inFrontDist = Infinity;
     for (const p of Object.values(playerRecordsRef.current)) {
-      const dist = Math.hypot(p.x - player.x, p.y - player.y);
+      const pos = remotePos(p);
+      const dx = pos.x - player.x;
+      const dy = pos.y - player.y;
+      const dist = Math.hypot(dx, dy);
       if (dist > NUDGE_RANGE_PX) continue;
-      if (dist < bestDist) { bestDist = dist; target = p; }
+      if (dist < nearestDist) { nearestDist = dist; nearest = p; }
+
+      // Projection onto the facing vector (how far ahead) vs. onto its
+      // perpendicular (how far to the side) — "in front" means more ahead
+      // than sideways, i.e. within a 90° cone centered on facing direction.
+      const forward = dx * fwd.x + dy * fwd.y;
+      const lateral = dx * -fwd.y + dy * fwd.x;
+      if (forward > 0 && forward >= Math.abs(lateral) && dist < inFrontDist) {
+        inFrontDist = dist;
+        inFront = p;
+      }
     }
+    const target = inFront ?? nearest;
     if (!target) return;
     emitNudgeRef.current(target.id);
   }, []);
@@ -855,8 +1117,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
   const performStandUp = useCallback(() => {
     const state = useGameStore.getState();
     const returnPos = state.sitReturnPos;
-    const x = returnPos?.x ?? state.localPlayer.x;
-    const y = returnPos?.y ?? state.localPlayer.y;
+    const x = returnPos?.x ?? livePos.x;
+    const y = returnPos?.y ?? livePos.y;
     const direction = state.localPlayer.direction;
     state.setLocalPlayer({ x, y, isSitting: false, seatFurnitureId: undefined });
     state.setSittingFurnitureId(null);
@@ -1001,7 +1263,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     }
   }, []);
 
-  const draw = useCallback((timestamp: number) => {
+  const drawFrame = useCallback((timestamp: number) => {
     // QA (Kompat checklist item 7, "Low-spec") — this callback is PURE
     // rendering (movement/input each run their own independent loop
     // elsewhere — useMovement.ts, keyboard handlers — so skipping a draw
@@ -1013,7 +1275,6 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // reschedules the SAME rAF loop either way, just returns before doing
     // any actual drawing work on a skipped frame.
     if (lowSpecModeRef.current && timestamp - lastDrawTimeRef.current < LOW_SPEC_FRAME_INTERVAL_MS) {
-      rafRef.current = requestAnimationFrame(draw);
       return;
     }
     lastDrawTimeRef.current = timestamp;
@@ -1023,6 +1284,17 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     disableImageSmoothing(ctx);
+
+    // Phase timing (see frameDiag.ts). Measured always: eight performance.now()
+    // calls per frame is nothing next to what they measure, and a 250ms frame
+    // is unattributable without them.
+    const phases: Record<string, number> = {};
+    let phaseAt = performance.now();
+    const mark = (name: string) => {
+      const now = performance.now();
+      phases[name] = (phases[name] ?? 0) + (now - phaseAt);
+      phaseAt = now;
+    };
 
     // Map zoom — read fresh via getState() every frame (like every other
     // fast-changing value in this loop) rather than as a reactive dependency,
@@ -1092,6 +1364,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const worldViewW = logicalW / zoom;
     const worldViewH = logicalH / zoom;
 
+    // Advance everyone else's interpolated positions for THIS frame before
+    // anything reads them (see remotePositions.ts). Used to run on its own
+    // 16ms setInterval in useSocket, which both raced this loop and kept
+    // running while the tab was hidden.
+    interpolateRemotePositions((id) => id in playerRecordsRef.current);
+
     const moveResult = update(dt);
     let effectiveMoveResult = moveResult;
 
@@ -1115,11 +1393,12 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         if (targetPlayer) {
           const cols = tilesRef.current[0]?.length || MAP_WIDTH;
           const rows = tilesRef.current.length || MAP_HEIGHT;
+          const targetPos = remotePos(targetPlayer);
           const routeTarget = findFollowRouteTarget({
             currentX: effectiveMoveResult.x,
             currentY: effectiveMoveResult.y,
-            targetX: targetPlayer.x,
-            targetY: targetPlayer.y,
+            targetX: targetPos.x,
+            targetY: targetPos.y,
             targetDirection: targetPlayer.direction,
             blocked: pathBlocked,
             cols,
@@ -1167,8 +1446,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       handledLocateRequestIdRef.current = lr.requestId;
       const target = playerRecordsRef.current[lr.playerId];
       if (target) {
-        const targetTileX = Math.floor(target.x / TILE_SIZE);
-        const targetTileY = Math.floor(target.y / TILE_SIZE);
+        const targetPos = remotePos(target);
+        const targetTileX = Math.floor(targetPos.x / TILE_SIZE);
+        const targetTileY = Math.floor(targetPos.y / TILE_SIZE);
         cancelActiveFollowForRoute();
         walkTargetRef.current = computeWalkWaypoints(targetTileX, targetTileY);
         locateHighlightRef.current = { playerId: lr.playerId, start: performance.now() };
@@ -1211,7 +1491,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       wasMovingRef.current = true;
     } else if (wasMovingRef.current) {
       emitStopRef.current(effectiveMoveResult.x, effectiveMoveResult.y, effectiveMoveResult.direction);
-      useGameStore.getState().setLocalPlayer({ isMoving: false });
+      // Carries x/y, unlike the bare { isMoving: false } this used to send:
+      // with the position now throttled, the last frame's exact resting spot
+      // would otherwise never reach the store, leaving it up to one interval
+      // behind wherever the player actually stopped.
+      useGameStore.getState().stopLocalPlayer(
+        effectiveMoveResult.x,
+        effectiveMoveResult.y,
+        effectiveMoveResult.direction,
+      );
       wasMovingRef.current = false;
     }
 
@@ -1432,6 +1720,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // Same light-purple tint Minimap.tsx's own background uses (opaque here,
     // unlike the minimap's 0.9 alpha, since this fills the WHOLE screen and
     // has nothing behind it to blend with).
+    mark('sim');
     ctx.fillStyle = isOverview ? '#ede9fe' : '#1a1a2e';
     ctx.fillRect(0, 0, worldViewW, worldViewH);
 
@@ -1538,6 +1827,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         }
       }
 
+      mark('tiles');
       // Room Editor's "Wall Area" tool — the one impassable-rect flavor that's
       // actually meant to be seen (a plain Impassable Area stays invisible on
       // purpose, see its own doc comment in shared/mapLayers.ts). Drawn here,
@@ -1594,7 +1884,9 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         }
       }
 
-      drawLiveReferenceImage(ctx, liveReferenceImageRef.current, cameraX, cameraY);
+      mark('areaRects');
+      drawLiveReferenceImage(ctx, liveReferenceImageRef.current, cameraX, cameraY, worldViewW, worldViewH);
+      mark('liveReferenceImage');
 
       // Furniture — object layer (base row, drawn before avatars). Banners
       // are DOM overlays (see bannerRefs below), not tileset sprites.
@@ -1608,6 +1900,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       }
     }
 
+    mark('furnitureObject');
     // Editor overlay
     if (editorModeRef.current) {
       for (let row = startRow; row < endRow; row++) {
@@ -1690,14 +1983,30 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // a couple hundred ms means it sits at partial opacity for a few frames
     // right as the avatar reaches it, which reads as the head rendering
     // "half, then filling in" rather than a clean disappearance.
+    // Built ONCE per frame, not once per label. This list used to be
+    // rebuilt inside the check below, which runs for every zone banner and
+    // every banner furniture item — so a room with ten of each rebuilt it
+    // twenty times a frame, each time walking every player in the room.
+    // Live positions throughout: a throttled one would make labels flicker
+    // back on for a few frames as an avatar passes under them.
+    // Stored as TILE coordinates, converted once here rather than inside
+    // isAvatarUnderLabel — that predicate runs for every zone banner and
+    // every banner furniture item, so flooring the same positions in there
+    // repeated the same two divisions per player per label (50 labels x 20
+    // players = 2000 of them a frame) to arrive at the same answer every
+    // time.
+    const labelOccluders: { col: number; row: number }[] = [
+      { col: Math.floor(livePos.x / TILE_SIZE), row: Math.floor(livePos.y / TILE_SIZE) },
+    ];
+    for (const p of Object.values(playerRecordsRef.current)) {
+      const pos = remotePos(p);
+      labelOccluders.push({ col: Math.floor(pos.x / TILE_SIZE), row: Math.floor(pos.y / TILE_SIZE) });
+    }
+
     const isAvatarUnderLabel = (tileX: number, tileY: number, tilesW: number) => {
-      const local = localPlayerRef.current;
-      const avatars: { x: number; y: number }[] = [local, ...Object.values(playerRecordsRef.current)];
-      return avatars.some((a) => {
-        const row = Math.floor(a.y / TILE_SIZE);
-        const col = Math.floor(a.x / TILE_SIZE);
-        return row >= tileY && row <= tileY + 1 && col >= tileX - 1 && col <= tileX + tilesW;
-      });
+      return labelOccluders.some(
+        (a) => a.row >= tileY && a.row <= tileY + 1 && a.col >= tileX - 1 && a.col <= tileX + tilesW,
+      );
     };
 
     // Zone banners (DOM overlay) — position each labeled zone's floating
@@ -1709,38 +2018,89 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // class on these elements) doing the visual resize, same as the canvas
     // content right underneath it.
     for (const zone of zones) {
-      // ZEP-style spotlight follow-up — Private Area zones (isolating,
-      // non-meeting) never show a name at all now, replaced by the
-      // dim/spotlight effect below instead. Map Location/meeting labels are
-      // untouched — this only affects zones the ROOM ADMIN drew as Private
-      // Area (see isPrivateZone's own comment below for the exact signal).
-      if (!zone.label || isPrivateZone(zone)) continue;
+      // Bug fix — banner visibility used to be gated on isPrivateZone too,
+      // which silently suppressed the label for Private/Focus/Restricted
+      // Area (isPrivateZone defaults to true for anything not explicitly
+      // audioIsolated:false or type:'meeting' — see its own comment below),
+      // not just Private Area as the old comment here claimed. The
+      // dim/spotlight effect (isPrivateZone's other use, elsewhere in this
+      // file) is a separate, deliberate, UNCHANGED behavior — every zone
+      // with a name now always shows its banner regardless of isolation.
+      if (!zone.label) continue;
       const el = zoneBannerRefs.current.get(zone.id);
       if (!el) continue;
       const zx = (zone.x * TILE_SIZE - cameraX) * zoom;
       const zy = (zone.y * TILE_SIZE - cameraY) * zoom;
-      const zw = zone.width * TILE_SIZE;
-      if (zone.type === 'meeting') {
-        el.style.transform = `translate(${zx}px, ${zy}px) scale(${zoom})`;
-        el.style.width = `${zw}px`;
+      const zw = zone.width * TILE_SIZE * zoom;
+      // A banner is a thin strip pinned to its zone's TOP edge, so its own
+      // height (not the zone's) is what decides whether it's on screen —
+      // the body of a very tall zone extending down into view doesn't bring
+      // a label that sits far above the viewport with it. Everything below
+      // is skipped for an off-screen one; see overlayStyle.ts for why this
+      // is worth doing at all (a room can have 50+ of these).
+      if (!cullOverlay(el, zx, zy - ZONE_BANNER_APPROX_H_PX * zoom, zw, ZONE_BANNER_APPROX_H_PX * 2 * zoom, logicalW, logicalH)) continue;
+      // Readability fix — this used to be a single `scale(zoom)` on the
+      // whole element (font AND box together), so the name shrank in
+      // lock-step with the room and went unreadable well before Overview
+      // mode's fixed 0.3 floor. Font size is now computed explicitly with a
+      // floor (MIN_ZONE_LABEL_FONT_PX) instead of living inside the
+      // transform, so it keeps shrinking proportionally with zoom-out right
+      // up until the floor, then just stops — never below legible. Position
+      // (translate) still uses the real, unclamped zoom so the banner stays
+      // pinned to its actual on-screen corner at any zoom level.
+      const baseFontPx = isOverview ? 11 : zone.type === 'meeting' ? 14 : 10;
+      setOverlayStyle(el, 'font-size', `${Math.max(MIN_ZONE_LABEL_FONT_PX, baseFontPx * zoom)}px`);
+      if (isOverview) {
+        // Full Office View — every zone gets the SAME plain-text treatment
+        // (no colored pill/bar) regardless of type, matching the flat,
+        // uncluttered floor-plan aesthetic the rest of Overview mode already
+        // uses (see miniRender.ts's own header comment) — a colored pill per
+        // zone reads fine for a handful of rooms in the normal view, but
+        // Kaitech's real room alone has 50+ named areas; that many colored
+        // boxes at once in a whole-office view would bury the map itself.
+        setOverlayStyle(el, 'transform', `translate(${zx + 4 * zoom}px, ${zy + 2 * zoom}px)`);
+        setOverlayStyle(el, 'width', `${zw}px`);
+      } else if (zone.type === 'meeting') {
+        setOverlayStyle(el, 'transform', `translate(${zx}px, ${zy}px)`);
+        setOverlayStyle(el, 'width', `${zw}px`);
       } else {
-        el.style.transform = `translate(${zx + 6 * zoom}px, ${zy - 12 * zoom}px) scale(${zoom})`;
-        el.style.width = 'auto';
+        setOverlayStyle(el, 'transform', `translate(${zx + 6 * zoom}px, ${zy - 12 * zoom}px)`);
+        setOverlayStyle(el, 'width', 'auto');
       }
-      el.style.opacity = isAvatarUnderLabel(zone.x, zone.y, zone.width) ? '0' : '1';
+      setOverlayStyle(el, 'opacity', isAvatarUnderLabel(zone.x, zone.y, zone.width) ? '0' : '1');
     }
 
     // Banner furniture (DOM overlay) — same imperative positioning as zone
-    // banners above, anchored at the furniture's tile position.
+    // banners above, anchored at the furniture's CENTER (not top-left, like
+    // zone banners) since it needs to rotate around its own middle, the way
+    // a real sign tilts. Also carries the same font-floor fix zone banners
+    // already have (see MIN_ZONE_LABEL_FONT_PX's own comment above): the old
+    // version scaled the WHOLE box (including text) by a bare `scale(zoom)`,
+    // which shrank the text unreadable well before zoom-out finished — width
+    // is now sized in already-zoomed pixels and font-size is computed with
+    // the same explicit floor, so only the box's on-screen size shrinks with
+    // zoom, never the text past legibility.
     for (const item of furnitureList) {
       if (item.kind !== 'banner') continue;
       const el = bannerRefs.current.get(item.id);
       if (!el) continue;
-      const bx = (item.x * TILE_SIZE - cameraX) * zoom;
-      const by = (item.y * TILE_SIZE - cameraY) * zoom;
-      el.style.transform = `translate(${bx}px, ${by}px) scale(${zoom})`;
-      el.style.width = `${item.tilesW * TILE_SIZE}px`;
-      el.style.opacity = isAvatarUnderLabel(item.x, item.y, item.tilesW) ? '0' : '1';
+      const scaleW = (item.sizePercent?.w ?? 100) / 100;
+      const scaleH = (item.sizePercent?.h ?? 100) / 100;
+      const cx = (item.x * TILE_SIZE + (item.tilesW * TILE_SIZE) / 2 - cameraX) * zoom;
+      const cy = (item.y * TILE_SIZE + TILE_SIZE / 2 - cameraY) * zoom;
+      const baseFontPx = 13;
+      const bw = item.tilesW * TILE_SIZE * scaleW * zoom;
+      const bh = TILE_SIZE * scaleH * zoom;
+      // cx/cy are the CENTER (the element re-centers itself with
+      // translate(-50%,-50%)), so the box starts half its size back from
+      // there. A rotated banner's bounding box is bigger than this — well
+      // within cullOverlay's own margin.
+      if (!cullOverlay(el, cx - bw / 2, cy - bh / 2, bw, bh, logicalW, logicalH)) continue;
+      setOverlayStyle(el, 'font-size', `${Math.max(MIN_ZONE_LABEL_FONT_PX, baseFontPx * zoom)}px`);
+      setOverlayStyle(el, 'width', `${bw}px`);
+      setOverlayStyle(el, 'height', `${bh}px`);
+      setOverlayStyle(el, 'transform', `translate(${cx}px, ${cy}px) translate(-50%, -50%) rotate(${item.bannerRotationDeg ?? 0}deg)`);
+      setOverlayStyle(el, 'opacity', isAvatarUnderLabel(item.x, item.y, item.tilesW) ? '0' : '1');
     }
 
     // QA #7/#8/#9 — Note markers (DOM overlay), same imperative positioning
@@ -1751,7 +2111,8 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       if (!el) continue;
       const nx = (note.x * TILE_SIZE - cameraX) * zoom;
       const ny = (note.y * TILE_SIZE - cameraY) * zoom;
-      el.style.transform = `translate(${nx}px, ${ny}px) scale(${zoom})`;
+      if (!cullOverlay(el, nx, ny, MARKER_APPROX_SIZE_PX * zoom, MARKER_APPROX_SIZE_PX * zoom, logicalW, logicalH)) continue;
+      setOverlayStyle(el, 'transform', `translate(${nx}px, ${ny}px) scale(${zoom})`);
     }
 
     // §6 — Media markers (DOM overlay), same imperative positioning.
@@ -1772,14 +2133,23 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       // a camera-relative translate) is what lets that `position: fixed`
       // actually size against the VIEWPORT — any transform on an ancestor
       // (even a no-op one) would otherwise trap it to this element's own box.
-      if (media.id === maximizedYtId) { if (el.style.transform) el.style.transform = ''; continue; }
+      // setOverlayStyle, not a raw style write — the write cache has to see
+      // this clear too, or un-maximizing would find its cached transform
+      // still matching the value it is about to write, skip the write, and
+      // leave the marker pinned at the top-left corner with no transform.
+      if (media.id === maximizedYtId) { setOverlayStyle(el, 'transform', ''); continue; }
       // Image/YouTube render as a much bigger inline thumbnail below (see
       // the marker JSX) than the small pin whiteboard/file still use, so
       // they need a wider stacking gap to avoid overlapping.
       const stackOffsetPx = media.type === 'image' || media.type === 'youtube' ? 40 : 18;
       const mx = (media.x * TILE_SIZE - cameraX + stackIndex * stackOffsetPx) * zoom;
       const my = (media.y * TILE_SIZE - cameraY) * zoom;
-      el.style.transform = `translate(${mx}px, ${my}px) scale(${zoom})`;
+      // Image/YouTube markers render a real thumbnail, several times the
+      // size of the small pin the other kinds use — hence the bigger box
+      // here, so a partly-visible thumbnail at the screen edge isn't culled.
+      const markerSize = (media.type === 'image' || media.type === 'youtube' ? MEDIA_THUMBNAIL_APPROX_SIZE_PX : MARKER_APPROX_SIZE_PX) * zoom;
+      if (!cullOverlay(el, mx, my, markerSize, markerSize, logicalW, logicalH)) continue;
+      setOverlayStyle(el, 'transform', `translate(${mx}px, ${my}px) scale(${zoom})`);
     }
 
     // Claimable-seat markers (DOM overlay), same imperative positioning,
@@ -1789,9 +2159,11 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       if (!el) continue;
       const sx = (seat.x * TILE_SIZE + TILE_SIZE / 2 - cameraX) * zoom;
       const sy = (seat.y * TILE_SIZE + TILE_SIZE / 2 - cameraY) * zoom;
-      el.style.transform = `translate(${sx}px, ${sy}px) scale(${zoom})`;
+      if (!cullOverlay(el, sx, sy, MARKER_APPROX_SIZE_PX * zoom, MARKER_APPROX_SIZE_PX * zoom, logicalW, logicalH)) continue;
+      setOverlayStyle(el, 'transform', `translate(${sx}px, ${sy}px) scale(${zoom})`);
     }
 
+    mark('domOverlays');
     // Zone draw preview (while dragging out a new zone rectangle)
     if (zoneDragStartRef.current && zoneDragCurrentRef.current) {
       const a = zoneDragStartRef.current;
@@ -1814,6 +2186,48 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     const localPlayerId = localPlayerIdRef.current;
     const localPlayer = localPlayerRef.current;
     const now = Date.now();
+
+    // Bug fix — claimable-seat auto-prompt: stand on the seat's own tile
+    // for SEAT_AUTO_PROMPT_DELAY_MS and the claim/request popup offers
+    // itself, no click needed (see seatProximityRef's own doc comment
+    // above). Only for seats that AREN'T already ours — walking onto your
+    // own claimed seat still just needs the normal click to sit, unchanged.
+    // Reads seatClaims/localUserId/pendingSeatClaimRequest fresh via
+    // getState() rather than the closed-over reactive values: this draw()
+    // callback is memoized once (empty deps), so those would otherwise be
+    // stuck at whatever they were on first render.
+    {
+      const playerTileX = Math.floor(playerX / TILE_SIZE);
+      const playerTileY = Math.floor(playerY / TILE_SIZE);
+      const standingSeat = claimableSeatsRef.current.find((s) => s.x === playerTileX && s.y === playerTileY);
+      if (standingSeat) {
+        if (seatProximityRef.current?.seatId !== standingSeat.id) {
+          seatProximityRef.current = { seatId: standingSeat.id, enteredAt: now, prompted: false };
+        } else if (!seatProximityRef.current.prompted && now - seatProximityRef.current.enteredAt >= SEAT_AUTO_PROMPT_DELAY_MS) {
+          seatProximityRef.current.prompted = true;
+          const state = useGameStore.getState();
+          const owner = state.seatClaims[standingSeat.id];
+          const isMine = !!owner && owner.userId === state.localUserId;
+          if (!isMine && !pendingSeatClaimRef.current && !state.pendingSeatClaimRequest) {
+            setPendingSeatClaim({ seatId: standingSeat.id, ownerName: owner?.name ?? null });
+          }
+        }
+      } else {
+        // Bug fix — leaving the seat's tile only ever cleared the proximity
+        // tracker below, not the popup it had already offered, so walking
+        // away mid-offer left the card stuck on screen indefinitely (only
+        // its own Batal button, or claiming/requesting, ever closed it).
+        // Retract it here too, same outcome as clicking Batal — but only
+        // for a still-undecided offer on THIS seat; once Klaim/Minta Kursi
+        // is clicked, pendingSeatClaim is already cleared (see its onClick
+        // above), so this never fights a real in-flight request.
+        if (seatProximityRef.current && pendingSeatClaimRef.current?.seatId === seatProximityRef.current.seatId) {
+          setPendingSeatClaim(null);
+        }
+        seatProximityRef.current = null;
+      }
+    }
+
     const walkOffset = effectiveMoveResult.isMoving ? Math.sin(timestamp * 0.008) * 2 : 0;
     const localAvatar: Avatar = {
       ...localPlayer, x: playerX, y: playerY, isMoving: effectiveMoveResult.isMoving,
@@ -1827,7 +2241,14 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       id: localPlayerId,
       isRunning: effectiveMoveResult.isMoving && effectiveMoveResult.isRunning,
     };
-    const remoteAvatars = Object.values(playerRecords).filter((p) => p.id !== localPlayerId);
+    // Positions come from the interpolation overlay, everything else from
+    // the record — see remotePositions.ts.
+    const remoteAvatars = Object.values(playerRecords)
+      .filter((p) => p.id !== localPlayerId)
+      .map((p) => {
+        const live = livePlayers.get(p.id);
+        return live ? { ...p, x: live.x, y: live.y } : p;
+      });
     const allAvatars: Avatar[] = [localAvatar, ...remoteAvatars];
     // "Hide myself" (Avatar.hidden) — admin+ sees a hidden avatar regardless;
     // everyone else, including anyone who just hasn't toggled it themselves,
@@ -1835,6 +2256,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // mid-frame.
     const canSeeHidden = roleAtLeast(useGameStore.getState().localRole, 'admin');
 
+    mark('avatarPrep');
     for (const avatar of allAvatars) {
       if (avatar.hidden && avatar.id !== localPlayerId && !canSeeHidden) continue;
       const sx = avatar.x - cameraX;
@@ -1887,7 +2309,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const nudgeOffset = getNudgeShakeOffset(nudgeStart, now);
       const zoneSession = activeZoneSessionsRef.current.get(avatar.userId ?? avatar.id);
       const queueCountdown = zoneSession ? `⏳ ${formatQueueCountdown(zoneSession.endsAt - Date.now())}` : undefined;
-      drawAvatar(ctx, { avatar, x: sx + nudgeOffset, y: sy, isLocal, timestamp,
+      const topBadgeY = drawAvatar(ctx, { avatar, x: sx + nudgeOffset, y: sy, isLocal, timestamp,
         walkAnimOffset: bobOffset + jumpOffset,
         scale: avatarScaleRef.current,
         queueCountdown,
@@ -1954,11 +2376,17 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         }
       }
 
-      // Crown for admin players
+      // Crown for admin players — positioned at topBadgeY (drawAvatar's
+      // return value: the free slot right above the name/status-tag/
+      // presence-pill stack it just drew, and above hand-raise/queue-
+      // countdown too when either of those is present). Bug fix: this used
+      // to be a hardcoded `sy - AVATAR_RADIUS - 24`, which sat almost
+      // exactly where the presence pill (e.g. "Away") starts, so an admin
+      // with any status badge showing got a crown drawn right on top of it.
       if (avatar.isAdmin) {
         ctx.font = '14px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('👑', sx, sy - AVATAR_RADIUS - 24);
+        ctx.fillText('👑', sx, topBadgeY);
       }
 
       // Soundboard — blinking speaker above whoever's sound is currently
@@ -1971,7 +2399,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         if (Math.floor(now / 300) % 2 === 0) {
           ctx.font = '14px sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillText('🔊', sx + 16, sy - AVATAR_RADIUS - 24);
+          ctx.fillText('🔊', sx + 16, topBadgeY);
         }
       }
 
@@ -2030,6 +2458,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     }
 
     if (!isOverview) {
+      mark('avatars');
       // Furniture — overhead layer (drawn after avatars, so tall pieces let
       // players walk visually behind their upper portion)
       for (const item of furnitureList) {
@@ -2052,7 +2481,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         const label = `🪑 ${item.assignedToName || 'Reserved'}`;
         ctx.font = 'bold 9px sans-serif';
         ctx.textAlign = 'center';
-        const tw = ctx.measureText(label).width;
+        const tw = measureTextCached(ctx, label);
         ctx.fillStyle = 'rgba(76, 29, 149, 0.85)';
         ctx.beginPath();
         ctx.roundRect(asx - tw / 2 - 5, asy - 20, tw + 10, 14, 6);
@@ -2118,7 +2547,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const label = 'X';
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
-      const tw = ctx.measureText('X  Buka').width;
+      const tw = measureTextCached(ctx, 'X  Buka');
       const bx = msx - tw / 2 - 8;
       const by = msy - 40 + bob;
       // pill background
@@ -2144,7 +2573,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const name = label || (target ? 'room lain' : 'titik lain');
       const text = `F — ${name}`;
       ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-      const tw = ctx.measureText(text).width;
+      const tw = measureTextCached(ctx, text);
       const bx = psx - tw / 2 - 8, by = psy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
       ctx.fillStyle = 'rgba(124, 58, 237, 0.95)';
       ctx.beginPath();
@@ -2168,7 +2597,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const bob = Math.sin(timestamp * 0.005) * 2;
       const text = 'F — Buka';
       ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-      const tw = ctx.measureText(text).width;
+      const tw = measureTextCached(ctx, text);
       const bx = isx - tw / 2 - 8, by = isy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
       ctx.fillStyle = 'rgba(124, 58, 237, 0.95)';
       ctx.beginPath();
@@ -2192,7 +2621,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const bob = Math.sin(timestamp * 0.005) * 2;
       const text = 'F — Buka Pintu';
       ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-      const tw = ctx.measureText(text).width;
+      const tw = measureTextCached(ctx, text);
       const bx = dsx - tw / 2 - 8, by = dsy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
       ctx.fillStyle = 'rgba(212, 160, 86, 0.95)';
       ctx.beginPath();
@@ -2215,7 +2644,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const bob = Math.sin(timestamp * 0.005) * 2;
       const text = 'F — Buka Pintu';
       ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-      const tw = ctx.measureText(text).width;
+      const tw = measureTextCached(ctx, text);
       const bx = dasx - tw / 2 - 8, by = dasy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
       ctx.fillStyle = 'rgba(212, 160, 86, 0.95)';
       ctx.beginPath();
@@ -2240,7 +2669,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const nsy = f.y * TILE_SIZE - cameraY;
       const bob = Math.sin(timestamp * 0.005) * 2;
       ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
-      const tw = ctx.measureText(f.name).width;
+      const tw = measureTextCached(ctx, f.name);
       const bx = nsx - tw / 2 - 8, by = nsy - 40 + bob, bw = tw + 16, bh = 18, rr = 9;
       ctx.fillStyle = 'rgba(30,41,59,0.9)';
       ctx.beginPath();
@@ -2272,7 +2701,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       ctx.font = '10px sans-serif';
       const lines = wrapText(ctx, text, 100);
       const lineH = 13; const pad = 5;
-      const wbw = Math.min(110, ctx.measureText(text).width + pad * 2);
+      const wbw = Math.min(110, measureTextCached(ctx, text) + pad * 2);
       const wbh = lines.length * lineH + pad * 2;
       const wbx = wsx - wbw / 2;
       const wby = wsy - 40 - wbh;
@@ -2332,11 +2761,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     // Placed after avatars/overhead furniture (so people standing outside
     // the room read as dimmed too) but before speech bubbles/prompts below
     // (so in-world UI text stays legible either way).
-    const spotlightZone = isOverview ? undefined : zones.find((z) =>
-      isPrivateZone(z) &&
-      playerX / TILE_SIZE >= z.x && playerX / TILE_SIZE < z.x + z.width &&
-      playerY / TILE_SIZE >= z.y && playerY / TILE_SIZE < z.y + z.height,
-    );
+    //
+    // Bug fix — reuses findZoneAt's smallest-area tie-break (see its own doc
+    // comment in useProximity.ts) instead of a bare zones.find(), which
+    // always took whichever isolating zone happened to be earlier in the
+    // array — in practice a large Map Location an admin also marked "kedap
+    // suara", permanently shadowing any smaller Private Area drawn inside
+    // it. Same fix, same reasoning, applied here so the dim effect agrees
+    // with which zone chat/audio isolation (useProximity.ts) already picks.
+    const spotlightZone = isOverview ? undefined : findZoneAt({ x: playerX, y: playerY }, zones.filter(isPrivateZone));
     if (spotlightZone) {
       const pzx = spotlightZone.x * TILE_SIZE - cameraX;
       const pzy = spotlightZone.y * TILE_SIZE - cameraY;
@@ -2359,13 +2792,29 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       const records = playerRecordsRef.current;
       const p = pid === localPlayerId ? localPlayerRef.current : records[pid];
       if (!p) continue;
-      const bsx = p.x - cameraX;
-      const bsy = p.y - cameraY;
+      // Own bubble follows THIS frame's position, not the throttled store
+      // copy — otherwise it visibly trails the avatar while walking.
+      const remote = remotePos(p);
+      const px = pid === localPlayerId ? playerX : remote.x;
+      const py = pid === localPlayerId ? playerY : remote.y;
+      const bsx = px - cameraX;
+      const bsy = py - cameraY;
       const alpha = Math.max(0, 1 - (now - bubble.expireAt + 1000) / 1000);
       ctx.save(); ctx.globalAlpha = alpha;
+      // Bug fix — ctx.font used to still be whatever was last set earlier
+      // in this same draw() pass (nametags, zone banners, ...) at the point
+      // wrapText/measureText ran below, then got switched to 10px sans-serif
+      // only afterward, right before the actual fillText calls. Wrapping
+      // and the bubble's own width were measured in the WRONG font, so a
+      // line that fit fine at that stale (often larger) size could still
+      // render wider than the bubble once the real 10px font applied,
+      // spilling text past the drawn background — exactly "kepotong". Set
+      // it first, same order the sibling word_balloon popup right above
+      // already gets right.
+      ctx.font = '10px sans-serif';
       const lines = wrapText(ctx, bubble.text, 100);
       const lineH = 13; const pad = 5;
-      const bw = Math.min(110, ctx.measureText(bubble.text).width + pad * 2);
+      const bw = Math.min(110, measureTextCached(ctx, bubble.text) + pad * 2);
       const bh = lines.length * lineH + pad * 2;
       const bx = bsx - bw / 2;
       const by = bsy - AVATAR_RADIUS - 40 - bh;
@@ -2380,7 +2829,7 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - 4);
       ctx.lineTo(bx, by + 4); ctx.quadraticCurveTo(bx, by, bx + 4, by);
       ctx.fill();
-      ctx.fillStyle = '#333'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#333'; ctx.textAlign = 'center';
       for (let li = 0; li < lines.length; li++) {
         ctx.fillText(lines[li], bx + bw / 2, by + pad + lineH * (li + 1) - 2);
       }
@@ -2401,8 +2850,59 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
       ctx.restore();
     }
 
-    rafRef.current = requestAnimationFrame(draw);
+    mark('effects');
+    recordPhases(phases);
+    // How much scenery this frame was asked for. "Slow" and "asked to draw
+    // forty thousand things" are different diagnoses.
+    recordSceneCounts({
+      visibleTiles: Math.max(0, (endCol - startCol) * (endRow - startRow)),
+      mapCols,
+      mapRows,
+      furniture: furnitureList.length,
+      referenceImage: liveReferenceImageRef.current?.visible ? 1 : 0,
+      zones: zonesRef.current.length,
+      wallAreaRects: wallAreaRectsRef.current.length,
+      doorAreaRects: doorAreaRectsRef.current.length,
+      players: Object.keys(playerRecordsRef.current).length,
+      zoom: Math.round(zoom * 100) / 100,
+      dpr,
+    });
   }, []);
+
+  // The rAF loop proper: draws ONE frame, then schedules the next — and the
+  // scheduling lives in a `finally` so that a throw inside the frame cannot
+  // stop it.
+  //
+  // It used to be the last statement of the frame body itself, which made any
+  // exception in ~1700 lines of drawing permanently fatal: the throw skipped
+  // the reschedule, no further frame was ever requested, and the canvas froze
+  // for the rest of the session with no way back short of a reload. That is
+  // what "the app crashed" actually was — one nameless avatar record
+  // (truncateName on an undefined name, see gameStore's upsertPlayer) killed
+  // the entire render loop. Two independent fixes for one bug: don't produce
+  // the bad record, and don't let a bad frame be terminal.
+  //
+  // Errors are logged once rather than every frame — at 60fps a recurring
+  // fault would otherwise write 3600 lines a minute and make DevTools itself
+  // the next problem.
+  const drawErrorLoggedRef = useRef(false);
+  const draw = useCallback((timestamp: number) => {
+    const startedAt = performance.now();
+    try {
+      drawFrame(timestamp);
+      // Only the drawing is timed here — the gap BETWEEN frames is measured
+      // inside recordFrame. Comparing the two is what tells a slow canvas
+      // apart from a blocked main thread (see frameDiag.ts).
+      recordFrame(performance.now() - startedAt);
+    } catch (err) {
+      if (!drawErrorLoggedRef.current) {
+        drawErrorLoggedRef.current = true;
+        console.error('[canvas] render frame threw — the loop keeps running, this is logged once:', err);
+      }
+    } finally {
+      rafRef.current = requestAnimationFrame(draw);
+    }
+  }, [drawFrame]);
 
   // Editor mouse handlers
   const getTileFromMouse = useCallback((clientX: number, clientY: number) => {
@@ -2509,6 +3009,40 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
     if (!erasedBanner) onTilePaint(tile.x, tile.y, 'floor');
   }, [getTileFromMouse, onTilePaint, onTileHistoryPush, onFurnitureErase]);
 
+  // Announce the stop the instant the tab goes away, rather than leaving it
+  // to the render loop.
+  //
+  // emitStop only ever fires from inside draw(), and browsers suspend
+  // requestAnimationFrame entirely for a hidden tab. Switching tabs
+  // mid-stride therefore never sent one: the player stopped locally (blur
+  // clears the held keys, see useMovement) but nobody was told, so every
+  // other client kept animating them walking — or running — on the spot,
+  // forever.
+  //
+  // The server sweeps for this too (movementHandler.ts's activeMovers), and
+  // that is the authoritative fix since it also catches a frozen tab or a
+  // dropped packet. This is the fast path: it closes the gap in the common
+  // case immediately instead of a second later.
+  useEffect(() => {
+    const announceStop = () => {
+      if (!wasMovingRef.current) return;
+      wasMovingRef.current = false;
+      // livePos, not the store — this is the exact spot the avatar reached
+      // on the last frame that actually ran.
+      emitStopRef.current(livePos.x, livePos.y, livePos.direction);
+      useGameStore.getState().stopLocalPlayer(livePos.x, livePos.y, livePos.direction);
+    };
+    const onVisibility = () => { if (document.hidden) announceStop(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    // pagehide covers the mobile/bfcache path, where a tab can be frozen
+    // without visibilitychange ever being delivered.
+    window.addEventListener('pagehide', announceStop);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', announceStop);
+    };
+  }, []);
+
   useEffect(() => {
     resizeCanvas();
     const observer = new ResizeObserver(() => resizeCanvas());
@@ -2544,56 +3078,114 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         onContextMenu={handleContextMenu}
       />
       {/* Zone banners — positioned imperatively in the draw() loop above via
-          style.transform, not React state, so they track the camera at 60fps
-          without re-rendering. */}
+          style.transform (including font size, see MIN_ZONE_LABEL_FONT_PX),
+          not React state, so they track the camera at 60fps without
+          re-rendering. Every named zone gets one regardless of isolation
+          (see the matching comment in that loop) — isPrivateZone is only
+          for the separate dim/spotlight effect now. Now rendered in
+          Overview mode too (previously excluded entirely) — see the
+          isOverviewReactive branch below for its own, deliberately
+          undecorated style. */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {zones.filter((z) => z.label && !isPrivateZone(z) && !isOverviewReactive).map((zone) => (
-          <div
-            key={zone.id}
-            ref={(el) => {
-              if (el) zoneBannerRefs.current.set(zone.id, el);
-              else zoneBannerRefs.current.delete(zone.id);
-            }}
-            className="absolute top-0 left-0 will-change-transform origin-top-left"
-          >
-            {zone.type === 'meeting' ? (
-              <div
-                className="px-3 py-1.5 text-center text-white font-bold text-sm tracking-wide shadow-md inline-flex items-center gap-1.5"
-                style={{ backgroundColor: zone.color || '#7c3aed' }}
-              >
-                {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
-                {zone.label}
-              </div>
-            ) : (
-              <div
-                className="px-2 py-0.5 rounded-full text-[10px] font-semibold text-white shadow whitespace-nowrap inline-flex items-center gap-1"
-                style={{ backgroundColor: zone.color || '#7c3aed' }}
-              >
-                {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
-                {zone.label}
-              </div>
-            )}
-          </div>
-        ))}
+        {zones.filter((z) => z.label).map((zone) => {
+          // Bug fix — a repeated generic label ("Private"/"Focus") reads as
+          // clutter, not information: a real office floor plan has dozens
+          // of these (one per desk), left at their default name, so the
+          // label just repeats the same word across the whole screen. Per
+          // the room admin, ONLY Map Location is meant to keep its name
+          // visible on the map — every other area (Private, Focus, AND
+          // Meeting — see below) goes color-block-only, regardless of zoom
+          // level. Restricted stays labeled (checked via the same
+          // restrictedZoneIds set the 🔒 badge below uses) since it's
+          // typically a real, unique room name ("CEO Office"), not a
+          // repeated default.
+          //
+          // Bug fix — this used to be a denylist (`isPrivateZone(zone) &&
+          // !isMapLocation && !restricted`), and isPrivateZone's own
+          // definition explicitly EXEMPTS type:'meeting' zones (they're
+          // never dimmed as "private" — see its doc comment) — which meant
+          // a Meeting Area's own label was NEVER suppressed, map location or
+          // not. An admin who stamps a Map Location on top of the same
+          // tiles as a Meeting Area (a common combo — "In a meeting" status
+          // AND a persistent room name) got BOTH labels rendered at nearly
+          // the same on-screen spot: the Meeting Area's opaque full-width
+          // bar visually buried the Map Location's smaller pill at normal
+          // zoom (reading as "the name just isn't there"), while Overview
+          // mode's plain-text-no-background style let both draw
+          // simultaneously, overlapping into garbled text. Now an allowlist
+          // — show a label ONLY for Map Location or Restricted, exactly
+          // matching "only map location keeps its name" — so a Meeting
+          // Area's own label no longer exists to collide with anything,
+          // regardless of whether it's also isMapLocation.
+          const showLabel = zone.isMapLocation || restrictedZoneIds?.has(zone.id);
+          if (!showLabel) return null;
+          return (
+            <div
+              key={zone.id}
+              ref={(el) => {
+                if (el) zoneBannerRefs.current.set(zone.id, el);
+                else zoneBannerRefs.current.delete(zone.id);
+              }}
+              className="absolute top-0 left-0 will-change-transform origin-top-left"
+            >
+              {isOverviewReactive ? (
+                // Plain text, no colored pill/bar — see the positioning loop's
+                // comment for why (Full Office View can have 50+ named areas
+                // on screen at once; a colored box per zone would bury the
+                // floor plan the rest of Overview mode is going for). Text-
+                // shadow substitutes for the pill's own background contrast,
+                // since the zone's flat color tint (drawMiniZoneBackground)
+                // is faint and varies per zone.
+                <div
+                  className="font-bold text-white whitespace-nowrap"
+                  style={{ textShadow: '0 1px 2px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.7)' }}
+                >
+                  {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
+                  {zone.label}
+                </div>
+              ) : zone.type === 'meeting' ? (
+                <div
+                  className="px-3 py-1.5 text-center text-white font-bold tracking-wide shadow-md inline-flex items-center gap-1.5"
+                  style={{ backgroundColor: zone.color || '#7c3aed' }}
+                >
+                  {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
+                  {zone.label}
+                </div>
+              ) : (
+                <div
+                  className="px-2 py-0.5 rounded-full font-semibold text-white shadow whitespace-nowrap inline-flex items-center gap-1"
+                  style={{ backgroundColor: zone.color || '#7c3aed' }}
+                >
+                  {restrictedZoneIds?.has(zone.id) && <span title="Zona dibatasi">🔒</span>}
+                  {zone.label}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
-      {/* Banner furniture — decorative signage placed via the Room Editor,
-          same imperative-transform pattern as zone banners above. */}
+      {/* Banner furniture — decorative signage placed via the Room Editor's
+          "Signage" tool (see RoomEditorPage.tsx's bannerMode), same
+          imperative-transform pattern as zone banners above. Was
+          temporarily hidden while furniture-based Banner was being replaced
+          by a proper editor flow with free rotation + resize; that flow now
+          exists (BannerSettingsPanel), so this renders again. */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {furniture.filter((f) => f.kind === 'banner').map((item) => (
+        {furniture.filter((item) => item.kind === 'banner').map((item) => (
           <div
             key={item.id}
             ref={(el) => {
               if (el) bannerRefs.current.set(item.id, el);
               else bannerRefs.current.delete(item.id);
             }}
-            className="absolute top-0 left-0 will-change-transform origin-top-left"
+            className="absolute top-0 left-0 will-change-transform origin-center"
           >
             {item.imageUrl ? (
-              <img src={item.imageUrl} alt={item.text || 'Banner'} className="w-full h-auto shadow-md" />
+              <img src={item.imageUrl} alt={item.text || 'Banner'} className="w-full h-full object-contain shadow-md" />
             ) : (
               <div
-                className="px-3 py-1.5 text-center font-bold text-sm tracking-wide shadow-md"
-                style={{ backgroundColor: item.bgColor || '#7c3aed', color: item.textColor || '#ffffff' }}
+                className="w-full h-full flex items-center justify-center px-3 text-center font-bold tracking-wide shadow-md whitespace-pre-line break-words"
+                style={{ backgroundColor: item.bgColor || '#7c3aed', color: item.textColor || '#ffffff', fontSize: 'inherit' }}
               >
                 {item.text || 'Banner'}
               </div>
@@ -2775,6 +3367,15 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         {claimableSeats.map((seat) => {
           const owner = seatClaims[seat.id];
           const isMine = !!owner && owner.userId === localUserId;
+          const ownerOnline = !!owner && Object.values(playerRecords).some((p) => p.userId === owner.userId);
+          // Marker shows when the owner is OFFLINE (their own avatar isn't
+          // in the room to identify the desk, so the label is the only
+          // cue), or it's your own seat (always shown as "You", regardless
+          // of the online check below — playerRecords structurally never
+          // contains the LOCAL player's own entry, per setRoomState/
+          // upsertPlayer, so a literal lookup would incorrectly read as
+          // "offline" for yourself; isMine overrides that).
+          const ownerVisible = !!owner && (isMine || !ownerOnline);
           return (
             <div
               key={seat.id}
@@ -2814,22 +3415,37 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
                   } else {
                     // ZEP-style confirm — see pendingSeatClaim's own doc
                     // comment; a bare click no longer claims directly.
-                    setPendingSeatClaim({ seatId: seat.id, ownerName: owner?.name ?? null });
+                    // ownerVisible-gated (not just owner) — see this
+                    // button's own comment below: an online owner's seat
+                    // looks and behaves exactly like an unclaimed one, so
+                    // the confirm dialog must not reveal it was actually
+                    // claimed either.
+                    setPendingSeatClaim({ seatId: seat.id, ownerName: ownerVisible ? (owner?.name ?? null) : null });
                   }
                 }}
-                title={owner ? (isMine ? 'Kursimu — klik untuk duduk di sini' : `Diklaim ${owner.name}`) : 'Klaim kursi ini'}
+                title={ownerVisible ? (isMine ? 'Kursimu — klik untuk duduk di sini' : `Diklaim ${owner!.name}`) : 'Klaim kursi ini'}
                 // Unclaimed — deliberately invisible (no bg/border/icon, per
                 // the room admin): the hit area still works exactly like an
                 // Impassable tile's invisible barrier, just with no shape
                 // drawn. Once claimed, this same button also carries the
-                // "Kamu"/owner-name text (merged in — see the follow-up
+                // "You"/owner-name text (merged in — see the follow-up
                 // comment below) instead of a separate stacked pill, so a
                 // claimed seat is ONE small label, not three stacked pieces.
+                // Gated on ownerVisible (owner offline, OR it's your own
+                // seat — see its own comment above), not just owner — a
+                // seat whose owner has COME online reverts to looking (and
+                // behaving, see the onClick/title above) exactly like a
+                // genuinely unclaimed seat: no name label, invisible hit
+                // area, no "already claimed" warning if someone else clicks
+                // it. Still fully claimed in the underlying data
+                // (seatClaims/assignedToName elsewhere aren't touched) —
+                // only this marker's own presentation while the owner is
+                // present changes.
                 className={`h-7 px-2 flex items-center justify-center gap-1 text-xs font-semibold rounded-full transition-transform cursor-pointer whitespace-nowrap ${
-                  owner ? `shadow-md border-2 hover:scale-105 text-white ${isMine ? 'bg-emerald-500/95 border-emerald-600' : 'bg-amber-500/95 border-amber-600'}` : 'w-7'
+                  ownerVisible ? `shadow-md border-2 hover:scale-105 text-white ${isMine ? 'bg-emerald-500/95 border-emerald-600' : 'bg-amber-500/95 border-amber-600'}` : 'w-7'
                 }`}
               >
-                {owner ? `🪑 ${isMine ? 'Kamu' : owner.name}` : ''}
+                {ownerVisible ? `🪑 ${isMine ? 'You' : truncateName(owner!.name, SEAT_MARKER_NAME_MAX_CHARS)}` : ''}
               </button>
               {/* Follow-up — used to be a separate always-visible "Kamu" pill
                   PLUS this release button stacked below it, permanently in
@@ -2866,37 +3482,110 @@ export function GameCanvas({ emitMove, emitStop, emitJump, emitNudge, proximityD
         })}
       </div>
 
+      {/* Bug fix — this used to be a full-screen dark-backdrop modal, the
+          same "block everything until decided" treatment the admin
+          guest-approval popup uses. Per the room admin that read as too
+          heavy for something that can now trigger just from standing on a
+          tile (see seatProximityRef above) rather than a deliberate click —
+          a small floating card, same non-blocking style as the incoming-
+          request card below, fits an offer you can just as easily ignore
+          and keep walking. */}
       {pendingSeatClaim && (
-        <div
-          className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-auto"
-          onClick={() => setPendingSeatClaim(null)}
-        >
-          <div
-            className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center max-w-xs"
-            onClick={(e) => e.stopPropagation()}
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-auto bg-white dark:bg-gray-900 rounded-lg px-4 py-2.5 shadow-xl border border-purple-100 dark:border-gray-700 flex items-center gap-3 text-sm">
+          <span className="text-gray-900 dark:text-gray-100">
+            {pendingSeatClaim.ownerName
+              ? <>Kursi ini sudah diklaim <span className="font-semibold">{truncateName(pendingSeatClaim.ownerName, SEAT_CLAIM_NAME_MAX_CHARS)}</span>. Minta kursi ini?</>
+              : 'Klaim kursi ini sebagai milikmu?'}
+          </span>
+          <button
+            onClick={() => setPendingSeatClaim(null)}
+            className="px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 text-xs cursor-pointer whitespace-nowrap"
           >
-            <p className="text-gray-900 dark:text-gray-100 text-sm mb-4">
-              {pendingSeatClaim.ownerName
-                ? <>Kursi ini sudah diklaim <span className="font-semibold">{pendingSeatClaim.ownerName}</span>. Tetap ingin menjadikannya kursimu?</>
-                : 'Klaim kursi ini sebagai milikmu?'}
-            </p>
-            <div className="flex gap-3 justify-center">
+            Batal
+          </button>
+          <button
+            onClick={() => {
+              // Bug fix — taking over an already-claimed seat used to just
+              // call emitClaimSeat here, which the server silently resolved
+              // by bumping the requester to the nearest free desk without
+              // ever telling the current owner anything was asked. Now it's
+              // a real request the owner has to approve — same shape as
+              // ZONE_KNOCK's keyholder-decides flow — and only a genuinely
+              // free seat still claims instantly below.
+              if (pendingSeatClaim.ownerName) {
+                emitSeatClaimRequest(pendingSeatClaim.seatId);
+                setPendingSeatClaimRequest({ seatId: pendingSeatClaim.seatId, ownerName: pendingSeatClaim.ownerName });
+              } else {
+                emitClaimSeat(pendingSeatClaim.seatId);
+              }
+              setPendingSeatClaim(null);
+            }}
+            className="px-2.5 py-1 rounded-md bg-purple-600 hover:bg-purple-700 text-white text-xs cursor-pointer whitespace-nowrap"
+          >
+            {pendingSeatClaim.ownerName ? 'Minta Kursi' : 'Klaim'}
+          </button>
+        </div>
+      )}
+
+      {/* Incoming seat-claim requests — one card per pending ask on a seat
+          WE own, stacked top-center. Deliberately NOT a full-screen modal
+          like pendingSeatClaim above: unlike claiming your own seat, this
+          can arrive at any moment while the owner is doing something else
+          entirely, so it shouldn't block the rest of the screen while they
+          decide (or ignore it for now — the requester's own card below has
+          a Batal button for exactly that case). */}
+      {seatClaimRequests.length > 0 && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 flex flex-col gap-2 pointer-events-none">
+          {seatClaimRequests.map((req) => (
+            <div
+              key={`${req.seatId}:${req.requesterUserId}`}
+              className="pointer-events-auto bg-white dark:bg-gray-900 rounded-lg px-4 py-2.5 shadow-xl border border-purple-100 dark:border-gray-700 flex items-center gap-3 text-sm"
+            >
+              <span className="text-gray-900 dark:text-gray-100">
+                <span className="font-semibold">{truncateName(req.requesterName, SEAT_CLAIM_NAME_MAX_CHARS)}</span> minta kursi ini.
+              </span>
               <button
-                onClick={() => setPendingSeatClaim(null)}
-                className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 text-sm cursor-pointer"
+                onClick={() => { emitSeatClaimDecide(req.seatId, req.playerId, false); removeSeatClaimRequest(req.seatId, req.requesterUserId); }}
+                className="px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 text-xs cursor-pointer"
               >
-                Batal
+                Tolak
               </button>
               <button
-                onClick={() => { emitClaimSeat(pendingSeatClaim.seatId); setPendingSeatClaim(null); }}
-                className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm cursor-pointer"
+                onClick={() => { emitSeatClaimDecide(req.seatId, req.playerId, true); removeSeatClaimRequest(req.seatId, req.requesterUserId); }}
+                className="px-2.5 py-1 rounded-md bg-purple-600 hover:bg-purple-700 text-white text-xs cursor-pointer"
               >
-                Konfirmasi
+                Izinkan
               </button>
             </div>
-          </div>
+          ))}
+        </div>
+      )}
+
+      {/* Our own outstanding request, waiting on the owner above — mirrors
+          useZoneLock.ts's pendingKnock "Menunggu persetujuan..." card.
+          Resolved (cleared) by SEAT_CLAIM_DECIDED (approved either way) or
+          by the owner disconnecting before deciding — see seatClaim.ts. */}
+      {pendingSeatClaimRequest && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-40 pointer-events-auto bg-white dark:bg-gray-900 rounded-lg px-4 py-2.5 shadow-xl border border-purple-100 dark:border-gray-700 flex items-center gap-3 text-sm">
+          <span className="text-gray-500 dark:text-gray-400 inline-flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
+            Menunggu persetujuan {truncateName(pendingSeatClaimRequest.ownerName, SEAT_CLAIM_NAME_MAX_CHARS)}...
+          </span>
+          <button
+            onClick={() => { emitSeatClaimRequestCancel(pendingSeatClaimRequest.seatId); setPendingSeatClaimRequest(null); }}
+            className="px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 text-xs cursor-pointer"
+          >
+            Batal
+          </button>
         </div>
       )}
     </div>
   );
 }
+
+// memo matters here specifically: App re-renders whenever the throttled local
+// position lands (~10/sec while walking), and this is by far the heaviest
+// child it has. Every remaining prop is either a primitive or a useCallback,
+// so the default shallow compare is enough — proximityData, the one prop that
+// was a fresh array each time, now travels outside React entirely.
+export const GameCanvas = memo(GameCanvasImpl);

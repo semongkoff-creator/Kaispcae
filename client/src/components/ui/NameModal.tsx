@@ -1,20 +1,25 @@
 import { useState } from 'react';
 
-const STORAGE_KEY = 'virtualmeet-player-name';
-
 interface NameModalProps {
+  // specs/2026-08-21-room-entry-name-prompt-v2-design.md — the caller
+  // decides the pre-fill (App.tsx: playerName || user.displayName). This
+  // component doesn't read localStorage or call the API itself — submit
+  // just hands the trimmed name back to the caller.
+  initialName: string;
   onSubmit: (name: string) => void;
 }
 
-export function NameModal({ onSubmit }: NameModalProps) {
-  const savedName = localStorage.getItem(STORAGE_KEY) || '';
-  const [name, setName] = useState(savedName);
+export function NameModal({ initialName, onSubmit }: NameModalProps) {
+  const [name, setName] = useState(initialName);
+  const trimmed = name.trim();
 
+  // Empty/whitespace-only input is a hard block, not a random-name
+  // fallback — the submit button stays disabled until there's a real
+  // name, mirroring GuestEntry.tsx's existing
+  // `disabled={loading || !name.trim() || !password}` pattern.
   const handleSubmit = () => {
-    const trimmed = name.trim();
-    const displayName = trimmed || `Player-${Math.random().toString(36).slice(2, 6)}`;
-    localStorage.setItem(STORAGE_KEY, displayName);
-    onSubmit(displayName);
+    if (!trimmed) return;
+    onSubmit(trimmed);
   };
 
   return (
@@ -36,7 +41,8 @@ export function NameModal({ onSubmit }: NameModalProps) {
 
         <button
           onClick={handleSubmit}
-          className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg py-3 transition-colors cursor-pointer"
+          disabled={!trimmed}
+          className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg py-3 transition-colors cursor-pointer"
         >
           Join Room
         </button>

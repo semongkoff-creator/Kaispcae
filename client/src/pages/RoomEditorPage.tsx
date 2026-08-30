@@ -9,6 +9,7 @@ import { api, ApiError } from '@/services/api';
 import { adminApi } from '@/admin/api';
 import { useEditorStore, EDITOR_LAYERS, EDITOR_TOOLS, EditorLayer, EditorTool } from '@/stores/editorStore';
 import { showAlert, showConfirm, showPrompt } from '@/stores/modalStore';
+import { GlobalModal } from '@/components/ui/GlobalModal';
 import { drawFloorTile, drawWallTile, drawFurnitureLayer } from '@/components/canvas/mapRender';
 import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
@@ -27,15 +28,16 @@ type LoadError = 'auth' | 'forbidden' | 'notfound' | 'generic';
 const OBJ_CATEGORIES: { key: 'furniture' | 'decor' | 'electronics'; label: string }[] = [
   { key: 'furniture', label: 'Furniture' }, { key: 'decor', label: 'Decor' }, { key: 'electronics', label: 'Electronics' },
 ];
-const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat' | 'restrictedArea' | 'doorArea'; label: string; color: string; hint: string }[] = [
+const EFFECTS: { id: 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'recordArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat' | 'restrictedArea' | 'doorArea'; label: string; color: string; hint: string }[] = [
   { id: 'startingPoint', label: 'Starting point', color: 'rgba(16,185,129,0.9)', hint: 'Stamp per tile = titik spawn (bisa banyak; pemain muncul di salah satunya).' },
   { id: 'impassable', label: 'Impassable', color: 'rgba(239,68,68,0.85)', hint: 'Stamp per tile = penghalang tak terlihat (memblok gerak, tanpa tekstur).' },
   { id: 'impassableArea', label: 'Impassable Area', color: 'rgba(220,38,38,0.6)', hint: 'Drag di area kosong = buat area kotak baru, ukuran bebas (tidak ikut grid). Klik area yang sudah ada = pilih (muncul handle) — drag badan untuk pindah, tarik pojok/sisi untuk resize, Delete untuk hapus. Saat main, penghalangnya tetap memblok tile penuh mana pun yang tersentuh kotak ini — invisible, sama seperti Impassable per-tile.' },
   { id: 'wallArea', label: 'Wall Area', color: 'rgba(55,65,81,0.9)', hint: 'Sama seperti Impassable Area (drag = buat, klik = pilih/resize/pindah, Delete = hapus, ukuran bebas), TAPI kelihatan pas main — digambar abu-abu gelap bergaris kuning, bukan invisible. Pas buat tembok/partisi yang jelas keliatan menghalangi.' },
   { id: 'mapLocation', label: 'Map location', color: 'rgba(192,132,252,0.95)', hint: 'Stamp: drag area lalu beri nama → pill label muncul di game. Bisa pilih kedap suara atau tidak (default: tidak, jarak biasa).' },
   { id: 'privateArea', label: 'Private area', color: 'rgba(96,165,250,0.95)', hint: 'Stamp: drag area + Area ID. Area ber-ID sama = satu grup audio (walau terpisah). Bisa pilih kedap suara atau tidak (default: kedap suara).' },
-  { id: 'focusArea', label: 'Focus area', color: 'rgba(245,158,11,0.95)', hint: 'Drag area lalu beri nama. Pemain yang masuk otomatis berstatus Focus + DND (tidak bisa disummon/slap/di-follow, tidak auto-connect proximity), bisa nyetel musik privat sendiri, dan channel chat "Fokus" otomatis kebuka. Visual area tetap normal, tidak digelapkan.' },
+  { id: 'focusArea', label: 'Focus area', color: 'rgba(245,158,11,0.95)', hint: 'Drag area lalu beri nama. Pemain yang masuk otomatis berstatus Focus + DND (tidak bisa disummon/slap/di-follow, tidak auto-connect proximity), bisa nyetel musik privat sendiri, dan channel chat "Fokus" otomatis kebuka. Area sedikit digelapkan pas ditempati (lebih terang dari Private Area), nama areanya tetap muncul sebagai label.' },
   { id: 'meetingArea', label: 'Meeting area', color: 'rgba(20,184,166,0.95)', hint: 'Drag area lalu beri nama. Pemain yang masuk otomatis berstatus "In a meeting" dan bicara lewat voice/video jarak-dekat. Bisa pilih kedap suara atau tidak (default: kedap suara, seperti rapat sungguhan).' },
+  { id: 'recordArea', label: 'Record area', color: 'rgba(219,39,119,0.95)', hint: 'Drag area lalu beri nama. Pemain yang masuk melihat panel Start/Jeda/Stop untuk merekam layar mereka sendiri — beda total dari Meeting area.' },
   { id: 'restrictedArea', label: 'Restricted area', color: 'rgba(220,38,38,0.85)', hint: 'Drag area lalu beri nama (mis. "CEO Office") — hanya ADMIN yang bisa langsung masuk. Orang lain yang menyentuh area ini langsung disodori form antrean "Ngobrol dengan CEO" untuk dapat giliran masuk sendiri.' },
   { id: 'portal', label: 'Portal', color: 'rgba(124,58,237,0.95)', hint: 'Stamp klik tile portal → pilih tujuan room lain, atau klik titik tujuan di room ini. Pemain tekan F untuk pindah.' },
   { id: 'door', label: 'Door', color: 'rgba(212,160,86,0.9)', hint: 'Stamp per tile = pintu yang bisa dilewati. Pilih tool Select lalu klik pintu untuk atur Password (opsional, mirip ZEP).' },
@@ -105,11 +107,95 @@ function PieceThumb({ paletteId, size = 40 }: { paletteId: string; size?: number
   return <canvas ref={ref} style={{ width: size, height: size, imageRendering: 'pixelated' }} className="block" />;
 }
 
+// Banner (Furniture.kind==='banner') settings — a dedicated panel rather
+// than more conditionals inside ObjectSettingsPanel below, same pattern as
+// DoorSettingsPanel/SittableSettingsPanel: a banner isn't Interactive-Object
+// content, isn't sittable, and has no palette-sprite Type to pick, so all of
+// that generic UI would just be dead space here. Reuses sizePercent
+// (Size%) and drag-to-move (Select tool, unchanged) from the generic piece
+// exactly as-is; rotation is its own free-angle field (bannerRotationDeg),
+// deliberately NOT the shared 90°-snap `rotation` every other piece uses —
+// see that field's own doc comment in shared/types/index.ts.
+function BannerSettingsPanel({
+  furniture, layer, onBack,
+}: {
+  furniture: Furniture;
+  layer: 'objects' | 'top';
+  onBack: () => void;
+}) {
+  const patch = (p: Partial<Furniture>) => useEditorStore.getState().updateSelectedObject(p, layer);
+  const rotationDeg = furniture.bannerRotationDeg ?? 0;
+  const sizeW = furniture.sizePercent?.w ?? 100;
+  const sizeH = furniture.sizePercent?.h ?? 100;
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <button onClick={onBack} title="Kembali ke palette" className="w-6 h-6 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer text-white/70">←</button>
+        <p className="text-xs uppercase tracking-wider text-white/40">Banner Settings</p>
+      </div>
+
+      <p className="text-[11px] text-white/50 mb-1.5">Teks</p>
+      <textarea
+        value={furniture.text ?? ''}
+        onChange={(e) => patch({ text: e.target.value })}
+        placeholder="Ketik teks banner..."
+        rows={3}
+        className="w-full mb-3 bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder:text-white/30 outline-none focus:border-purple-400 resize-none"
+      />
+
+      <div className="flex items-center gap-2 mb-3">
+        <label className="flex-1 text-[10px] text-white/40">
+          Warna teks
+          <input type="color" value={furniture.textColor ?? '#ffffff'} onChange={(e) => patch({ textColor: e.target.value })} className="mt-0.5 w-full h-7 bg-gray-900 border border-white/10 rounded cursor-pointer" />
+        </label>
+        <label className="flex-1 text-[10px] text-white/40">
+          Warna latar
+          <input type="color" value={furniture.bgColor ?? '#7c3aed'} onChange={(e) => patch({ bgColor: e.target.value })} className="mt-0.5 w-full h-7 bg-gray-900 border border-white/10 rounded cursor-pointer" />
+        </label>
+      </div>
+
+      <p className="text-[11px] text-white/50 mb-1.5">Rotasi (bebas derajat)</p>
+      <div className="flex items-center gap-2 mb-3">
+        <input
+          type="range" min={0} max={359} value={rotationDeg}
+          onChange={(e) => patch({ bannerRotationDeg: Number(e.target.value) })}
+          className="flex-1 cursor-pointer"
+        />
+        <input
+          type="number" min={0} max={359} value={rotationDeg}
+          onChange={(e) => { const n = Math.round(Number(e.target.value)); patch({ bannerRotationDeg: Number.isFinite(n) ? ((n % 360) + 360) % 360 : 0 }); }}
+          className="w-14 bg-gray-900 border border-white/10 rounded px-1.5 py-1 text-xs text-white outline-none text-right"
+        />
+        <span className="text-[10px] text-white/40">°</span>
+      </div>
+
+      <p className="text-[11px] text-white/50 mb-1.5">Ukuran(%)</p>
+      <div className="flex items-center gap-2 mb-3">
+        <label className="flex-1 text-[10px] text-white/40">W<input type="number" min={10} value={sizeW} onChange={(e) => patch({ sizePercent: { w: Math.max(10, Number(e.target.value) || 100), h: sizeH } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
+        <label className="flex-1 text-[10px] text-white/40">H<input type="number" min={10} value={sizeH} onChange={(e) => patch({ sizePercent: { w: sizeW, h: Math.max(10, Number(e.target.value) || 100) } })} className="mt-0.5 w-full bg-gray-900 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none" /></label>
+      </div>
+
+      <p className="text-[11px] text-white/40 mb-3">Posisi: pilih tool Select, lalu drag banner ini di kanvas untuk memindahkan.</p>
+
+      <button
+        onClick={() => patch({ bannerRotationDeg: undefined, sizePercent: undefined, textColor: undefined, bgColor: undefined })}
+        className="w-full py-1.5 rounded bg-white/10 hover:bg-white/20 text-white/70 text-xs cursor-pointer"
+      >
+        ↺ Reset Settings
+      </button>
+    </div>
+  );
+}
+
 // Fitur 15B — ZEP-style "Object Settings" panel: shown instead of the
 // palette grid while a placed piece is selected (Select tool). Rotate&Flip/
 // Size/Reposition are generic to any piece; the Type dropdown below them is
 // the Interactive Object system — only 'text_popup' is wired up so far
 // (more of ZEP's pop-up/website/developer types land incrementally).
+// kind==='banner' delegates entirely to BannerSettingsPanel (see its own
+// doc comment) — a banner has none of the interactive/sittable/palette-Type
+// concepts this generic panel is built around.
 function ObjectSettingsPanel({
   furniture, layer, slug, onBack,
 }: {
@@ -123,6 +209,7 @@ function ObjectSettingsPanel({
   const [spriteBusy, setSpriteBusy] = useState(false);
   const [spriteErr, setSpriteErr] = useState('');
   if (!furniture) return null;
+  if (furniture.kind === 'banner') return <BannerSettingsPanel furniture={furniture} layer={layer} onBack={onBack} />;
   const patch = (p: Partial<Furniture>) => useEditorStore.getState().updateSelectedObject(p, layer);
   const rotation = furniture.rotation ?? 0;
   const sizeW = furniture.sizePercent?.w ?? 100;
@@ -759,6 +846,37 @@ function drawAreaHandles(ctx: CanvasRenderingContext2D, a: { x: number; y: numbe
   for (const [, hx, hy] of areaHandlePoints(a)) ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
 }
 
+// Editor-only preview for kind:'banner' pieces. drawFurnitureLayer (shared
+// with GameCanvas, see mapRender.ts) looks up item.paletteId in the real
+// sprite manifest and silently no-ops when it isn't found — which is every
+// banner, since paletteId is a stable placeholder for them (see Furniture's
+// own doc comment). Rather than teach the SHARED render function about a
+// non-sprite piece, this is a small, editor-only stand-in: a rotated box
+// with its text, just enough to place/aim/read it while editing. The real,
+// live rendering users actually see is GameCanvas's DOM-overlay banner pass
+// (font-floor, avatar-occlusion, etc.) — this doesn't need to match it
+// pixel-for-pixel, only be legible enough to work with.
+function drawBannerPlaceholder(ctx: CanvasRenderingContext2D, item: Furniture) {
+  const w = (item.tilesW * TILE_SIZE * (item.sizePercent?.w ?? 100)) / 100;
+  const h = (TILE_SIZE * (item.sizePercent?.h ?? 100)) / 100;
+  const cx = item.x * TILE_SIZE + (item.tilesW * TILE_SIZE) / 2 + (item.offsetPx?.x ?? 0);
+  const cy = item.y * TILE_SIZE + TILE_SIZE / 2 + (item.offsetPx?.y ?? 0);
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (item.bannerRotationDeg) ctx.rotate((item.bannerRotationDeg * Math.PI) / 180);
+  ctx.fillStyle = item.bgColor || '#7c3aed';
+  ctx.fillRect(-w / 2, -h / 2, w, h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(-w / 2, -h / 2, w, h);
+  ctx.fillStyle = item.textColor || '#ffffff';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(item.text || '(banner kosong)', 0, 0, w - 6);
+  ctx.restore();
+}
+
 function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomTheme, layer: EditorLayer) {
   if (layer === 'floor') {
     for (let y = 0; y < ld.height; y++) for (let x = 0; x < ld.width; x++)
@@ -767,9 +885,9 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
     for (let y = 0; y < ld.height; y++) for (let x = 0; x < ld.width; x++)
       if (ld.wall[y]?.[x]) drawWallTile(ctx, { x, y, type: 'wall', wallPaletteId: ld.wallPaletteId?.[y]?.[x] ?? undefined }, x * TILE_SIZE, y * TILE_SIZE, theme);
   } else if (layer === 'objects') {
-    for (const item of ld.objects) { drawFurnitureLayer(ctx, item, 0, 0, 'object'); drawFurnitureLayer(ctx, item, 0, 0, 'overhead'); }
+    for (const item of ld.objects) { drawFurnitureLayer(ctx, item, 0, 0, 'object'); drawFurnitureLayer(ctx, item, 0, 0, 'overhead'); if (item.kind === 'banner') drawBannerPlaceholder(ctx, item); }
   } else if (layer === 'top') {
-    for (const item of ld.topObjects) { drawFurnitureLayer(ctx, item, 0, 0, 'object'); drawFurnitureLayer(ctx, item, 0, 0, 'overhead'); }
+    for (const item of ld.topObjects) { drawFurnitureLayer(ctx, item, 0, 0, 'object'); drawFurnitureLayer(ctx, item, 0, 0, 'overhead'); if (item.kind === 'banner') drawBannerPlaceholder(ctx, item); }
   } else if (layer === 'effects') {
     // Every legacy 'desk'/'chair'/'blocked' tile round-trips into an
     // 'impassable' tileEffect (see shared/mapLayers.ts's legacyToLayerData) —
@@ -825,6 +943,19 @@ function drawLayer(ctx: CanvasRenderingContext2D, ld: LayerData, theme: RoomThem
         ctx.fillStyle = 'rgba(20,184,166,0.16)'; ctx.fillRect(zx, zy, zw, zh);
         ctx.strokeStyle = 'rgba(20,184,166,0.95)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(zx, zy, zw, zh); ctx.setLineDash([]);
         ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px sans-serif'; ctx.fillText(`🎥 ${isolated ? '🔇' : '🔊'} ${a.name || 'Meeting'}`, zx + 4, zy + 14);
+        continue;
+      }
+      if (a.effect === 'recordArea') {
+        // Pink, matching EFFECTS' own toolbar legend color for this tool
+        // exactly (rgba(219,39,119,0.95)) — was previously falling through to
+        // the privateArea/mapLocation fallback below and rendering with Map
+        // Location's purple instead. No isolation badge (unlike meetingArea
+        // above): a Record Area never audio-isolates — see editorStore.ts's
+        // addArea, which force-sets audioIsolated:false for it — so there's
+        // no per-area isolation state worth showing, same as focusArea above.
+        ctx.fillStyle = 'rgba(219,39,119,0.16)'; ctx.fillRect(zx, zy, zw, zh);
+        ctx.strokeStyle = 'rgba(219,39,119,0.95)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(zx, zy, zw, zh); ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px sans-serif'; ctx.fillText(`🎬 ${a.name || 'Record Area'}`, zx + 4, zy + 14);
         continue;
       }
       if (a.effect === 'doorArea') {
@@ -959,9 +1090,23 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const [importBusy, setImportBusy] = useState(false);
   const [importErr, setImportErr] = useState('');
   const openImportPicker = async () => {
-    const f = await pickFile('image/png,image/jpeg');
+    // webp — already accepted end-to-end by the server's general upload
+    // route (server/src/routes/uploads.ts's allowedMimeTypes/Extensions);
+    // this client-side gate was the only thing actually blocking it here.
+    // svg — accepted here too, but confirmImport below sends it through
+    // api.uploadRoomAsset (a SEPARATE, admin-gated server route), not the
+    // general uploadMedia every other upload in this app uses. That
+    // general route deliberately excludes SVG everywhere (see its own
+    // comment: "excludes anything that can carry an XSS payload when
+    // rendered inline") because it's reachable by any authenticated org
+    // member with no room-role check at all. Import Image is different:
+    // this whole picker only opens for someone who can already edit this
+    // room's map (server-checked, not just UI-hidden), the same trust
+    // tier as everything else Fitur 15 already does — so SVG rides on
+    // that existing gate instead of the shared endpoint's wider one.
+    const f = await pickFile('image/png,image/jpeg,image/webp,image/svg+xml');
     if (!f) return;
-    if (!['image/png', 'image/jpeg'].includes(f.type)) { await showAlert('Hanya file PNG atau JPG yang diperbolehkan.'); return; }
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(f.type)) { await showAlert('Hanya file PNG, JPG, WebP, atau SVG yang diperbolehkan.'); return; }
     if (f.size > MAX_IMPORT_BYTES) { await showAlert(`Ukuran file maksimal ${MAX_IMPORT_BYTES / 1024 / 1024}MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
     setImportFile(f);
     setImportLabel(f.name.replace(/\.[^.]+$/, ''));
@@ -973,7 +1118,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
     if (!importFile) return;
     setImportBusy(true); setImportErr('');
     try {
-      const { url } = await api.uploadMedia(importFile, slug);
+      const { url } = await api.uploadRoomAsset(importFile, slug);
       // tilesW/tilesH fixed at 1x1 (one 32px tile) — Fitur 15's own scope note
       // keeps this to a basic import; a multi-tile footprint picker is a
       // reasonable follow-up, not part of this pass.
@@ -1016,13 +1161,18 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   const [scalePanelOpen, setScalePanelOpen] = useState(false);
   const avatarScale = useEditorStore((s) => s.doc?.avatarScale) ?? 1;
   const uploadReferenceImage = async () => {
-    const f = await pickFile('image/png,image/jpeg');
+    // Same WebP/SVG treatment as Import Image just above — accepted here
+    // too, via the same admin-gated uploadRoomAsset route rather than the
+    // general uploadMedia (see that function's own comment for why). This
+    // panel's canvas render is drawReferenceImage() below, drawImage()
+    // same as any custom asset, so SVG renders exactly the same way.
+    const f = await pickFile('image/png,image/jpeg,image/webp,image/svg+xml');
     if (!f) return;
-    if (!['image/png', 'image/jpeg'].includes(f.type)) { await showAlert('Hanya file PNG atau JPG yang diperbolehkan.'); return; }
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(f.type)) { await showAlert('Hanya file PNG, JPG, WebP, atau SVG yang diperbolehkan.'); return; }
     if (f.size > MAX_IMPORT_BYTES) { await showAlert(`Ukuran file maksimal ${MAX_IMPORT_BYTES / 1024 / 1024}MB (file ini ${(f.size / 1024 / 1024).toFixed(1)}MB).`); return; }
     setRefBusy(true); setRefErr('');
     try {
-      const { url } = await api.uploadMedia(f, slug);
+      const { url } = await api.uploadRoomAsset(f, slug);
       const doc = useEditorStore.getState().doc;
       const mapW = (doc?.width ?? MAP_WIDTH) * TILE_SIZE, mapH = (doc?.height ?? MAP_HEIGHT) * TILE_SIZE;
       // Default: cover the whole current map, half-transparent, visible —
@@ -1065,6 +1215,16 @@ export function RoomEditorPage({ slug }: { slug: string }) {
   // layerData; fetched separately and drawn as editor markers.
   const [mediaMode, setMediaMode] = useState<'image' | 'youtube' | 'website' | 'bgm' | null>(null);
   const mediaModeRef = useRef(mediaMode); useEffect(() => { mediaModeRef.current = mediaMode; }, [mediaMode]);
+  // Banner — a Furniture piece (kind:'banner') placed via the SAME
+  // click-to-stamp path as media above, not a new AreaEffect: unlike every
+  // other Tile Effect (rectangle-drag, no rotation/resize after creation),
+  // a Banner needs free rotation + resize + reposition, which only the
+  // Objects-layer settings-panel machinery (ObjectSettingsPanel/
+  // updateSelectedObject) already has. Placed with placeholder text, then
+  // immediately selected on the objects layer so its settings panel (see
+  // BannerSettingsPanel) opens right away for the admin to type the real text.
+  const [bannerMode, setBannerMode] = useState(false);
+  const bannerModeRef = useRef(bannerMode); useEffect(() => { bannerModeRef.current = bannerMode; }, [bannerMode]);
   const [media, setMedia] = useState<MediaObj[]>([]);
   const mediaRef = useRef<MediaObj[]>([]);
   useEffect(() => { mediaRef.current = media; }, [media]);
@@ -1203,15 +1363,39 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             const { panX, panY, zoom: z } = st.viewport;
             disableImageSmoothing(ctx); ctx.setTransform(z * dpr, 0, 0, z * dpr, panX * dpr, panY * dpr);
             drawLayer(ctx, doc, m.theme, 'floor'); drawLayer(ctx, doc, m.theme, 'wall');
-            drawLayer(ctx, doc, m.theme, 'objects'); drawLayer(ctx, doc, m.theme, 'top'); drawLayer(ctx, doc, m.theme, 'effects');
-            // Drawn LAST (on top of floor/wall/objects), not underneath — the
-            // floor layer above fills every single tile with an opaque
+            drawLayer(ctx, doc, m.theme, 'objects'); drawLayer(ctx, doc, m.theme, 'top');
+            // Media markers (Potong 6, editor-only) — drawn BEFORE the effects
+            // layer right below (moved from after everything else), so tile
+            // effects (spawn/impassable/portal/door/sittable/claimable-seat
+            // markers) stay visible on top of a media marker occupying the
+            // same tile, instead of being hidden underneath it.
+            for (const mm of mediaRef.current) {
+              const mx = mm.x * TILE_SIZE, my = mm.y * TILE_SIZE;
+              if (mm.type === 'bgm') {
+                const w = (mm.payload.areaW ?? 1) * TILE_SIZE, h = (mm.payload.areaH ?? 1) * TILE_SIZE;
+                ctx.fillStyle = 'rgba(34,197,94,0.14)'; ctx.fillRect(mx, my, w, h);
+                ctx.strokeStyle = 'rgba(34,197,94,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(mx, my, w, h); ctx.setLineDash([]);
+                ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '11px sans-serif'; ctx.fillText(`🎵 ${mm.payload.name ?? ''}`, mx + 4, my + 14);
+              } else {
+                const icon = mm.type === 'image' ? '🖼️' : mm.type === 'youtube' ? '▶️' : mm.type === 'website' ? '🔗' : '📌';
+                ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(mx + 3, my + 3, TILE_SIZE - 6, TILE_SIZE - 6);
+                ctx.font = '14px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText(icon, mx + TILE_SIZE / 2, my + TILE_SIZE / 2 + 5); ctx.textAlign = 'left';
+              }
+            }
+            // Drawn on top of floor/wall/objects/top/media, not underneath —
+            // the floor layer above fills every single tile with an opaque
             // texture, so an underlay here would just always be fully
             // covered and never actually visible. A translucent overlay (its
             // own adjustable opacity is exactly what makes this work) lets
             // the admin see their in-progress trace AND the reference photo
             // at once, same as a real tracing-paper-over-a-photo workflow.
+            // Drawn BEFORE the effects layer right below (not after, like
+            // before) so tile-effect markers stay visible on top of the
+            // reference photo instead of being hidden underneath it — the
+            // admin needs to see exactly where a portal/spawn/door marker
+            // sits while tracing, not lose it under the reference image.
             drawReferenceImage(ctx, doc.referenceImage);
+            drawLayer(ctx, doc, m.theme, 'effects');
             if (z >= 0.5) {
               ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1 / z; ctx.beginPath();
               for (let x = 0; x <= doc.width; x++) { ctx.moveTo(x * TILE_SIZE, 0); ctx.lineTo(x * TILE_SIZE, doc.height * TILE_SIZE); }
@@ -1241,20 +1425,6 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               const arr = st.activeLayer === 'top' ? doc.topObjects : doc.objects;
               const f = arr.find((o) => o.id === st.selectedObjectId);
               if (f) { const bx = f.x * TILE_SIZE, by = (f.y - (f.tilesH - 1)) * TILE_SIZE; ctx.strokeStyle = 'rgba(250,204,21,0.95)'; ctx.lineWidth = 2 / z; ctx.strokeRect(bx, by, f.tilesW * TILE_SIZE, f.tilesH * TILE_SIZE); }
-            }
-            // Media markers (Potong 6, editor-only).
-            for (const mm of mediaRef.current) {
-              const mx = mm.x * TILE_SIZE, my = mm.y * TILE_SIZE;
-              if (mm.type === 'bgm') {
-                const w = (mm.payload.areaW ?? 1) * TILE_SIZE, h = (mm.payload.areaH ?? 1) * TILE_SIZE;
-                ctx.fillStyle = 'rgba(34,197,94,0.14)'; ctx.fillRect(mx, my, w, h);
-                ctx.strokeStyle = 'rgba(34,197,94,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(mx, my, w, h); ctx.setLineDash([]);
-                ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '11px sans-serif'; ctx.fillText(`🎵 ${mm.payload.name ?? ''}`, mx + 4, my + 14);
-              } else {
-                const icon = mm.type === 'image' ? '🖼️' : mm.type === 'youtube' ? '▶️' : mm.type === 'website' ? '🔗' : '📌';
-                ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(mx + 3, my + 3, TILE_SIZE - 6, TILE_SIZE - 6);
-                ctx.font = '14px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText(icon, mx + TILE_SIZE / 2, my + TILE_SIZE / 2 + 5); ctx.textAlign = 'left';
-              }
             }
           }
         }
@@ -1381,6 +1551,25 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         else if (s.activeTool === 'eraser') { const m = mediaAt(t.x, t.y); if (m) api.deleteRoomMedia(slug, m.id).then(refetchMedia).catch(() => {}); }
         return;
       }
+      // Banner (see bannerMode's own doc comment) — same "stamp/eraser
+      // intercept before the effects list" shape as media above. No
+      // dialog: placed with placeholder text, then switched straight to
+      // the objects layer + select tool + selected, so BannerSettingsPanel
+      // is the very next thing the admin sees.
+      if (bannerModeRef.current) {
+        if (s.activeTool === 'stamp') {
+          const id = crypto.randomUUID();
+          s.placeObject({ id, paletteId: 'banner', kind: 'banner', x: t.x, y: t.y, tilesW: 3, tilesH: 1, text: 'Banner baru' }, 'objects');
+          setBannerMode(false);
+          setActiveLayer('objects');
+          setActiveTool('select');
+          useEditorStore.getState().selectObjectAt(t.x, t.y, 'objects');
+        } else if (s.activeTool === 'eraser') {
+          const o = s.objectAt(t.x, t.y, 'objects');
+          if (o && o.kind === 'banner') s.removeObject(o.id, 'objects');
+        }
+        return;
+      }
       const eff = s.selectedEffect; if (!eff) return;
       const isPointEffect = eff === 'startingPoint' || eff === 'impassable' || eff === 'door' || eff === 'sittable' || eff === 'claimableSeat';
       if (isPointEffect && s.stampMode === 'block' && (s.activeTool === 'stamp' || s.activeTool === 'eraser')) {
@@ -1424,25 +1613,36 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           const origin = portalOriginRef.current; portalOriginRef.current = null; setPortalHint(false);
           dialogPendingRef.current = true;
           setTimeout(async () => {
-            const label = ((await showPrompt('Nama portal (opsional):', '')) ?? '').trim();
-            dialogPendingRef.current = false;
-            s.addPortal(origin.x, origin.y, { targetX: t.x, targetY: t.y, label: label || undefined });
+            // try/finally — same stuck-forever fix as the areaRect flow
+            // below: without it, a throw here leaves dialogPendingRef stuck
+            // `true` and silently blocks every future Portal/area dialog.
+            try {
+              const label = ((await showPrompt('Nama portal (opsional):', '')) ?? '').trim();
+              dialogPendingRef.current = false;
+              s.addPortal(origin.x, origin.y, { targetX: t.x, targetY: t.y, label: label || undefined });
+            } finally {
+              dialogPendingRef.current = false;
+            }
           }, DIALOG_DEFER_MS);
           return;
         }
         // First click: choose cross-room vs internal.
         dialogPendingRef.current = true;
         setTimeout(async () => {
-          const wantsCrossRoom = await showConfirm('Portal ke ROOM LAIN?\n\nOK = pilih room lain · Batal = titik dalam room ini');
-          if (wantsCrossRoom) {
-            const target = ((await showPrompt('Kode room tujuan (slug dari URL/share):', '')) ?? '').trim();
+          try {
+            const wantsCrossRoom = await showConfirm('Portal ke ROOM LAIN?\n\nOK = pilih room lain · Batal = titik dalam room ini');
+            if (wantsCrossRoom) {
+              const target = ((await showPrompt('Kode room tujuan (slug dari URL/share):', '')) ?? '').trim();
+              dialogPendingRef.current = false;
+              if (!target) return;
+              const label = ((await showPrompt('Nama portal (opsional):', '')) ?? '').trim();
+              s.addPortal(t.x, t.y, { targetSlug: target, label: label || undefined });
+            } else {
+              dialogPendingRef.current = false;
+              portalOriginRef.current = { x: t.x, y: t.y }; setPortalHint(true);
+            }
+          } finally {
             dialogPendingRef.current = false;
-            if (!target) return;
-            const label = ((await showPrompt('Nama portal (opsional):', '')) ?? '').trim();
-            s.addPortal(t.x, t.y, { targetSlug: target, label: label || undefined });
-          } else {
-            dialogPendingRef.current = false;
-            portalOriginRef.current = { x: t.x, y: t.y }; setPortalHint(true);
           }
         }, DIALOG_DEFER_MS);
       } else if (eff === 'impassableArea' || eff === 'wallArea' || eff === 'doorArea') {
@@ -1489,7 +1689,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
         s.setSelection({ x: fx, y: fy, w: 0, h: 0 });
         dragRef.current = { mode: 'impassableAreaRect', anchor: { x: fx, y: fy }, effect: targetEffect };
       } else { // mapLocation | privateArea | focusArea | meetingArea | restrictedArea — rectangular
-        if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y, eff as 'mapLocation' | 'privateArea' | 'focusArea' | 'meetingArea' | 'restrictedArea'); }
+        if (s.activeTool === 'eraser') { s.removeAreaAt(t.x, t.y, eff as 'mapLocation' | 'privateArea' | 'focusArea' | 'meetingArea' | 'restrictedArea' | 'recordArea'); }
         else { s.setSelection({ x: t.x, y: t.y, w: 1, h: 1 }); dragRef.current = { mode: 'areaRect', anchor: { x: t.x, y: t.y } }; }
       }
     }
@@ -1574,6 +1774,16 @@ export function RoomEditorPage({ slug }: { slug: string }) {
       if (sel && !dialogPendingRef.current) {
         dialogPendingRef.current = true;
         setTimeout(async () => {
+          // Bug fix — the reset below used to only run on the happy path.
+          // Any throw inside this block (a rejected showPrompt/showConfirm,
+          // adminApi failing synchronously, etc.) skipped past it and left
+          // dialogPendingRef stuck at `true` forever — the guard above then
+          // silently no-ops EVERY subsequent area-creation attempt (Map
+          // Location, Private, Focus, Meeting, Restricted all share this one
+          // ref) for the rest of the session, with no error shown: the
+          // selection box just clears on mouseup and nothing else happens.
+          // try/finally guarantees the reset runs no matter how this ends.
+          try {
           if (s.selectedEffect === 'privateArea') {
             const name = ((await showPrompt('Nama private area:', 'Private')) ?? '').trim();
             const areaId = ((await showPrompt('Area ID (samakan untuk menggabung area terpisah jadi satu grup):', '1')) ?? '').trim();
@@ -1610,6 +1820,9 @@ export function RoomEditorPage({ slug }: { slug: string }) {
             // happening just outside its walls.
             const isolate = await showConfirm('Area ini KEDAP SUARA?\n\nOK = ya — orang di luar area ini tidak akan saling dengar dengan yang di dalam.\nBatal = tidak — cuma jarak biasa yang menentukan siapa dengar siapa.');
             s.addArea('meetingArea', sel, name || 'Meeting', undefined, isolate);
+          } else if (s.selectedEffect === 'recordArea') {
+            const name = ((await showPrompt('Nama record area:', 'Record Area')) ?? '').trim();
+            s.addArea('recordArea', sel, name || 'Record Area');
           } else if (s.selectedEffect === 'restrictedArea') {
             const name = ((await showPrompt('Nama area (mis. "CEO Office"):', 'CEO Office')) ?? '').trim();
             const id = s.addArea('restrictedArea', sel, name || 'Restricted Area');
@@ -1625,7 +1838,9 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               await showAlert('Area berhasil dibuat, tapi gagal menandainya sebagai restricted. Hapus area ini (Eraser) lalu gambar ulang untuk coba lagi.');
             });
           }
-          dialogPendingRef.current = false;
+          } finally {
+            dialogPendingRef.current = false;
+          }
         }, DIALOG_DEFER_MS);
       }
     }
@@ -1981,12 +2196,23 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               <p className="text-xs uppercase tracking-wider text-white/40 mb-2">Tile Effects</p>
               <div className="space-y-1.5">
                 {EFFECTS.map((e) => (
-                  <button key={e.id} onClick={() => { setSelectedEffect(e.id); setMediaMode(null); }}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm cursor-pointer ${!mediaMode && selectedEffect === e.id ? 'bg-purple-600/30 border border-purple-400 text-white' : 'border border-white/10 text-white/70 hover:bg-white/5'}`}>
+                  <button key={e.id} onClick={() => { setSelectedEffect(e.id); setMediaMode(null); setBannerMode(false); }}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm cursor-pointer ${!mediaMode && !bannerMode && selectedEffect === e.id ? 'bg-purple-600/30 border border-purple-400 text-white' : 'border border-white/10 text-white/70 hover:bg-white/5'}`}>
                     <span className="w-3 h-3 rounded-sm shrink-0" style={{ background: e.color }} /> {e.label}
                   </button>
                 ))}
               </div>
+              {/* Banner — see bannerMode's own doc comment for why this is a
+                  Furniture placement (Objects layer), not a new AreaEffect
+                  like the Tile Effects above, even though it lives in this
+                  same palette section. */}
+              <p className="text-xs uppercase tracking-wider text-white/40 mt-4 mb-2">Signage</p>
+              <button
+                onClick={() => { setBannerMode(true); setSelectedEffect(null); setMediaMode(null); }}
+                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm cursor-pointer ${bannerMode ? 'bg-purple-600/30 border border-purple-400 text-white' : 'border border-white/10 text-white/70 hover:bg-white/5'}`}
+              >
+                🪧 Banner
+              </button>
               {/* "Ngobrol dengan CEO" v2 — bookingMode toggle. No dedicated
                   per-zone settings panel exists yet (ZoneRestriction rows are
                   otherwise only ever written once, at area-creation time, see
@@ -2045,7 +2271,7 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               <p className="text-xs uppercase tracking-wider text-white/40 mt-4 mb-2">Media</p>
               <div className="space-y-1.5">
                 {([['image', '🖼️ Insert image'], ['youtube', '▶️ YouTube'], ['website', '🔗 Open website'], ['bgm', '🎵 Background music']] as const).map(([id, label]) => (
-                  <button key={id} onClick={() => { setMediaMode(id); setSelectedEffect(null); }}
+                  <button key={id} onClick={() => { setMediaMode(id); setSelectedEffect(null); setBannerMode(false); }}
                     className={`w-full px-2 py-1.5 rounded text-left text-sm cursor-pointer ${mediaMode === id ? 'bg-purple-600/30 border border-purple-400 text-white' : 'border border-white/10 text-white/70 hover:bg-white/5'}`}>
                     {label}
                   </button>
@@ -2054,7 +2280,9 @@ export function RoomEditorPage({ slug }: { slug: string }) {
               <p className="text-[11px] text-white/50 mt-3 leading-relaxed">
                 {mediaMode
                   ? 'Stamp: klik tile untuk menaruh (image/BGM → upload; YouTube/Website → tempel URL). Eraser: klik untuk hapus.'
-                  : (EFFECTS.find((e) => e.id === selectedEffect)?.hint ?? 'Pilih efek/media lalu gambar di kanvas. Overlay ini hanya tampil di editor.')}
+                  : bannerMode
+                    ? 'Stamp: klik tile untuk menaruh banner. Langsung terpilih setelah ditaruh — ketik teksnya di panel yang muncul, lalu atur rotasi (bebas derajat), ukuran, dan warnanya di situ juga. Drag untuk pindah posisi. Eraser: klik untuk hapus.'
+                    : (EFFECTS.find((e) => e.id === selectedEffect)?.hint ?? 'Pilih efek/media lalu gambar di kanvas. Overlay ini hanya tampil di editor.')}
               </p>
             </>
           )}
@@ -2217,6 +2445,19 @@ export function RoomEditorPage({ slug }: { slug: string }) {
           )}
         </div>
       )}
+
+      {/* Bug fix — the Room Editor is a SEPARATE top-level render branch
+          (App.tsx's `export default function App()`: `?roomEditor=` on the
+          URL returns ONLY <RoomEditorPage>, never <MainApp>), so the
+          <GlobalModal /> mounted inside MainApp's tree was never present
+          here at all. Every showPrompt/showConfirm/showAlert call in this
+          file (all the tile-effect naming dialogs, Portal, etc.) sets
+          modalStore's state correctly but had nothing anywhere in the
+          mounted tree to ever render it — the awaited promise just hung
+          forever, silently, with no error: exactly "drag/click does
+          nothing" from the outside. Mounting it here, once, fixes every
+          dialog in this file at once. */}
+      <GlobalModal />
     </div>
   );
 }

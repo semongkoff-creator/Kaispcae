@@ -5,6 +5,7 @@ import { signToken } from './auth';
 import { disconnectUserSockets } from '../lib/sessionKick';
 import { googleConfig } from '../lib/googleConfig';
 import { resolvePendingInvite, markInviteAccepted, accountFieldsForInviteRole } from '../lib/orgInvite';
+import { oauthReturn } from '../lib/oauthReturn';
 
 const google = Router();
 
@@ -57,7 +58,7 @@ google.get('/auth/google/callback', async (req: Request, res: Response) => {
   if (!cfg) return res.status(503).send('Login Google belum dikonfigurasi di server.');
 
   const { code, state } = req.query;
-  const fail = (reason: string) => res.redirect(`/?googleError=${reason}`);
+  const fail = (reason: string) => res.redirect(oauthReturn(`googleError=${reason}`));
 
   const pending = typeof state === 'string' ? pendingStates.get(state) : undefined;
   if (!pending || pending.exp < Date.now()) return fail('state');
@@ -144,7 +145,7 @@ google.get('/auth/google/callback', async (req: Request, res: Response) => {
     sweep(oneTimeCodes, (v) => v.exp);
     const otc = crypto.randomBytes(24).toString('hex');
     oneTimeCodes.set(otc, { token, exp: Date.now() + CODE_TTL_MS });
-    return res.redirect(`/?googleCode=${otc}`);
+    return res.redirect(oauthReturn(`googleCode=${otc}`));
   } catch (e) {
     console.error('[google] callback failed:', e);
     return fail('exchange');

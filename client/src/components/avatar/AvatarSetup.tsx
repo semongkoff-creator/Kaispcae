@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Tools, LightningFill, PersonSquare, Trash3 } from 'react-bootstrap-icons';
+import { Tools, LightningFill, PersonSquare, Trash3, Images } from 'react-bootstrap-icons';
 import { AvatarConfig, SpriteMode } from '@kaispace/shared';
 import { drawAvatar } from '@/components/canvas/AvatarSprite';
 import { disableImageSmoothing } from '@/utils/canvasSharpness';
@@ -14,6 +14,7 @@ import {
   GENERATOR_HAIRSTYLES,
   GENERATOR_ACCESSORIES,
   PREMADE_CHARACTERS,
+  CUSTOM_CHARACTERS,
 } from '@/data/spriteManifest';
 
 // Cycles through `options`, wrapping around. When `allowNone` is set, an
@@ -57,9 +58,20 @@ interface AvatarSetupProps {
   // opens (via the batch endpoint). The upload/delete calls themselves are
   // authed server-side, so they don't need it.
   localUserId?: string;
+  // specs/2026-08-21-full-name-field-design.md — pre-fills the new "Nama
+  // Lengkap" field. Separate from initialConfig/AvatarConfig entirely —
+  // fullName is not part of the pixel-avatar config, it's saved through
+  // its own dedicated endpoint (api.saveFullName), not api.saveAvatar.
+  initialFullName?: string | null;
+  // Bug-class fix mirroring onDisplayNameChange (see App.tsx's Game) —
+  // local-only optimistic patch for the cached useAuth() user.fullName, so
+  // reopening this editor later in the same session doesn't pre-fill the
+  // stale pre-save value. No API call of its own; api.saveFullName below
+  // already persists it.
+  onFullNameSave?: (name: string) => void;
 }
 
-export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: AvatarSetupProps) {
+export function AvatarSetup({ initialConfig, onSave, onClose, localUserId, initialFullName, onFullNameSave }: AvatarSetupProps) {
   const previewRef = useRef<HTMLCanvasElement>(null);
 
   // ── Profile photo (chat avatar) — independent of the pixel avatar above;
@@ -68,6 +80,12 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: Ava
   const [photo, setPhoto] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState('');
+
+  // specs/2026-08-21-full-name-field-design.md — independent of `config`
+  // (the AvatarConfig) entirely, same reasoning as the photo state right
+  // above: saved through its own dedicated call (api.saveFullName), not
+  // bundled into onSave/api.saveAvatar.
+  const [fullName, setFullName] = useState(initialFullName ?? '');
 
   // Load the current photo once, so the editor shows what's already set.
   useEffect(() => {
@@ -134,6 +152,9 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: Ava
       if (tab === 'premade' && !prev.premadeId) {
         return { ...prev, spriteMode: tab, premadeId: PREMADE_CHARACTERS[0] };
       }
+      if (tab === 'custom' && !prev.customSpriteId) {
+        return { ...prev, spriteMode: tab, customSpriteId: CUSTOM_CHARACTERS[0] };
+      }
       return { ...prev, spriteMode: tab };
     });
   }, []);
@@ -152,10 +173,25 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: Ava
     }));
   }, []);
 
+  const cycleCustom = useCallback((dir: 1 | -1) => {
+    setConfig((prev) => ({
+      ...prev,
+      customSpriteId: cycleOption(CUSTOM_CHARACTERS, prev.customSpriteId, dir, false),
+    }));
+  }, []);
+
   const handleSave = () => {
     const trimmed = { ...config, name: config.name.trim() || 'You', statusTag: config.statusTag.trim().slice(0, 10) };
     setConfig(trimmed);
     onSave(trimmed);
+    // specs/2026-08-21-full-name-field-design.md — fire-and-forget, same
+    // posture as every other profile-field save in this codebase; a
+    // failure here must never block the avatar-config save above or the
+    // panel closing. Empty string is a valid submission (clears fullName
+    // back to null server-side) — see the route's own comment.
+    const trimmedFullName = fullName.trim();
+    api.saveFullName(trimmedFullName).catch(() => {});
+    onFullNameSave?.(trimmedFullName);
   };
 
   const handleClose = () => {
@@ -256,6 +292,14 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: Ava
           >
             <LightningFill size={12} /> Quick Pick
           </button>
+          <button
+            onClick={() => setTab('custom')}
+            className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all inline-flex items-center justify-center gap-1.5 ${
+              config.spriteMode === 'custom' ? 'bg-purple-600 text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+          >
+            <Images size={12} /> Custom
+          </button>
         </div>
 
         {config.spriteMode === 'premade' ? (
@@ -268,6 +312,18 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: Ava
             />
             <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-2 leading-relaxed">
               Ready-made character combos — no need to mix layers yourself.
+            </p>
+          </Section>
+        ) : config.spriteMode === 'custom' ? (
+          <Section label="Character">
+            <CyclePicker
+              label="Custom Character"
+              value={describeSelection(CUSTOM_CHARACTERS, config.customSpriteId, false)}
+              onPrev={() => cycleCustom(-1)}
+              onNext={() => cycleCustom(1)}
+            />
+            <p className="text-gray-400 dark:text-gray-500 text-[10px] mt-2 leading-relaxed">
+              Uploaded character art.
             </p>
           </Section>
         ) : (
@@ -283,6 +339,21 @@ export function AvatarSetup({ initialConfig, onSave, onClose, localUserId }: Ava
             ))}
           </Section>
         )}
+
+        {/* Nama Lengkap — specs/2026-08-21-full-name-field-design.md.
+            Separate from Display Name below: this is the account's real
+            name, saved through its own endpoint, never shown on the
+            nametag/desk pill/chat/anywhere else. */}
+        <Section label="Nama Lengkap">
+          <input
+            type="text"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value.slice(0, 100))}
+            maxLength={100}
+            className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg px-3 py-2 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 transition-colors text-sm"
+            placeholder="Nama lengkap kamu"
+          />
+        </Section>
 
         {/* Display Name */}
         <Section label="Display Name">

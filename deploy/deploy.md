@@ -72,6 +72,26 @@ docker compose ps
 curl -fsS http://127.0.0.1:8091/api/health
 ```
 
+## Menambahkan akun DCM setelah deploy
+
+`DCM_Password_List.xlsx` sengaja diabaikan Git dan tidak ikut Docker image,
+karena memuat password. Setelah deploy aplikasi selesai, salin file itu secara
+sementara dari root proyek di VPS ke container `server`, jalankan seed, lalu
+hapus lagi dari container:
+
+```bash
+cd /var/www/office
+SERVER_ID="$(docker compose ps -q server)"
+test -n "$SERVER_ID"
+docker cp DCM_Password_List.xlsx "$SERVER_ID:/app/DCM_Password_List.xlsx"
+docker compose exec -T server npx tsx server/scripts/seedDcmAccounts.ts
+docker compose exec -T server rm -f /app/DCM_Password_List.xlsx
+```
+
+Jalankan ini hanya setelah build yang membawa `server/scripts` sudah aktif.
+Script bersifat idempoten: akun yang sudah ada tidak dibuat ulang atau password-
+nya tidak diubah. Jangan memasukkan spreadsheet ke `git add` atau ke Dockerfile.
+
 Deploy ini rebuild `server` dan `nginx`, jadi perubahan backend Socket.IO, build frontend Vite, dan `nginx/nginx.conf` ikut naik.
 
 ## Dry Run
@@ -161,6 +181,84 @@ Nginx host saat ini perlu tetap proxy ke container client:
 ```nginx
 proxy_pass http://127.0.0.1:8091;
 ```
+
+## TURN Relay (coturn)
+
+Sama seperti Nginx host, coturn **tidak** dikelola script ini dan tidak ada di
+`docker-compose.yml` — dia service host:
+
+```bash
+systemctl status coturn          # /usr/bin/turnserver -c /etc/turnserver.conf
+```
+
+Tanpa TURN, dua orang yang tidak bisa menemukan jalur langsung (NAT simetris,
+firewall kantor yang men-drop UDP, CGNAT seluler) **tidak akan pernah saling
+terdengar** — tanpa error di mana pun, selamanya, karena jaringan mereka sama
+setiap hari. Gejalanya: "beberapa orang tertentu selalu tidak ada suara".
+
+### Tiga variabel yang harus terisi bersamaan
+
+`VITE_TURN_URL`, `VITE_TURN_USERNAME`, `VITE_TURN_CREDENTIAL` di `.env`. Klien
+menolak entri TURN yang tidak lengkap dan **membuang ketiganya** — dua dari tiga
+terisi sama saja dengan nol. Produksi pernah berjalan berbulan-bulan seperti itu
+(URL kosong), karena tidak ada yang memberi tahu; sekarang console browser
+memperingatkannya.
+
+Ketiganya **build arg**, bukan runtime env:
+
+```bash
+docker compose build nginx     # WAJIB — `restart` tidak mengubah apa pun
+```
+
+Nilainya dijahit ke dalam file JS saat `vite build`. Verifikasi:
+
+```bash
+docker compose exec nginx sh -c "grep -o 'turn:[^\"]*' /usr/share/nginx/html/assets/index-*.js"
+```
+
+### Yang wajib ada di /etc/turnserver.conf
+
+```
+min-port=49152
+max-port=65535        # tiap alokasi TURN memakan satu port; range sempit = gagal acak
+total-quota=0
+
+no-multicast-peers    # kredensial ikut ke bundle JS, jadi PUBLIK — tanpa blok
+denied-peer-ip=0.0.0.0-0.255.255.255        # di bawah ini, siapa pun yang
+denied-peer-ip=10.0.0.0-10.255.255.255      # membacanya bisa memakai server ini
+denied-peer-ip=127.0.0.0-127.255.255.255    # sebagai relay ke jaringan internal
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+```
+
+### Jebakan: aturan ufw tertimpa Docker
+
+Port bisa terdaftar `ALLOW` di `ufw status` tapi tetap **di-drop dari luar** —
+Docker menyisipkan aturannya sendiri ke iptables dan menggeser chain ufw setiap
+daemon-nya restart. Gejalanya khas: dari luar **timeout**, bukan
+*connection refused*, padahal `ss` menunjukkan servicenya listening.
+
+Obatnya cukup memicu reload ufw:
+
+```bash
+ufw allow 3478/udp && ufw allow 3478/tcp && ufw allow 49152:65535/udp
+```
+
+Jalankan walaupun ufw menjawab `Skipping adding existing rule` — reload-nya
+itulah yang memperbaiki, bukan penambahan aturannya. Port lain di VPS ini
+(8080/8081, 21115-21117 RustDesk) diketahui pernah kena hal yang sama.
+
+### Verifikasi dari luar VPS
+
+Cek sampai ke **alokasi**, bukan cuma STUN binding — alokasi butuh autentikasi
+DAN port dari range relay, jadi hanya itu yang membuktikan jalurnya utuh. Paling
+mudah lewat [Trickle ICE](https://webrtc.github.io/samples/src/content/peerconnection/trickle-ice/):
+isi URI/username/password, lalu **harus muncul baris `Type = relay`**.
+
+Di aplikasi, `webrtcDiag()` di console menampilkan jalur kandidat terpilih per
+peer: `relay` berarti TURN dipakai, `host`/`srflx` berarti mereka tersambung
+langsung dan masalah lain (mis. isolasi zona) yang menyenyapkan mereka.
 
 ## Troubleshooting
 

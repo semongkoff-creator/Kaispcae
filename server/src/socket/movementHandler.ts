@@ -1,19 +1,104 @@
 import { Server, Socket } from 'socket.io';
 import { getPrisma } from '../lib/prisma';
-import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isPointInImpassableArea, RoomTile, JumpEvent, NudgeEvent, PlayerMovePayload, PlayerMovedPayload, PlayerStoppedPayload } from '@kaispace/shared';
+import { SocketEvents, MAP_WIDTH, MAP_HEIGHT, TILE_SIZE, isTileBlocked, isDoorTile, isPointInImpassableArea, doesRectOverlapImpassableArea, movementHitboxBounds, DOOR_HITBOX_HALF_PX, shouldIsolateZoneAudio, RoomTile, JumpEvent, NudgeEvent, PlayerMovePayload, PlayerMovedPayload, PlayerStoppedPayload } from '@kaispace/shared';
 import { updatePlayerPosition, setPlayerStopped, getCachedTiles, getCachedImpassableAreas, getCachedDoorAreaRects, getCachedZones, getCachedPlayers } from '../store/roomStore';
-import { isDoorUnlocked, isDoorAreaUnlocked, clearUnlockedDoors } from './doorLock';
+import { clearUnlockedDoors, isDoorLockedForSocket } from './doorLock';
 import { isDoorOverrideActive } from './roomHandler';
 import { createStoppedPayload } from './movementPayload';
 import { socketRateLimit } from '../middleware/rateLimit';
 import { clearMovementSequence, shouldAcceptMoveSequence } from './movementSequence';
+import { collectStaleMovers, MoverEntry, STALE_MOVE_SWEEP_INTERVAL_MS } from './staleMovers';
 import { recordPokeReceived } from '../lib/pokeResponse';
 import { getPlayerName } from './roomHandler';
 import { broadcastAnalyticsActivity } from './analyticsFeed';
+import { getLivePlayerMovement, clearLivePlayerMovement } from '../store/playerLiveState';
 
-// Rate limiting: max 20 updates per second per player
+// Rate limiting, per player.
+//
+// This has to sit BELOW the client's own send interval, not level with it.
+// The client throttles emitMove to one packet per 50ms (useSocket.ts), so a
+// 50ms floor here left exactly zero tolerance: a packet delayed even a
+// millisecond less than its predecessor arrives 49ms after it and gets
+// dropped as "too fast", even though the sender was perfectly well behaved.
+// Ordinary network jitter therefore ate a steady fraction of legitimate
+// movement updates, and the gaps showed up as stutter on every other
+// client's screen. 30ms keeps the abuse ceiling meaningful (~33/sec against
+// a client that sends 20/sec) while giving normal jitter room to land.
 const rateLimitMap = new Map<string, number>();
-const MIN_UPDATE_INTERVAL = 1000 / 20; // 50ms
+const MIN_UPDATE_INTERVAL = 30;
+
+// Sockets currently believed to be walking, and when they last said so.
+//
+// A client only ever stops being "moving" by SENDING a stop, and that emit
+// lives inside the browser's requestAnimationFrame loop — which browsers
+// suspend entirely for a backgrounded tab. Switch tabs mid-stride and the
+// frame that would have sent it never runs: the server keeps the player
+// flagged as moving, and every other client keeps cycling their walk (or
+// run) animation over a position that never changes again. An avatar
+// jogging on the spot forever, and nothing in the system ever cleaned it
+// up — the flag only cleared on an explicit stop or on disconnect.
+//
+// So the server stops waiting to be told. If nothing has arrived from a
+// mover for STALE_MOVE_TIMEOUT_MS, it calls the stop itself. Deliberately
+// server-side rather than a client-side visibilitychange handler alone:
+// this also covers a frozen tab, a dropped packet, and a client that lies.
+const activeMovers = new Map<string, MoverEntry>();
+
+let staleMoveSweep: ReturnType<typeof setInterval> | null = null;
+
+function startStaleMoveSweep(io: Server): void {
+  if (staleMoveSweep) return;
+  staleMoveSweep = setInterval(() => {
+    const now = Date.now();
+    for (const { socketId, room } of collectStaleMovers(activeMovers, now)) {
+      activeMovers.delete(socketId);
+
+      // Whether they are moving lives HERE, not on the roster row.
+      // setPlayerMoved writes to the live map and returns a merged copy
+      // without touching the stored roster, so a roster row's isMoving is
+      // false for the whole session — and this used to read exactly that,
+      // `continue` every time, and clean up nothing. The sweep existed and
+      // did nothing, which is worse than not having one: a mover who went
+      // quiet stayed flagged as moving forever, and everyone who joined or
+      // refreshed after that saw them walking on the spot.
+      const live = getLivePlayerMovement(room, socketId);
+      if (!live?.isMoving) continue;
+
+      // Gone already. The roster cleanup belongs to the disconnect path, but
+      // the live flag has to go regardless: a player kept in the room through
+      // the disconnect debounce would otherwise be handed to the next person
+      // who refreshes, still walking.
+      const socket = io.sockets.sockets.get(socketId);
+      if (!socket) {
+        clearLivePlayerMovement(room, socketId);
+        continue;
+      }
+
+      const player = getCachedPlayers(room).find((p) => p.id === socketId);
+      if (!player) continue;
+
+      // Position from the live state, which is where the last move actually
+      // landed. The roster row's own x/y is only written when a stop arrives —
+      // the very thing that never came.
+      const stopped: PlayerStoppedPayload = {
+        id: socketId,
+        x: live.x,
+        y: live.y,
+        direction: live.direction,
+        serverTime: now,
+      };
+      // socket.to(), NOT io.to() — everyone else needs correcting, but the
+      // stale client does not. Sending it to them too would snap their own
+      // avatar back to this position, and if the silence turned out to be a
+      // network hiccup rather than a backgrounded tab, that reads as a
+      // rubber-band on a player who never actually stopped.
+      socket.to(room).emit(SocketEvents.PLAYER_STOPPED, stopped);
+      void setPlayerStopped(room, socketId, live.x, live.y, live.direction);
+    }
+  }, STALE_MOVE_SWEEP_INTERVAL_MS);
+  // Never a reason to hold the process open for this.
+  staleMoveSweep.unref?.();
+}
 
 // QA #16 (Anti-spam) — Nudge had no cap at all: a spoofed/scripted client
 // could fire PLAYER_NUDGE as fast as the socket allows. Same burst budget as
@@ -35,29 +120,26 @@ const canNudge = socketRateLimit(3);
 // because Impassable Area rectangles are checked at sub-tile precision, not
 // against the tile grid (see mapLayers.ts's getImpassableAreaRects doc
 // comment for why they're never rasterized into it).
+//
+// Follow-up ("kadang masih ada bug ... di atas impassible") — the Impassable
+// Area check below used to test only the single target PIXEL against the
+// rects (isPointInImpassableArea), while the client's own movement
+// prediction (useMovement.ts's wouldCollide) tests the player's full
+// hitbox. A minimap teleport has no incremental walk history the way normal
+// stepping does, so its target point could land just outside a rect's edge
+// — passing the point check — while the rendered avatar's hitbox still
+// visually overlapped the rect. Now uses the same hitbox box as the client
+// (movementHitboxBounds, door-aware) so the two never disagree at an edge.
 function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string, tileX: number, tileY: number, pixelX: number, pixelY: number): boolean {
   if (isTileBlocked(tiles, tileX, tileY)) return true;
-  if (isPointInImpassableArea(getCachedImpassableAreas(room), pixelX, pixelY)) return true;
-  const tile = tiles[tileY]?.[tileX];
-  if (tile?.type === 'door' && tile.doorPasswordEnabled && tile.doorPassword) {
-    // Item #9 — emergency override lets everyone through every door in this
-    // room, bypassing the normal per-socket unlock entirely.
-    if (isDoorOverrideActive(room)) return false;
-    return !isDoorUnlocked(socketId, room, tileX, tileY);
-  }
-  // Follow-up — "Door Area" tool, the resizable-area sibling of the
-  // per-tile check just above. Reuses isPointInImpassableArea AS-IS (same
-  // pixel-space rect shape, see mapLayers.ts's DoorAreaRect) against only
-  // the subset of door areas that are actually still locked for THIS
-  // socket — an unlocked or override-bypassed one is simply left out of
-  // the list handed in, rather than teaching isPointInImpassableArea a new
-  // per-socket concept it has no business knowing about.
-  if (!isDoorOverrideActive(room)) {
-    const lockedDoorAreas = getCachedDoorAreaRects(room).filter(
-      (r) => r.doorPasswordEnabled && r.doorPassword && !isDoorAreaUnlocked(socketId, room, r.id),
-    );
-    if (lockedDoorAreas.length > 0 && isPointInImpassableArea(lockedDoorAreas, pixelX, pixelY)) return true;
-  }
+  const half = isDoorTile(tiles, tileX, tileY) ? DOOR_HITBOX_HALF_PX : TILE_SIZE / 2 - 2;
+  const { left, top, right, bottom } = movementHitboxBounds(pixelX, pixelY, half);
+  if (doesRectOverlapImpassableArea(getCachedImpassableAreas(room), left, top, right, bottom)) return true;
+  // Door tile password + Door Area password — extracted to doorLock.ts's
+  // isDoorLockedForSocket so TELEPORT_REQUEST (roomHandler.ts) can ask the
+  // exact same question without duplicating this logic (it used to have no
+  // door-lock awareness at all).
+  if (isDoorLockedForSocket(socketId, room, tiles, tileX, tileY, pixelX, pixelY, getCachedDoorAreaRects(room), isDoorOverrideActive(room))) return true;
   if (isTileOccupiedInPrivateArea(room, tileX, tileY, socketId)) return true;
   return false;
 }
@@ -67,20 +149,18 @@ function isBlockedForSocket(tiles: RoomTile[][], room: string, socketId: string,
 // to EVERY private area, not just ones with a numeric capacity set (a
 // left-unlimited private area is still a "real room" someone shouldn't be
 // able to walk through another person inside). The Zone model has no
-// explicit "this is a Private Area, not a Map Location" flag (both are
-// zoneType 'desk' — see mapLayers.ts's layerDataToLegacy, which drops
-// AreaEffect.effect entirely once converted), so `audioIsolated !== false`
-// is the best available proxy: Private Area's whole point is isolating
-// audio (defaults to isolate=true), Map Location's is a plain name pin
-// (defaults to isolate=false) — matching the exact same inference
-// RoomEditorPage.tsx's own preview already uses to tell them apart.
+// explicit "this is a Private Area, not a Map Location" flag (both can be
+// zoneType 'desk'), so the shared audio-isolation predicate is the source of
+// truth: explicit audioIsolated wins, and very large desk zones default back
+// to open-office behaviour to avoid turning a whole department area into one
+// collision/audio room.
 // Meeting/Focus areas (zoneType 'meeting'/'focus') are naturally excluded by
 // the zoneType==='desk' check — this was never asked to extend to those. A
 // player is never blocked by their OWN current tile — this only stops
 // walking ONTO someone else, not standing still.
 function isTileOccupiedInPrivateArea(room: string, tileX: number, tileY: number, selfId: string): boolean {
   const zone = getCachedZones(room).find(
-    (z) => z.type === 'desk' && z.audioIsolated !== false && tileX >= z.x && tileX < z.x + z.width && tileY >= z.y && tileY < z.y + z.height,
+    (z) => z.type === 'desk' && shouldIsolateZoneAudio(z) && tileX >= z.x && tileX < z.x + z.width && tileY >= z.y && tileY < z.y + z.height,
   );
   if (!zone) return false;
   return getCachedPlayers(room).some((p) => {
@@ -113,6 +193,8 @@ function getMapBounds(tiles: RoomTile[][] | undefined): { mapWidth: number; mapH
 }
 
 export function registerMovementHandlers(io: Server, socket: Socket) {
+  startStaleMoveSweep(io);
+
   // Root cause of "jalan ke selatan snap balik" (walking south/diagonal
   // snapping back straight) — every handler below used to derive the game
   // room by picking the first entry in socket.rooms that wasn't the
@@ -200,6 +282,9 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
       };
       socket.to(gameRoom).emit(SocketEvents.PLAYER_MOVED, moved);
       updatePlayerPosition(gameRoom, socket.id, clampedX, clampedY, moved.direction, data.isRunning);
+      // Refreshed on every accepted move; the sweep above calls the stop
+      // itself if these ever run dry.
+      activeMovers.set(socket.id, { room: gameRoom, lastMoveAt: now });
     }
   });
 
@@ -222,10 +307,15 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
     const direction = data.direction || 'down';
     socket.to(gameRoom).emit(SocketEvents.PLAYER_TELEPORTED, { id: socket.id, x: clampedX, y: clampedY, direction });
     updatePlayerPosition(gameRoom, socket.id, clampedX, clampedY, direction, false);
+    activeMovers.delete(socket.id);
   });
 
   socket.on(SocketEvents.PLAYER_STOP, (data: { x?: number; y?: number; direction: string }) => {
     const gameRoom = currentRoom;
+    // Told properly — the sweep has nothing left to clean up here. Cleared
+    // before the branch below so an early return can't leave a stale entry
+    // behind to fire a redundant stop a second later.
+    activeMovers.delete(socket.id);
     if (gameRoom) {
       const serverTime = Date.now();
       const tiles = getCachedTiles(gameRoom);
@@ -317,6 +407,7 @@ export function registerMovementHandlers(io: Server, socket: Socket) {
   // Clean up rate limit map on disconnect
   socket.on('disconnect', () => {
     rateLimitMap.delete(socket.id);
+    activeMovers.delete(socket.id);
     clearMovementSequence(socket.id);
     clearUnlockedDoors(socket.id);
   });

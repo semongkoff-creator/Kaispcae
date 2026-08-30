@@ -7,6 +7,7 @@
 // interacted with the page (they clicked to join the room), .play() works.
 import { getNotificationSettings } from './browserNotifications';
 import { calcGain } from '@/hooks/useProximity';
+import { useGameStore } from '@/stores/gameStore';
 
 // Nudge ("senggol"/"colek", Z key) — same punch-effect clip as Slap below
 // (both are user-facing "colek" in different parts of the UI: this one via
@@ -16,6 +17,10 @@ const NUDGE_SRC = '/assets/sfx/slap.mp3';
 const NUDGE_STRONG_SRC = '/assets/sfx/slap.mp3';
 const SLAP_SRC = '/assets/sfx/slap.mp3';
 const HAND_RAISE_SRC = '/assets/sfx/hand-raise.mp3';
+// Room-wide announcement chime — the airport-PA call that plays before an
+// admin broadcast appears. 4.8s long, and deliberately not waited out in
+// full: see AnnouncementTicker's ANNOUNCE_LEAD_IN_MS.
+const ANNOUNCE_SRC = '/assets/sounds/announce/airport-call.mp3';
 
 // Preload one element per clip so the file is fetched/decoded up front; we
 // clone it per play so rapid repeats overlap instead of cutting each other
@@ -36,6 +41,7 @@ if (typeof window !== 'undefined') {
   preload(NUDGE_STRONG_SRC);
   preload(SLAP_SRC);
   preload(HAND_RAISE_SRC);
+  preload(ANNOUNCE_SRC);
 }
 
 function playClip(src: string, volume: number): void {
@@ -76,6 +82,19 @@ export function playSlapSound(emphasized = false): void {
 // gentle volume and sound-setting gate as before via playClip.
 export function playHandRaiseSound(): void {
   playClip(HAND_RAISE_SRC, 0.35);
+}
+
+// The chime before a room-wide announcement (AnnouncementTicker). Louder than
+// the other clips because it is doing a specific job — turning heads before
+// text arrives — and quieter than 1.0 because it is 4.8 seconds of PA chime
+// and lands unannounced.
+//
+// Gated on the sound setting like every other incoming event. Someone who
+// turned notification sounds off chose not to be interrupted by audio, and
+// nothing is lost by honouring it: the ticker itself is unmissable, running
+// across the top of the screen with or without the chime.
+export function playAnnouncementSound(): void {
+  playClip(ANNOUNCE_SRC, 0.7);
 }
 
 // Soundboard — unlike the fixed clips above, the src here is dynamic (one of
@@ -123,9 +142,25 @@ export function playSoundboardClip(fromId: string, src: string): void {
 // range, and un-mutes it again if the listener walks back within range
 // before it finishes, same real-time behavior as a live voice call rather
 // than a one-shot decision made at click time.
+//
+// Bug — `nearby` is a "who's near ME" list computed from playerRecords,
+// which deliberately never carries an entry for the local player's own id
+// (see useSocket.ts's ROOM_STATE handler). So the presser's OWN clip —
+// tracked here under their own localPlayerId, started at full
+// SOUNDBOARD_BASE_VOLUME by playSoundboardClip — could never find itself in
+// `nearby` and fell through to the `gain = 0` branch, silencing it, on the
+// very next proximity recalculation (anyone moving/changing zone nearby)
+// that happened to land while it was still playing. Nothing was wrong with
+// the play() call itself — this was muting audio that had already started
+// correctly. Everyone else's clips size correctly by real distance; only
+// the presser's own is exempted, staying at the fixed base volume for its
+// whole duration, the same way it already sounds during the instant right
+// after it starts.
 export function updateSoundboardVolumes(nearby: { id: string; distanceTiles: number; viaZone?: boolean }[]): void {
   if (activeSoundboardAudio.size === 0) return;
+  const localPlayerId = useGameStore.getState().localPlayerId;
   for (const [fromId, node] of activeSoundboardAudio) {
+    if (fromId === localPlayerId) continue;
     const p = nearby.find((n) => n.id === fromId);
     const gain = p ? (p.viaZone ? 1 : calcGain(p.distanceTiles)) : 0;
     node.volume = Math.max(0, Math.min(1, SOUNDBOARD_BASE_VOLUME * gain));

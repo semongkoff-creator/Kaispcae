@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { AvatarConfig, BodyShape, Accessory, Expression } from '@kaispace/shared';
 
-const STORAGE_KEY = 'virtualmeet-avatar-config';
+const STORAGE_KEY = 'kaispace-avatar-config';
 
 export const PALETTE = [
   '#ff6b6b', '#4ecdc4', '#ffe66d', '#a786df',

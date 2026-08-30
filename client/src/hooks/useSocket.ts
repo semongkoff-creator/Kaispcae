@@ -1,6 +1,8 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, RoomBroadcast, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveDoorAreaPasswordResultPayload, DoorAreaUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, ZoneQueueSessionClearedPayload, GuestJoinRequest, PlayerMovedPayload, PlayerStoppedPayload, DeskNoteData, RosterEntry, RosterUpdate } from '@kaispace/shared';
+import { SocketEvents, Avatar, AvatarConfig, ChatMessage, EmoteEvent, JumpEvent, NudgeEvent, RoomUpdatePayload, Notice, RoomBroadcast, FollowInfo, FollowerChangedPayload, TeleportRequest, FollowRequestPayload, FollowResultPayload, RemoteHelpRequestPayload, RemoteHelpResultPayload, RemoteHelpCredentialPayload, RemoteHelpEndPayload, SummonRequestPayload, SummonResultPayload, MediaType, MediaPayload, MapMediaObject, WhiteboardStroke, Channel, ChannelMessage, ChatReadEntry, DirectConversationStarted, TILE_SIZE, findAdjacentFreeTile, WorkMode, InteractivePasswordResultPayload, InteractiveDoorPasswordResultPayload, DoorUnlockedNoticePayload, InteractiveDoorAreaPasswordResultPayload, DoorAreaUnlockedNoticePayload, InteractiveChoiceResultPayload, InteractiveApiCallResultPayload, SoundboardSoundData, SoundboardPlayedPayload, SOUNDBOARD_DEFAULT_SOUNDS, MusicSessionState, JoinRequestPopupPayload, ZoneQueueRequestedPayload, ZoneQueueSessionActivePayload, ZoneQueueSessionClearedPayload, GuestJoinRequest, PlayerMovedPayload, PlayerStoppedPayload, DeskNoteData, RosterEntry, RosterUpdate, SeatClaimRequest } from '@kaispace/shared';
+import { serverTimeToClient, resetServerClock } from '@/stores/serverClock';
+import { snapRemotePosition, clearRemotePositions, pushRemoteSnapshot } from '@/stores/remotePositions';
 import { useGameStore } from '@/stores/gameStore';
 import { loadAvatarConfig } from '@/hooks/useAvatarConfig';
 import { notifyNewMessage, notifyNudge } from '@/services/browserNotifications';
@@ -42,6 +44,15 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   const lastEmitRef = useRef<number>(0);
   const moveSeqRef = useRef<number>(0);
   const lastRemoteMoveSeqRef = useRef<Map<string, number>>(new Map());
+  // Finding 1 (4th-round final review) — authUserName must be readable from
+  // inside the main effect below WITHOUT being one of its dependencies: a
+  // mid-session rename (now live via Game's authDisplayName prop) must not
+  // itself be treated as a reason to tear down and rebuild the whole socket
+  // connection (see that effect's own dependency array for the full story).
+  // This ref is what lets the effect read whatever the CURRENT name is at
+  // the moment it actually (re)connects for some OTHER real reason, without
+  // reacting to the name by itself.
+  const authUserNameRef = useRef(authUserName);
 
   const setConnected = useGameStore((s) => s.setConnected);
   const setLocalPlayerId = useGameStore((s) => s.setLocalPlayerId);
@@ -49,8 +60,6 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   const setLocalPlayer = useGameStore((s) => s.setLocalPlayer);
   const upsertPlayer = useGameStore((s) => s.upsertPlayer);
   const removePlayer = useGameStore((s) => s.removePlayer);
-  const setPlayerTarget = useGameStore((s) => s.setPlayerTarget);
-  const interpolatePlayers = useGameStore((s) => s.interpolatePlayers);
   const addZoneChatMessage = useGameStore((s) => s.addZoneChatMessage);
   const setSpeechBubble = useGameStore((s) => s.setSpeechBubble);
   const addEmote = useGameStore((s) => s.addEmote);
@@ -67,6 +76,14 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
   const removeMediaObject = useGameStore((s) => s.removeMediaObject);
   const appendWhiteboardStroke = useGameStore((s) => s.appendWhiteboardStroke);
   const clearWhiteboardStrokes = useGameStore((s) => s.clearWhiteboardStrokes);
+
+  // Keep authUserNameRef current every render — deliberately separate from
+  // the main effect below so this never needs authUserName in ITS OWN
+  // dependency array to matter; only the ref's .current value is ever read
+  // from inside that effect.
+  useEffect(() => {
+    authUserNameRef.current = authUserName;
+  }, [authUserName]);
 
   // Identify this player by their real authenticated account id whenever one
   // is available, so admin/ownership checks (which compare against
@@ -86,12 +103,15 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     setLocalUserId(uid);
   }, [authUserId]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      interpolatePlayers();
-    }, 16);
-    return () => clearInterval(interval);
-  }, [interpolatePlayers]);
+  // Interpolation is driven by GameCanvas's requestAnimationFrame loop now,
+  // not by a standalone 16ms setInterval. One clock instead of two racing
+  // ones, no work at all while the tab is backgrounded (rAF pauses,
+  // setInterval does not), and the sampled positions land in the same frame
+  // that draws them rather than up to a frame early or late.
+  //
+  // Remote position overlays are per-room state: leaving must not carry
+  // someone else's coordinates into the next room.
+  useEffect(() => () => clearRemotePositions(), []);
 
   useEffect(() => {
     // Reset for this room-join attempt — see gameStore.ts's doc comment on
@@ -134,16 +154,34 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       console.log('[socket] connected:', socket.id);
       setLocalPlayerId(socket.id!);
       setConnected(true);
+      // Skew samples from the previous connection describe a clock this
+      // session can no longer be compared against — a reconnect can land on
+      // a different server process entirely, and even the same one may have
+      // been restarted. Keeping them would offset every snapshot by a
+      // constant error for the rest of the session.
+      resetServerClock();
 
       const config = loadAvatarConfig();
       const uid = authUserId || localStorage.getItem('vm_userId') || socket.id;
-      const displayName = authUserName || config.name || 'Player';
+      const displayName = authUserNameRef.current || config.name || 'Player';
       socket.emit(SocketEvents.JOIN_ROOM, roomSlug, displayName, config, uid);
     });
 
     socket.on(SocketEvents.DISCONNECT, (reason) => {
       console.warn('[socket] disconnected — reason:', reason);
       setConnected(false);
+      // Final-review Fix 2 — remoteHelpHandler.ts's own DISCONNECT handler
+      // unconditionally destroys any active/pending remote-help session the
+      // instant EITHER party disconnects, and can only notify the OTHER
+      // party. So whichever side actually disconnected (portal travel calls
+      // socket.disconnect() on every roomSlug change — see this effect's own
+      // cleanup above; a network blip that auto-reconnects hits this too)
+      // must reconcile its own stale remote-help state here, since
+      // gameStore is a module-level singleton that outlives any one socket
+      // connection/reconnect and nothing else would ever clear it.
+      useGameStore.getState().setIncomingRemoteHelpRequest(null);
+      useGameStore.getState().setActiveRemoteHelp(null);
+      useGameStore.getState().setReceivedRemoteHelpCredential(null);
     });
 
     socket.on(SocketEvents.ROOM_STATE, (roomState) => {
@@ -184,7 +222,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
         if (lastSeq !== undefined && data.seq <= lastSeq) return;
         lastRemoteMoveSeqRef.current.set(data.id, data.seq);
       }
-      setPlayerTarget(data.id, data.x, data.y, receivedAt);
+      // Timestamp the snapshot by when the server SENT it, not when it
+      // happened to land here — see serverClock.ts. Arrival time carried the
+      // network's jitter into the interpolation buffer, which is what made
+      // remote avatars stutter on an otherwise healthy connection.
+      pushRemoteSnapshot(data.id, data.x, data.y, serverTimeToClient(data.serverTime, receivedAt));
       upsertPlayer({
         id: data.id,
         direction: data.direction as Avatar['direction'],
@@ -198,7 +240,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       const y = data.y;
       const hasPosition = typeof x === 'number' && typeof y === 'number';
       if (hasPosition) {
-        const receivedAt = Date.now();
+        const receivedAt = serverTimeToClient(data.serverTime, Date.now());
         const state = useGameStore.getState();
         if (data.id === state.localPlayerId) {
           setLocalPlayer({
@@ -210,7 +252,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
           });
           return;
         }
-        setPlayerTarget(data.id, x, y, receivedAt);
+        pushRemoteSnapshot(data.id, x, y, receivedAt);
       }
       upsertPlayer({
         id: data.id,
@@ -290,20 +332,63 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       } else {
         upsertPlayer({ id: data.id, spotlightActive: data.active || undefined } as Avatar);
       }
+      // "Someone got spotlighted" notice (SpotlightNotice.tsx) — only set on
+      // activation (going dark isn't newsworthy the same way), reusing
+      // playerRecords for the name since it's already keyed by player id
+      // for both self and others (see nudgerName above). Cleared right away
+      // on deactivation too, but only if THIS target is still the one
+      // showing — a newer spotlight may have already replaced it.
+      if (data.active) {
+        const spotlightName = state.playerRecords[data.id]?.name ?? 'Seseorang';
+        state.setSpotlightNotice({ id: data.id, name: spotlightName });
+      } else if (state.spotlightNotice?.id === data.id) {
+        state.setSpotlightNotice(null);
+      }
     });
 
     // QA #9/#10 — CEO/admin text broadcast toast, everyone in the room
     // (including the sender) gets this since the server emits via
     // io.to(room), same reasoning as SPOTLIGHT_CHANGED above.
     socket.on(SocketEvents.BROADCAST_RECEIVED, (data: RoomBroadcast) => {
-      useGameStore.getState().setRoomBroadcast(data);
+      useGameStore.getState().enqueueBroadcast(data);
     });
+
+    socket.on(SocketEvents.ZONE_PASSWORD_REQUIRED, (data: { zoneId: string; eventTitle: string }) => {
+      useGameStore.getState().setZonePasswordPrompt({ zoneId: data.zoneId, eventTitle: data.eventTitle });
+      useGameStore.getState().setZonePasswordResult(null);
+    });
+
+    socket.on(SocketEvents.ZONE_PASSWORD_RESULT, (data: { zoneId: string; correct: boolean }) => {
+      useGameStore.getState().setZonePasswordResult(data);
+      const currentPrompt = useGameStore.getState().zonePasswordPrompt;
+      if (data.correct && currentPrompt?.zoneId === data.zoneId) {
+        useGameStore.getState().setZonePasswordPrompt(null);
+        // The socket is only NOW unlocked server-side, and the ZONE_ENTER
+        // that triggered this prompt was refused — so zone chat/roster/music
+        // are still unsynced. Hand App.tsx a one-shot signal to re-emit
+        // ZONE_ENTER (enterZoneNow) rather than making the player walk out
+        // and back in. Set only inside this already-zone-matched branch, so a
+        // stale result for some other zone can never trigger a re-entry.
+        useGameStore.getState().setZonePasswordUnlockedZoneId(data.zoneId);
+      }
+    });
+
+    // Meeting auto-join — same lightweight activity-feed notice FORCE_PULLED
+    // already uses, not a toast (see FORCE_PULLED's own comment for why).
+    socket.on(SocketEvents.MEETING_AUTO_JOINED, (data: { title: string }) => {
+      useGameStore.getState().addActivity(`📅 Kamu ditarik ke meeting: "${data.title}"`);
+    });
+
 
     socket.on(SocketEvents.PLAYER_SAT, (data: { id: string; isSitting: boolean; x: number; y: number; direction: Avatar['direction']; seatFurnitureId?: string }) => {
       const state = useGameStore.getState();
       if (data.id === state.localPlayerId) return;
       // seatFurnitureId carried through so this peer's table membership (and
       // chair occupancy) is known locally — undefined once they stand.
+      // Sitting places the avatar exactly on the chair — snap the live
+      // overlay too, or it would keep drawing them at the last interpolated
+      // step until the buffer drains.
+      snapRemotePosition(data.id, data.x, data.y);
       upsertPlayer({ id: data.id, isSitting: data.isSitting, seatFurnitureId: data.seatFurnitureId, x: data.x, y: data.y, direction: data.direction, isMoving: false } as Avatar);
     });
 
@@ -365,10 +450,13 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
         return;
       }
       upsertPlayer({ id: data.id, x: data.x, y: data.y, direction: data.direction, isMoving: false } as Avatar);
-      // Clears any in-flight lerp target left over from a move right before
-      // the teleport — otherwise interpolatePlayers would still nudge this
-      // avatar toward the pre-teleport target for a frame or two.
-      setPlayerTarget(data.id, data.x, data.y);
+      // Drops the lerp buffer and places the avatar, in one call. This
+      // used to append a snapshot under a comment claiming it CLEARED the
+      // in-flight target — appending does the opposite, handing the
+      // interpolator one more point to glide toward, so a teleport rendered
+      // as a slide across the map: the very thing PLAYER_TELEPORTED exists
+      // to avoid.
+      snapRemotePosition(data.id, data.x, data.y);
     });
 
     // §5 — Summon, consent-gated. SUMMON_REQUEST is someone else asking to
@@ -447,6 +535,39 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
     socket.on(SocketEvents.FOLLOW_RESULT, (data: FollowResultPayload) => {
       useGameStore.getState().setFollowResult(data);
+    });
+
+    // Minta Bantuan Remote — same consent shape as Follow above.
+    socket.on(SocketEvents.REMOTE_HELP_INCOMING, (data: RemoteHelpRequestPayload) => {
+      useGameStore.getState().setIncomingRemoteHelpRequest(data);
+    });
+    socket.on(SocketEvents.REMOTE_HELP_RESULT, (data: RemoteHelpResultPayload) => {
+      useGameStore.getState().setRemoteHelpResult(data);
+      // Accepted means THIS client is the helper — the target's own client
+      // sets its half of activeRemoteHelp optimistically on accept-click
+      // instead (see App.tsx), same "clear pending state on my own action
+      // without waiting for a round trip" convention every other
+      // accept/decline flow in this codebase already uses.
+      if (data.accepted) useGameStore.getState().setActiveRemoteHelp({ role: 'helper', otherName: data.targetName });
+    });
+    socket.on(SocketEvents.REMOTE_HELP_CREDENTIAL, (data: RemoteHelpCredentialPayload) => {
+      useGameStore.getState().setReceivedRemoteHelpCredential({ rustdeskId: data.rustdeskId, password: data.password });
+    });
+    // Final-review Fix 3 — authoritative confirmation the credential
+    // actually reached the helper; the only signal RemoteHelpCredentialForm
+    // is allowed to treat as "Terkirim".
+    socket.on(SocketEvents.REMOTE_HELP_CREDENTIAL_ACK, () => {
+      useGameStore.getState().setRemoteHelpCredentialAcked(true);
+    });
+    socket.on(SocketEvents.REMOTE_HELP_END, (data: RemoteHelpEndPayload) => {
+      // addActivity is the same lightweight one-off notice mechanism this
+      // file already uses for INTERACTIVE_API_CALL_RESULT/
+      // DOOR_AREA_UNLOCKED_NOTICE — reused here so whoever did NOT click
+      // "Selesai" themselves still learns who ended the session, instead of
+      // the banner just silently vanishing.
+      useGameStore.getState().addActivity(`Sesi bantuan remote diakhiri oleh ${data.endedByName}.`);
+      useGameStore.getState().setActiveRemoteHelp(null);
+      useGameStore.getState().setReceivedRemoteHelpCredential(null);
     });
 
     // §6 — Add Media. MEDIA_LIST arrives once right after ROOM_STATE (this
@@ -569,6 +690,31 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
         ? `Kursi ini sudah diklaim ${byName} — kamu dipindah ke kursi kosong terdekat.`
         : `Kursi ini sudah diklaim ${byName}.`;
       useGameStore.getState().setSitNotice(msg);
+    });
+
+    // Someone wants to take over a seat WE own — see seatClaim.ts's
+    // SEAT_CLAIM_REQUEST handler. Rendered as an Izinkan/Tolak card
+    // (SeatClaimBar.tsx).
+    socket.on(SocketEvents.SEAT_CLAIM_REQUESTED, (data: SeatClaimRequest) => {
+      useGameStore.getState().addSeatClaimRequest(data);
+    });
+    // The owner decided on OUR request (or disconnected before deciding —
+    // seatClaim.ts's DISCONNECT handler resolves that the same way, as a
+    // denial, so this "menunggu" card never hangs forever).
+    socket.on(SocketEvents.SEAT_CLAIM_DECIDED, (data: { seatId: string; approved: boolean; byName?: string }) => {
+      const state = useGameStore.getState();
+      if (state.pendingSeatClaimRequest?.seatId === data.seatId) state.setPendingSeatClaimRequest(null);
+      state.setSitNotice(data.approved
+        ? `${data.byName ?? 'Pemilik'} mengizinkan kamu memakai kursi ini.`
+        : `${data.byName ?? 'Pemilik'} menolak permintaanmu.`);
+    });
+    // Our own pending request became moot from the OWNER's side of the
+    // card — the requester cancelled, disconnected, or the seat's actual
+    // owner never comes back into play here (this event only ever targets
+    // the OWNER's socket, dropping their card for a request that's no
+    // longer pending).
+    socket.on(SocketEvents.SEAT_CLAIM_REQUEST_CANCELLED, (data: { seatId: string; requesterUserId: string }) => {
+      useGameStore.getState().removeSeatClaimRequest(data.seatId, data.requesterUserId);
     });
 
     // Zone-private chat only now — the old whole-room broadcast case is
@@ -768,12 +914,24 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
         if (state.isNotifKindEnabled('nudge')) playNudgeSound(isMe);
         if (isMe) {
           const nudgerName = state.playerRecords[event.fromId]?.name ?? 'Seseorang';
-          // In-app toast — shows even while the tab is focused, which the
-          // OS-level notification below deliberately does not (it only fires
-          // when the tab is in the background, to avoid double-pinging someone
-          // already looking at the screen).
-          state.setNudgedBy(nudgerName);
-          if (state.isNotifKindEnabled('nudge')) notifyNudge(nudgerName);
+          if (state.isNotifKindEnabled('nudge')) {
+            if (document.visibilityState === 'visible') {
+              // Tab is already in view — a single bottom-right toast is
+              // enough (see InAppToastStack's own comment on why this isn't
+              // the earlier repeated/top-center version anymore).
+              state.pushInAppToast('👋', 'Disenggol!', `${nudgerName} menyenggolmu`, 'nudge');
+            } else {
+              // Backgrounded — a single native popup was easy to miss
+              // entirely, so this lands as a short burst instead of a
+              // one-shot alert (native notification + tab-title flash, see
+              // notifyNudge).
+              const NUDGE_BURST_COUNT = 3;
+              const NUDGE_BURST_INTERVAL_MS = 450;
+              for (let i = 0; i < NUDGE_BURST_COUNT; i++) {
+                setTimeout(() => notifyNudge(nudgerName), i * NUDGE_BURST_INTERVAL_MS);
+              }
+            }
+          }
         }
       }
     });
@@ -883,6 +1041,25 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // is shared across every tab of this origin.
     socket.on(SocketEvents.SESSION_TAKEN_OVER, () => {
       console.warn('[socket] session taken over by a newer tab/connection');
+      // Stop reconnecting, and stop it BEFORE anything else here.
+      //
+      // The server has already force-disconnected this socket, and socket.io
+      // reconnects by default — landing in the 'connect' handler above, which
+      // re-emits JOIN_ROOM on every connect, not just the first. That JOIN_ROOM
+      // then supersedes the connection that just took over from us, which
+      // reconnects and supersedes us straight back: a ping-pong between two
+      // tabs of one account, where EVERY round broadcasts a join and a leave to
+      // every other client in the room. Each of those makes all of them drop a
+      // player record, build a new one under a fresh socket id, fetch a profile
+      // photo, and tear down and rebuild a peer connection — so two tabs
+      // belonging to one person generated continuous churn for everyone, which
+      // is what the room was actually suffering from (constant
+      // "player joined/left" in every console, movement stuttering for people
+      // who were standing still).
+      //
+      // This socket has been replaced and is not meant to come back. Say so.
+      socket.io.reconnection(false);
+      socket.disconnect();
       useGameStore.getState().setSessionTakenOverNotice('Sesi ini diambil alih oleh tab atau perangkat lain.');
     });
 
@@ -956,7 +1133,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socket.on(SocketEvents.GUEST_JOIN_ADMITTED, () => {
       console.log('[socket] guest admitted — rejoining');
       const config = loadAvatarConfig();
-      socket.emit(SocketEvents.JOIN_ROOM, roomSlug, authUserName, config, authUserId);
+      socket.emit(SocketEvents.JOIN_ROOM, roomSlug, authUserNameRef.current, config, authUserId);
       useGameStore.getState().setGuestWaitState('admitted');
     });
 
@@ -1014,6 +1191,11 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     // Bug 1 — server-initiated kick when a NEW login supersedes this live
     // socket (emitted just before the forced disconnect, see lib/sessionKick).
     socket.on('SESSION_SUPERSEDED', (d: { message?: string }) => {
+      // Same reasoning as SESSION_TAKEN_OVER above: this session is finished,
+      // so retrying the handshake forever achieves nothing except noise (here
+      // the token is cleared too, so every retry would be rejected anyway).
+      socket.io.reconnection(false);
+      socket.disconnect();
       window.dispatchEvent(new CustomEvent('vm-session-superseded', { detail: d?.message }));
     });
 
@@ -1056,7 +1238,7 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
       socket.removeAllListeners();
       socket.disconnect();
     };
-  }, [authUserName, roomSlug, authUserId, guestToken]);
+  }, [roomSlug, authUserId, guestToken]);
 
   const emitMove = useCallback(
     (x: number, y: number, direction: string, isRunning?: boolean) => {
@@ -1097,6 +1279,10 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
   const emitSpotlight = useCallback((targetUserId: string, active: boolean) => {
     socketRef.current?.emit(SocketEvents.SPOTLIGHT_TOGGLE, { targetUserId, active });
+  }, []);
+
+  const emitZonePasswordSubmit = useCallback((zoneId: string, password: string) => {
+    socketRef.current?.emit(SocketEvents.ZONE_PASSWORD_SUBMIT, { zoneId, password });
   }, []);
 
   const emitBroadcastSend = useCallback((text: string) => {
@@ -1157,6 +1343,23 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
 
   const emitReleaseSeat = useCallback((seatId: string) => {
     socketRef.current?.emit(SocketEvents.RELEASE_SEAT, { seatId });
+  }, []);
+
+  // Asking the current OWNER for a seat instead of letting CLAIM_SEAT
+  // silently redirect to the nearest free desk — see seatClaim.ts's
+  // SEAT_CLAIM_REQUEST handler. GameCanvas.tsx sets pendingSeatClaimRequest
+  // locally right after calling this, same optimistic-local-state
+  // convention as useZoneLock.ts's knock().
+  const emitSeatClaimRequest = useCallback((seatId: string) => {
+    socketRef.current?.emit(SocketEvents.SEAT_CLAIM_REQUEST, { seatId });
+  }, []);
+
+  const emitSeatClaimDecide = useCallback((seatId: string, playerId: string, approve: boolean) => {
+    socketRef.current?.emit(SocketEvents.SEAT_CLAIM_DECIDE, { seatId, playerId, approve });
+  }, []);
+
+  const emitSeatClaimRequestCancel = useCallback((seatId: string) => {
+    socketRef.current?.emit(SocketEvents.SEAT_CLAIM_REQUEST_CANCEL, { seatId });
   }, []);
 
   // Fitur 15B — Password prompt. The attempt travels to the server for
@@ -1377,6 +1580,22 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.FOLLOW_RESPOND, { requestId, accept });
   }, []);
 
+  const emitRemoteHelpRequest = useCallback((targetUserId: string) => {
+    socketRef.current?.emit(SocketEvents.REMOTE_HELP_REQUEST, { targetUserId });
+  }, []);
+
+  const emitRemoteHelpRespond = useCallback((requestId: string, accept: boolean) => {
+    socketRef.current?.emit(SocketEvents.REMOTE_HELP_RESPOND, { requestId, accept });
+  }, []);
+
+  const emitRemoteHelpCredential = useCallback((rustdeskId: string, password: string) => {
+    socketRef.current?.emit(SocketEvents.REMOTE_HELP_CREDENTIAL, { rustdeskId, password });
+  }, []);
+
+  const emitRemoteHelpEnd = useCallback(() => {
+    socketRef.current?.emit(SocketEvents.REMOTE_HELP_END);
+  }, []);
+
   const emitFollowUnfollow = useCallback(() => {
     socketRef.current?.emit(SocketEvents.FOLLOW_UNFOLLOW);
   }, []);
@@ -1409,5 +1628,5 @@ export function useSocket(authUserName: string = '', roomSlug: string = 'main-of
     socketRef.current?.emit(SocketEvents.RECORDING_FINALIZE, { recordingId, fileUrl });
   }, []);
 
-  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitRoomDelete, emitKick, emitForceMute, emitDoorOverride, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend };
+  return { emitMove, emitStop, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, emitSeatClaimRequest, emitSeatClaimDecide, emitSeatClaimRequestCancel, socketRef, emitChat, emitBubble, emitEmote, emitJump, emitNudge, emitZoneEnter, emitZoneExit, emitRoomUpdate, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitRoomDelete, emitKick, emitForceMute, emitDoorOverride, emitGuestJoinDecide, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitRemoteHelpRequest, emitRemoteHelpRespond, emitRemoteHelpCredential, emitRemoteHelpEnd, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitZonePasswordSubmit };
 }

@@ -15,12 +15,20 @@ function test(name: string, fn: () => void) {
 }
 
 test('KaiSpace favicon asset is wired into the document head', () => {
-  assert.equal(existsSync('client/public/assets/img/favico.png'), true);
+  // favicon-kaispace.png, the current mark. The tab icon and the browser
+  // notification icon both point at it, and they have to agree — a
+  // notification carrying a different logo than the tab it came from reads
+  // as a different product.
+  assert.equal(existsSync('client/public/assets/img/favicon-kaispace.png'), true);
 
   const html = readFileSync('client/index.html', 'utf8');
 
   assert.match(html, /rel="icon"/);
-  assert.match(html, /href="\/assets\/img\/favico\.png"/);
+  assert.match(html, /href="\/assets\/img\/favicon-kaispace\.png"/);
+
+  const notifications = readFileSync('client/src/services/browserNotifications.ts', 'utf8');
+  assert.doesNotMatch(notifications, /favico\.png/, 'notifications must use the same mark as the tab');
+  assert.match(notifications, /favicon-kaispace\.png/);
 });
 
 test('login page uses the KaiSpace favicon mark, not a legacy horizontal logo', () => {

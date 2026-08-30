@@ -24,6 +24,27 @@ export default defineConfig(({ mode }) => {
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split the libraries that never change out of the app chunk. Without
+        // this every deploy — even a one-line fix — invalidated a single
+        // ~1.2MB file, so returning users re-downloaded React and socket.io
+        // along with the change. Split out, those stay in the browser cache
+        // across deploys and only the app code is re-fetched.
+        //
+        // Deliberately coarse. Splitting per-package produces dozens of tiny
+        // requests and, worse, lets Rollup hoist shared internals into
+        // additional chunks whose hashes churn anyway — which is the opposite
+        // of the point.
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-realtime': ['socket.io-client'],
+          'vendor-datetime': ['luxon'],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     // Listen on all interfaces (0.0.0.0) so other devices on the same LAN can

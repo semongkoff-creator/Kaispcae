@@ -17,15 +17,17 @@ import { registerSeatClaimHandlers } from './socket/seatClaim';
 import { registerFurnitureHandlers } from './socket/furnitureHandler';
 import { registerNoteHandlers } from './socket/noteHandler';
 import { registerFollowHandlers } from './socket/followHandler';
+import { registerRemoteHelpHandlers } from './socket/remoteHelpHandler';
 import { registerMediaHandlers, startMediaExpirySweep } from './socket/mediaHandler';
 import { registerRecordingHandlers } from './socket/recordingHandler';
-import { getRedis } from './store/roomStore';
+import { getRedis, clearAllPlayerPresence } from './store/roomStore';
 import { getPrisma } from './lib/prisma';
 import { loadConfig, getConfig } from './config';
 import { rateLimit } from './middleware/rateLimit';
 import { verifyTokenClaims, verifyGuestTokenClaims, SESSION_SUPERSEDED, isInviteRevoked, GUEST_LINK_REVOKED } from './middleware/auth';
 import { setSessionKickIo } from './lib/sessionKick';
 import authRoutes from './routes/auth';
+import livekitRoutes from './routes/livekit';
 import roomRoutes, { setIo } from './routes/rooms';
 import roomMemberRoutes, { setMembersIo } from './routes/roomMembers';
 import guestInviteRoutes, { setIo as setGuestInviteIo } from './routes/guestInvite';
@@ -37,6 +39,7 @@ import chatRoutes, { setIo as setChatIo } from './routes/chat';
 import adminRoutes, { setAdminIo } from './routes/admin';
 import attendanceRoutes from './routes/attendance';
 import attendanceAdminRoutes from './routes/attendanceAdmin';
+import roomParticipantsRoutes from './routes/roomParticipants';
 import calendarRoutes, { setCalendarIo } from './routes/calendar';
 import meetingRoomRoutes from './routes/meetingRooms';
 import userRoutes, { setUsersIo } from './routes/users';
@@ -45,6 +48,7 @@ import operatorRoutes from './routes/operator';
 import analyticsRoutes from './routes/analytics';
 import csRoutes from './routes/cs';
 import { startReminderSweep } from './socket/reminderSweep';
+import { startMeetingAutoJoinSweep } from './socket/meetingAutoJoinSweep';
 import { startAttendanceSweep } from './socket/attendanceSweep';
 import { startQueueSweep } from './socket/queueSweep';
 import { startAnalyticsSweep } from './socket/analyticsSweep';
@@ -184,18 +188,21 @@ io.use(async (socket, next) => {
       // just stays undefined in that case, and every org-scoped check below
       // is required to treat that as "reject", not "skip the check".
       let organizationId: string | undefined;
+      let restrictedToRoomId: string | null | undefined;
       try {
-        const user = await getPrisma().user.findUnique({ where: { id: claims.userId }, select: { currentSessionId: true, organizationId: true } });
+        const user = await getPrisma().user.findUnique({ where: { id: claims.userId }, select: { currentSessionId: true, organizationId: true, restrictedToRoomId: true } });
         if (user?.currentSessionId && claims.sessionId !== user.currentSessionId) {
           return next(new Error(SESSION_SUPERSEDED));
         }
         organizationId = user?.organizationId;
+        restrictedToRoomId = user?.restrictedToRoomId;
       } catch (e) {
         console.error('[auth] socket session/org lookup error:', e);
       }
       socket.data.userId = claims.userId;
       socket.data.sessionId = claims.sessionId;
       socket.data.organizationId = organizationId;
+      socket.data.restrictedToRoomId = restrictedToRoomId;
     }
   }
   next();
@@ -253,9 +260,11 @@ app.use('/api', userRoutes);
 // only /api/ is proxied to the backend).
 app.use('/api', googleRoutes);
 app.use('/api', operatorRoutes);
+app.use('/api', livekitRoutes);
 app.use('/api', adminRoutes);
 app.use('/api', attendanceRoutes);
 app.use('/api', attendanceAdminRoutes);
+app.use('/api', roomParticipantsRoutes);
 app.use('/api', calendarRoutes);
 app.use('/api', meetingRoomRoutes);
 app.use('/api', analyticsRoutes);
@@ -266,6 +275,13 @@ async function start() {
   const redis = await getRedis();
   console.log(`[server] ${redis ? 'Redis connected' : 'Redis unavailable — in-memory mode'}`);
   console.log(`[server] environment: ${config.NODE_ENV}`);
+
+  // Player presence — see clearAllPlayerPresence's own doc comment: a
+  // redeploy leaves ghost "online" entries in Redis for everyone connected
+  // at that instant, since their 'disconnect' handler never runs. Must
+  // finish before the first socket can possibly JOIN_ROOM, so this runs
+  // before io.on(CONNECT) registration below.
+  await clearAllPlayerPresence();
 
   io.on(SocketEvents.CONNECT, (socket) => {
     console.log(`[server] player connected: ${socket.id}`);
@@ -307,6 +323,7 @@ async function start() {
       registerFurnitureHandlers(io, socket);
       registerNoteHandlers(io, socket);
       registerFollowHandlers(io, socket);
+      registerRemoteHelpHandlers(io, socket);
       registerMediaHandlers(io, socket);
       registerRecordingHandlers(io, socket);
     }
@@ -314,6 +331,7 @@ async function start() {
 
   startMediaExpirySweep(io);
   startReminderSweep(io);
+  startMeetingAutoJoinSweep(io);
   startAttendanceSweep(io);
   startQueueSweep(io);
   startAnalyticsSweep(io);

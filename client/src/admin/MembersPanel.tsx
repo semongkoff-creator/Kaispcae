@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { PersonPlusFill } from 'react-bootstrap-icons';
-import { WORKSPACE_ROLE_LABELS, WorkspaceRole } from '@kaispace/shared';
+import { WORKSPACE_ROLE_LABELS, WorkspaceRole, EMPLOYMENT_TYPE_LABELS, EmploymentType } from '@kaispace/shared';
 import { CurrentUser } from '@/hooks/useCurrentUser';
 import { adminApi, AdminMember, AdminDepartment } from './api';
 import { InviteMemberModal } from './InviteMemberModal';
@@ -70,6 +70,7 @@ export function MembersPanel({ currentUser }: { currentUser: CurrentUser }) {
             <tr className="text-left text-gray-400 border-b border-gray-100 dark:border-gray-700">
               <th className="py-2 pr-3 font-medium">Nama</th>
               <th className="py-2 pr-3 font-medium">Peran</th>
+              <th className="py-2 pr-3 font-medium">Status Kerja</th>
               <th className="py-2 pr-3 font-medium">Departemen</th>
               <th className="py-2 pr-3 font-medium">Manajer</th>
               <th className="py-2 pr-3 font-medium">Bergabung</th>
@@ -104,6 +105,19 @@ export function MembersPanel({ currentUser }: { currentUser: CurrentUser }) {
                     >
                       {(['admin', 'member'] as WorkspaceRole[]).map((r) => (
                         <option key={r} value={r}>{WORKSPACE_ROLE_LABELS[r]}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="py-2 pr-3">
+                    <select
+                      value={m.employmentType}
+                      disabled={busyId === m.id}
+                      onChange={(e) => patch(m.id, { employmentType: e.target.value as EmploymentType })}
+                      aria-label={`Status kerja ${m.displayName}`}
+                      className="bg-gray-50 dark:bg-gray-700 rounded px-1.5 py-1 outline-none cursor-pointer text-gray-800 dark:text-gray-100"
+                    >
+                      {(['fulltime', 'freelance'] as EmploymentType[]).map((t) => (
+                        <option key={t} value={t}>{EMPLOYMENT_TYPE_LABELS[t]}</option>
                       ))}
                     </select>
                   </td>

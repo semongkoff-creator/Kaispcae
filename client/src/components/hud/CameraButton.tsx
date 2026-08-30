@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
-import { CameraVideoFill, CameraVideoOffFill } from 'react-bootstrap-icons';
+import { CameraVideo, CameraVideoOffFill } from 'react-bootstrap-icons';
 import { isTypingTarget } from '@/utils/hotkeys';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { DeviceCaret } from './DeviceCaret';
 
 interface CameraButtonProps {
   enabled: boolean;
@@ -24,22 +25,28 @@ export function CameraButton({ enabled, onToggle }: CameraButtonProps) {
   }, [onToggle]);
 
   return (
-    <Tooltip
-      label={`Kamera (V) — ${enabled ? 'Aktif' : 'Mati'}`}
-      detail="Nyalakan/matikan kameramu. Video hanya terlihat oleh orang yang sedang satu zone/meeting denganmu."
-    >
-      <button
-        onClick={onToggle}
-        // Same active-state convention as MicButton: camera on = solid purple
-        // (the capability is actively broadcasting), off = glass + red icon.
-        className={`flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
-          enabled
-            ? 'bg-purple-600 border-purple-500 shadow-purple-500/30'
-            : 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
-        }`}
+    <div className="flex items-center">
+      <Tooltip
+        label={`Kamera (V) — ${enabled ? 'Aktif' : 'Mati'}`}
+        detail="Nyalakan/matikan kameramu. Video hanya terlihat oleh orang yang sedang satu zone/meeting denganmu."
       >
-        {enabled ? <CameraVideoFill className="text-white" size={16} /> : <CameraVideoOffFill className="text-red-500" size={16} />}
-      </button>
-    </Tooltip>
+        <button
+          onClick={onToggle}
+          // Flat/borderless toolbar restyle (see MicButton's own comment).
+          className="flex items-center justify-center w-8 h-8 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+        >
+          {/* CameraVideo (outline) instead of the camera.svg asset — see
+              MicButton's own comment on why this bar switched back to
+              react-icons outline glyphs. Same silhouette family as the
+              existing "off" icon (CameraVideoOffFill), just outline instead
+              of filled, colored to the asset pack's own gray rather than
+              react-icons' default. No outline "camera off" glyph swap
+              needed — off is meant to stand out, so it keeps its filled red
+              look unchanged. */}
+          {enabled ? <CameraVideo size={14} className="text-[#6E6D72]" /> : <CameraVideoOffFill className="text-red-500" size={14} />}
+        </button>
+      </Tooltip>
+      <DeviceCaret kind="camera" label="Kamera" />
+    </div>
   );
 }

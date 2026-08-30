@@ -52,7 +52,18 @@ export function registerNoteHandlers(io: Server, socket: Socket) {
       const dbRoom = await prisma.room.findUnique({ where: { slug: room }, select: { id: true } });
       if (!dbRoom) return;
 
-      const authorName = getPlayerName(socket.id);
+      // specs/2026-08-21-room-entry-name-prompt-design.md — final-review
+      // fix (round 2): authorName is a persisted, DB-visible attribution
+      // read by everyone who ever sees this note, forever — it must be the
+      // real account name, not whatever room-entry nametag the author
+      // happened to be using at that moment (getPlayerName(socket.id) now
+      // returns that room-entry name, since JOIN_ROOM's displayName carries
+      // it — see App.tsx's authDisplayName). Falls back to getPlayerName
+      // only if the DB lookup somehow fails (e.g. the user row vanished
+      // mid-request) — same graceful-degradation posture as other
+      // best-effort name resolutions in this codebase.
+      const authorUser = await prisma.user.findUnique({ where: { id: uid }, select: { displayName: true } });
+      const authorName = authorUser?.displayName || getPlayerName(socket.id);
       const note = await prisma.deskNote.create({
         data: { roomId: dbRoom.id, x: Math.round(data.x), y: Math.round(data.y), authorUserId: uid, authorName, text },
       });

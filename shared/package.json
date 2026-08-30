@@ -2,6 +2,7 @@
   "name": "@kaispace/shared",
   "version": "0.0.1",
   "private": true,
+  "sideEffects": false,
   "type": "module",
   "main": "./types/index.ts",
   "types": "./types/index.ts",

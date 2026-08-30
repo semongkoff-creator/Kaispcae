@@ -42,7 +42,7 @@ admin.get('/admin/members', authenticateToken, requireWorkspace('workspace:manag
       // account in the deployment to any workspace admin regardless of org.
       where: { organizationId: req.organizationId },
       select: {
-        id: true, email: true, displayName: true, workspaceRole: true, timezone: true,
+        id: true, email: true, displayName: true, workspaceRole: true, employmentType: true, timezone: true,
         active: true, createdAt: true, memberVerifiedAt: true,
         department: { select: { id: true, name: true } },
         manager: { select: { id: true, displayName: true } },
@@ -56,7 +56,7 @@ admin.get('/admin/members', authenticateToken, requireWorkspace('workspace:manag
   }
 });
 
-// Change workspace role / department / manager / active.
+// Change workspace role / employment type / department / manager / active.
 admin.patch('/admin/members/:userId', authenticateToken, requireWorkspace('workspace:manageMembers'), adminMutationLimit, async (req: AuthRequest, res: Response) => {
   if (!req.organizationId) return res.status(401).json({ error: 'Authentication required' });
   try {
@@ -67,7 +67,7 @@ admin.patch('/admin/members/:userId', authenticateToken, requireWorkspace('works
     // returns null (→ 404) for a cross-org id, same as "doesn't exist".
     const target = await findUserInOrg(prisma, req.params.userId, req.organizationId, {
       id: true, workspaceRole: true, active: true, departmentId: true, managerId: true, displayName: true,
-      memberVerifiedAt: true,
+      memberVerifiedAt: true, employmentType: true,
     });
     if (!target) return res.status(404).json({ error: 'Pengguna tidak ditemukan' });
 
@@ -90,6 +90,16 @@ admin.patch('/admin/members/:userId', authenticateToken, requireWorkspace('works
       }
       before.workspaceRole = target.workspaceRole; after.workspaceRole = role;
       data.workspaceRole = role;
+    }
+    if (req.body?.employmentType !== undefined) {
+      const employmentType = String(req.body.employmentType);
+      if (employmentType !== 'fulltime' && employmentType !== 'freelance') {
+        return res.status(400).json({ error: 'Status kerja tidak valid' });
+      }
+      // Pure label — no admin-lockout guard needed (unlike workspaceRole
+      // above), since this carries no permission weight to lock anyone out of.
+      before.employmentType = target.employmentType; after.employmentType = employmentType;
+      data.employmentType = employmentType;
     }
     if (req.body?.active !== undefined) {
       const active = Boolean(req.body.active);

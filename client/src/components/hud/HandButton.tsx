@@ -33,11 +33,11 @@ export function HandButton({ raised, onToggle }: HandButtonProps) {
     >
       <button
         onClick={onToggle}
-        className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
-          raised
-            ? 'bg-amber-400 border-amber-300 shadow-amber-400/30'
-            : 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
-        }`}
+        // Flat/borderless toolbar restyle (see MicButton's own comment) —
+        // the amber background pill is gone; "raised" is now carried by the
+        // icon's own color + bounce (matching how Mic carries muted/
+        // speaking via icon color alone, not a ring or fill any more).
+        className="relative flex items-center justify-center w-8 h-8 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
       >
         {/* User-supplied icon (checked react-bootstrap-icons' full hand set
             previously — HandIndex*, HandThumbs*, PersonRaisedHand — none read
@@ -57,7 +57,7 @@ export function HandButton({ raised, onToggle }: HandButtonProps) {
         <span
           role="img"
           aria-label=""
-          className={`w-4 h-4 ${raised ? 'bg-white animate-bounce' : 'bg-purple-700 dark:bg-purple-300'}`}
+          className={`w-4 h-4 ${raised ? 'bg-amber-500 animate-bounce' : 'bg-[#6E6D72]'}`}
           style={{
             maskImage: 'url(/assets/img/raise-hand-icon.png)',
             maskSize: 'contain',

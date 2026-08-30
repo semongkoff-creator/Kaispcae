@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
-import { Clipboard, Link45deg, PersonWalking, X, MagnetFill, HandIndexThumbFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill } from 'react-bootstrap-icons';
-import { AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents } from '@kaispace/shared';
+import { Clipboard, PersonWalking, X, MagnetFill, PersonPlusFill, DoorOpenFill, VolumeUpFill, BriefcaseFill, Display, StarFill } from 'react-bootstrap-icons';
+import { Avatar, AvatarConfig, EmoteType, TileType, MAP_WIDTH, TILE_SIZE, Furniture, roleAtLeast, hasFeatureAccess, MediaType, MediaPayload, CONSENT_REQUEST_TIMEOUT_MS, WorkMode, SocketEvents, ProximityPlayer, doesRectOverlapImpassableArea, movementHitboxBounds, DOOR_HITBOX_HALF_PX } from '@kaispace/shared';
 import { PALETTE_BY_ID } from './data/themeAssets';
 import type { ManualStatus } from './data/presence';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -8,10 +8,11 @@ import { ConnectionIndicator } from './components/ui/ConnectionIndicator';
 import { Tooltip } from './components/ui/Tooltip';
 import { MapZoomControl } from './components/ui/MapZoomControl';
 import { MobileControls } from './components/hud/MobileControls';
-import { NameModal } from './components/ui/NameModal';
 import { AvatarSetup } from './components/avatar/AvatarSetup';
+import { NameModal } from './components/ui/NameModal';
 import { VideoGrid } from './components/ui/VideoGrid';
 import { MeetingView } from './components/ui/MeetingView';
+import { RecordAreaPanel } from './components/ui/RecordAreaPanel';
 // QA (Kompat checklist item 7) — same reasoning as RoomEditorPage above:
 // only a workspace admin ever opens this (AdminConsole itself re-gates on
 // workspaceRole, see its own file), so splitting it out means the far more
@@ -25,17 +26,15 @@ const OperatorConsole = lazy(() => import('./operator/OperatorConsole').then((m)
 // doc comment), so it's split out for the same "don't pay for code you
 // never load" reason as AdminConsole above, just for a much larger audience.
 const MyAnalyticsPanel = lazy(() => import('./admin/MyAnalyticsPanel').then((m) => ({ default: m.MyAnalyticsPanel })));
-import { CalendarApp } from './components/Calendar/CalendarApp';
-import { AttendanceApp } from './components/Attendance/AttendanceApp';
 import { toCurrentUser, type CurrentUser } from './hooks/useCurrentUser';
 import { isTypingTarget, shouldIgnoreRoomHotkey } from './utils/hotkeys';
 import { useZoneLock } from './hooks/useZoneLock';
 import { ZoneLockBar } from './components/ui/ZoneLockBar';
+import { InAppToastStack } from './components/ui/InAppToastStack';
 import { MiniMode, isMiniModeSupported, openMiniModeWindow } from './components/ui/MiniMode';
 import { ChatPanel } from './components/ui/ChatPanel';
 import { setProfileName } from './hooks/useProfiles';
 import { JoinGate, JoinRequestPanel } from './components/ui/JoinApproval';
-import { MessengerApp } from './components/Messenger/MessengerApp';
 import { NoticeBanner } from './components/ui/NoticeBanner';
 import { EmoteWheel } from './components/ui/EmoteWheel';
 import { BookingForm } from './components/ui/BookingForm';
@@ -52,6 +51,17 @@ import { TeleportPanel } from './components/ui/TeleportPanel';
 // TESTING.md's "no code-splitting" gap). Splitting it into its own chunk
 // means only whoever actually opens the editor pays that cost.
 const RoomEditorPage = lazy(() => import('./pages/RoomEditorPage').then((m) => ({ default: m.RoomEditorPage })));
+
+// Panels reached from the sidebar, never on the path to rendering the room
+// itself — so they have no business being in the chunk that has to download
+// before anything appears. Each is already conditionally rendered, which
+// makes lazy() a drop-in. Their dependency trees are the real prize:
+// CalendarApp pulls in rrule, and the calendar/attendance surfaces together
+// account for most of this app's luxon usage.
+const CalendarApp = lazy(() => import('./components/Calendar/CalendarApp').then((m) => ({ default: m.CalendarApp })));
+const AttendanceApp = lazy(() => import('./components/Attendance/AttendanceApp').then((m) => ({ default: m.AttendanceApp })));
+const MessengerApp = lazy(() => import('./components/Messenger/MessengerApp').then((m) => ({ default: m.MessengerApp })));
+
 import { useBgm } from './hooks/useBgm';
 import { AddMediaPanel } from './components/ui/AddMediaPanel';
 import { MediaViewerModal } from './components/ui/MediaViewerModal';
@@ -61,24 +71,25 @@ import { TutorialModal } from './components/ui/TutorialModal';
 import { UserGuidePanel } from './components/ui/UserGuidePanel';
 import { StatusPickModal } from './components/ui/StatusPickModal';
 import { MemberListPanel } from './components/ui/MemberListPanel';
-import { ParticipantPanel } from './components/ui/ParticipantPanel';
+import { PlayerCard } from './components/ui/PlayerCard';
 import { ReportUserModal } from './components/ui/ReportUserModal';
 import { GlobalModal } from './components/ui/GlobalModal';
-import { SoundboardPanel } from './components/ui/SoundboardPanel';
 import { MusicPlayerWidget } from './components/ui/MusicPlayerWidget';
 import { AwayReasonModal } from './components/ui/AwayReasonModal';
 import { ActivityFeed } from './components/ui/ActivityFeed';
 import { PendingRequestToast } from './components/ui/PendingRequestToast';
+import { SpotlightNotice } from './components/ui/SpotlightNotice';
+import { RemoteHelpBanner } from './components/ui/RemoteHelpBanner';
+import { RemoteHelpCredentialForm } from './components/ui/RemoteHelpCredentialForm';
+import { RustdeskSetupHint } from './components/ui/RustdeskSetupHint';
 import { Sidebar } from './components/ui/Sidebar';
 import { MicButton } from './components/hud/MicButton';
 import { HandButton } from './components/hud/HandButton';
 import { playHandRaiseSound, updateSoundboardVolumes } from './services/soundEffects';
 import { CameraButton } from './components/hud/CameraButton';
-import { DeviceMenu } from './components/hud/DeviceMenu';
 import { ScreenShareButton } from './components/hud/ScreenShareButton';
 import { EmojiButton } from './components/hud/EmojiButton';
-import { ParticipantsToggleButton } from './components/hud/ParticipantsToggleButton';
-import { LeaveButton } from './components/hud/LeaveButton';
+import { AttachmentMenuButton } from './components/ui/AttachmentMenuButton';
 import { Lobby } from './pages/Lobby';
 import { LoginPage } from './pages/LoginPage';
 import { GuestEntry, GuestSession } from './pages/GuestEntry';
@@ -86,12 +97,23 @@ import { JoinOrgInvite } from './pages/JoinOrgInvite';
 import { useAuth } from './hooks/useAuth';
 import { useTheme, Theme } from './hooks/useTheme';
 import { api, UserPreferences } from './services/api';
-import { createDefaultRoom, isTileBlocked } from './utils/createDefaultRoom';
+import { createDefaultRoom, isTileBlocked, isDoorTile } from './utils/createDefaultRoom';
+import { ZoneWatcher } from './components/ZoneWatcher';
+import { AnnouncementTicker } from './components/ui/AnnouncementTicker';
+import { BroadcastComposer } from './components/ui/BroadcastComposer';
+import { livePos } from '@/stores/livePosition';
+import { setProximitySnapshot, notifyProximityChanged, interpolateRemotePositions } from '@/stores/remotePositions';
+
+// How often proximity is recomputed. Crossing one tile takes ~170ms at
+// walking speed and ~116ms running, so 200ms still catches every
+// boundary well before it matters for audio or video.
+const PROXIMITY_TICK_MS = 200;
+import { livekitService } from '@/services/livekitService';
 import { useGameStore } from './stores/gameStore';
 import { showAlert, showConfirm, showPrompt } from '@/stores/modalStore';
 import { useSocket } from './hooks/useSocket';
 import { useChannelChat } from './hooks/useChannelChat';
-import { useProximity, findZoneAt } from './hooks/useProximity';
+import { computeProximity, proximityUnchanged } from './hooks/useProximity';
 import { useWebRTC } from './hooks/useWebRTC';
 import { useScreenRecording } from './hooks/useScreenRecording';
 import { webrtcService } from './services/webrtcService';
@@ -151,10 +173,10 @@ const AFK_IDLE_MS = 120000; // 2 minutes
 // picked once per trigger (see handleInteractiveTrigger below).
 const WORD_BALLOON_RANDOM_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#ddd6fe'];
 
-function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest, onUpdatePreferences }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean; onUpdatePreferences?: (patch: UserPreferences) => void }) {
+function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, authUserId, currentUser, theme, onToggleTheme, guestToken, isGuest, onUpdatePreferences, onDisplayNameChange, onFullNameChange }: { roomSlug: string; onLeave: () => void; onLogout: () => void; onPortalTravel: (slug: string) => void; authDisplayName: string; authUserId: string; currentUser: CurrentUser; theme: Theme; onToggleTheme: () => void; guestToken?: string; isGuest?: boolean; onUpdatePreferences?: (patch: UserPreferences) => void; onDisplayNameChange?: (name: string) => void; onFullNameChange?: (name: string) => void }) {
   const playerName = useGameStore((s) => s.localPlayer.name);
-  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
-  const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead });
+  const { emitMove, emitStop, emitJump, emitNudge, emitAvatarUpdate, emitWorkMode, emitTeleportTo, emitPlayerHand, emitPlayerMic, emitPlayerHidden, emitSit, emitFurnitureAssign, emitFurnitureUnassign, emitNoteAdd, emitNoteEdit, emitNoteDelete, emitRosterListRequest, emitClaimSeat, emitReleaseSeat, emitSeatClaimRequest, emitSeatClaimDecide, emitSeatClaimRequestCancel, socketRef, emitChat, emitBubble, emitEmote, emitZoneEnter, emitZoneExit, emitAdminGrant, emitAdminRevoke, emitStaffGrant, emitStaffRevoke, emitCeoGrant, emitCeoRevoke, emitKick, emitForceMute, emitDoorOverride, emitNoticePin, emitNoticeUnpin, emitFollowRequest, emitFollowRespond, emitFollowUnfollow, emitRemoteHelpRequest, emitRemoteHelpRespond, emitRemoteHelpCredential, emitRemoteHelpEnd, emitTeleportRequest, emitSummonUser, emitSummonRespond, emitForcePull, emitSlap, emitMediaAdd, emitMediaRemove, emitWhiteboardStroke, emitWhiteboardClear, emitRecordingStart, emitRecordingStop, emitRecordingFinalize, emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead, emitInteractivePasswordCheck, emitInteractiveChoiceCheck, emitInteractiveApiCall, emitInteractiveChangeObject, emitInteractiveDoorPasswordCheck, emitInteractiveDoorAreaPasswordCheck, emitSoundboardPlay, emitSpotlight, emitBroadcastSend, emitGuestJoinDecide, emitZonePasswordSubmit } = useSocket(authDisplayName, roomSlug, authUserId, guestToken);
+  const channelChat = useChannelChat(roomSlug, { emitChannelJoin, emitChannelLeave, emitChannelMessageSend, emitDmJoin, emitDmLeave, emitDmMessageSend, emitChannelTyping, emitDmTyping, emitDeleteMessage, emitEditMessage, emitPinMessage, emitMarkRead }, currentUser.name);
   // ZEP-style User Guide — Sidebar's "Panduan" row (Room Features menu).
   // Independent of MainApp's own first-run TutorialModal gate (shown before
   // <Game> ever mounts, for new accounts/guests) — that one is untouched,
@@ -193,9 +215,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     mediaError,
     screenShareError,
     failedPeers,
+    screenStalledPeers,
     setManualVolume,
     destroy,
-  } = useWebRTC({ socketRef });
+    getLocalStream,
+    getScreenStream,
+  } = useWebRTC({ socketRef, roomSlug });
 
   // Remote video streams
   const [remoteStreams] = useState(() => new Map<string, MediaStream>());
@@ -224,6 +249,70 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         setPlayerSpeaking(id, speaking);
       }
     });
+
+    // The same three sinks, fed from LiveKit for rooms on that path.
+    //
+    // Translated at the boundary, because the two layers key people
+    // differently: the mesh used the socket id, LiveKit identifies
+    // participants by ACCOUNT id (a socket id changes on reconnect, so a
+    // participant would come back as a stranger). Everything downstream —
+    // VideoGrid, ParticipantPanel, the signal bars — is keyed by player id and
+    // stays exactly as it is; only this lookup is new.
+    const playerIdFor = (identity: string): string | null => {
+      const records = useGameStore.getState().playerRecords;
+      for (const p of Object.values(records)) if (p.userId === identity) return p.id;
+      return null;
+    };
+
+    // The same translation the streams use, handed to the service so it can
+    // key connection quality by player id too — MemberListPanel looks it up
+    // that way, and an account-id key misses on every lookup.
+    livekitService.setPlayerIdResolver(playerIdFor);
+
+    livekitService.setOnRemoteStream((identity, stream) => {
+      const id = playerIdFor(identity);
+      if (!id) return;
+      remoteStreams.set(id, stream);
+      setStreamsVersion((v) => v + 1);
+    });
+    // A share arrives in its own map, exactly as it does on the mesh. Feeding
+    // it into remoteStreams is what made a presenter go silent: the app holds
+    // one stream per player, so the screen replaced the microphone.
+    livekitService.setOnRemoteScreenStream((identity, stream) => {
+      const id = playerIdFor(identity);
+      if (!id) return;
+      remoteScreenStreams.set(id, stream);
+      setStreamsVersion((v) => v + 1);
+    });
+    livekitService.setOnRemoteScreenEnded((identity) => {
+      const id = playerIdFor(identity);
+      if (!id) return;
+      // Only the share. Stopping one must leave the voice beside it alone.
+      remoteScreenStreams.delete(id);
+      setStreamsVersion((v) => v + 1);
+    });
+    livekitService.setOnRemoteStreamEnded((identity) => {
+      const id = playerIdFor(identity);
+      if (!id) return;
+      remoteStreams.delete(id);
+      setStreamsVersion((v) => v + 1);
+    });
+    livekitService.setOnSpeakingChange((identity, speaking) => {
+      // Bug: the local participant's own speaking edges were falling into
+      // setPlayerSpeaking (the REMOTE-peers Set) like everyone else's —
+      // unlike the webrtcService wiring above, which special-cases id ===
+      // 'local' into setLocalSpeaking. LiveKit has no 'local' sentinel of
+      // its own (identity is the account id, per this block's own comment),
+      // so localSpeaking silently never became true on LiveKit rooms: MicButton's
+      // green speaking state (and anything else reading localSpeaking) was
+      // dead code there, even though the plumbing itself was correct.
+      if (identity === authUserId) {
+        setLocalSpeaking(speaking);
+        return;
+      }
+      const id = playerIdFor(identity);
+      if (id) setPlayerSpeaking(id, speaking);
+    });
   }, []);
 
   // Init media on mount
@@ -236,7 +325,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   }, [initMedia]);
 
   // Proximity calculation
-  const localPlayer = useGameStore((s) => s.localPlayer);
+  // Per-field, NOT the whole localPlayer object. The object's identity
+  // changes on every throttled position write (10/sec while walking);
+  // these four fields change only when the player actually does
+  // something. Position itself is nobody's business up here any more —
+  // <ZoneWatcher/> owns it.
+  const localPlayerName = useGameStore((s) => s.localPlayer.name);
+  const localHidden = useGameStore((s) => s.localPlayer.hidden);
+  const localIsSitting = useGameStore((s) => s.localPlayer.isSitting);
+  const localHandRaised = useGameStore((s) => s.localPlayer.handRaised);
   const playerRecords = useGameStore((s) => s.playerRecords);
   const localPlayerId = useGameStore((s) => s.localPlayerId);
   const roomStateReceived = useGameStore((s) => s.roomStateReceived);
@@ -320,52 +417,94 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     emitTeleportRequest({ kind: 'seat' });
   }, [emitTeleportRequest, emitTeleportTo, furniture, localUserId, myClaimedSeatId, tiles]);
 
-  const nearby = useProximity(
-    { x: localPlayer.x, y: localPlayer.y, id: localPlayerId, isSitting: localPlayer.isSitting, seatFurnitureId: localPlayer.seatFurnitureId, workMode: localPlayer.workMode },
-    playerRecords,
-    zones,
-    furniture,
-  );
+  // Proximity runs on its own fixed tick rather than as a render-derived
+  // memo. Two reasons it can no longer be reactive: remote positions live
+  // outside the store now (remotePositions.ts), so a peer walking toward you
+  // changes nothing React would notice; and recomputing it per render meant
+  // updateProximity's whole WebRTC pass — filter, sort, Set, loop every peer
+  // — ran 60x/sec. 5/sec is still far quicker than anyone can cross the
+  // proximity radius, and an unchanged result skips the state update
+  // entirely, so standing still costs nothing at all.
+  // No longer App state — see useProximitySnapshot. What App still needs is
+  // the previous result (to decide whether anything changed) and ONE
+  // quantised boolean for the background music, which flips rarely instead of
+  // several times a second.
+  const previousProximityRef = useRef<ProximityPlayer[]>([]);
+  // The tick's effect has empty deps, so it must not capture updateProximity
+  // directly — a ref keeps it correct even if that callback is ever recreated.
+  const updateProximityRef = useRef(updateProximity);
+  updateProximityRef.current = updateProximity;
+  const [inConversation, setInConversation] = useState(false);
+  useEffect(() => {
+    const tick = () => {
+      const s = useGameStore.getState();
+      // Also advance interpolation here, not just in the render loop.
+      // requestAnimationFrame stops entirely while the tab is hidden, which
+      // would freeze everyone's position — and since proximity now reads
+      // those positions, someone walking up to a backgrounded tab would
+      // never connect. Sampling is a pure function of the wall clock, so
+      // running it from both places is harmless: whichever fires first for a
+      // given moment produces the same answer.
+      interpolateRemotePositions((id) => id in s.playerRecords);
+      const next = computeProximity(
+        {
+          // livePos, not the store copy — proximity should react to where
+          // the avatar is, not to where it was at the last throttled write.
+          x: livePos.x,
+          y: livePos.y,
+          id: s.localPlayerId,
+          isSitting: s.localPlayer.isSitting,
+          seatFurnitureId: s.localPlayer.seatFurnitureId,
+          workMode: s.localPlayer.workMode,
+        },
+        s.playerRecords,
+        s.zones,
+        s.furniture,
+      );
+      // The canvas reads this outside React (it renders every frame
+      // regardless), so publish unconditionally — skipping it when the
+      // result is 'unchanged' would leave the canvas on a value up to
+      // 0.01 tile stale for no benefit.
+      setProximitySnapshot(next);
+
+      // WebRTC and soundboard volume are not render work. They contain
+      // time-based state machines (dwell before connect, debounced
+      // disconnect, resync-grace expiry), so they must tick even when the
+      // rendered proximity snapshot is unchanged.
+      updateProximityRef.current(next);
+      updateSoundboardVolumes(next);
+
+      // Everything below is the "something actually changed" path, which used
+      // to be a React state update plus an effect keyed on it. Doing it here
+      // is both cheaper and clearer: the work belongs to the tick that
+      // produced the data, not to a re-render triggered by it.
+      if (proximityUnchanged(previousProximityRef.current, next)) return;
+      previousProximityRef.current = next;
+      notifyProximityChanged();
+      const talking = next.some((p) => p.visibility === 'full_visible');
+      setInConversation((was) => (was === talking ? was : talking));
+    };
+    tick();
+    const id = setInterval(tick, PROXIMITY_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
 
   // Potong 6 — area background music. Conversation (any full-connected peer)
   // always takes priority: the hook pauses the music while one is active.
-  const bgm = useBgm(nearby.some((p) => p.visibility === 'full_visible'));
+  const bgm = useBgm(inConversation);
 
-  // Update WebRTC connections based on proximity
-  useEffect(() => {
-    updateProximity(nearby);
-    updateSoundboardVolumes(nearby);
-  }, [nearby, updateProximity]);
-
-  // Meeting zone detection — purely derived; feeds the A11 presence status
-  // below, so standing inside a Zone of type 'meeting' shows as "In a
-  // meeting". Conversation itself happens over the room's own proximity
-  // WebRTC, with the zone's audio isolation deciding who can hear whom.
-  const meetingZone = useMemo(
-    () => findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'meeting')),
-    [localPlayer.x, localPlayer.y, zones],
-  );
-
-  // A11 — Presence status (consolidates A3 Focus + A5 meeting detection). Zone
-  // wins over the manual choice: inside a meeting zone → 'in_meeting'; inside a
-  // focus zone → 'focus'; otherwise the user's last manual pick
-  // (available/lunch/away). On change, update the store (drives DND gating +
-  // badge) and broadcast so other clients see it. Leaving a zone re-applies the
-  // remembered manual status automatically.
-  const workMode = useGameStore((s) => s.workMode);
-  const setWorkMode = useGameStore((s) => s.setWorkMode);
-  const manualStatus = useGameStore((s) => s.manualStatus);
+  // Meeting-zone and presence detection moved into <ZoneWatcher/> below, so
+  // App no longer subscribes to the local position at all. Only the RESULT
+  // lands here, and only when it changes.
+  const [meetingZoneId, setMeetingZoneId] = useState<string | null>(null);
+  const [recordZoneId, setRecordZoneId] = useState<string | null>(null);
+  // Kept for the workMode effect that ZoneWatcher owns; the setters stay here
+  // because the presence menu writes them directly.
   const setManualStatus = useGameStore((s) => s.setManualStatus);
-  const awayReason = useGameStore((s) => s.awayReason);
   const setAwayReason = useGameStore((s) => s.setAwayReason);
-  useEffect(() => {
-    const focusZone = findZoneAt({ x: localPlayer.x, y: localPlayer.y }, zones.filter((z) => z.type === 'focus'));
-    const effective: WorkMode = meetingZone ? 'in_meeting' : focusZone ? 'focus' : manualStatus;
-    if (effective !== workMode) {
-      setWorkMode(effective);
-      emitWorkMode(effective, meetingZone?.id ?? focusZone?.id, effective === 'away' ? awayReason ?? undefined : undefined);
-    }
-  }, [localPlayer.x, localPlayer.y, zones, meetingZone, manualStatus, workMode, setWorkMode, emitWorkMode, awayReason]);
+  const workMode = useGameStore((s) => s.workMode);
+  const manualStatus = useGameStore((s) => s.manualStatus);
+  const awayReason = useGameStore((s) => s.awayReason);
 
   // Focus area — the room's dedicated "Fokus" text channel (lazily created
   // server-side the first time an admin saves a Focus area, see rooms.ts's
@@ -469,7 +608,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     (userId: string) => Object.values(playerRecords).find((p) => p.userId === userId)?.id,
     [playerRecords],
   );
-  const { requestRecording, stopMyRecording, isRecordingMine, uploading: recordingUploading } = useScreenRecording({
+  const { requestRecording, stopMyRecording, pauseRecording, resumeRecording, isRecordingMine, isPaused: isRecordingPaused, uploading: recordingUploading } = useScreenRecording({
     activeRecording,
     localUserId,
     findSocketIdByUserId,
@@ -481,7 +620,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // people was only ever reachable by first spotlighting them; that feature
   // was removed in Bug 7, so the picker is now just this single entry.)
   const recordingTargets = [
-    { userId: localUserId, name: `${localPlayer.name} (You)` },
+    { userId: localUserId, name: `${currentUser.name} (You)` },
   ];
 
   // Track which zone (if any) the local player is standing in — drives the
@@ -568,109 +707,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     const p = useGameStore.getState().localPlayer;
     setLocal({
       ...p,
-      x: clamp(p.x, (z.x + 0.5) * TILE_SIZE, (z.x + z.width - 0.5) * TILE_SIZE),
-      y: clamp(p.y, (z.y + 0.5) * TILE_SIZE, (z.y + z.height - 0.5) * TILE_SIZE),
+      // Clamp the LIVE position — clamping the throttled copy would also
+      // rewind the avatar to it, which is a visible snap backwards.
+      x: clamp(livePos.x, (z.x + 0.5) * TILE_SIZE, (z.x + z.width - 0.5) * TILE_SIZE),
+      y: clamp(livePos.y, (z.y + 0.5) * TILE_SIZE, (z.y + z.height - 0.5) * TILE_SIZE),
       isMoving: false,
     });
   }, [zones]);
-  // Last position we know we were legitimately allowed to occupy — restored
-  // when a zone-entry attempt gets refused, so the avatar snaps back out
-  // instead of visibly standing inside a locked room it was denied entry to.
-  const lastAllowedPosRef = useRef({ x: localPlayer.x, y: localPlayer.y });
-
-  useEffect(() => {
-    const zone = findZoneAt(localPlayer, zones);
-    const zoneId = zone?.id ?? null;
-    if (zoneId === currentZoneIdRef.current) {
-      lastAllowedPosRef.current = { x: localPlayer.x, y: localPlayer.y };
-      return;
-    }
-
-    // A locked zone holds you in until it's unlocked (even for the person who
-    // locked it — see server zoneLock.ts). The server refuses the zone:exit
-    // anyway (membership drives zone chat + A/V), so without this the avatar
-    // would stand outside while still being IN the meeting — worse than not
-    // letting them walk out at all.
-    const leaving = currentZoneIdRef.current;
-    if (leaving) {
-      const lock = zoneLock.lockOf(leaving);
-      if (lock) {
-        pushBackInside(leaving);
-        return;
-      }
-      emitZoneExit(leaving);
-      // "Ngobrol dengan CEO" queue — leaving early completes the ticket
-      // server-side (zoneHandler.ts's completeActiveZoneQueueEntry), but
-      // nothing else ever refreshes our own cached zoneQueueTicket once its
-      // status is 'active' (useZoneLock.ts's poll deliberately stops once
-      // active — there's nothing left to wait for while genuinely inside).
-      // Without dropping it here, walking back in during the same session
-      // would read the stale 'active' status as still-admitted and skip the
-      // restricted-zone bounce below entirely, even though the server has
-      // already closed that ticket and will deny the re-entry.
-      zoneLock.clearZoneQueueTicketOnExit(leaving);
-    }
-
-    // A locked zone also holds people OUT — not just chat/AV membership, the
-    // avatar itself must not be able to stand inside it. Checked client-side
-    // against the mirrored lock state (same pattern as the leaving check
-    // above) so the bounce is instant, no round trip needed.
-    if (zoneId) {
-      const lock = zoneLock.lockOf(zoneId);
-      if (lock && !zoneLock.isKeyholder(zoneId) && !zoneLock.isAdmitted(zoneId)) {
-        const back = lastAllowedPosRef.current;
-        useGameStore.getState().setLocalPlayer({ x: back.x, y: back.y, isMoving: false });
-        zoneLock.denyEntry(zoneId);
-        return;
-      }
-      // "Ngobrol dengan CEO" queue, zone-level — a restricted zone (Room
-      // Editor's "Restricted area" tool) must physically hold out anyone who
-      // isn't the room owner or explicitly granted CEO access, AND hasn't
-      // been called/admitted into their queue slot, same bounce as a manual
-      // lock above, mirroring the exact authoritative check
-      // zoneHandler.ts's ZONE_ENTER does server-side so the decision is
-      // instant and client-only — no round trip, no brief "stood inside it"
-      // flash before the server's own ZONE_LOCKED_DENIED came back.
-      //
-      // Deliberately NOT role-based (no roleAtLeast/minRole check) — an
-      // ordinary room admin must queue like anyone else here; only the room
-      // owner and whoever's been granted CEO access (see gameStore's
-      // localIsCeo, roomHandler.ts's ceoUserIds) bypass.
-      // "Ngobrol dengan CEO" v2 — a bookingMode zone is always freely
-      // walkable (see zoneHandler.ts's own ZONE_ENTER, which skips this same
-      // gate server-side), so this client-side mirror must skip it too, or
-      // the avatar would get bounced back out locally even though the
-      // server would have let it through.
-      const restriction = zoneLock.restrictionOf(zoneId);
-      if (restriction && !restriction.bookingMode && localRole !== 'owner' && !localIsCeo) {
-        const ticket = zoneLock.zoneQueueTicket;
-        const admitted = ticket?.zoneId === zoneId && (ticket.status === 'called' || ticket.status === 'active');
-        if (!admitted) {
-          const back = lastAllowedPosRef.current;
-          useGameStore.getState().setLocalPlayer({ x: back.x, y: back.y, isMoving: false });
-          zoneLock.denyEntry(zoneId, restriction.queueEnabled ? 'queue' : 'restricted');
-          return;
-        }
-      }
-      emitZoneEnter(zoneId);
-    }
-    currentZoneIdRef.current = zoneId;
-    setCurrentZone(zone ? { id: zone.id, name: zone.name } : null);
-    lastAllowedPosRef.current = { x: localPlayer.x, y: localPlayer.y };
-    // Reaching this line at all means the crossing succeeded (every denial
-    // branch above returns early) — whether that landed us in no zone or a
-    // completely different one, whatever we were previously denied from is
-    // no longer relevant, so the knock/queue-form card should go away.
-    //
-    // Bug fix — this used to only clear when zoneId was null (no zone at
-    // all), so walking straight from a CEO Office denial into a DIFFERENT
-    // zone (e.g. a neighboring "AI Team" area) skipped this entirely — the
-    // stale "isi form antrean" card for CEO Office stayed on screen
-    // indefinitely, since the player never passed through a genuine
-    // "in no zone" gap to trigger the old guard.
-    zoneLock.clearDenied();
-  }, [localPlayer.x, localPlayer.y, zones, emitZoneEnter, emitZoneExit]);
-
   // "Ngobrol dengan CEO" queue, zone-level — our timed slot in a restricted
   // zone ran out (see roomHandler.ts's forceZoneExitForQueue). Unlike a
   // manually-locked zone (which the player can only ever be pushed BACK INTO,
@@ -873,19 +916,20 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     }
   }, [roomSlug]);
 
-  // QA #9/#10 — CEO/admin text broadcast. Same prompt-based "quick admin
-  // config" convention as Guest Link above — the server independently
-  // re-checks 'broadcast:text' (roomHandler.ts), this is just the trigger.
-  const handleBroadcast = useCallback(async () => {
-    const text = ((await showPrompt('Pesan broadcast ke SEMUA orang di room ini:')) ?? '').trim();
-    if (!text) return;
-    emitBroadcastSend(text);
-  }, [emitBroadcastSend]);
+  // QA #9/#10 — CEO/admin text broadcast, shown to everyone as a running
+  // text strip (AnnouncementTicker). Opens a composer rather than a bare
+  // prompt: this goes to the whole room at once and can't be recalled, so
+  // the character budget and a preview are worth the extra component. The
+  // server independently re-checks 'broadcast:text' (roomHandler.ts) — this
+  // is only the trigger, never the permission.
+  const [broadcastComposerOpen, setBroadcastComposerOpen] = useState(false);
+  const handleBroadcast = useCallback(() => setBroadcastComposerOpen(true), []);
 
   // Summon/Follow consent requests (see PendingRequestToast.tsx). Incoming
   // requests auto-clear on the same clock the server uses to auto-decline
   // them (CONSENT_REQUEST_TIMEOUT_MS) so the toast never outlives a request
   // that's already dead server-side; result toasts are a one-off ping.
+  const spotlightNotice = useGameStore((s) => s.spotlightNotice);
   const incomingSummonRequest = useGameStore((s) => s.incomingSummonRequest);
   useEffect(() => {
     if (!incomingSummonRequest) return;
@@ -900,17 +944,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     return () => clearTimeout(timer);
   }, [summonResult]);
 
-  // "Kamu disenggol!" toast — set by useSocket.ts's PLAYER_NUDGE handler
-  // only when I'm the target; auto-clears after a few seconds, same one-shot
-  // ping pattern as summonResult above.
-  const nudgedBy = useGameStore((s) => s.nudgedBy);
-  useEffect(() => {
-    if (!nudgedBy) return;
-    const timer = setTimeout(() => useGameStore.getState().setNudgedBy(null), 3000);
-    return () => clearTimeout(timer);
-  }, [nudgedBy]);
-
-  // A10 — "colek"/slap toast, same auto-clear pattern as the nudge toast above.
+  // A10 — "colek"/slap toast, same auto-clear pattern as summonResult above.
   const slappedBy = useGameStore((s) => s.slappedBy);
   useEffect(() => {
     if (!slappedBy) return;
@@ -919,7 +953,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   }, [slappedBy]);
 
   // Server-side admin-permission rejections (Spotlight, Kick, room lock, …)
-  // — same brief-toast pattern as nudgedBy/slappedBy above, see gameStore's
+  // — same brief-toast pattern as slappedBy above, see gameStore's
   // doc comment on adminErrorMessage for why this needed to exist at all.
   const adminErrorMessage = useGameStore((s) => s.adminErrorMessage);
   useEffect(() => {
@@ -931,12 +965,10 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // QA #9/#10 — CEO/admin text broadcast toast. Longer-lived (8s) than the
   // other brief pings above — this is a room-wide announcement meant to
   // actually be read, not a quick "someone poked you" ping.
-  const roomBroadcast = useGameStore((s) => s.roomBroadcast);
-  useEffect(() => {
-    if (!roomBroadcast) return;
-    const timer = setTimeout(() => useGameStore.getState().setRoomBroadcast(null), 8000);
-    return () => clearTimeout(timer);
-  }, [roomBroadcast]);
+  // Announcements no longer time out on a fixed clock here — a running text
+  // has to stay up as long as it takes to travel, which depends on its own
+  // length. AnnouncementTicker owns that and drops each message from the
+  // queue when it has finished.
 
   const incomingFollowRequest = useGameStore((s) => s.incomingFollowRequest);
   useEffect(() => {
@@ -944,6 +976,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     const timer = setTimeout(() => useGameStore.getState().setIncomingFollowRequest(null), CONSENT_REQUEST_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, [incomingFollowRequest]);
+
+  // Final-review Fix 1 — same auto-clear as incomingSummonRequest/
+  // incomingFollowRequest above: the toast must not outlive a request the
+  // server already auto-declined server-side after CONSENT_REQUEST_TIMEOUT_MS.
+  const incomingRemoteHelpRequest = useGameStore((s) => s.incomingRemoteHelpRequest);
+  useEffect(() => {
+    if (!incomingRemoteHelpRequest) return;
+    const timer = setTimeout(() => useGameStore.getState().setIncomingRemoteHelpRequest(null), CONSENT_REQUEST_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [incomingRemoteHelpRequest]);
 
   // Item #5 — room-join requests popped up for admins. No auto-clear timer
   // like the knock/summon/follow toasts above: those have a matching
@@ -975,10 +1017,25 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     return () => clearTimeout(timer);
   }, [followResult]);
 
+  const remoteHelpResult = useGameStore((s) => s.remoteHelpResult);
+  const activeRemoteHelp = useGameStore((s) => s.activeRemoteHelp);
+  const receivedRemoteHelpCredential = useGameStore((s) => s.receivedRemoteHelpCredential);
+  const remoteHelpCredentialAcked = useGameStore((s) => s.remoteHelpCredentialAcked);
+  useEffect(() => {
+    if (!remoteHelpResult) return;
+    const timer = setTimeout(() => useGameStore.getState().setRemoteHelpResult(null), 3000);
+    return () => clearTimeout(timer);
+  }, [remoteHelpResult]);
+
   // Admin / Editor. editorMode (the old in-map overlay editor) can no longer
   // be switched on — the toggle went with the retired editor (Potong 7) — but
   // the store field and GameCanvas's editor branches remain, permanently off.
   const isAdmin = useGameStore((s) => s.isAdmin);
+  // hasFeatureAccess (shared/permissions.ts) is the same check
+  // recordingHandler.ts applies server-side — this client-side call can
+  // never grant more than the server allows even if it drifts or is
+  // bypassed, since the server re-checks independently on RECORDING_START.
+  const canRecordHere = hasFeatureAccess(localRole, 'recording:start');
   const editorMode = useGameStore((s) => s.editorMode);
   const selectedTileType = useGameStore((s) => s.selectedTileType);
   const selectedPaletteId = useGameStore((s) => s.selectedPaletteId);
@@ -1011,10 +1068,32 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // Item 13, "Panic/report user" — who ParticipantPanel's "Laporkan" was
   // clicked for, if anyone; the modal itself does the actual submit.
   const [reportTarget, setReportTarget] = useState<{ userId: string; name: string } | null>(null);
+  // ZEP-style player card — who was clicked on the map, if anyone, and
+  // where on screen to anchor the card (see GameCanvas's onPlayerClick).
+  // The clicked player's own live record is kept whole (not decomposed
+  // into separate id/name/config fields) since PlayerCard needs several of
+  // its fields together and the record is already fully in hand at click
+  // time — no extra store lookup needed.
+  const [playerCardTarget, setPlayerCardTarget] = useState<{ player: Avatar; x: number; y: number } | null>(null);
+  // Stable identity, and that is the entire point.
+  //
+  // GameCanvas is memo()'d deliberately — it is the heaviest component in the
+  // app (3490 lines, 127 hooks) and its JSX carries every DOM overlay in the
+  // room: zone banners, media markers, note markers, seat markers. It receives
+  // 35 props, and this was the ONLY one built inline, so its identity changed
+  // on every single App render and the memo comparison failed every time.
+  //
+  // App re-renders several times a second whenever anyone nearby moves (the
+  // proximity tick), so that one arrow function was re-rendering and
+  // reconciling all of that at gameplay rate — the shape of the ~200ms
+  // presentation delay that survived every other fix. A memo barrier is only
+  // a barrier if every prop crossing it is stable.
+  const handlePlayerClick = useCallback(
+    (player: Avatar, x: number, y: number) => setPlayerCardTarget({ player, x, y }),
+    [],
+  );
   const mediaObjects = useGameStore((s) => s.mediaObjects);
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [roomCodeCopied, setRoomCodeCopied] = useState(false);
-  const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
   const adminViewActive = activePanel === 'adminConsole';
   const operatorConsoleActive = activePanel === 'operatorConsole';
@@ -1148,6 +1227,14 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       color: config.color,
       avatarConfig: config,
     });
+    // specs/2026-08-21-room-entry-name-prompt-v2-design.md — this is the
+    // Sidebar's mid-session Avatar Editor, which has no other way to reach
+    // MainApp's playerName/user.displayName. Without this, MainApp keeps
+    // pre-filling the room-entry NameModal (on the next portal travel or
+    // leave-and-rejoin) with the name from BEFORE this rename — and
+    // accepting that stale pre-fill silently reverts the rename on the
+    // server via handleNameSubmit's own api.saveAvatar call.
+    onDisplayNameChange?.(config.name);
     emitAvatarUpdate(config);
     // Chat's sender-name cache (useProfiles) resolves by userId and never
     // refetches once cached — AVATAR_UPDATED (above) excludes the sender's
@@ -1164,7 +1251,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
     // reachable at all, so there's no logged-out case to gate this behind.
     api.saveAvatar(config).catch(() => {});
     if (useGameStore.getState().activePanel === 'avatarSetup') closePanel();
-  }, [emitAvatarUpdate, localUserId]);
+  }, [emitAvatarUpdate, localUserId, onDisplayNameChange]);
 
   // ─── AFK auto-away (ZEP/Gather-style) ────────────────────────────────
   // Fitur 3B — after AFK_IDLE_MS with no keyboard/pointer/touch input, show
@@ -1219,7 +1306,38 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   // the editor's own live preview. Seed it with the real account name so
   // opening the editor and saving without touching the name field doesn't
   // broadcast "You" to every other player in the room.
-  const savedConfig = { ...loadAvatarConfig(), name: playerName || loadAvatarConfig().name };
+  // Specifically `currentUser.name`, not `playerName` — Avatar Setup's
+  // save path writes this field straight into User.displayName when
+  // non-empty (see routes/rooms.ts's PUT /users/me/avatar), and
+  // `playerName` (Zustand's localPlayer.name) is exactly the value that
+  // same save path last wrote there. Seeding from it would make this
+  // panel's initial name come from its own previous save instead of the
+  // account's actual name of record.
+  const savedConfig = { ...loadAvatarConfig(), name: currentUser.name || loadAvatarConfig().name };
+
+  // Player card's "Copy Outfit" — reuses handleAvatarSave verbatim (same
+  // broadcast + persist path as the Avatar Setup panel), just with a
+  // constructed config: every VISUAL field taken from the clicked player,
+  // name/statusTag kept as the local player's own (AvatarConfig mixes
+  // identity into the same object — copying it whole would also steal the
+  // other player's name, see PlayerCard.tsx's own prop comment).
+  const handleCopyOutfit = useCallback((source: AvatarConfig) => {
+    handleAvatarSave({
+      ...savedConfig,
+      bodyShape: source.bodyShape,
+      color: source.color,
+      accessory: source.accessory,
+      expression: source.expression,
+      spriteMode: source.spriteMode,
+      bodyId: source.bodyId,
+      eyesId: source.eyesId,
+      outfitId: source.outfitId,
+      hairId: source.hairId,
+      spriteAccessoryId: source.spriteAccessoryId,
+      premadeId: source.premadeId,
+    });
+    setPlayerCardTarget(null);
+  }, [handleAvatarSave, savedConfig]);
 
   // Chat + emotes + minimap state
   const notice = useGameStore((s) => s.notice);
@@ -1344,6 +1462,55 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         failureMessage: interactiveDoorAreaPasswordResult.failureMessage,
       }
     : null;
+
+  const zonePasswordPrompt = useGameStore((s) => s.zonePasswordPrompt);
+  const zonePasswordResult = useGameStore((s) => s.zonePasswordResult);
+
+  // Meeting Zone password — same InteractiveObjectModal-reuse trick as the
+  // door password adapters above, adapting the prompt into the same
+  // synthetic Furniture shape.
+  const zonePasswordFurniture = zonePasswordPrompt
+    ? {
+        id: `zonepw:${zonePasswordPrompt.zoneId}`,
+        x: 0, y: 0, paletteId: '', tilesW: 1, tilesH: 1,
+        name: zonePasswordPrompt.eventTitle,
+        interactiveType: 'password' as const,
+        interactiveConfig: {
+          passwordDescription: `"${zonePasswordPrompt.eventTitle}" sedang berlangsung — masukkan password untuk masuk.`,
+          correctText: 'Password benar — silakan masuk.',
+          failureMessage: 'Password salah.',
+        },
+      }
+    : null;
+  const zonePasswordResultAdapted = (zonePasswordPrompt && zonePasswordResult && zonePasswordResult.zoneId === zonePasswordPrompt.zoneId)
+    ? {
+        furnitureId: `zonepw:${zonePasswordPrompt.zoneId}`,
+        correct: zonePasswordResult.correct,
+        correctText: zonePasswordFurniture?.interactiveConfig.correctText,
+        failureMessage: zonePasswordFurniture?.interactiveConfig.failureMessage,
+      }
+    : null;
+
+  const handleCheckZonePassword = useCallback((_furnitureId: string, attempt: string) => {
+    if (!zonePasswordPrompt) return;
+    useGameStore.getState().setZonePasswordResult(null);
+    emitZonePasswordSubmit(zonePasswordPrompt.zoneId, attempt);
+  }, [zonePasswordPrompt, emitZonePasswordSubmit]);
+
+  // Correct password → actually get in. The ZONE_ENTER that raised the prompt
+  // was refused server-side (and ZoneWatcher bounced the avatar back out of
+  // the zone), so unlocking the socket alone leaves zone chat, the roster's
+  // location and the zone's music all unsynced until the player happens to
+  // walk out and back in. enterZoneNow is the same "we've just been admitted,
+  // re-sync membership now" path the CEO queue already uses when a ticket is
+  // called. One-shot: the signal is cleared immediately after use.
+  const zonePasswordUnlockedZoneId = useGameStore((s) => s.zonePasswordUnlockedZoneId);
+  useEffect(() => {
+    if (zonePasswordUnlockedZoneId) {
+      enterZoneNow(zonePasswordUnlockedZoneId);
+      useGameStore.getState().setZonePasswordUnlockedZoneId(null);
+    }
+  }, [zonePasswordUnlockedZoneId, enterZoneNow]);
 
   // A correct door password should just let the player walk through — no
   // "Password benar" confirmation to dismiss. Movement itself is already
@@ -1475,13 +1642,15 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
   }, [doorAreaPasswordAreaId, emitInteractiveDoorAreaPasswordCheck]);
 
   const handleEmoteSelect = useCallback((emote: EmoteType) => {
-    const lp = useGameStore.getState().localPlayer;
-    emitEmote(emote, lp.x, lp.y);
+    // livePos — the store position is throttled while walking (see
+    // livePosition.ts), and an emote fired mid-stride should appear over the
+    // avatar, not over where it was a tenth of a second ago.
+    emitEmote(emote, livePos.x, livePos.y);
     useGameStore.getState().addEmote({
       playerId: localPlayerId,
       emote,
-      x: lp.x,
-      y: lp.y,
+      x: livePos.x,
+      y: livePos.y,
       timestamp: Date.now(),
     });
     setShowEmoteWheel(false);
@@ -1617,12 +1786,32 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
 
   return (
     <div className="w-screen h-screen overflow-hidden bg-purple-50">
+      {/* Room-wide admin announcement, running across the top of the
+          screen above everything else. */}
+      <AnnouncementTicker />
+      {broadcastComposerOpen && (
+        <BroadcastComposer
+          onSend={emitBroadcastSend}
+          onClose={() => setBroadcastComposerOpen(false)}
+        />
+      )}
+      {/* Renders nothing. Owns the local position so App doesn't have to —
+          see ZoneWatcher.tsx. */}
+      <ZoneWatcher
+        zoneLock={zoneLock}
+        currentZoneIdRef={currentZoneIdRef}
+        onZoneChange={setCurrentZone}
+        onMeetingZoneChange={setMeetingZoneId}
+        onRecordZoneChange={setRecordZoneId}
+        emitZoneEnter={emitZoneEnter}
+        emitZoneExit={emitZoneExit}
+        emitWorkMode={emitWorkMode}
+      />
       <GameCanvas
         emitMove={emitMove}
         emitStop={emitStop}
         emitJump={emitJump}
         emitNudge={emitNudge}
-        proximityData={nearby}
         micMuted={isMicMuted}
         cameraOn={isCameraOn}
         editorMode={editorMode}
@@ -1643,7 +1832,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         emitTeleportTo={emitTeleportTo}
         emitClaimSeat={emitClaimSeat}
         emitReleaseSeat={emitReleaseSeat}
+        emitSeatClaimRequest={emitSeatClaimRequest}
+        emitSeatClaimDecide={emitSeatClaimDecide}
+        emitSeatClaimRequestCancel={emitSeatClaimRequestCancel}
         onMediaOpen={setViewingMediaId}
+        onPlayerClick={handlePlayerClick}
         onInteractiveTrigger={handleInteractiveTrigger}
         onNoteOpen={setNoteEditingId}
         onDoorPasswordTrigger={handleDoorPasswordTrigger}
@@ -1651,6 +1844,39 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         lowSpecMode={simplifiedView}
         restrictedZoneIds={restrictedZoneIds}
       />
+
+      {playerCardTarget && (
+        <PlayerCard
+          name={playerCardTarget.player.name}
+          seed={playerCardTarget.player.userId ?? playerCardTarget.player.id}
+          avatarConfig={playerCardTarget.player.avatarConfig}
+          anchorX={playerCardTarget.x}
+          anchorY={playerCardTarget.y}
+          onSendMessage={
+            playerCardTarget.player.userId && !playerCardTarget.player.isGuest
+              ? () => { channelChat.startDm(playerCardTarget.player.userId!); setPlayerCardTarget(null); }
+              : undefined
+          }
+          isFollowingThem={!!playerCardTarget.player.userId && followInfo?.targetUserId === playerCardTarget.player.userId}
+          onFollow={
+            playerCardTarget.player.userId
+              ? () => { emitFollowRequest(playerCardTarget.player.userId!); setPlayerCardTarget(null); }
+              : undefined
+          }
+          onUnfollow={() => { emitFollowUnfollow(); setPlayerCardTarget(null); }}
+          onCopyOutfit={
+            playerCardTarget.player.avatarConfig
+              ? () => handleCopyOutfit(playerCardTarget.player.avatarConfig!)
+              : undefined
+          }
+          onRequestRemoteHelp={
+            playerCardTarget.player.userId && !playerCardTarget.player.isGuest
+              ? () => { emitRemoteHelpRequest(playerCardTarget.player.userId!); setPlayerCardTarget(null); }
+              : undefined
+          }
+          onClose={() => setPlayerCardTarget(null)}
+        />
+      )}
 
       {/* QA (Data A/V checklist item 7, "Rekaman & consent") — persistent
           (not a self-dismissing toast, unlike the notices below) and
@@ -1665,11 +1891,49 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </div>
       )}
 
+      {/* §7 — Task 4 of the Record Area Zone + Recording Pause/Resume
+          plan: a zone-gated recording surface, shown only while the local
+          avatar stands inside a 'record'-type zone (Task 1's Room Editor
+          tool, Task 2's zone-entry detection). Deliberately one-click (no
+          title prompt, unlike the Sidebar's own Recording control).
+          Reuses the exact same recording state as the Sidebar's
+          Recording control (requestRecording/stopMyRecording/pauseRecording/
+          resumeRecording, recordingTargets, canRecordHere) — there is only
+          one useScreenRecording() call in the whole app, this is just an
+          additional surface for it.
+
+          Positioning history: originally a vertical band below the top-16
+          row (collided with the consent-toast stack), then offset left of
+          center via `right-1/2 -translate-x-48` (verified collision-free
+          against the toast stack, independent of this panel's own width —
+          see the deleted version of this comment in git history for the
+          full box-model trace). EXPLICITLY RE-CENTERED per direct user
+          request (`left-1/2 -translate-x-1/2`) — this reintroduces the
+          exact collision risk the offset was built to avoid: a
+          Summon/Follow/RemoteHelp toast can paint over this panel's
+          Pause/Stop buttons. Known and accepted, not an oversight — do not
+          "fix" this back to the offset without checking with the user
+          first. */}
+      {recordZoneId && !editorMode && (
+        <RecordAreaPanel
+          canRecord={canRecordHere}
+          hasTarget={recordingTargets.length > 0}
+          isRecordingMine={isRecordingMine}
+          isPaused={isRecordingPaused}
+          uploading={recordingUploading}
+          onStart={() => {
+            if (recordingTargets.length > 0) requestRecording(recordingTargets[0].userId, 'Rekaman Zona', emitRecordingStart);
+          }}
+          onStop={stopMyRecording}
+          onPause={pauseRecording}
+          onResume={resumeRecording}
+        />
+      )}
+
       {miniModeWindow && (
         <MiniMode
           pipWindow={miniModeWindow}
-          nearby={nearby}
-          localStream={webrtcService.getLocalStream()}
+          localStream={getLocalStream()}
           remoteStreams={remoteStreams}
           remoteScreenStreams={remoteScreenStreams}
           micMuted={isMicMuted}
@@ -1680,32 +1944,83 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         />
       )}
 
-      {!simplifiedView && (
-        <>
-          {/* Controls text ("WASD / Arrows...") and "Playing as" removed from
-              here — the map stayed permanently covered by them. The control
-              list now lives in the existing Panduan (TutorialModal.tsx,
-              Slide 2), reachable any time via Sidebar ☰ → Room Features →
-              Panduan; "Playing as" was dropped entirely (the player's own
-              name is already visible elsewhere — video tile, participant
-              list, etc.). */}
-          <div className="absolute top-14 left-16 flex items-start gap-2 pointer-events-none">
-            {/* QA (Akses tamu checklist item 2, "Guest terbatas") — Soundboard
-                playback is now also server-rejected for guests
-                (roomHandler.ts's SOUNDBOARD_PLAY), so hiding the panel too
-                avoids a dead "nothing happens when I click" button. */}
-            {!isGuest && (
-              <SoundboardPanel roomSlug={roomSlug} emitSoundboardPlay={emitSoundboardPlay} open={activePanel === 'soundboard'} onToggle={() => openPanel('soundboard')} onClose={closePanel} />
-            )}
-            <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
-          </div>
-          {!isGuest && <MusicPlayerWidget zoneId={currentZone?.id ?? null} />}
-        </>
-      )}
+      {/* Controls text ("WASD / Arrows...") and "Playing as" removed from
+          here — the map stayed permanently covered by them. The control
+          list now lives in the existing Panduan (TutorialModal.tsx,
+          Slide 2), reachable any time via Sidebar ☰ → Room Features →
+          Panduan; "Playing as" was dropped entirely (the player's own
+          name is already visible elsewhere — video tile, participant
+          list, etc.). */}
+      {/* top-4 (not top-14) — aligns this row with the Sidebar rail's own
+          top-4 hamburger button instead of sitting a row below it, matching
+          the reference wireframe where both live in the same top strip. */}
+      <div className="absolute top-4 left-16 flex items-start gap-2 pointer-events-none">
+        {/* Status — opens the unified Member/Employee List panel
+            (MemberListPanel.tsx), which has the Status row built in. This
+            is now the only toolbar entry point into that panel here (the
+            dedicated people-icon toggle was removed — Status already
+            reaches the same destination). */}
+        {!isGuest && (
+          <Tooltip label="Status" detail="Lihat & ubah statusmu, dan siapa saja yang online.">
+            <button
+              onClick={() => openPanel('memberList')}
+              className="pointer-events-auto w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer bg-green-500 hover:bg-green-600 shadow-sm"
+            >
+              {/* brightness-0 invert forces the icon's own baked-in dark-gray
+                  fill to pure white — emoticon.svg is shared with ChatPanel/
+                  EmojiButton, so recoloring the asset itself would repaint
+                  those too; this filter only affects this one <img>. */}
+              <img src="/assets/img/icons/emoticon.svg" width={14} height={14} alt="" className="brightness-0 invert" />
+            </button>
+          </Tooltip>
+        )}
+        {hasMySeat && (
+          <Tooltip label="Ke Kursi Saya" detail="Teleport langsung ke kursi tetapmu di room ini.">
+            <button
+              onClick={handleMySeat}
+              className="pointer-events-auto w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer bg-green-500 hover:bg-green-600 shadow-sm"
+            >
+              <img src="/assets/img/icons/back_to_seat.svg" width={14} height={14} alt="" className="brightness-0 invert" />
+            </button>
+          </Tooltip>
+        )}
+        {/* Soundboard moved to the Sidebar rail (see that file's own
+            comment) — the reference design's top-left pill doesn't include
+            it, and SoundboardPanel's trigger+popover are one component, so
+            moving its mount point there was cleaner than trying to hide
+            just this trigger while keeping the popover anchored here.
+            ActivityFeed (the clock icon that used to live here) moved to
+            the notification bell in the top-right toolbar — see that row
+            below. */}
+      </div>
+      {!simplifiedView && !isGuest && <MusicPlayerWidget zoneId={currentZone?.id ?? null} />}
 
       <div className="absolute top-4 right-4 flex items-center gap-2">
         <MapZoomControl />
         <ConnectionIndicator />
+        {/* Notification bell — now the Recent Activity dropdown's entry
+            point (moved here from the clock icon that used to sit in the
+            top-left toolbar; see ActivityFeed.tsx's own comment). It no
+            longer opens Settings > Notifikasi — the gear icon still reaches
+            that section on its own, so nothing was lost by repurposing this
+            button. Same !simplifiedView gate ActivityFeed always had at its
+            old spot (Simplify Mode hides it, same as Soundboard). */}
+        {!simplifiedView && (
+          <ActivityFeed open={activePanel === 'activityFeed'} onToggle={() => openPanel('activityFeed')} />
+        )}
+        {/* Invite — new top-bar entry point for an existing capability
+            (handleCreateGuestLink/canManageGuests below, already wired to
+            Sidebar's "Buat Guest Link" row), not a new backend feature.
+            Same isAdmin gate as that row. */}
+        {isAdmin && !isGuest && (
+          <button
+            onClick={handleCreateGuestLink}
+            className="flex items-center gap-1.5 bg-login-accent hover:brightness-110 text-white text-xs font-medium pl-2.5 pr-3 py-2 rounded-lg shadow-sm cursor-pointer"
+          >
+            <img src="/assets/img/icons/invite_user.svg" width={14} height={14} alt="" />
+            Invite
+          </button>
+        )}
       </div>
 
       {/* On-screen movement/action controls — self-hides on non-touch devices
@@ -1757,6 +2072,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           during a presentation the card does overlap its title bar, which is
           the intended trade: a request waiting on you should interrupt. */}
       <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2">
+        {spotlightNotice && (
+          <SpotlightNotice
+            key={spotlightNotice.id}
+            icon={<StarFill size={13} className="text-amber-500" />}
+            message={<><span className="font-medium">{spotlightNotice.name}</span> sedang di-Spotlight ✨</>}
+          />
+        )}
         {incomingSummonRequest && (
           <PendingRequestToast
             icon={<MagnetFill size={13} className="text-amber-500" />}
@@ -1771,6 +2093,26 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             message={<><span className="font-medium">{incomingFollowRequest.actorName}</span> wants to follow you</>}
             onAccept={() => { emitFollowRespond(incomingFollowRequest.requestId, true); useGameStore.getState().setIncomingFollowRequest(null); }}
             onDecline={() => { emitFollowRespond(incomingFollowRequest.requestId, false); useGameStore.getState().setIncomingFollowRequest(null); }}
+          />
+        )}
+        {incomingRemoteHelpRequest && (
+          <PendingRequestToast
+            icon={<Display size={13} className="text-purple-600" />}
+            message={<><span className="font-medium">{incomingRemoteHelpRequest.actorName}</span> minta bantuan remote (RustDesk)</>}
+            onAccept={() => {
+              emitRemoteHelpRespond(incomingRemoteHelpRequest.requestId, true);
+              useGameStore.getState().setIncomingRemoteHelpRequest(null);
+              useGameStore.getState().setActiveRemoteHelp({ role: 'target', otherName: incomingRemoteHelpRequest.actorName });
+              // Final-review Fix 3 — each new session starts unacknowledged;
+              // without this a SECOND session in the same tab would inherit
+              // the previous session's acked:true and show "Terkirim"
+              // before the target has submitted anything this time.
+              useGameStore.getState().setRemoteHelpCredentialAcked(false);
+            }}
+            onDecline={() => {
+              emitRemoteHelpRespond(incomingRemoteHelpRequest.requestId, false);
+              useGameStore.getState().setIncomingRemoteHelpRequest(null);
+            }}
           />
         )}
         {/* Item #5 — stacked join-request popups. Capped at 3 visible cards
@@ -1850,27 +2192,21 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
               : `${followResult.targetName} ${describeConsentDecline(followResult.reason)} your follow request`}
           </div>
         )}
-        {nudgedBy && (
-          <div className="bg-amber-500/95 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-2 animate-fade-in">
-            <HandIndexThumbFill size={14} />
-            <span className="font-bold">{nudgedBy}</span> menyenggolmu!
+        {remoteHelpResult && (
+          <div className="bg-purple-600/90 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-1.5">
+            <Display size={13} />
+            {remoteHelpResult.accepted
+              ? `${remoteHelpResult.targetName} accepted your remote-help request`
+              : remoteHelpResult.reason === 'busy'
+                ? `${remoteHelpResult.targetName} is already being helped by someone else`
+                : remoteHelpResult.reason === 'helper-busy'
+                  ? 'Kamu sedang aktif membantu orang lain — selesaikan sesi itu dulu.'
+                  : `${remoteHelpResult.targetName} ${describeConsentDecline(remoteHelpResult.reason)} your remote-help request`}
           </div>
         )}
         {slappedBy && (
           <div className="bg-purple-600/95 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg pointer-events-none inline-flex items-center gap-2 animate-fade-in">
             👋 <span className="font-bold">{slappedBy}</span> nyoel kamu — sadar dong!
-          </div>
-        )}
-        {/* QA #9/#10 — CEO/admin text broadcast. rounded-2xl + max-w-md
-            (not the pill shape above) since this can be a real multi-word
-            announcement, not a short one-liner ping. */}
-        {roomBroadcast && (
-          <div className="bg-teal-600/95 text-white text-sm font-semibold px-4 py-3 rounded-2xl shadow-lg pointer-events-none flex items-start gap-2 animate-fade-in max-w-md text-left">
-            <VolumeUpFill size={16} className="shrink-0 mt-0.5" />
-            <span>
-              <span className="block text-[11px] font-normal opacity-80 mb-0.5">Pengumuman dari {roomBroadcast.senderName}</span>
-              {roomBroadcast.text}
-            </span>
           </div>
         )}
         {adminErrorMessage && (
@@ -1879,6 +2215,48 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           </div>
         )}
       </div>
+
+      {activeRemoteHelp && (
+        <RemoteHelpBanner
+          role={activeRemoteHelp.role}
+          otherName={activeRemoteHelp.otherName}
+          onEnd={() => { emitRemoteHelpEnd(); useGameStore.getState().setActiveRemoteHelp(null); useGameStore.getState().setReceivedRemoteHelpCredential(null); }}
+        />
+      )}
+      {activeRemoteHelp?.role === 'target' && !receivedRemoteHelpCredential && (
+        <RemoteHelpCredentialForm
+          helperName={activeRemoteHelp.otherName}
+          onSubmit={(rustdeskId, password) => emitRemoteHelpCredential(rustdeskId, password)}
+          acked={remoteHelpCredentialAcked}
+        />
+      )}
+      {activeRemoteHelp?.role === 'helper' && receivedRemoteHelpCredential && (
+        <div className="fixed top-32 right-4 z-50 w-72 bg-white/95 dark:bg-gray-900/95 rounded-xl shadow-lg px-3.5 py-3 text-xs text-gray-800 dark:text-gray-100 flex flex-col gap-2">
+          <div className="font-semibold">ID+password dari {activeRemoteHelp.otherName}:</div>
+          {/* ID only — safe to embed in a link, RustDesk shows this plainly
+              on its own home screen too. Password NEVER goes into a link/URL
+              (see RemoteHelpCredentialPayload's doc comment) — copy-button
+              only, so it can't end up in browser/OS history. Real behavior
+              of the rustdesk:// scheme (does it open the app? pre-fill the
+              ID field?) depends on the RustDesk version installed — needs a
+              real test, this is a best-effort convenience, not guaranteed. */}
+          <a
+            href={`rustdesk://${encodeURIComponent(receivedRemoteHelpCredential.rustdeskId)}`}
+            className="flex items-center justify-between gap-2 font-mono bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 rounded px-2 py-1.5 hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors"
+          >
+            <span className="select-all">{receivedRemoteHelpCredential.rustdeskId}</span>
+            <span className="text-purple-600 dark:text-purple-400 text-[10px] font-sans font-semibold shrink-0">Buka RustDesk →</span>
+          </a>
+          <button
+            onClick={() => { navigator.clipboard?.writeText(receivedRemoteHelpCredential.password).catch(() => {}); }}
+            className="flex items-center justify-between gap-2 font-mono bg-gray-100 dark:bg-gray-800 rounded px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-left cursor-pointer"
+          >
+            <span className="select-all">{receivedRemoteHelpCredential.password}</span>
+            <span className="text-gray-500 dark:text-gray-400 text-[10px] font-sans font-semibold shrink-0">Copy</span>
+          </button>
+          <RustdeskSetupHint />
+        </div>
+      )}
 
       <AwayReasonModal open={awayPromptOpen} onResolve={resolveAwayPrompt} />
       {/* Global replacement for window.alert/confirm/prompt — see
@@ -1910,6 +2288,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         roomFeaturesActive={activePanel === 'roomFeatures'}
         onToggleRoomFeatures={() => openPanel('roomFeatures')}
         onCloseRoomFeatures={() => { if (useGameStore.getState().activePanel === 'roomFeatures') closePanel(); }}
+        roomDisplayName={roomSlug.charAt(0).toUpperCase() + roomSlug.slice(1)}
         onOpenSettings={() => openPanel('settings')}
         hasActiveBooking={zoneLock.zoneQueueTicket?.mode === 'booking'}
         onReopenBookingNotice={() => setBookingNoticeDismissed(false)}
@@ -1917,18 +2296,27 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onOpenTutorial={() => openPanel('userGuide')}
         onOpenMemberList={() => openPanel('memberList')}
         localRole={localRole}
-        manualStatus={manualStatus}
-        onPickPresence={handlePresencePick}
         isAdmin={isAdmin}
-        onOpenRoomEditor={() => window.open(`/?roomEditor=${encodeURIComponent(roomSlug)}`, '_blank', 'noopener')}
+        // Bare `/` only ever worked because the app used to own the whole
+        // domain — on kaispace.io that root path now serves the marketing
+        // landing site instead (deploy/kaispace/nginx-host.conf), so this new
+        // tab would land there with nothing to read `?roomEditor=` at all.
+        // `/_platform` is the same reserved-for-the-app utility path the
+        // OAuth-return fix already established for this exact class of bug
+        // (see server/src/lib/oauthReturn.ts) — the query param is read from
+        // window.location.search regardless of pathname, so this works
+        // identically on office.dev-kaitech.com too.
+        onOpenRoomEditor={() => window.open(`/_platform?roomEditor=${encodeURIComponent(roomSlug)}`, '_blank', 'noopener')}
         canTeleport={roleAtLeast(localRole, 'member')}
         showTeleportPanel={showTeleportPanel}
         onToggleTeleport={() => openPanel('teleport')}
-        hasMySeat={hasMySeat}
-        onMySeat={handleMySeat}
         doorOverride={doorOverride}
         canDoorOverride={isAdmin}
         onToggleDoorOverride={() => emitDoorOverride(!doorOverride)}
+        soundboardActive={activePanel === 'soundboard'}
+        onToggleSoundboard={() => openPanel('soundboard')}
+        onCloseSoundboard={closePanel}
+        emitSoundboardPlay={emitSoundboardPlay}
         canManageGuests={isAdmin}
         onCreateGuestLink={handleCreateGuestLink}
         onRevokeLastGuestLink={handleRevokeGuestLink}
@@ -1977,7 +2365,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         onToggleMiniMode={handleToggleMiniMode}
         showAddMediaPanel={showAddMediaPanel}
         onToggleAddMedia={() => openPanel('addMedia')}
-        canRecord={isAdmin}
+        canRecord={canRecordHere}
         recordingTargets={recordingTargets}
         activeRecording={activeRecording}
         isRecordingMine={isRecordingMine}
@@ -1985,9 +2373,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         roomSlug={roomSlug}
         onStartRecording={(targetUserId, title) => requestRecording(targetUserId, title, emitRecordingStart)}
         onStopRecording={stopMyRecording}
+        isRecordingPaused={isRecordingPaused}
+        onPauseRecording={pauseRecording}
+        onResumeRecording={resumeRecording}
         onLeaveRoom={onLeave}
-        onLogout={() => setShowLogoutConfirm(true)}
-        hiddenActive={!!localPlayer.hidden}
+        hiddenActive={!!localHidden}
         canToggleHidden={roleAtLeast(localRole, 'admin')}
         onToggleHidden={handleHiddenToggle}
         theme={theme}
@@ -2001,12 +2391,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           on the canvas itself (GameCanvas.tsx), which anyone can use
           regardless of login; assigning requires an account (server-side
           checked) since it's meant to persist across sessions. */}
-      {localPlayer.isSitting && sittingItem && (
+      {localIsSitting && sittingItem && (
         <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
           {!sittingItem.assignedToUserId ? (
             <Tooltip label="Jadikan Kursi Saya" detail="Tandai kursi ini jadi kursi tetapmu — otomatis kamu duduk di sini tiap masuk room.">
               <button
-                onClick={() => emitFurnitureAssign(sittingItem.id, playerName)}
+                onClick={() => emitFurnitureAssign(sittingItem.id, currentUser.name)}
                 className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg cursor-pointer inline-flex items-center gap-1.5"
               >
                 🪑 Assign as My Seat
@@ -2046,7 +2436,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </Suspense>
       )}
       {/* Absensi + Cuti sekaligus — Cuti adalah tab di dalam AttendanceApp. */}
-      {attendanceViewActive && <AttendanceApp onClose={closePanel} />}
+      {attendanceViewActive && <Suspense fallback={null}><AttendanceApp onClose={closePanel} /></Suspense>}
       {joinQueueActive && isAdmin && (
         <JoinRequestPanel roomSlug={roomSlug} onClose={closePanel} />
       )}
@@ -2054,6 +2444,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           with the floating ChatPanel below (same useChannelChat instance), so
           the two are two views of one conversation, not two inboxes. */}
       {messengerViewActive && (
+        <Suspense fallback={null}>
         <MessengerApp
           localUserId={authUserId}
           isAdmin={isAdmin}
@@ -2074,13 +2465,16 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onLoadOlder={channelChat.loadOlder}
           onCreateChannel={channelChat.createChannel}
         />
+        </Suspense>
       )}
       {calendarViewActive && (
+        <Suspense fallback={null}>
         <CalendarApp
-          currentUser={{ id: authUserId, name: authDisplayName, timezone: currentUser.timezone }}
+          currentUser={{ id: authUserId, name: currentUser.name, timezone: currentUser.timezone }}
           onClose={closePanel}
           onStartMeeting={(slug) => { closePanel(); onPortalTravel(slug); }}
         />
+        </Suspense>
       )}
 
       {showAdminPanel && (
@@ -2091,6 +2485,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onRevokeStaff={(userId) => emitStaffRevoke(userId)}
           onGrantCeo={(userId) => emitCeoGrant(userId)}
           onRevokeCeo={(userId) => emitCeoRevoke(userId)}
+          localAccountName={currentUser.name}
         />
       )}
 
@@ -2160,6 +2555,17 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         />
       )}
 
+      {zonePasswordFurniture && (
+        <InteractiveObjectModal
+          furniture={zonePasswordFurniture}
+          onClose={() => useGameStore.getState().setZonePasswordPrompt(null)}
+          onCheckPassword={handleCheckZonePassword}
+          passwordResult={zonePasswordResultAdapted}
+          onCheckChoice={() => {}}
+          choiceResult={null}
+        />
+      )}
+
       {reportTarget && (
         <ReportUserModal target={reportTarget} roomSlug={roomSlug} onClose={() => setReportTarget(null)} />
       )}
@@ -2182,25 +2588,54 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onSave={handleAvatarSave}
           onClose={closePanel}
           localUserId={localUserId}
+          initialFullName={currentUser.fullName}
+          onFullNameSave={onFullNameChange}
         />
       )}
 
       {userGuideActive && <UserGuidePanel onClose={closePanel} />}
 
-      {memberListActive && (
-        <MemberListPanel
-          localUserId={authUserId}
-          currentRoomSlug={roomSlug}
-          emitRosterListRequest={emitRosterListRequest}
-          onClose={closePanel}
-        />
-      )}
+      {/* MemberListPanel is now the ONE participants surface — merged in
+          everything ParticipantPanel had (video thumbnails, room-scoped
+          Offline section, leave badges, hand-raised/speaking/signal/
+          follower badges, the ⋮ action menu) on top of its own newer style
+          (Status/My Seat row, "OrgLabel N/M" label). Always rendered (not
+          wrapped in {memberListActive && ...}) so its internal
+          meetingViewActive-transition effect keeps working while closed,
+          same as ParticipantPanel's own always-mounted pattern before this
+          merge. Three entry points now open the same `memberList` panel:
+          the Status icon, the flyout's "Member" row, and the top-left
+          pill's Participants toggle (see that button's own prop change). */}
+      <MemberListPanel
+        remoteStreams={remoteStreams}
+        roomSlug={roomSlug}
+        isMicMuted={isMicMuted}
+        emitRosterListRequest={emitRosterListRequest}
+        open={memberListActive}
+        onToggle={() => openPanel('memberList')}
+        onClose={closePanel}
+        manualStatus={manualStatus}
+        onPickPresence={handlePresencePick}
+        hasMySeat={hasMySeat}
+        onMySeat={handleMySeat}
+        isGuest={isGuest}
+        localAccountName={currentUser.name}
+        emitFollowRequest={emitFollowRequest}
+        emitFollowUnfollow={emitFollowUnfollow}
+        emitSummonUser={emitSummonUser}
+        emitSlap={emitSlap}
+        onStartDm={channelChat.startDm}
+        onReport={(userId, name) => setReportTarget({ userId, name })}
+        emitKick={emitKick}
+        emitForceMute={emitForceMute}
+        emitForcePull={emitForcePull}
+        emitSpotlight={emitSpotlight}
+      />
 
       {meetingViewActive ? (
         <MeetingView
-          nearby={nearby}
-          localStream={webrtcService.getLocalStream()}
-          localScreenStream={isScreenSharing ? webrtcService.getScreenStream() : null}
+          localStream={getLocalStream()}
+          localScreenStream={isScreenSharing ? getScreenStream() : null}
           remoteStreams={remoteStreams}
           remoteScreenStreams={remoteScreenStreams}
           micMuted={isMicMuted}
@@ -2212,13 +2647,13 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           onEmote={handleEmoteSelect}
           showReactions={showEmoteWheel}
           failedPeerIds={failedPeers}
+          screenStalledPeerIds={screenStalledPeers}
         />
       ) : (
         <>
           <VideoGrid
-            nearby={nearby}
-            localStream={webrtcService.getLocalStream()}
-            localScreenStream={isScreenSharing ? webrtcService.getScreenStream() : null}
+            localStream={getLocalStream()}
+            localScreenStream={isScreenSharing ? getScreenStream() : null}
             remoteStreams={remoteStreams}
             remoteScreenStreams={remoteScreenStreams}
             micMuted={isMicMuted}
@@ -2227,6 +2662,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             recordedTargetUserId={activeRecording?.targetUserId}
             isLocalBeingRecorded={!!activeRecording && activeRecording.targetUserId === localUserId}
             failedPeerIds={failedPeers}
+            screenStalledPeerIds={screenStalledPeers}
             onToggleMeetingView={() => openPanel('meeting')}
             onScreenShareMaximizedChange={setScreenShareMaximized}
           />
@@ -2262,14 +2698,12 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       )}
       {!moduleOpen && !screenShareMaximized && (
       <>
-        {/* ParticipantPanel now positions itself as a full-height drawer
-            (left over the map HUD, right over Meeting View — see its own
-            file), no longer a toolbar-anchored popover, so it no longer
-            needs a positioning wrapper here. Ghost mode and Notification
-            Settings moved to Sidebar.tsx (no longer in this bar) —
-            Soundboard/ActivityFeed's own top-left panel spot is untouched,
-            see the top-14 left-16 block above. */}
-        <ParticipantPanel remoteStreams={remoteStreams} isMicMuted={isMicMuted} isGuest={isGuest} emitFollowRequest={emitFollowRequest} emitFollowUnfollow={emitFollowUnfollow} emitSummonUser={emitSummonUser} emitSlap={emitSlap} onStartDm={channelChat.startDm} onReport={(userId, name) => setReportTarget({ userId, name })} emitKick={emitKick} emitForceMute={emitForceMute} emitForcePull={emitForcePull} emitSpotlight={emitSpotlight} open={activePanel === 'participants'} onToggle={() => openPanel('participants')} onClose={closePanel} />
+        {/* ParticipantPanel was deleted — MemberListPanel (rendered above,
+            always mounted) is now the one participants surface. Ghost mode
+            and Notification Settings moved to Sidebar.tsx (no longer in
+            this bar) — Soundboard's own top-left panel spot is untouched,
+            see the top-14 left-16 block above (ActivityFeed moved out of
+            that block to the notification bell in the top-right row). */}
         {/* Fixed dead-centre, always — Messenger/Chat (see MessengerApp.tsx)
             is a pure `position: absolute` overlay docked to the left half of
             the screen; it never participates in layout flow, so it can't
@@ -2283,25 +2717,54 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             z-index comment) — flipped from an earlier version where this
             bar stayed on top and clickable through the overlap; that read
             as the toolbar barging in front of chat, not a feature. */}
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2">
+        {/* Border reverted from the accent-blue guess a previous pass made —
+            that blue almost certainly came from a Figma canvas selection
+            outline on the reference screenshot, not real UI (confirmed by
+            Screen Share also turning out to be gray/green, not blue, per
+            the app's own mic.svg/mic_on.svg color pair — see
+            ScreenShareButton's own comment). Sized down further (gap-2->1.5,
+            px-3->2.5) after a clearer, uncropped reference screenshot showed
+            noticeably smaller/more delicate icon proportions than this pass
+            still had. */}
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-2.5 py-1.5">
           <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
           <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
           <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
           {/* QA (Akses tamu checklist item 2, "Guest terbatas") — both
               server-rejected for guests now too (roomHandler.ts's
-              PLAYER_HAND/PLAYER_HIDDEN, emoteHandler.ts). Mic/Camera/Share/
-              Peserta stay — those are the kept-open meeting-participation
-              set. Chat is its own standalone bottom-right button again (see
+              PLAYER_HAND/PLAYER_HIDDEN, emoteHandler.ts). Mic/Camera/Share
+              stay — those are the kept-open meeting-participation set.
+              Peserta moved to the top-left rail beside Soundboard (see that
+              section's own comment) — same !moduleOpen/!screenShareMaximized
+              gate as this bar, just relocated, not removed from the set.
+              Chat is its own standalone bottom-right button again (see
               ChatPanel.tsx), not part of this bar. */}
-          {!isGuest && <HandButton raised={!!localPlayer.handRaised} onToggle={handleHandToggle} />}
+          {/* Divider — separates the three call controls above (mic/camera/
+              share) from the group/raise-hand/emoji cluster below, per the
+              reference design. */}
+          <div className="w-px h-4 bg-gray-200 dark:bg-gray-600 shrink-0" />
+          {/* Add Media — reuses AttachmentMenuButton (ChatPanel/MessengerApp's
+              own Gambar/Video/Dokumen picker), not a new upload component.
+              Its onFile is a placeholder: this toolbar has no single "active
+              conversation" of its own to attach to (unlike the chat composer,
+              where AttachmentMenuButton always sends into whatever channel/DM
+              is open) — sending here to whatever channelChat.activeChatTarget
+              happens to be would silently deliver to a conversation the user
+              may not even have open. Wiring the real destination is a product
+              decision, not something to guess at. */}
+          <AttachmentMenuButton
+            onFile={() => showAlert('Add Media belum tersambung ke tujuan manapun — placeholder sampai ada keputusan produk soal file ini dikirim ke mana.')}
+            title="Add Media"
+            detail="Kirim gambar, video, atau dokumen."
+            icon={<img src="/assets/img/icons/add_media.svg" width={14} height={14} alt="" />}
+            buttonClassName="flex items-center justify-center w-8 h-8 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+          />
+          {/* Raise Hand — moved here (after the group icon, before emoji)
+              per the reference layout; same handler/behavior as before,
+              only its position and (via HandButton's own restyle) its
+              background changed. */}
+          {!isGuest && <HandButton raised={!!localHandRaised} onToggle={handleHandToggle} />}
           {!isGuest && <EmojiButton open={showEmoteWheel} onToggle={() => setShowEmoteWheel((v) => !v)} />}
-          <ParticipantsToggleButton open={activePanel === 'participants'} onToggle={() => openPanel('participants')} />
-          {/* Mic/speaker/camera device picker — was two small carets glued
-              to Mic and Camera, merged into one ⋮ menu (see DeviceMenu.tsx)
-              placed just left of Keluar. */}
-          <DeviceMenu />
-          <div className="w-px h-7 bg-purple-200/50 dark:bg-white/10 mx-0.5" />
-          <LeaveButton onLeave={onLeave} />
         </div>
       </>
       )}
@@ -2353,9 +2816,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
         </div>
       )}
 
-      {/* Room name HUD + code */}
+      {/* Room code */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 pointer-events-auto">
-        <p className="text-gray-500 dark:text-gray-400 text-xs font-medium tracking-wider uppercase">MAIN OFFICE</p>
         <Tooltip label="Salin Kode Room" detail="Salin kode room ini untuk dibagikan.">
           <button
             onClick={async () => {
@@ -2368,62 +2830,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             <Clipboard size={11} /> {roomSlug.slice(0, 12)}
           </button>
         </Tooltip>
-        <Tooltip label="Salin Link Undangan" detail="Salin link undangan ke room ini.">
-          <button
-            onClick={async () => {
-              // ?join=<slug> — read back on load by App()'s own pending-invite
-              // effect below, which auto-joins this exact room once the
-              // clicker is authenticated (logging in first if they weren't).
-              const url = new URL(window.location.href);
-              url.search = '';
-              url.searchParams.set('join', roomSlug);
-              await navigator.clipboard.writeText(url.toString());
-              setInviteLinkCopied(true);
-              setTimeout(() => setInviteLinkCopied(false), 2000);
-            }}
-            className="text-gray-400 hover:text-gray-700 text-xs cursor-pointer transition-colors inline-flex items-center gap-1"
-          >
-            <Link45deg size={12} /> Invite
-          </button>
-        </Tooltip>
       </div>
 
       {roomCodeCopied && (
         <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 bg-purple-100 text-purple-700 text-[10px] px-2 py-0.5 rounded-full pointer-events-none">
           Code copied!
-        </div>
-      )}
-      {inviteLinkCopied && (
-        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 bg-purple-100 text-purple-700 text-[10px] px-2 py-0.5 rounded-full pointer-events-none">
-          Invite link copied!
-        </div>
-      )}
-
-      {showLogoutConfirm && (
-        <div
-          className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-          onClick={() => setShowLogoutConfirm(false)}
-        >
-          <div
-            className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-xl shadow-purple-100/50 dark:shadow-black/30 border border-purple-100 dark:border-gray-700 text-center"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="text-gray-900 dark:text-gray-100 text-sm mb-4">Log out of your account?</p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowLogoutConfirm(false)}
-                className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 text-sm cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => { setShowLogoutConfirm(false); onLogout(); }}
-                className="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm cursor-pointer"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
@@ -2470,6 +2881,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
       {notice && !simplifiedView && (
         <NoticeBanner notice={notice} isAdmin={isAdmin} onUnpin={emitNoticeUnpin} />
       )}
+
+      <InAppToastStack />
 
       {!moduleOpen && (
         <ZoneLockBar
@@ -2605,6 +3018,22 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           // passing the isTileBlocked check above.
           const targetX = tileX * TILE_SIZE + TILE_SIZE / 2;
           const targetY = tileY * TILE_SIZE + TILE_SIZE / 2;
+          // Bug fix ("kadang masih ada bug ... di atas impassible") — this
+          // check was missing entirely: Impassable Area rectangles are a
+          // free-form pixel-space overlay, never rasterized into the tile
+          // grid (see mapLayers.ts's getImpassableAreaRects doc comment), so
+          // the isTileBlocked check above never catches them. Below this
+          // point the player's position is set OPTIMISTICALLY (no waiting on
+          // server confirmation — see emitMove's own comment further down),
+          // so without this check a click landing inside an Impassable Area
+          // visibly dropped the local player right on top of it, even though
+          // the server would correctly refuse to broadcast that position to
+          // anyone else. Same hitbox box the server now validates with
+          // (movementHitboxBounds) so a click this rejects is never one the
+          // server would have accepted anyway.
+          const half = isDoorTile(state.tiles, tileX, tileY) ? DOOR_HITBOX_HALF_PX : TILE_SIZE / 2 - 2;
+          const { left, right, top, bottom } = movementHitboxBounds(targetX, targetY, half);
+          if (doesRectOverlapImpassableArea(state.impassableAreaRects, left, top, right, bottom)) return;
           // Stand up first if sitting — otherwise the player's x/y moves to
           // the clicked spot but isSitting stays true, so useMovement's
           // isFrozen check keeps refusing all WASD input at the new
@@ -2694,7 +3123,7 @@ function todayKey(): string {
 const STATUS_PICKED_PREFIX = 'vm_status_picked:';
 
 function MainApp() {
-  const { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, createOrganization, logout, markTutorialSeen, updatePreferences } = useAuth();
+  const { user, loading, error, sessionExpiredMessage, login, register, acceptOrgInvite, createOrganization, logout, markTutorialSeen, updatePreferences, updateDisplayName, updateFullName } = useAuth();
   const { theme, toggleTheme } = useTheme();
   // Settings feature — sync the store's live tooltipsEnabled/notifKinds
   // mirrors from the account's saved preferences as soon as they're known,
@@ -2848,26 +3277,74 @@ function MainApp() {
     if (roomSlug) localStorage.setItem('vm_last_room_slug', roomSlug);
   }, [roomSlug]);
   const [playerName, setPlayerName] = useState<string | null>(null);
+  // specs/2026-08-21-room-entry-name-prompt-v2-design.md — which roomSlug
+  // the CURRENT playerName was confirmed for. null until the modal is
+  // first submitted for this room. Compared against the live roomSlug
+  // below: `<Game key={roomSlug}>` already remounts on every new room
+  // entry (lobby->room AND portal travel), so re-showing the modal
+  // whenever roomSlug !== roomNameConfirmedFor gives "every room entry"
+  // for free, with no new wiring into useSocket.ts's reconnect path
+  // (reconnects don't change roomSlug, so they never touch this).
+  const [roomNameConfirmedFor, setRoomNameConfirmedFor] = useState<string | null>(null);
   const [showAvatarSetup, setShowAvatarSetup] = useState(false);
   const [isRoomReady, setIsRoomReady] = useState(false);
   const setRoomState = useGameStore((s) => s.setRoomState);
   const setLocalPlayer = useGameStore((s) => s.setLocalPlayer);
+
+  // specs/2026-08-21-room-entry-name-prompt-v2-design.md — logout()
+  // (useAuth.ts) doesn't reload the page, so this component never unmounts
+  // across a same-tab account switch — without this, a second user logging
+  // in after a first would inherit the first user's
+  // playerName/roomNameConfirmedFor untouched (the seeding effect below
+  // only fires when playerName is still null, which it never is after the
+  // first login), silently entering rooms under the PREVIOUS account's
+  // name with no prompt at all.
+  const prevUserIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (user && user.id !== prevUserIdRef.current) {
+      prevUserIdRef.current = user.id;
+      setPlayerName(null);
+      setRoomNameConfirmedFor(null);
+    } else if (!user) {
+      prevUserIdRef.current = null;
+    }
+  }, [user]);
 
   // If authenticated, use user's displayName and avatarConfig. New accounts
   // have no avatarConfig saved yet (null from the DB) — fall back to
   // loadAvatarConfig()'s defaults (sprite mode etc.) instead of leaving it
   // undefined, which would silently drop back to the legacy shape avatar.
   useEffect(() => {
-    if (user) {
+    // specs/2026-08-21-nametag-displayname-sync-design.md — guarded on
+    // playerName still being null so this only ever seeds ONCE per login,
+    // not every time the `user` object gets a new reference (e.g.
+    // markTutorialSeen/updatePreferences below both call setUser with a
+    // fresh object for an unrelated field). The nametag always follows
+    // user.displayName directly now — no separate room-entry nickname to
+    // fall back to (removed; see specs/2026-08-21-room-entry-name-prompt-
+    // design.md, the feature that originally added it).
+    if (user && playerName === null) {
       const config = user.avatarConfig || loadAvatarConfig();
+      saveAvatarConfig(config);
       setPlayerName(user.displayName);
       setLocalPlayer({
         name: user.displayName,
         color: config.color,
         avatarConfig: config,
       });
+      // specs/2026-08-21-room-entry-name-prompt-design.md originally
+      // triggered Avatar Setup from inside the now-removed name-prompt's
+      // submit handler, guarded on `savedConfig.bodyShape &&
+      // savedConfig.name` (both being set meant "already fully onboarded").
+      // The `name` half of that check no longer means anything distinct
+      // now that there's no separate name-collection step — bodyShape
+      // alone is the real signal of "has this account ever completed
+      // avatar customization."
+      if (!user.avatarConfig?.bodyShape) {
+        setShowAvatarSetup(true);
+      }
     }
-  }, [user, setLocalPlayer]);
+  }, [user, setLocalPlayer, playerName]);
 
   useEffect(() => {
     const room = createDefaultRoom('main-office', 'Main Office');
@@ -2883,24 +3360,55 @@ function MainApp() {
     }
   }, [user]);
 
-  const handleNameSubmit = useCallback((name: string) => {
-    setPlayerName(name);
-    const savedConfig = loadAvatarConfig();
-    if (savedConfig.bodyShape && savedConfig.name) {
-      savedConfig.name = name;
-      saveAvatarConfig(savedConfig);
-      setLocalPlayer({ name, color: savedConfig.color, avatarConfig: savedConfig });
-    } else {
-      setShowAvatarSetup(true);
-    }
-  }, [setLocalPlayer]);
-
   const handleAvatarSave = useCallback((config: AvatarConfig) => {
     saveAvatarConfig(config);
+    setPlayerName(config.name);
     setLocalPlayer({ name: config.name, color: config.color, avatarConfig: config });
     setShowAvatarSetup(false);
+    // specs/2026-08-21-room-entry-name-prompt-v2-design.md — a user who
+    // just went through first-time Avatar Setup (which has its own Display
+    // Name field, see AvatarSetup.tsx) has already given their name for
+    // THIS room entry. Without this, the name-prompt gate below would
+    // immediately fire again right after, asking for a name they just gave
+    // a moment ago.
+    setRoomNameConfirmedFor(roomSlug);
+    updateDisplayName(config.name);
     persistAvatar(config);
-  }, [setLocalPlayer, persistAvatar]);
+    // Finding 2 (4th-round final review) — this is the first-time-onboarding
+    // Avatar Setup path (distinct from the Game-scoped Sidebar avatar editor's
+    // own handleAvatarSave, which already does this). Without it, chat
+    // bubbles (ChatPanel.tsx) and video tile labels (VideoGrid.tsx,
+    // MeetingView.tsx) keep showing the pre-onboarding name for the rest of
+    // the session — useProfiles' cache is a module-level store separate from
+    // both Zustand's localPlayer/playerName and useAuth's cached user object.
+    if (user && config.name) setProfileName(user.id, config.name);
+  }, [setLocalPlayer, persistAvatar, roomSlug, updateDisplayName, user]);
+
+  // specs/2026-08-21-room-entry-name-prompt-v2-design.md — unlike the
+  // original (removed) version of this flow, there is no separate
+  // roomDisplayName field to write: this merges the submitted name into
+  // whatever avatar config already exists and saves it through the SAME
+  // path AvatarSetup itself uses (api.saveAvatar), which already writes
+  // both avatarConfig AND displayName in one call (see rooms.ts's PUT
+  // /users/me/avatar). Sending the FULL merged config — not just {name} —
+  // is required: that route stores whatever it receives as the entire
+  // avatarConfig, with no server-side merge, so a name-only payload would
+  // silently erase the user's body/eyes/outfit selections.
+  const handleNameSubmit = useCallback((name: string) => {
+    const merged = { ...loadAvatarConfig(), name };
+    setRoomNameConfirmedFor(roomSlug);
+    setPlayerName(name);
+    saveAvatarConfig(merged);
+    setLocalPlayer({ name, color: merged.color, avatarConfig: merged });
+    updateDisplayName(name);
+    api.saveAvatar(merged).catch(() => {});
+    // Finding 2 (4th-round final review) — same gap as handleAvatarSave
+    // above: without this, this room-entry popup's rename never reaches
+    // useProfiles' cache, so this user's own chat bubbles and video tile
+    // keep showing the old name for the rest of the session even though
+    // playerName/localPlayer (and the nametag) updated live.
+    if (user) setProfileName(user.id, name);
+  }, [setLocalPlayer, roomSlug, updateDisplayName, user]);
 
   // Ask before entering. A room that takes walk-ins answers immediately and
   // this is one extra request; a gated one is caught here instead of at the
@@ -3007,7 +3515,7 @@ function MainApp() {
       <JoinGate
         roomSlug={roomSlug}
         reason={entryBlock.reason}
-        onBack={() => { setEntryBlock(null); setRoomSlug(null); }}
+        onBack={() => { setEntryBlock(null); setRoomSlug(null); setRoomNameConfirmedFor(null); }}
         onAdmitted={() => setEntryBlock(null)}
       />
     );
@@ -3025,18 +3533,37 @@ function MainApp() {
   // `entryBlock` check above swaps it out for JoinGate on the next render,
   // cleanly disconnecting the socket via Game's own unmount cleanup.
 
-  // Room (existing flow)
-  if (!playerName) {
-    return <NameModal onSubmit={handleNameSubmit} />;
+  // QA #1/#6 — "next-next sebelum masuk": a real account with a null
+  // `tutorialCompletedAt` (brand-new, or any pre-existing account from
+  // before this feature shipped) sees the walkthrough exactly once, gating
+  // <Game> itself rather than overlaying on top of it. Deliberately ahead
+  // of Avatar Setup and the daily status picker below: a brand-new account
+  // should meet the walkthrough first, not "customize your avatar" or
+  // "pick a status" before ever seeing "Welcome to KaiSpace".
+  if (!user.tutorialCompletedAt) {
+    return <TutorialModal onFinish={markTutorialSeen} />;
   }
 
   if (showAvatarSetup) {
     return (
       <AvatarSetup
-        initialConfig={{ ...loadAvatarConfig(), name: playerName }}
+        initialConfig={{ ...loadAvatarConfig(), name: playerName || user.displayName }}
         onSave={handleAvatarSave}
+        initialFullName={user.fullName}
+        onFullNameSave={updateFullName}
       />
     );
+  }
+
+  // specs/2026-08-21-room-entry-name-prompt-v2-design.md — shows once per
+  // NEW roomSlug (fresh entry from Lobby, or portal travel — both already
+  // remount <Game key={roomSlug}> below), never on a reconnect within the
+  // same room visit (reconnects don't change roomSlug). Placed AFTER the
+  // showAvatarSetup check above: a never-configured account goes straight
+  // to Avatar Setup (which has its own Display Name field) instead of
+  // being asked for a name twice.
+  if (roomSlug !== roomNameConfirmedFor) {
+    return <NameModal initialName={playerName || user.displayName} onSubmit={handleNameSubmit} />;
   }
 
   if (!isRoomReady) {
@@ -3047,21 +3574,11 @@ function MainApp() {
     );
   }
 
-  // QA #1/#6 — "next-next sebelum masuk": a real account with a null
-  // `tutorialCompletedAt` (brand-new, or any pre-existing account from
-  // before this feature shipped) sees the walkthrough exactly once, gating
-  // <Game> itself rather than overlaying on top of it.
-  if (!user.tutorialCompletedAt) {
-    return <TutorialModal onFinish={markTutorialSeen} />;
-  }
-
   // QA #1 — "set status saat login": re-asked once per calendar day (see
-  // todayKey/STATUS_PICKED_DATE_PREFIX above), after the tutorial gate so a
-  // brand-new account meets the walkthrough first. `statusPickedDate` starts
+  // todayKey/STATUS_PICKED_DATE_PREFIX above). `statusPickedDate` starts
   // null until the effect above resolves it from localStorage — treated as
   // "not picked yet today" rather than flashing the picker for a tick on
-  // every load, which is why this sits after (not before) the tutorial gate:
-  // by this point `user` has been stable for at least one render already.
+  // every load.
   if (statusPickedDate !== todayKey()) {
     return <StatusPickModal onPick={finishStatusPick} />;
   }
@@ -3074,12 +3591,18 @@ function MainApp() {
   // window still open, with no signal anything changed underneath. Forcing
   // a remount on room change gives every room a clean slate, matching what
   // already happens when leaving to the Lobby and rejoining.
-  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => setRoomSlug(null)} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} onUpdatePreferences={updatePreferences} />;
+  // specs/2026-08-21-nametag-displayname-sync-design.md — authDisplayName
+  // falls back to user.displayName for the one-tick window before the
+  // seeding effect first runs, same fallback pattern used above at
+  // AvatarSetup's initialConfig.
+  return <Game key={roomSlug} roomSlug={roomSlug} onLeave={() => { setRoomSlug(null); setRoomNameConfirmedFor(null); }} onLogout={logout} onPortalTravel={setRoomSlug} authDisplayName={playerName || user.displayName} authUserId={user.id} currentUser={toCurrentUser(user)} theme={theme} onToggleTheme={toggleTheme} onUpdatePreferences={updatePreferences} onDisplayNameChange={(n) => { setPlayerName(n); updateDisplayName(n); }} onFullNameChange={updateFullName} />;
 }
 
-// ZEP Room Editor opens in its own tab as /?roomEditor=<slug> (a query param on
-// the root path so the SPA index.html always loads — same scheme as ?join, no
-// nginx SPA-fallback dependency). The tab shares localStorage, so it's the SAME
+// ZEP Room Editor opens in its own tab as /_platform?roomEditor=<slug> (a
+// query param read from window.location.search below, so any app-reserved
+// pathname works — /_platform rather than bare `/` since kaispace.io's
+// nginx routes root `/` to the marketing landing site, not this app; see
+// onOpenRoomEditor in App.tsx). The tab shares localStorage, so it's the SAME
 // session as the main tab (no new login, no single-device supersede). A tiny
 // wrapper picks the page WITHOUT conditional hooks in either component.
 export default function App() {

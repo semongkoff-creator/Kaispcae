@@ -2,14 +2,33 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { Socket } from 'socket.io-client';
 import { ProximityPlayer, DISCONNECT_DEBOUNCE_MS } from '@kaispace/shared';
 import { webrtcService, MAX_VIDEO_PEERS } from '@/services/webrtcService';
+import { livekitService } from '@/services/livekitService';
+import { usesLiveKit } from '@/services/livekitRooms';
 import { calcGain } from './useProximity';
 
 interface UseWebRTCOptions {
   socketRef: React.MutableRefObject<Socket | null>;
   onRemoteStream?: (id: string, stream: MediaStream) => void;
+  // Which room this is, so the media path can be chosen per room.
+  //
+  // The branch lives here rather than in App because this hook is already the
+  // only door between the app and the media layer — every caller goes through
+  // the same six functions it returns, so App does not have to know there are
+  // two implementations behind them.
+  roomSlug?: string | null;
 }
 
-export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
+// How long a peer has to stay inside proximity range before a connection is
+// started for them. Deliberately short: at App's 200ms proximity tick this is
+// two or three ticks, imperceptible next to how long ICE negotiation itself
+// takes, but enough that simply walking past someone never negotiates at all.
+const CONNECT_DWELL_MS = 400;
+
+export function useWebRTC({ socketRef, onRemoteStream, roomSlug }: UseWebRTCOptions) {
+  // Decided once per room and never mid-session. The two paths cannot
+  // interoperate, so a room is entirely on one or entirely on the other —
+  // switching under a live call would leave everyone half-connected to each.
+  const onLiveKit = usesLiveKit(roomSlug);
   const connectedRef = useRef<Set<string>>(new Set());
   const initRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
@@ -20,6 +39,11 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // once and then, if it's still happening a bit later (a genuine mass
   // departure, not a one-off blip), let through rather than blocked forever.
   const massGlitchSinceRef = useRef<number | null>(null);
+  // peer id → when they FIRST read in-range, for the dwell gate in
+  // updateProximity below. Pruned the moment they leave range, so a peer who
+  // steps out and back in starts a fresh dwell rather than resuming an old
+  // one.
+  const inRangeSinceRef = useRef<Map<string, number>>(new Map());
 
   // Mic starts muted / camera starts off — matches webrtcService disabling
   // both tracks right after acquiring them, so the UI doesn't show "live"
@@ -43,6 +67,12 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // webrtcService's onPeerConnectionStatus. Consumed by VideoGrid to show a
   // "connection lost" badge instead of a silently-frozen tile.
   const [failedPeers, setFailedPeers] = useState<Set<string>>(new Set());
+  // Peers whose incoming screen-share frames have stalled (ICE still
+  // nominally connected, but no new frames for a tick) — see
+  // webrtcService's checkScreenStall/onScreenShareStalled. Consumed by
+  // VideoGrid/MeetingView to show "Menyambung ulang..." over the frozen
+  // picture instead of leaving it silently black.
+  const [screenStalledPeers, setScreenStalledPeers] = useState<Set<string>>(new Set());
 
   // Guards against overlapping initLocalMedia() calls (e.g. mic and camera
   // buttons both clicked before the first request resolves) — NOT a
@@ -53,6 +83,22 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // mic/camera buttons would then silently do nothing for the rest of the
   // session, no matter how many times they were clicked.
   const initMedia = useCallback(async () => {
+    if (onLiveKit) {
+      // One connection to the server, and the microphone published on it.
+      // No peer loop, no offer, no ICE — joining a room of thirty costs the
+      // same as joining a room of two.
+      if (initRef.current || livekitService.isConnected() || !roomSlug) return;
+      initRef.current = true;
+      const res = await livekitService.connect(roomSlug);
+      initRef.current = false;
+      if (!res.success) { setMediaError(res.error ?? 'Tidak bisa menyambung ke server media.'); return; }
+      // Mic starts muted, matching the mesh path's own posture so the UI does
+      // not show "live" before the user has chosen to be.
+      await livekitService.setMicrophoneEnabled(false);
+      setIsMicMuted(true);
+      setIsCameraOn(false);
+      return;
+    }
     if (initRef.current) return;
     // The mic is all this needs to obtain. It used to also require a video
     // track before considering itself done, which no longer makes sense: the
@@ -118,6 +164,15 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
         return next;
       });
     });
+    webrtcService.setOnScreenShareStalled((id, stalled) => {
+      setScreenStalledPeers((prev) => {
+        const already = prev.has(id);
+        if (stalled === already) return prev;
+        const next = new Set(prev);
+        if (stalled) next.add(id); else next.delete(id);
+        return next;
+      });
+    });
   });
 
   // §6 — connect for both 'full_visible' and 'translucent' (still shown,
@@ -138,6 +193,27 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // fairness for stability, which matters more for a call already in
   // progress than for who wins a not-yet-made connection.
   const updateProximity = useCallback((nearby: ProximityPlayer[]) => {
+    if (onLiveKit) {
+      // The same useProximity output, spent differently. On the mesh this
+      // opened and closed peer connections and renegotiated to do it; here it
+      // subscribes and unsubscribes tracks the server already holds, which
+      // touches no SDP at all — so walking past somebody can no longer break
+      // a call, which is the entire reason for this migration.
+      //
+      // The gain is computed here and not in the service, so the distance
+      // curve stays in one place (calcGain) for both paths.
+      livekitService.applyProximity(
+        nearby
+          .filter((p) => p.visibility !== 'not_visible')
+          .map((p) => ({
+            userId: p.userId,
+            distanceTiles: p.distanceTiles,
+            viaZone: p.viaZone,
+            gain: p.viaZone ? 1 : calcGain(p.distanceTiles),
+          })),
+      );
+      return;
+    }
     const visible = nearby.filter((p) => p.visibility !== 'not_visible');
     const sorted = [...visible].sort((a, b) => {
       if (!!a.viaZone !== !!b.viaZone) return a.viaZone ? -1 : 1;
@@ -145,6 +221,25 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     });
     const inRangeIds = new Set(visible.map((p) => p.id));
     const connectedIds = connectedRef.current;
+
+    // Reconcile against what the service ACTUALLY holds. A peer it has given
+    // up on — the negotiation watchdog tore it down, or its one automatic
+    // retry was refused because local media or a peer slot wasn't available
+    // at that moment — is gone from its map, but stayed listed here forever,
+    // and this set is the only thing deciding whether to try again. That left
+    // the pair silent both ways for the rest of the session with nothing
+    // anywhere reporting a problem. Dropping it here puts them back on the
+    // normal "not connected yet" path, which retries every tick.
+    for (const id of connectedIds) {
+      if (!webrtcService.hasPeer(id)) connectedIds.delete(id);
+    }
+
+    // Anyone no longer in range forfeits their accumulated dwell (see the
+    // dwell gate below) — and this is also what keeps the map from growing
+    // for the lifetime of the session as people come and go.
+    for (const id of inRangeSinceRef.current.keys()) {
+      if (!inRangeIds.has(id)) inRangeSinceRef.current.delete(id);
+    }
 
     // Recomputed fresh every tick from the CURRENT ranking — only takes
     // effect for a peer not yet connected (webrtcService locks
@@ -161,20 +256,38 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
       }
 
       if (!connectedIds.has(p.id)) {
-        // Only mark them connected if the attempt actually started — when
-        // local media isn't ready yet, or MAX_TOTAL_PEERS is already
-        // reached, connectToPlayer is a no-op, and marking them anyway
-        // meant this branch never ran again for that player, stranding
-        // them silent for the rest of the session. Leaving them unmarked
-        // lets the next proximity tick retry — same self-healing shape
-        // whether the reason is "media not ready yet" or "room's crowded
-        // right now, try again once someone else leaves range".
-        // [webrtc-diag] Proximity fired for this player — did a connection
-        // attempt actually start, or was it refused (no local media / no
-        // socket / at cap)? A refusal here means nothing downstream ever runs.
-        const started = webrtcService.connectToPlayer(p.id);
-        console.log('[webrtc-diag] proximity connect', { peer: p.id, started, visibility: p.visibility });
-        if (started) connectedIds.add(p.id);
+        // Dwell gate — crossing someone's proximity radius for a fraction of
+        // a second does not mean you meant to talk to them, but it used to
+        // start a full peer connection anyway. Walking through a busy area
+        // (Kaitech's desk floor, a dozen people in one open zone) therefore
+        // fired a burst of offer/answer/ICE negotiation for people already
+        // behind you by the time it completed — and SDP/ICE work runs on the
+        // main thread, so each one is a hitch in the walk itself, then a
+        // matching teardown a second later (see the debounced disconnect
+        // below). Requiring the peer to stay in range for CONNECT_DWELL_MS
+        // first means passers-by cost nothing, while anyone you actually
+        // stop near still connects well before the negotiation itself could
+        // have finished.
+        //
+        // Zone/table-mates (viaZone) bypass the dwell entirely: joining a
+        // meeting area is a deliberate act, not something you do in passing,
+        // and it should connect on the same tick as before.
+        const now = Date.now();
+        const inRangeSince = inRangeSinceRef.current.get(p.id) ?? now;
+        inRangeSinceRef.current.set(p.id, inRangeSince);
+
+        if (p.viaZone || now - inRangeSince >= CONNECT_DWELL_MS) {
+          // Only mark them connected if the attempt actually started — when
+          // local media isn't ready yet, or MAX_TOTAL_PEERS is already
+          // reached, connectToPlayer is a no-op, and marking them anyway
+          // meant this branch never ran again for that player, stranding
+          // them silent for the rest of the session. Leaving them unmarked
+          // lets the next proximity tick retry — same self-healing shape
+          // whether the reason is "media not ready yet" or "room's crowded
+          // right now, try again once someone else leaves range".
+          const started = webrtcService.connectToPlayer(p.id);
+          if (started) connectedIds.add(p.id);
+        }
       }
 
       // Zone-mates always get full volume; otherwise fall off with distance.
@@ -230,6 +343,12 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   }, []);
 
   const toggleMic = useCallback(async () => {
+    if (onLiveKit) {
+      const next = !livekitService.isMicrophoneEnabled();
+      await livekitService.setMicrophoneEnabled(next);
+      setIsMicMuted(!next);
+      return true;
+    }
     // This click is a user gesture — the one thing the browser was waiting
     // for before it would let any peer audio actually play.
     webrtcService.resumeAudio();
@@ -259,6 +378,12 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   // re-acquired the whole stream and silently re-muted a mic the user had
   // already turned on).
   const toggleCamera = useCallback(async () => {
+    if (onLiveKit) {
+      const next = !livekitService.isCameraEnabled();
+      await livekitService.setCameraEnabled(next);
+      setIsCameraOn(next);
+      return true;
+    }
     webrtcService.resumeAudio();
 
     // No local stream at all yet — the very first click also has to obtain
@@ -281,6 +406,13 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   }, [initMedia]);
 
   const toggleScreenShare = useCallback(async () => {
+    if (onLiveKit) {
+      const sharing = livekitService.isScreenSharing();
+      const res = await livekitService.setScreenShareEnabled(!sharing);
+      if (!res.success) { setScreenShareError(res.error ?? null); return false; }
+      setIsScreenSharing(!sharing);
+      return true;
+    }
     if (webrtcService.isScreenSharing()) {
       webrtcService.stopScreenShare();
       setIsScreenSharing(false);
@@ -306,6 +438,9 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
   }, []);
 
   const destroy = useCallback(() => {
+    // Leaving a LiveKit room is one disconnect. The mesh needs the timer
+    // sweep below because it holds a teardown timer per peer.
+    if (onLiveKit) void livekitService.disconnect();
     for (const timer of disconnectTimers.current.values()) {
       clearTimeout(timer);
     }
@@ -317,6 +452,7 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     streamRef.current = null;
     massGlitchSinceRef.current = null;
     setFailedPeers(new Set());
+    setScreenStalledPeers(new Set());
   }, []);
 
   return {
@@ -331,8 +467,14 @@ export function useWebRTC({ socketRef, onRemoteStream }: UseWebRTCOptions) {
     mediaError,
     screenShareError,
     failedPeers,
+    screenStalledPeers,
     setManualVolume,
     destroy,
-    getLocalStream: () => webrtcService.getLocalStream(),
+    // Both paths, through one door. App used to reach past this hook and call
+    // webrtcService directly for its own preview tile, which returned null for
+    // every LiveKit room — webrtcService is never initialised on that path —
+    // so nobody could see themselves in Meeting View.
+    getLocalStream: () => (onLiveKit ? livekitService.getLocalStream() : webrtcService.getLocalStream()),
+    getScreenStream: () => (onLiveKit ? livekitService.getScreenStream() : webrtcService.getScreenStream()),
   };
 }

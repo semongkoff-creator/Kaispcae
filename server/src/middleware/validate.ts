@@ -38,7 +38,7 @@ export const createRoomSchema = z.object({
   maxPlayers: z.number().int().min(2).max(100).optional(),
   isPublic: z.boolean().optional(),
   theme: z.enum(['modern-interiors', 'scifi-office']).optional(),
-  template: z.enum(['main-office', 'small-team', 'open-lounge']).optional(),
+  template: z.enum(['main-office', 'small-team', 'open-lounge', 'blank']).optional(),
 });
 
 // Same length cap as createRoomSchema's own `name` — a renamed room is still
@@ -68,6 +68,16 @@ export const avatarUpdateSchema = z.object({
   hairId: z.string().optional(),
   spriteAccessoryId: z.string().optional(),
   premadeId: z.string().optional(),
+  customSpriteId: z.string().optional(),
+});
+
+// specs/2026-08-21-full-name-field-design.md — no `.min(1)`: an empty
+// string is a valid submission and means "clear the field back to null"
+// (see the route below), not an invalid one. 100 chars is generous
+// compared to displayName's 20-char nametag cap — a real full name is
+// often longer than a casual nickname.
+export const fullNameSchema = z.object({
+  name: z.string().max(100),
 });
 
 export function sanitizeChat(text: string): string {
@@ -90,3 +100,4 @@ export const createChannelSchema = z.object({
 export const startDmSchema = z.object({
   otherUserId: z.string().min(1),
 });
+

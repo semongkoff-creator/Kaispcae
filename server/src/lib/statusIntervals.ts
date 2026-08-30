@@ -41,6 +41,12 @@ export async function openStatusInterval(
 ): Promise<void> {
   await closeOpenStatusInterval(prisma, userId, at);
   await prisma.statusInterval.create({ data: { userId, roomSlug, status, startedAt: at, zoneId: zoneId ?? null } });
+  // specs/2026-08-21-last-seen-offline-members-design.md — overwritten
+  // UNCONDITIONALLY on every call (room join OR work-mode change alike),
+  // unlike firstSeenAt's old "set if null" guard (deleted above): there is
+  // no "only once" constraint here, the newest join/mode-change is always
+  // the value the Offline list should show, so last write always wins.
+  await prisma.user.updateMany({ where: { id: userId }, data: { lastSeenAt: at } });
 }
 
 export async function closeOpenStatusInterval(

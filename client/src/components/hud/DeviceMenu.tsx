@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ThreeDotsVertical, Check, MicFill, VolumeUpFill, CameraVideoFill } from 'react-bootstrap-icons';
+import { ThreeDotsVertical, Check, VolumeUpFill } from 'react-bootstrap-icons';
 import { webrtcService } from '@/services/webrtcService';
 import { Tooltip } from '@/components/ui/Tooltip';
 
-// Device picker (mic/speaker/camera) — the same affordance Zoom/Meet/Zep
-// use, now behind a single ⋮ trigger instead of two separate carets next to
-// Mic and Camera (was one instance per `kind`, merged per request so the
-// toolbar has one less pair of small controls). Selection is applied
-// immediately via webrtcService and remembered there, so this component
-// holds no source of truth of its own beyond what it last read.
+// Speaker picker — Mic and Camera got their own DeviceCaret.tsx carets back
+// (matching the reference design), so this ⋮ menu now only needs to cover
+// Speaker, which has no dedicated toolbar button of its own to attach a
+// caret to. Selection is applied immediately via webrtcService and
+// remembered there, so this component holds no source of truth of its own
+// beyond what it last read.
 interface Group {
   label: string;
   icon: React.ReactNode;
@@ -24,23 +24,13 @@ export function DeviceMenu() {
   const ref = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
-    const { mics, cameras, speakers } = await webrtcService.listDevices();
+    const { speakers } = await webrtcService.listDevices();
     const sel = webrtcService.getSelectedDevices();
     setGroups([
-      {
-        label: 'Mikrofon', icon: <MicFill size={11} />, devices: mics,
-        selectedId: sel.micId, fallbackName: 'Mikrofon',
-        onPick: (id) => webrtcService.switchMic(id),
-      },
       {
         label: 'Speaker', icon: <VolumeUpFill size={11} />, devices: speakers,
         selectedId: sel.speakerId, fallbackName: 'Speaker',
         onPick: (id) => webrtcService.switchSpeaker(id),
-      },
-      {
-        label: 'Kamera', icon: <CameraVideoFill size={11} />, devices: cameras,
-        selectedId: sel.cameraId, fallbackName: 'Kamera',
-        onPick: (id) => webrtcService.switchCamera(id),
       },
     ]);
   }, []);
@@ -73,16 +63,16 @@ export function DeviceMenu() {
   };
 
   return (
-    // Now a standalone toolbar control (was a small sub-caret glued to
-    // Mic/Camera) — sized to match the other 44px main buttons.
+    // Standalone toolbar control for Speaker only now — Mic/Camera moved to
+    // their own DeviceCaret.tsx carets (see this file's header comment).
     <div className="relative" ref={ref}>
       <Tooltip
-        label="Pilih Perangkat"
-        detail="Pilih mikrofon, speaker, atau kamera yang ingin dipakai, tanpa perlu mematikan mic/kamera dulu."
+        label="Pilih Speaker"
+        detail="Pilih speaker/output audio yang ingin dipakai."
       >
         <button
           onClick={() => setOpen((v) => !v)}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 transition-all hover:scale-105 cursor-pointer text-purple-700 dark:text-purple-300"
+          className="flex items-center justify-center w-10 h-10 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-login-border-soft dark:border-white/10 shadow-lg shadow-purple-500/10 transition-all hover:scale-105 cursor-pointer text-login-accent dark:text-purple-300"
         >
           <ThreeDotsVertical size={16} />
         </button>
@@ -91,7 +81,7 @@ export function DeviceMenu() {
       {open && (
         // bottom-full (not a fixed pixel offset) anchors off this button's
         // own box, so it stays correct regardless of the trigger's size.
-        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-64 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-purple-100 dark:border-gray-700 rounded-lg shadow-xl py-1 z-[60]">
+        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-64 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-login-border-soft dark:border-gray-700 rounded-lg shadow-xl py-1 z-[60]">
           {groups.map((g) => (
             <div key={g.label}>
               <div className="flex items-center gap-1.5 px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
@@ -113,9 +103,9 @@ export function DeviceMenu() {
                   <button
                     key={d.deviceId || i}
                     onClick={() => pick(g, d.deviceId)}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-purple-50 dark:hover:bg-gray-700 cursor-pointer"
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-login-surface dark:hover:bg-gray-700 cursor-pointer"
                   >
-                    <span className="w-3.5 shrink-0 text-purple-600 dark:text-purple-300">
+                    <span className="w-3.5 shrink-0 text-login-accent dark:text-purple-300">
                       {isSelected && <Check size={14} />}
                     </span>
                     <span className="truncate">{d.label || `${g.fallbackName} ${i + 1}`}</span>

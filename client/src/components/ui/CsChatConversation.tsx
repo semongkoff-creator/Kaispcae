@@ -98,7 +98,7 @@ export function CsChatConversation({ active }: CsChatConversationProps) {
         {messages.map((m) => (
           <div key={m.id} className={`flex ${m.from === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
-              className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-xs leading-relaxed whitespace-pre-line ${
+              className={`max-w-[80%] min-w-0 rounded-2xl px-3 py-1.5 text-xs leading-relaxed whitespace-pre-line break-words select-text ${
                 m.from === 'user'
                   ? 'bg-purple-600 text-white rounded-br-sm'
                   : m.from === 'admin'

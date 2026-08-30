@@ -1,19 +1,22 @@
-import { useState, useRef, useEffect, useCallback, type ReactNode, type MouseEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, type ReactNode, type MouseEvent, type ClipboardEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { ChatDotsFill, LockFill, EmojiSmile, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, MegaphoneFill, ChevronLeft, ChevronRight, XLg, Headset } from 'react-bootstrap-icons';
+import { LockFill, PlusLg, ChatLeftText, FileEarmarkFill, Download, TrashFill, PencilFill, PlayCircleFill, ExclamationTriangleFill, ArrowClockwise, PinAngleFill, PinAngle, MegaphoneFill, ChevronLeft, ChevronRight, XLg, Headset, Clipboard } from 'react-bootstrap-icons';
 import { ChatMessage, ChannelMessage, Channel, DirectConversationSummary, EmoteType } from '@kaispace/shared';
 import { api } from '@/services/api';
 import { useGameStore } from '@/stores/gameStore';
 import { ChatAvatar, avatarColor } from './ChatAvatar';
 import { AttachmentLightbox, type LightboxTarget } from './AttachmentLightbox';
 import { AttachmentMenuButton } from './AttachmentMenuButton';
+import { AttachmentTray } from './AttachmentTray';
+import { usePendingAttachments, type PendingAttachment } from '@/hooks/usePendingAttachments';
 import { Tooltip } from './Tooltip';
 import { CsChatConversation } from './CsChatConversation';
 import { useProfiles } from '@/hooks/useProfiles';
-import { textMentionsUser, renderWithMentions } from '@/utils/mentions';
+import { textMentionsUser, renderWithMentions, stripMentionsToPlainText } from '@/utils/mentions';
 import { showConfirm } from '@/stores/modalStore';
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024; // matches server/src/routes/uploads.ts's multer limit
+const MAX_COMPOSE_HEIGHT_PX = 96; // ~6 lines before the compose box scrolls internally instead of growing further
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp)$/i;
 const VIDEO_EXT_RE = /\.(mp4|webm|mov|avi)$/i;
 
@@ -143,14 +146,36 @@ export function ChatPanel({
   // 1s tick while open so typing entries lapse on their own (there's no
   // explicit "stopped typing" event — they just pass their expiry).
   const [, setTypingTick] = useState(0);
+  // Ticks ONLY while there is an unexpired typing entry to expire. It used
+  // to run unconditionally for as long as the surface was up, re-rendering
+  // this whole component once a second forever — and a chat surface is
+  // typically left open, so that was a permanent 1Hz render of one of the
+  // largest components in the app to do nothing at all. Someone starting to
+  // type changes typingByTarget, which restarts this effect; the tick that
+  // notices the last entry lapse stops it again.
+  const anyoneTyping = () =>
+    Object.values(useGameStore.getState().typingByTarget).some((byUser) =>
+      Object.values(byUser).some((expiresAt) => expiresAt > Date.now()),
+    );
   useEffect(() => {
-    if (!open) return;
-    const iv = setInterval(() => setTypingTick((t) => t + 1), 1000);
+    if (!open || !anyoneTyping()) return;
+    const iv = setInterval(() => {
+      // Re-render first so the lapsed entry actually leaves the screen, then
+      // decide whether there is any reason to tick again.
+      setTypingTick((t) => t + 1);
+      if (!anyoneTyping()) clearInterval(iv);
+    }, 1000);
     return () => clearInterval(iv);
-  }, [open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, typingByTarget]);
 
   const [text, setText] = useState('');
-  const messageInputRef = useRef<HTMLInputElement>(null);
+  // A <textarea> now (was <input>) — a single-line input can never wrap, it
+  // only scrolls sideways forever, which is what was actually happening in
+  // the compose box for a long word with no spaces (separate from — and
+  // upstream of — the sent-bubble wrap fix, which only affects already-sent
+  // messages). See the auto-grow onChange below.
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   // Potongan C2 — @mention autocomplete (Bagian 1). null = closed. When open,
   // `query` is whatever's typed after the triggering "@" (before the cursor,
   // no whitespace yet), `start` is that "@"'s index in `text` so a selection
@@ -201,7 +226,6 @@ export function ChatPanel({
     const pos = mention.start + token.length;
     requestAnimationFrame(() => { input?.focus(); input?.setSelectionRange(pos, pos); });
   }, [mention, text]);
-  const [proximityMode, setProximityMode] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [viewingZone, setViewingZone] = useState(false);
   // Customer Service chat — a tab alongside channels/DMs/zone, same
@@ -225,9 +249,12 @@ export function ChatPanel({
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [attachError, setAttachError] = useState('');
   // Potongan C3 — zone-chat file upload has no message bubble to show a
-  // pending state on (see handleAttachFile), so this is the ONLY signal the
-  // user gets that something's happening.
+  // pending state on (see sendPendingZoneAttachments), so this is the ONLY
+  // signal the user gets that something's happening.
   const [zoneFileUploading, setZoneFileUploading] = useState(false);
+  // Paste/attach stage files here first — nothing uploads or sends until
+  // Kirim (handleSend) drains this. See usePendingAttachments.ts.
+  const pendingAttachments = usePendingAttachments();
   // Scroll container (not an anchor element): we drive scrollTop directly,
   // which is steadier under React re-renders than scrollIntoView (that can
   // yank the whole page and fights the smooth-scroll mid-render).
@@ -342,34 +369,81 @@ export function ChatPanel({
     setMention(null);
   }, [activeChatTarget?.type, activeChatTarget?.id]);
 
+  // Zone (Private) chat has no persisted message / pending-bubble concept to
+  // hang an optimistic upload off of (see handleAttachFile's old doc
+  // comment — chatHandler.ts is a pure live relay, never saved), so each
+  // staged attachment uploads here, sequentially, only once Kirim is
+  // pressed — same upload call and "Mengunggah…" signal the old
+  // upload-on-attach path used, just moved to send time.
+  const sendPendingZoneAttachments = useCallback(
+    async (attachments: PendingAttachment[], zoneId: string) => {
+      setZoneFileUploading(true);
+      for (const { file } of attachments) {
+        try {
+          const { url, fileName } = await api.uploadMedia(file, roomSlug);
+          onSendZone?.('', zoneId, url, fileName);
+        } catch (e) {
+          console.error('[chat] zone file upload failed:', e);
+          setAttachError('Upload gagal — coba lagi.');
+        }
+      }
+      setZoneFileUploading(false);
+    },
+    [onSendZone, roomSlug]
+  );
+
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    const attachments = pendingAttachments.items;
+    if (!trimmed && attachments.length === 0) return;
+    // Every zone/channel send also shows as a floating speech bubble over
+    // the avatar — no separate "Bubble" mode to remember to turn on first.
+    // DMs are excluded: their content is private, and a bubble is public to
+    // anyone standing nearby. The bubble is plain canvas-drawn text (see
+    // GameCanvas's speech-bubble draw loop) with no mention-markup parsing
+    // of its own — sending it the raw "@[Name](userId)" token straight from
+    // the input (correct for onSend/onSendZone, which DO parse it via
+    // renderWithMentions) rendered the userId itself as garbled-looking text
+    // over the avatar. stripMentionsToPlainText reduces it to "@Name" first.
+    const bubbleText = stripMentionsToPlainText(trimmed);
     if (viewingZone && currentZone && onSendZone) {
-      onSendZone(trimmed, currentZone.id);
-    } else if (proximityMode) {
-      onBubble(trimmed);
+      if (trimmed) {
+        onSendZone(trimmed, currentZone.id);
+        onBubble(bubbleText);
+      }
+      if (attachments.length > 0) sendPendingZoneAttachments(attachments, currentZone.id);
     } else {
-      onSend(trimmed);
+      if (trimmed) {
+        onSend(trimmed);
+        if (activeChatTarget?.type !== 'dm') onBubble(bubbleText);
+      }
+      // Channel/DM attachments each go through onSendFile exactly like a
+      // single manual attach did before — instant optimistic bubble +
+      // background upload per file (see useChannelChat.ts's
+      // sendFileMessage). Several staged files just means several bubbles.
+      attachments.forEach((a) => onSendFile?.(a.file));
     }
+    pendingAttachments.clear();
     setText('');
     setShowEmoji(false);
     setMention(null);
-  }, [text, proximityMode, onSend, onBubble, viewingZone, currentZone, onSendZone]);
+    // Collapse the compose box back to one line — it only grows via a
+    // direct DOM style write (see the textarea's onChange below), so
+    // clearing the `text` state alone wouldn't shrink it back.
+    if (messageInputRef.current) messageInputRef.current.style.height = 'auto';
+  }, [text, onSend, onBubble, viewingZone, currentZone, onSendZone, activeChatTarget, onSendFile, pendingAttachments, sendPendingZoneAttachments]);
 
   const insertEmoji = (emoji: string) => {
     setText((prev) => prev + emoji);
   };
 
-  // Bug 6 — this used to await the ENTIRE upload here before calling onSend
-  // at all, so the bubble (and every send-round-trip-wait on top of it)
-  // never appeared until the file had already finished uploading. onSendFile
-  // (useChannelChat.ts's sendFileMessage) now shows the bubble immediately
-  // (local blob: preview) and runs the upload in the background — this
-  // function only does the synchronous size pre-check, which still belongs
-  // here since it should reject before any bubble is even created. A failed
-  // upload/send shows up as that bubble's own status:'failed' with a retry
-  // button (see the message-list rendering below), not a generic banner.
+  // Paste/attach no longer uploads or sends anything by itself — it only
+  // stages the file into pendingAttachments (rendered as AttachmentTray
+  // below the input) so the user can review, add more, and remove before
+  // committing. The actual upload/send happens in handleSend once Kirim is
+  // pressed, branching the same way it always did (zone upload-then-emit vs.
+  // onSendFile's instant-bubble-then-upload) — see sendPendingZoneAttachments
+  // and handleSend above.
   const handleAttachFile = useCallback(
     (file: File) => {
       setAttachError('');
@@ -377,28 +451,30 @@ export function ChatPanel({
         setAttachError(`File is too large — max ${Math.round(MAX_ATTACHMENT_BYTES / (1024 * 1024))}MB.`);
         return;
       }
-      // Potongan C3 — zone (Private) chat has no persisted message / pending-
-      // bubble concept to hang an optimistic upload off of (see chatHandler.ts
-      // — it's a pure live relay, never saved), so unlike onSendFile's
-      // instant-bubble-then-upload-in-background pattern, this uploads FIRST
-      // and only calls onSendZone once there's a real URL to send. The
-      // "Mengunggah…" state below covers the gap so it never looks stuck.
-      if (viewingZone && currentZone && onSendZone) {
-        setZoneFileUploading(true);
-        api.uploadMedia(file, roomSlug)
-          .then(({ url, fileName }) => {
-            onSendZone('', currentZone.id, url, fileName);
-          })
-          .catch((e) => {
-            console.error('[chat] zone file upload failed:', e);
-            setAttachError('Upload gagal — coba lagi.');
-          })
-          .finally(() => setZoneFileUploading(false));
-        return;
-      }
-      onSendFile?.(file);
+      pendingAttachments.add(file);
     },
-    [onSendFile, viewingZone, currentZone, onSendZone, roomSlug]
+    [pendingAttachments]
+  );
+
+  // Ctrl+V a screenshot straight into the input, Lark/WhatsApp-style —
+  // reuses handleAttachFile verbatim (same size check, same staging), so
+  // this is zero new upload logic, just a new entry point into the existing
+  // one. Only intercepts when the clipboard actually carries image data;
+  // anything else (plain text, a copied file that isn't an image) falls
+  // through to the browser's normal paste behavior untouched. Multiple
+  // images pasted at once all get staged together, same as attaching
+  // several files manually one after another.
+  const handlePaste = useCallback(
+    (e: ClipboardEvent<HTMLTextAreaElement>) => {
+      const imageFiles = Array.from(e.clipboardData?.items ?? [])
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter((f): f is File => !!f);
+      if (imageFiles.length === 0) return;
+      e.preventDefault();
+      imageFiles.forEach((file) => handleAttachFile(file));
+    },
+    [handleAttachFile]
   );
 
   const handleLoadOlder = useCallback(async () => {
@@ -465,9 +541,9 @@ export function ChatPanel({
         >
           <button
             onClick={() => onToggleOpen(!open)}
-            className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl px-3 py-2 rounded-lg text-sm text-purple-700 dark:text-purple-300 hover:text-purple-800 border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 cursor-pointer inline-flex items-center gap-1.5"
+            className="font-login-body bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl px-3 py-2 rounded-lg text-sm text-login-accent dark:text-purple-300 hover:brightness-110 border border-login-border-soft dark:border-white/10 shadow-lg shadow-purple-500/10 cursor-pointer inline-flex items-center gap-1.5"
           >
-            <ChatDotsFill size={14} /> {open ? 'Hide' : 'Chat'}
+            <img src="/assets/img/icons/message.svg" width={14} height={14} alt="" /> {open ? 'Hide' : 'Message'}
             {!open && totalUnread > 0 && (
               <span className="ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold inline-flex items-center justify-center">
                 {totalUnread > 99 ? '99+' : totalUnread}
@@ -479,27 +555,28 @@ export function ChatPanel({
 
       {open && (
         <div
-          className="absolute bottom-16 right-4 z-50 w-80 h-[28rem] bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-xl border border-purple-200/50 dark:border-white/10 shadow-2xl shadow-purple-500/10 flex flex-col pointer-events-auto"
+          // Lower opacity than the other "Ethereal Collaboration" panels
+          // (95% -> 70%) per this round's feedback — the reference design
+          // wants this panel reading as floating over the map, not a solid
+          // card. backdrop-blur-xl stays, so text underneath the panel
+          // doesn't bleed through and hurt legibility.
+          className="absolute bottom-16 right-4 z-50 w-80 h-[28rem] bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl rounded-xl border border-login-border-soft dark:border-white/10 shadow-2xl shadow-purple-500/10 flex flex-col pointer-events-auto"
           onMouseDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          <div className="p-3 border-b border-purple-100 dark:border-gray-700 flex items-center justify-between">
-            <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">Chat</span>
-            <label className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
-              <input type="checkbox" checked={proximityMode} onChange={(e) => setProximityMode(e.target.checked)} className="w-3 h-3 accent-purple-600" />
-              Bubble
-            </label>
+          <div className="p-3 border-b border-login-border-soft dark:border-gray-700 flex items-center justify-between">
+            <span className="font-login-body text-gray-900 dark:text-gray-100 text-sm font-medium">Global Chat</span>
           </div>
 
-          <div className="flex gap-1 px-3 pt-2 pb-1 overflow-x-auto">
+          <div className="flex flex-wrap gap-1 px-3 pt-2 pb-1">
             {channels.map((c) => (
               <Tooltip key={c.id} label={`#${c.name}`} detail="Pindah ke channel ini." wrapperClassName="shrink-0">
                 <button
                   onClick={() => { setViewingZone(false); setCsTabActive(false); onSelectTarget({ type: 'channel', id: c.id }); }}
                   className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
                     !viewingZone && activeChatTarget?.type === 'channel' && activeChatTarget.id === c.id
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
+                      ? 'bg-login-accent text-white'
+                      : 'bg-login-surface dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-login-border-soft dark:hover:bg-gray-600'
                   }`}
                 >
                   #{c.name}
@@ -517,8 +594,8 @@ export function ChatPanel({
                   onClick={() => { setViewingZone(false); setCsTabActive(false); onSelectTarget({ type: 'dm', id: d.id }); }}
                   className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
                     !viewingZone && activeChatTarget?.type === 'dm' && activeChatTarget.id === d.id
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
+                      ? 'bg-login-accent text-white'
+                      : 'bg-login-surface dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-login-border-soft dark:hover:bg-gray-600'
                   }`}
                 >
                   @{d.otherUser.displayName}
@@ -535,7 +612,7 @@ export function ChatPanel({
                 <button
                   onClick={() => { setViewingZone(true); setCsTabActive(false); }}
                   className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
-                    viewingZone ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
+                    viewingZone ? 'bg-login-accent text-white' : 'bg-login-surface dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-login-border-soft dark:hover:bg-gray-600'
                   }`}
                 >
                   <LockFill size={10} className="inline -mt-0.5 mr-1" /> {currentZone.name}
@@ -552,7 +629,7 @@ export function ChatPanel({
               <button
                 onClick={() => { setViewingZone(false); setCsTabActive(true); }}
                 className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
-                  csTabActive ? 'bg-purple-600 text-white' : 'bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600'
+                  csTabActive ? 'bg-login-accent text-white' : 'bg-login-surface dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-login-border-soft dark:hover:bg-gray-600'
                 }`}
               >
                 <Headset size={10} className="inline -mt-0.5 mr-1" /> CS
@@ -562,7 +639,7 @@ export function ChatPanel({
               <Tooltip label="Channel Baru" detail="Buat channel baru. (Khusus admin.)" wrapperClassName="shrink-0">
                 <button
                   onClick={() => setShowNewChannel((v) => !v)}
-                  className="shrink-0 px-2 py-1 rounded-md text-[11px] font-medium bg-purple-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-purple-100 dark:hover:bg-gray-600 cursor-pointer"
+                  className="shrink-0 px-2 py-1 rounded-md text-[11px] font-medium bg-login-surface dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-login-border-soft dark:hover:bg-gray-600 cursor-pointer"
                 >
                   <PlusLg size={10} />
                 </button>
@@ -670,7 +747,7 @@ export function ChatPanel({
                       onPin={() => onPinNotice?.(m)}
                     >
                       {m.isProximity && <span className="opacity-60 mr-1">(nearby)</span>}
-                      {m.text && <span className={`break-words ${m.isBot ? 'whitespace-pre-line' : ''}`}>{renderWithMentions(m.text, localUserId)}</span>}
+                      {m.text && <span className={`break-words select-text ${m.isBot ? 'whitespace-pre-line' : ''}`}>{renderWithMentions(m.text, localUserId)}</span>}
                       {/* Potongan C3 — same attachment UI (icon by type, name,
                           click to open/download) as persisted chat, reused
                           as-is rather than a second render path. */}
@@ -752,7 +829,7 @@ export function ChatPanel({
                           />
                         ) : (
                           m.text && (
-                            <span className="break-words">
+                            <span className="break-words select-text">
                               {renderWithMentions(m.text, localUserId)}
                               {m.edited && <span className="ml-1 text-[9px] opacity-60">(diedit)</span>}
                             </span>
@@ -882,6 +959,7 @@ export function ChatPanel({
             </div>
           )}
 
+          <AttachmentTray items={pendingAttachments.items} onRemove={pendingAttachments.remove} />
           {attachError && (
             <p className="px-3 pb-1 text-[10px] text-red-500">{attachError}</p>
           )}
@@ -913,27 +991,22 @@ export function ChatPanel({
           })()}
           <div className="p-3 border-t border-purple-100 dark:border-gray-700 flex gap-2 items-center">
             <Tooltip label="Emoji" detail="Tambahkan emoji ke pesanmu.">
-              <button onClick={() => setShowEmoji(!showEmoji)} className="text-purple-600 dark:text-purple-400 cursor-pointer"><EmojiSmile size={16} /></button>
+              <button onClick={() => setShowEmoji(!showEmoji)} className="cursor-pointer"><img src="/assets/img/icons/emoticon.svg" width={16} height={16} alt="" /></button>
             </Tooltip>
-            {/* Potongan C3 — file attachments now work for zone (Private)
-                chat too, not just persisted Channel/DM. Still hidden for
-                proximityMode ("Say nearby") — that's a floating speech
-                bubble over the avatar, not a real chat log to attach
-                anything to. */}
-            {!proximityMode && (
-              <AttachmentMenuButton
-                onFile={handleAttachFile}
-                title="Lampirkan File"
-                detail="Kirim gambar, video, atau dokumen."
-                disabled={zoneFileUploading}
-                buttonClassName="text-purple-600 dark:text-purple-400 disabled:opacity-40 cursor-pointer"
-              />
-            )}
+            {/* Potongan C3 — file attachments work for zone (Private) chat
+                too, not just persisted Channel/DM. */}
+            <AttachmentMenuButton
+              onFile={handleAttachFile}
+              title="Lampirkan File"
+              detail="Kirim gambar, video, atau dokumen."
+              disabled={zoneFileUploading}
+              buttonClassName="text-purple-600 dark:text-purple-400 disabled:opacity-40 cursor-pointer"
+            />
             <div className="relative flex-1">
               {/* Potongan C2 — @mention candidates, #general (persisted
-                  channel/DM) only: zone/bubble chat has no real userId-backed
+                  channel/DM) only: zone chat has no real userId-backed
                   participant list to mention from. */}
-              {mention && !viewingZone && !proximityMode && (
+              {mention && !viewingZone && (
                 <div className="absolute bottom-full left-0 mb-1 w-56 max-h-48 overflow-y-auto bg-white dark:bg-gray-800 border border-purple-200 dark:border-gray-600 rounded-lg shadow-lg z-10">
                   {mentionCandidates.length === 0 ? (
                     <p className="px-2.5 py-1.5 text-[11px] text-gray-400">Tidak ada yang cocok</p>
@@ -950,15 +1023,21 @@ export function ChatPanel({
                   ))}
                 </div>
               )}
-              <input
+              <textarea
                 ref={messageInputRef}
+                rows={1}
                 value={text}
                 onChange={(e) => {
                   setText(e.target.value);
                   updateMentionState(e.target.value, e.target.selectionStart ?? e.target.value.length);
                   // Only the persisted channel/DM path has a typing indicator —
-                  // zone/bubble chat is a different, ephemeral concept.
-                  if (e.target.value && !viewingZone && !proximityMode) onTyping?.();
+                  // zone chat is a different, ephemeral concept.
+                  if (e.target.value && !viewingZone) onTyping?.();
+                  // Auto-grow with content, capped at MAX_COMPOSE_HEIGHT_PX —
+                  // reset to 'auto' first so it can shrink back down too
+                  // (deleting text), not just grow.
+                  e.target.style.height = 'auto';
+                  e.target.style.height = `${Math.min(e.target.scrollHeight, MAX_COMPOSE_HEIGHT_PX)}px`;
                 }}
                 onKeyDown={(e) => {
                   if (mention && mentionCandidates.length > 0) {
@@ -967,21 +1046,25 @@ export function ChatPanel({
                     if (e.key === 'Enter') { e.preventDefault(); insertMention(mentionCandidates[mentionActiveIndex]); return; }
                     if (e.key === 'Escape') { e.preventDefault(); setMention(null); return; }
                   }
-                  if (e.key === 'Enter') handleSend();
+                  // Unchanged from the old <input>: Enter always sends (no
+                  // Shift+Enter newline support — out of scope here, this is
+                  // only fixing the overflow, not adding multi-line compose).
+                  if (e.key === 'Enter') { e.preventDefault(); handleSend(); }
                 }}
                 onBlur={() => setMention(null)}
-                placeholder={viewingZone ? `Message ${currentZone?.name}...` : proximityMode ? 'Say nearby...' : 'Type a message...'}
+                onPaste={handlePaste}
+                placeholder={viewingZone ? `Message ${currentZone?.name}...` : 'enter your chat here'}
                 maxLength={200}
-                className="w-full bg-purple-50/50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-purple-100 dark:border-gray-700 focus:border-purple-500 disabled:opacity-60"
+                className="font-login-body w-full resize-none break-words bg-login-surface dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 text-xs rounded px-2 py-1.5 outline-none border border-login-border-soft dark:border-gray-700 focus:border-login-accent disabled:opacity-60"
               />
             </div>
             <Tooltip label="Kirim" detail="Kirim pesanmu.">
               <button
                 onClick={handleSend}
-                disabled={!text.trim()}
-                className="bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white text-xs px-3 py-1.5 rounded cursor-pointer"
+                disabled={!text.trim() && pendingAttachments.items.length === 0}
+                className="bg-login-accent hover:brightness-110 disabled:opacity-40 text-white text-xs w-7 h-7 shrink-0 rounded flex items-center justify-center cursor-pointer"
               >
-                Send
+                <img src="/assets/img/icons/send.svg" width={14} height={14} alt="" />
               </button>
             </Tooltip>
           </div>
@@ -1013,6 +1096,23 @@ export function ChatPanel({
             style={{ position: 'fixed', left: Math.min(msgMenu.x, window.innerWidth - 220), top: Math.min(msgMenu.y, window.innerHeight - 260) }}
             className="z-[1001] w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl py-1 text-xs"
           >
+            {/* Right-click → Copy, same as any desktop chat app — text is
+                already Ctrl+C-selectable (select-text above), but this menu
+                itself preventDefault()s the browser's own native "Copy" item,
+                so without this there was no right-click way to copy at all. */}
+            {msgMenu.message.text && (
+              <Tooltip label="Salin Teks" detail="Salin isi pesan ini ke clipboard." wrapperClassName="w-full">
+                <button
+                  onClick={async () => {
+                    try { await navigator.clipboard.writeText(msgMenu.message.text); } catch { /* clipboard permission denied — text stays selectable via Ctrl+C as a fallback */ }
+                    setMsgMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-200"
+                >
+                  <Clipboard size={11} /> Salin teks
+                </button>
+              </Tooltip>
+            )}
             {isAdmin && onPinMessage && (
               <Tooltip label={msgMenu.message.isPinned ? 'Lepas Sematan' : 'Sematkan'} detail="Sematkan pesan ini di channel. (Khusus admin.)" wrapperClassName="w-full">
                 <button
@@ -1119,7 +1219,7 @@ function MessageBubble({
         <div
           onContextMenu={onContextMenu ?? (pinnable ? (e) => { e.preventDefault(); onPin?.(); } : undefined)}
           title={onContextMenu ? 'Klik kanan untuk opsi (sematkan, lihat yang sudah baca)' : pinnable ? 'Right-click to pin as notice' : undefined}
-          className={`rounded-2xl px-2.5 py-1.5 ${isOwn ? 'rounded-br-sm' : 'rounded-bl-sm'} ${onContextMenu || pinnable ? 'cursor-context-menu' : ''} ${bodyText} ${
+          className={`min-w-0 rounded-2xl px-2.5 py-1.5 ${isOwn ? 'rounded-br-sm' : 'rounded-bl-sm'} ${onContextMenu || pinnable ? 'cursor-context-menu' : ''} ${bodyText} ${
             isBot
               ? 'bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800'
               : mentioned ? 'bg-amber-100 dark:bg-amber-900/40' : isOwn ? 'bg-purple-600' : 'bg-gray-100 dark:bg-gray-700'

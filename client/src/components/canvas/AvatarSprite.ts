@@ -1,5 +1,8 @@
 import { Avatar, BodyShape, Accessory, Expression, Direction, TILE_SIZE } from '@kaispace/shared';
-import { drawSpriteFrame } from '@/utils/spriteLoader';
+import { drawSpriteFrame, getSpriteImage } from '@/utils/spriteLoader';
+import { measureTextCached } from './textMetrics';
+import { PRESENCE_LABEL, PRESENCE_EMOJI } from '@/data/presence';
+import { truncateName } from '@/utils/truncateName';
 
 // Radius for the shape-fallback avatar (drawn only while no sprite is
 // configured/loaded) AND the local-player glow ring (drawn around whichever
@@ -42,10 +45,17 @@ interface DrawAvatarOptions {
   queueCountdown?: string;
 }
 
+// Returns the Y position immediately above everything this function drew
+// (name label, statusTag, presence pill — however many of those three are
+// actually present for this avatar right now) — the next free vertical
+// slot, so a caller stacking something else above the head (GameCanvas.tsx's
+// admin crown/soundboard icon) lands there instead of a hardcoded offset
+// that collides whenever a status badge happens to already occupy that
+// exact spot (see GameCanvas.tsx's own call site for the bug this fixed).
 export function drawAvatar(
   ctx: CanvasRenderingContext2D,
   options: DrawAvatarOptions,
-) {
+): number {
   const { avatar, x, y, isLocal, walkAnimOffset, timestamp = 0, scale = 1, queueCountdown } = options;
   const config = avatar.avatarConfig;
   const color = config?.color || avatar.color || DEFAULT_COLOR;
@@ -82,6 +92,8 @@ export function drawAvatar(
     renderedSprite = drawPremadeAvatar(ctx, cx, cy, config.premadeId, avatar.direction, avatar.isMoving, timestamp, !!avatar.isRunning, spriteSize, !!avatar.isSitting);
   } else if (config?.spriteMode === 'layered' && config.bodyId) {
     renderedSprite = drawLayeredAvatar(ctx, cx, cy, config, avatar.direction, avatar.isMoving, timestamp, !!avatar.isRunning, spriteSize, !!avatar.isSitting);
+  } else if (config?.spriteMode === 'custom' && config.customSpriteId) {
+    renderedSprite = drawCustomAvatar(ctx, cx, cy, config.customSpriteId, avatar.direction, avatar.isMoving, timestamp, !!avatar.isRunning, spriteSize);
   }
 
   if (!renderedSprite) {
@@ -121,15 +133,20 @@ export function drawAvatar(
   }
 
   // ─── Single unified status pill ─────────────────────────────────────
-  // The effective work-mode/presence status (WFH/In Meeting/Focus/Lunch/
-  // Break/Away), shown as one glanceable pill above the avatar.
-  const presenceLabel =
-    avatar.workMode === 'wfh' ? '🏠 WFH' :
-    avatar.workMode === 'in_meeting' ? '🎥 In Meeting' :
-    avatar.workMode === 'focus' ? '🎧 Focus' :
-    avatar.workMode === 'lunch' ? '🍽️ Lunch' :
-    avatar.workMode === 'break' ? '☕ Break' :
-    avatar.workMode === 'away' ? '🌙 Away' : '';
+  // The effective work-mode/presence status, shown as one glanceable pill
+  // above the avatar. Bug fix — this used to be a hand-written ternary
+  // chain covering only the original 6 statuses (wfh/in_meeting/focus/
+  // lunch/break/away); wfo/wfa/cuti (QA #1) were added to WorkMode and the
+  // STATUS dropdown but never to this chain, so picking any of those three
+  // silently showed no pill at all. Now reads PRESENCE_LABEL/PRESENCE_EMOJI
+  // (data/presence.ts) — the same shared map the HUD dropdown and
+  // Participant panel already use — so a future status added there can't
+  // drift out of sync with this pill again. 'available' still shows no
+  // pill (PRESENCE_EMOJI has no entry for it — a plain online dot instead,
+  // unchanged from before).
+  const presenceLabel = avatar.workMode && avatar.workMode !== 'available'
+    ? `${PRESENCE_EMOJI[avatar.workMode]} ${PRESENCE_LABEL[avatar.workMode]}`
+    : '';
   if (presenceLabel) {
     drawPresencePill(ctx, cx, nextBadgeY, presenceLabel);
     nextBadgeY -= 15;
@@ -154,6 +171,13 @@ export function drawAvatar(
   if (queueCountdown) {
     drawQueueCountdownPill(ctx, cx, nextBadgeY, queueCountdown);
   }
+
+  // Hand-raise and the queue countdown intentionally share the same slot
+  // above (both "topmost", see their own comments) rather than stacking on
+  // each other — so this only needs to clear that ONE shared slot once,
+  // not twice, when accounting for whichever (if either) was actually drawn.
+  if (avatar.handRaised || queueCountdown) nextBadgeY -= 20;
+  return nextBadgeY;
 }
 
 // ─── Layered pixel-art sprite ──────────────────────────────────────
@@ -240,11 +264,139 @@ function spriteFrameCoords(direction: Direction, isMoving: boolean, timestamp: n
     return { col, row: SIT_ROW, flipX: direction === 'left' };
   }
   const dirIndex = Math.max(0, DIRECTION_COLUMN_ORDER.indexOf(direction));
-  const row = isMoving ? WALK_ROW : IDLE_ROW;
-  const frameMs = isMoving ? (isRunning ? RUN_FRAME_MS : WALK_FRAME_MS) : IDLE_FRAME_MS;
+  // Sitting facing 'down' falls through to here (no sit art for that
+  // direction — see SIT_ROW). It must still never play a walk cycle: a
+  // seated avatar showing a run animation is how a stuck isMoving flag used
+  // to surface, and reading "someone jogging in their chair" as a rendering
+  // bug is exactly what happened. The flag itself is fixed elsewhere
+  // (movementHandler.ts's activeMovers sweep); this makes the pose
+  // impossible to draw regardless of what the flag says.
+  const animating = isMoving && !isSitting;
+  const row = animating ? WALK_ROW : IDLE_ROW;
+  const frameMs = animating ? (isRunning ? RUN_FRAME_MS : WALK_FRAME_MS) : IDLE_FRAME_MS;
   const frameInCycle = Math.floor(timestamp / frameMs) % FRAMES_PER_DIRECTION;
   const col = dirIndex * FRAMES_PER_DIRECTION + frameInCycle;
   return { col, row, flipX: false };
+}
+
+// Composed avatar frames, cached.
+//
+// A generator avatar is built from one sprite per layer — body, outfit, hair,
+// accessory and so on — each from its OWN spritesheet file. Drawing it meant a
+// drawImage per layer per avatar per frame: with eighteen people on screen that
+// is a hundred-odd draws touching a handful of large, distinct textures, sixty
+// times a second.
+//
+// Measured, that pass averaged 25ms per frame, and it spiked in lockstep with
+// the floor-plan reference image — the tell for texture-cache thrashing rather
+// than pixel work (frame times were bimodal, p50 2.7ms / p95 250ms: some frames
+// found every sheet resident, others re-uploaded them).
+//
+// So compose once and blit thereafter. The cache key is the whole visual
+// identity of the frame — every layer filename, the source cell (which encodes
+// direction and animation frame) and the raster size — so a hit is
+// pixel-identical to composing again. Eighteen players share very few distinct
+// keys: a handful of outfits x four directions x a few walk frames.
+// Sized against the actual working set, which is arithmetic rather than a
+// guess: FRAMES_PER_DIRECTION (6) x four directions x three rows (idle, walk,
+// sit) is 72 distinct frames per outfit, so eighteen people in differing
+// outfits reach ~1300 live entries. The first version of this capped at 240 —
+// five times too small — and a cache smaller than its working set does not
+// merely fail to help, it HURTS: FIFO eviction throws entries out before they
+// are reused, so avatars are re-composited continuously and every re-composite
+// touches all the layer spritesheets again. That is the episodic spike this was
+// supposed to remove (frames clustered at 200-290ms while several people walked
+// in different directions), caused by the cure rather than the disease.
+// Raised from 2000 for a 30-person room: 30 x 72 is 2160, which the old cap
+// could not hold, putting a full all-hands back into exactly the thrashing
+// described above. 3000 leaves room for outfit changes and people passing
+// through mid-session rather than sitting exactly on the working set.
+const LAYERED_AVATAR_CACHE_LIMIT = 3000;
+// And a second bound, because entry COUNT is not what costs memory: an entry is
+// rasterW x rasterH pixels, which grows with zoom and dpr. ~8M pixels is about
+// 32MB of canvas — at the common 48x66 frame that is ~2500 entries, and at 2x
+// zoom on a 2x display it falls to ~600, which is the correct direction for it
+// to move on its own.
+// Doubled to ~64MB alongside the entry cap above. Deliberately NOT raised to
+// the ~29M pixels a 30-outfit working set would need at 2x zoom on a 2x
+// display: the two bounds bite in opposite conditions. Zoomed OUT — many
+// people on screen at once, which is the case that matters here — an entry is
+// small and 2160 of them are only ~2M pixels, so the ENTRY CAP is what bites
+// and the pixel budget is slack. Zoomed IN, entries grow 16x but the viewport
+// holds far fewer people, so the working set shrinks on its own. Paying 115MB
+// to cache 30 avatars at 2x zoom buys a case that does not occur.
+const LAYERED_AVATAR_CACHE_PIXEL_BUDGET = 16_000_000;
+const layeredSpriteCache = new Map<string, HTMLCanvasElement>();
+let layeredSpriteCachePixels = 0;
+
+function layeredAvatarCacheKey(
+  config: NonNullable<Avatar['avatarConfig']>,
+  srcX: number,
+  srcY: number,
+  rasterW: number,
+  rasterH: number,
+): string {
+  let key = `${srcX},${srcY},${rasterW}x${rasterH}`;
+  for (const [, field] of LAYER_CATEGORIES) key += `|${(config[field] as string | undefined) ?? ''}`;
+  return key;
+}
+
+/** One composed frame, from cache when possible. Null while its layers are
+ *  still loading, so the caller can report "nothing drawn" and try again. */
+function composedLayeredFrame(
+  config: NonNullable<Avatar['avatarConfig']>,
+  srcX: number,
+  srcY: number,
+  rasterW: number,
+  rasterH: number,
+): HTMLCanvasElement | null {
+  const key = layeredAvatarCacheKey(config, srcX, srcY, rasterW, rasterH);
+  const hit = layeredSpriteCache.get(key);
+  if (hit) return hit;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = rasterW;
+  canvas.height = rasterH;
+  const cctx = canvas.getContext('2d');
+  if (!cctx) return null;
+  cctx.imageSmoothingEnabled = false;
+
+  let expected = 0;
+  let drawn = 0;
+  for (const [category, field] of LAYER_CATEGORIES) {
+    const fileName = config[field] as string | undefined;
+    if (!fileName) continue;
+    expected++;
+    if (drawSpriteFrame(cctx, `${GENERATOR_BASE}/${category}/${fileName}`, {
+      srcX, srcY, cellWidth: FRAME_SIZE, cellHeight: FRAME_VISUAL_HEIGHT,
+      dx: 0, dy: 0, dWidth: rasterW, dHeight: rasterH,
+    })) drawn++;
+  }
+  if (!drawn) return null;
+
+  // Only cache a COMPLETE composite. A frame missing a layer whose sheet has
+  // not decoded yet would otherwise be cached with that layer permanently
+  // absent — an avatar with no hair for the rest of the session.
+  if (drawn === expected) {
+    layeredSpriteCache.set(key, canvas);
+    layeredSpriteCachePixels += rasterW * rasterH;
+    // Evict oldest-first until BOTH bounds hold. Map iteration order is
+    // insertion order, so this is FIFO — good enough here, because the working
+    // set is now expected to fit and eviction should be the exception rather
+    // than the steady state.
+    while (
+      layeredSpriteCache.size > LAYERED_AVATAR_CACHE_LIMIT ||
+      layeredSpriteCachePixels > LAYERED_AVATAR_CACHE_PIXEL_BUDGET
+    ) {
+      const oldestKey = layeredSpriteCache.keys().next().value;
+      if (oldestKey === undefined) break;
+      const evicted = layeredSpriteCache.get(oldestKey);
+      layeredSpriteCache.delete(oldestKey);
+      if (evicted) layeredSpriteCachePixels -= evicted.width * evicted.height;
+      if (oldestKey === key) break; // never evict what we just inserted
+    }
+  }
+  return canvas;
 }
 
 function drawLayeredAvatar(
@@ -287,18 +439,17 @@ function drawLayeredAvatar(
   // first place (only visible on the sit+face-left pose).
   if (flipX) { const pivotX = dx + displaySize / 2; ctx.save(); ctx.translate(pivotX, 0); ctx.scale(-1, 1); ctx.translate(-pivotX, 0); }
 
-  let drewAny = false;
-  for (const [category, field] of LAYER_CATEGORIES) {
-    const fileName = config[field] as string | undefined;
-    if (!fileName) continue;
-    const drew = drawSpriteFrame(ctx, `${GENERATOR_BASE}/${category}/${fileName}`, {
-      srcX, srcY, cellWidth: FRAME_SIZE, cellHeight: FRAME_VISUAL_HEIGHT,
-      dx, dy, dWidth: displaySize, dHeight: displayHeight,
-    });
-    drewAny = drewAny || drew;
-  }
+  // Composed at the RASTER size the destination will occupy, so the blit is
+  // 1:1 and pixel art stays as crisp as drawing each layer directly did. The
+  // transform already carries zoom x dpr; reading it is what keeps the cache
+  // key honest about size.
+  const rasterScale = typeof ctx.getTransform === 'function' ? Math.abs(ctx.getTransform().a) || 1 : 1;
+  const rasterW = Math.max(1, Math.round(displaySize * rasterScale));
+  const rasterH = Math.max(1, Math.round(displayHeight * rasterScale));
+  const cached = composedLayeredFrame(config, srcX, srcY, rasterW, rasterH);
+  if (cached) ctx.drawImage(cached, 0, 0, cached.width, cached.height, dx, dy, displaySize, displayHeight);
   if (flipX) ctx.restore();
-  return drewAny;
+  return !!cached;
 }
 
 function drawPremadeAvatar(
@@ -327,6 +478,79 @@ function drawPremadeAvatar(
   });
   if (flipX) ctx.restore();
   return drew;
+}
+
+// ─── Custom uploaded character ─────────────────────────────────────
+//
+// A user-supplied sprite sheet, unlike the Character Generator/premade packs
+// above: 4 directions x N walk frames as separate pre-cropped, already-
+// transparent PNGs (client/public/assets/characters/custom/<id>/
+// <direction>_<0..N-1>.png), not one packed grid sheet. No flipX mirroring:
+// unlike LimeZu's sit pose (which only has 'right'/'up' art and mirrors
+// 'right' for 'left'), every custom character added so far has real frames
+// for all four directions.
+//
+// Frame count AND which frames actually look like walking (as opposed to a
+// standing/idle-ish pose baked in as one of the numbered frames) differ per
+// character — this is upload-sourced art, not a designed sprite pack, so
+// there's no single convention to assume. office-worker-1's frame 0 is a
+// distinct feet-together standing pose while 1/2/3 are near-duplicate
+// mid-stride poses (confirmed by inspecting the actual frames); cycling
+// through all 4 while moving meant every lap visibly snapped back to a dead
+// stop. schoolgirl-1, by contrast, has a real 3-phase alternating gait for
+// left/right (checked the same way) — excluding a frame there would throw
+// away a walk cycle that already works. So walk frames are an explicit
+// per-character list rather than a single "skip frame 0" rule; idle/sit
+// (no dedicated art for either) always falls back to frame 0, the same
+// fallback posture the LimeZu pack itself uses for its own gaps.
+const CUSTOM_BASE = '/assets/characters/custom';
+const CUSTOM_WALK_FRAMES: Record<string, number[]> = {
+  'office-worker-1': [1, 2, 3],
+  'schoolgirl-1': [0, 1, 2],
+};
+const CUSTOM_DEFAULT_WALK_FRAMES = [0, 1, 2, 3];
+
+function drawCustomAvatar(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  customSpriteId: string,
+  direction: Direction,
+  isMoving: boolean,
+  timestamp: number,
+  isRunning: boolean,
+  displaySize: number = SPRITE_DISPLAY_SIZE,
+): boolean {
+  const walkFrames = CUSTOM_WALK_FRAMES[customSpriteId] ?? CUSTOM_DEFAULT_WALK_FRAMES;
+  const frameMs = isRunning ? RUN_FRAME_MS : WALK_FRAME_MS;
+  const frame = isMoving ? walkFrames[Math.floor(timestamp / frameMs) % walkFrames.length] : 0;
+  const src = `${CUSTOM_BASE}/${customSpriteId}/${direction}_${frame}.png`;
+
+  // Dimensions read from the loaded image itself, not a hardcoded per-
+  // character constant — every character's frames are their own size (this
+  // one cropped to a shared bbox per character, not a shared size ACROSS
+  // characters), and drawSpriteFrame needs a known cellWidth/cellHeight
+  // upfront, which only getSpriteImage's already-decoded <img> can give.
+  const img = getSpriteImage(src);
+  if (!img) return false;
+
+  // Match LimeZu's rendered HEIGHT (not width) so this character doesn't
+  // read as freakishly tall/short next to everyone else — this source art's
+  // own aspect ratio is very different from LimeZu's (32x44), so reusing
+  // displaySize as the WIDTH like drawPremadeAvatar does would make a
+  // tall/narrow custom character read as much taller than its neighbors at
+  // the same displaySize. Deriving width from height (this image's own
+  // ratio) instead keeps on-screen height consistent across every avatar in
+  // the room, whatever that character's native proportions are.
+  const displayHeight = displaySize * (FRAME_VISUAL_HEIGHT / FRAME_SIZE);
+  const displayWidth = displayHeight * (img.naturalWidth / img.naturalHeight);
+  const dx = Math.round(cx - displayWidth / 2);
+  const dy = Math.round(cy + displaySize / 2 - displayHeight);
+
+  return drawSpriteFrame(ctx, src, {
+    srcX: 0, srcY: 0, cellWidth: img.naturalWidth, cellHeight: img.naturalHeight,
+    dx, dy, dWidth: displayWidth, dHeight: displayHeight,
+  });
 }
 
 // ─── Body shapes ──────────────────────────────────────────────────
@@ -674,6 +898,8 @@ function drawBow(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: numbe
 
 // ─── Labels ───────────────────────────────────────────────────────
 
+const NAME_LABEL_MAX_CHARS = 14;
+
 function drawNameLabel(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -685,8 +911,8 @@ function drawNameLabel(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
 
-  const metrics = ctx.measureText(name);
-  const tw = metrics.width;
+  const displayName = truncateName(name, NAME_LABEL_MAX_CHARS);
+  const tw = measureTextCached(ctx, displayName);
   const th = 14;
   const padX = 5;
   const padY = 2;
@@ -704,7 +930,7 @@ function drawNameLabel(
 
   // Text
   ctx.fillStyle = isLocal ? '#ffdd57' : '#ffffff';
-  ctx.fillText(name, x, baseY);
+  ctx.fillText(displayName, x, baseY);
 }
 
 function drawStatusTag(
@@ -717,8 +943,7 @@ function drawStatusTag(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
 
-  const metrics = ctx.measureText(tag);
-  const tw = metrics.width;
+  const tw = measureTextCached(ctx, tag);
   const padX = 4;
   const padY = 1;
   const h = 12;
@@ -749,8 +974,7 @@ function drawPresencePill(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
 
-  const metrics = ctx.measureText(status);
-  const tw = metrics.width;
+  const tw = measureTextCached(ctx, status);
   const padX = 5;
   const padY = 1;
   const h = 13;
@@ -782,8 +1006,7 @@ function drawQueueCountdownPill(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
 
-  const metrics = ctx.measureText(label);
-  const tw = metrics.width;
+  const tw = measureTextCached(ctx, label);
   const padX = 5;
   const padY = 1;
   const h = 13;

@@ -6,7 +6,7 @@ import { AVATAR_SCALE_MIN, AVATAR_SCALE_MAX } from '@kaispace/shared';
 // distinct from the older per-tile 'impassable' above (same distinction as
 // 'mapLocation'/'privateArea' being rectangles vs. e.g. 'door' being a point).
 // Maps to AreaEffect.effect: 'impassable' (see mapLayers.ts).
-export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat' | 'restrictedArea' | 'doorArea';
+export type TileEffectKind = 'startingPoint' | 'impassable' | 'mapLocation' | 'privateArea' | 'impassableArea' | 'focusArea' | 'meetingArea' | 'recordArea' | 'wallArea' | 'portal' | 'door' | 'sittable' | 'claimableSeat' | 'restrictedArea' | 'doorArea';
 
 // Follow-up — a "Kursi Diklaim" marker used to be stamped wherever the admin
 // clicked, completely independent of any Furniture piece, so it could
@@ -205,7 +205,7 @@ interface EditorState {
   // effect it actually means, same principle as zones already not being
   // hit-testable by the point-effect tools.
   areaAt: (x: number, y: number, effect?: AreaEffect['effect']) => AreaEffect | null;
-  addArea: (effect: 'mapLocation' | 'privateArea' | 'impassable' | 'focusArea' | 'meetingArea' | 'wallArea' | 'restrictedArea' | 'doorArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean, capacity?: number, memberOnly?: boolean) => string;
+  addArea: (effect: 'mapLocation' | 'privateArea' | 'impassable' | 'focusArea' | 'meetingArea' | 'recordArea' | 'wallArea' | 'restrictedArea' | 'doorArea', rect: Selection, name: string, areaId?: string, audioIsolated?: boolean, capacity?: number, memberOnly?: boolean) => string;
   removeAreaAt: (x: number, y: number, effect?: AreaEffect['effect']) => void;
   // Item #9 — select/move/resize/delete an EXISTING Impassable Area rectangle
   // (RoomEditorPage.tsx's drag-body / drag-handle / Delete-key interactions).
@@ -642,16 +642,38 @@ export const useEditorStore = create<EditorState>((set, get) => {
       // default; irrelevant for 'focusArea' (proximity is already blocked by
       // workMode==='focus' in useProximity, independent of any zone flag) and
       // for 'impassable' (Item #9, excluded from the zones list entirely).
+      // 'recordArea' is force-set to `false` HERE (not left to infer, unlike
+      // mapLocation above) — RoomEditorPage.tsx's dialog for it never even
+      // offers an isolate toggle (unlike privateArea/mapLocation/meetingArea),
+      // and the product decision is that a Record Area is a "record here"
+      // marker, not a chat/audio zone: walking into one to start/pause/stop a
+      // recording must never cut off proximity audio/video with people
+      // standing outside it, or dim the rest of the room.
       const id = crypto.randomUUID();
-      const zoneType = effect === 'focusArea' ? 'focus' : effect === 'meetingArea' ? 'meeting' : 'desk';
-      // GameCanvas.tsx's in-game banner falls back to purple (#7c3aed) when
-      // a zone has no color — fine for every other area type (they've always
-      // been purple), but a meeting area gets its own teal, and a restricted
-      // area its own red (matching the 🔒 lock badge GameCanvas.tsx already
-      // draws for it), so both read as visually distinct in-game, not just
-      // in the editor's own overlay.
-      const color = effect === 'meetingArea' ? '#14b8a6' : effect === 'restrictedArea' ? '#dc2626' : undefined;
-      d.areas.push({ id, effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, color, zoneType, areaId, audioIsolated, capacity, memberOnly });
+      const zoneType = effect === 'focusArea' ? 'focus' : effect === 'meetingArea' ? 'meeting' : effect === 'recordArea' ? 'record' : 'desk';
+      // Matches EFFECTS' own legend colors above (RoomEditorPage.tsx) exactly
+      // — every area type now reads as visually distinct in-game, not just in
+      // the editor's own overlay. All five used to funnel through GameCanvas
+      // .tsx's undefined-color fallback (purple, #7c3aed) except meeting/
+      // restricted, which is why map location/private/focus areas rendered
+      // the wrong color (or didn't render at all — see isPrivateZone's own
+      // comment in GameCanvas.tsx for that separate bug).
+      const color =
+        effect === 'meetingArea' ? '#14b8a6'
+        : effect === 'restrictedArea' ? '#dc2626'
+        : effect === 'mapLocation' ? '#c084fc'
+        : effect === 'privateArea' ? '#60a5fa'
+        : effect === 'focusArea' ? '#f59e0b'
+        : effect === 'recordArea' ? '#db2777'
+        : undefined;
+      // See the comment above `id` for why 'recordArea' can't just fall
+      // through to whatever `audioIsolated` the caller passed (always
+      // `undefined` today) — force it to `false` explicitly, the same
+      // "explicit, not inferred" posture mapLocation's own default gets in
+      // layerDataToLegacy (shared/mapLayers.ts), so it round-trips through
+      // Room.layerData.areas JSON storage as a real stored `false`.
+      const resolvedAudioIsolated = effect === 'recordArea' ? false : audioIsolated;
+      d.areas.push({ id, effect, name, label: name, x: rect.x, y: rect.y, width: rect.w, height: rect.h, color, zoneType, areaId, audioIsolated: resolvedAudioIsolated, capacity, memberOnly });
       areasDirty = true; pushHistory(snap); commit();
       return id;
     },

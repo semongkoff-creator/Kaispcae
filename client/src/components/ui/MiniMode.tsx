@@ -4,6 +4,7 @@ import { MicFill, MicMuteFill, CameraVideoFill, CameraVideoOffFill } from 'react
 import { ProximityPlayer } from '@kaispace/shared';
 import { useGameStore } from '@/stores/gameStore';
 import { getVideoTiles } from './VideoGrid';
+import { useProximitySnapshot } from '@/hooks/useProximitySnapshot';
 
 // Chrome/Edge-only browser API (as of this writing) for a genuinely
 // always-on-top floating window that keeps rendering live DOM content while
@@ -100,7 +101,6 @@ export async function openMiniModeWindow(): Promise<Window | null> {
 
 interface MiniModeProps {
   pipWindow: Window;
-  nearby: ProximityPlayer[];
   localStream: MediaStream | null;
   remoteStreams: Map<string, MediaStream>;
   remoteScreenStreams: Map<string, MediaStream>;
@@ -118,7 +118,11 @@ interface MiniModeProps {
 // window itself is opened by openMiniModeWindow() above and handed in
 // already-created — this component only portals content into it and
 // watches for it being closed.
-export function MiniMode({ pipWindow, nearby, localStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onToggleMic, onToggleCamera, onClose }: MiniModeProps) {
+export function MiniMode({ pipWindow, localStream, remoteStreams, remoteScreenStreams, micMuted, cameraOff, onToggleMic, onToggleCamera, onClose }: MiniModeProps) {
+  // Subscribed here rather than received as a prop: App used to hold this
+  // in state, so the proximity tick re-rendered its whole tree several
+  // times a second to deliver a value only this kind of component reads.
+  const nearby = useProximitySnapshot();
   const playerRecords = useGameStore((s) => s.playerRecords);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;

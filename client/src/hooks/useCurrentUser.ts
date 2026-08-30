@@ -8,6 +8,10 @@ import { WorkspaceAction, WorkspaceRole, canWorkspace } from '@kaispace/shared';
 export interface CurrentUser {
   id: string;
   name: string;
+  // specs/2026-08-21-full-name-field-design.md — threaded through so the
+  // Sidebar-triggered Avatar Editor (which only receives `currentUser`,
+  // not the raw `user` object) can pre-fill the Nama Lengkap field.
+  fullName?: string | null;
   avatarUrl?: string;
   workspaceRole: WorkspaceRole;
   timezone: string;
@@ -18,6 +22,7 @@ export function toCurrentUser(user: UserProfile): CurrentUser {
   return {
     id: user.id,
     name: user.displayName,
+    fullName: user.fullName,
     workspaceRole: user.workspaceRole ?? 'member',
     // Fall back to the browser's zone if the profile somehow lacks one, so
     // times are never silently rendered in the wrong zone.

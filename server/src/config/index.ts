@@ -53,6 +53,23 @@ const envSchema = z
     // separated, e.g. "you@example.com,other@example.com". Unset or empty
     // means nobody has access — see lib/operator.ts's isOperatorEmail().
     OPERATOR_EMAILS: z.string().optional(),
+    // LiveKit SFU (deploy/livekit/) — the media server that replaces the
+    // in-browser mesh. All three optional so the app runs exactly as it does
+    // today when they are unset: POST /livekit/token answers 503 and nothing
+    // else changes. That is what lets this ship long before any client code
+    // knows LiveKit exists.
+    //
+    // API_SECRET signs the access tokens participants join with. It is the
+    // whole of the authorisation story on the LiveKit side — anyone holding it
+    // can mint a token for any room — so it is server-side only and must never
+    // be logged.
+    LIVEKIT_API_KEY: z.string().optional(),
+    LIVEKIT_API_SECRET: z.string().optional(),
+    // The wss:// address browsers connect to. Handed to the client alongside
+    // the token rather than compiled into the bundle, so moving the SFU is a
+    // server restart and not a rebuild — the mistake the VITE_TURN_* vars
+    // taught this codebase the hard way.
+    LIVEKIT_URL: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     // The default JWT secret is a well-known literal — anyone can forge valid

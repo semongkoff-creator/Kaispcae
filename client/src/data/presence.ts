@@ -42,3 +42,10 @@ export type ManualStatus = (typeof MANUAL_STATUSES)[number];
 // (which still has all 10, including this same 5, reachable any time via
 // PresenceButton).
 export const LOGIN_STATUSES = ['wfo', 'wfh', 'wfa', 'cuti', 'in_meeting'] as const;
+
+// Participant-list grouping order — WFO/WFH/WFA surface first (the "where is
+// everyone working from today" signal people actually scan the list for),
+// then everything else in the same order PRESENCE_EMOJI/PRESENCE_LABEL
+// already declare it, so a status never renders in one order in the badge
+// and another in the list it groups.
+export const PARTICIPANT_GROUP_ORDER: WorkMode[] = ['wfo', 'wfh', 'wfa', 'available', 'in_meeting', 'focus', 'lunch', 'break', 'away', 'cuti'];

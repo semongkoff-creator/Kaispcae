@@ -7,6 +7,7 @@ import {
   expandOccurrences, normaliseRule, truncateRuleBefore, EditScope,
 } from '@kaispace/shared';
 import { authenticateToken, AuthRequest } from '../middleware/auth';
+import { zonesOfRoom } from './roomMembers';
 import { resolveCalendarRole } from '../lib/calendarAccess';
 import { resolveWorkspaceRole } from '../lib/workspace';
 import { rateLimit } from '../middleware/rateLimit';
@@ -108,6 +109,8 @@ interface EventRow {
   roomId: string | null; rrule: string | null; masterId: string | null;
   recurrenceId: Date | null; exdates: Date[]; organizerId: string; visibility: string;
   meetkaiRoomSlug: string | null;
+  meetkaiZoneId: string | null;
+  meetkaiPassword: string | null;
   attendees: { userId: string; rsvp: string; optional: boolean; user: { displayName: string } }[];
   room: { id: string; name: string } | null;
 }
@@ -146,6 +149,15 @@ function serialise(row: EventRow, occStart: Date, occEnd: Date, recurrenceId: Da
     roomName: row.room?.name ?? null,
     visibility: row.visibility,
     meetkaiRoomSlug: row.meetkaiRoomSlug,
+    meetkaiZoneId: row.meetkaiZoneId,
+    // Tighter than the rest of `detailed`: `detailed` is true for anyone
+    // passing canSeeEventDetails, which a plain calendar VIEWER does on a
+    // non-private event ('event:readDetails' is viewer-minimum) — so
+    // returning the password there would hand it to exactly the people the
+    // gate exists to keep out. 'event:update' is editor-minimum, this
+    // codebase's own bar for who may edit the event, which is the right bar
+    // for who may read its password back.
+    meetkaiPassword: (row.organizerId === viewerId || canCalendar('event:update', { role })) ? row.meetkaiPassword : null,
     attendees: row.attendees.map((a) => ({ userId: a.userId, name: a.user.displayName, rsvp: a.rsvp, optional: a.optional })),
     busyOnly: false,
   };
@@ -232,6 +244,19 @@ calendar.post('/calendars/:calendarId/events', authenticateToken, mutationLimit,
       if (why) return res.status(409).json({ error: why });
     }
 
+    let meetkaiRoomSlug = req.body?.meetkaiRoomSlug ? String(req.body.meetkaiRoomSlug).slice(0, 200) : null;
+    let meetkaiZoneId = meetkaiRoomSlug && req.body?.meetkaiZoneId ? String(req.body.meetkaiZoneId).slice(0, 200) : null;
+    let meetkaiPassword = meetkaiZoneId && req.body?.meetkaiPassword ? String(req.body.meetkaiPassword).slice(0, 200) : null;
+    // Cross-org / non-existent zone: drop the whole trio silently rather than
+    // 409-ing the way roomId's clash check does. This is a picker-driven UI
+    // field, not a scarce booking resource — a stale zone id (the Room Editor
+    // deleted it since) is an ordinary occurrence, not a conflict worth
+    // failing the whole event creation over, and it matches this handler's
+    // existing "malformed optional combos just don't persist" cascade above.
+    if (meetkaiRoomSlug && !(await validMeetkaiZone(prisma, req.organizationId, meetkaiRoomSlug, meetkaiZoneId))) {
+      meetkaiRoomSlug = null; meetkaiZoneId = null; meetkaiPassword = null;
+    }
+
     const eventData = {
       calendarId: req.params.calendarId, title,
       description: req.body?.description ? String(req.body.description).slice(0, 4000) : null,
@@ -242,6 +267,7 @@ calendar.post('/calendars/:calendarId/events', authenticateToken, mutationLimit,
       roomId, rrule: rule,
       organizerId: req.userId!,
       visibility: req.body?.visibility === 'private' ? 'private' : 'default',
+      meetkaiRoomSlug, meetkaiZoneId, meetkaiPassword,
       attendees: {
         create: (Array.isArray(req.body?.attendeeIds) ? req.body.attendeeIds : [])
           .filter((id: unknown) => typeof id === 'string' && id !== req.userId)
@@ -302,6 +328,36 @@ calendar.patch('/calendars/events/:eventId', authenticateToken, mutationLimit, a
     if (req.body?.description !== undefined) patch.description = req.body.description ? String(req.body.description).slice(0, 4000) : null;
     if (req.body?.location !== undefined) patch.location = req.body.location ? String(req.body.location).slice(0, 200) : null;
     if (req.body?.visibility !== undefined) patch.visibility = req.body.visibility === 'private' ? 'private' : 'default';
+    if (req.body?.meetkaiRoomSlug !== undefined) patch.meetkaiRoomSlug = req.body.meetkaiRoomSlug ? String(req.body.meetkaiRoomSlug).slice(0, 200) : null;
+    if (req.body?.meetkaiZoneId !== undefined) patch.meetkaiZoneId = req.body.meetkaiZoneId ? String(req.body.meetkaiZoneId).slice(0, 200) : null;
+    if (req.body?.meetkaiPassword !== undefined) patch.meetkaiPassword = req.body.meetkaiPassword ? String(req.body.meetkaiPassword).slice(0, 200) : null;
+
+    // Re-enforce password requires zone requires room — same cascade POST
+    // already applies, but PATCH can touch these fields independently of
+    // each other across separate requests, so re-derive from the EFFECTIVE
+    // (patched-or-existing) values, not just what THIS request happened to include.
+    const effectiveRoomSlug = 'meetkaiRoomSlug' in patch ? (patch.meetkaiRoomSlug as string | null) : row.meetkaiRoomSlug;
+    const effectiveZoneId = 'meetkaiZoneId' in patch ? (patch.meetkaiZoneId as string | null) : row.meetkaiZoneId;
+    if (!effectiveRoomSlug) {
+      patch.meetkaiZoneId = null;
+      patch.meetkaiPassword = null;
+    } else if (!effectiveZoneId) {
+      patch.meetkaiPassword = null;
+    }
+
+    // Ownership check — the same cross-org gap POST closes above, re-applied
+    // here on the EFFECTIVE pair. Deliberately triggered by ANY of the three
+    // fields being touched, not just meetkaiRoomSlug: PATCHing only the ZONE
+    // against an already-stored slug is the same escape hatch by another
+    // door, and the stored slug itself may predate this validation. Invalid
+    // (foreign org, unknown room, or a zone that isn't actually part of that
+    // room) drops all three together, matching the cascade just above.
+    const touchesMeetkai = 'meetkaiRoomSlug' in patch || 'meetkaiZoneId' in patch || 'meetkaiPassword' in patch;
+    if (touchesMeetkai && effectiveRoomSlug && !(await validMeetkaiZone(prisma, req.organizationId, effectiveRoomSlug, effectiveZoneId))) {
+      patch.meetkaiRoomSlug = null;
+      patch.meetkaiZoneId = null;
+      patch.meetkaiPassword = null;
+    }
 
     const newStart = req.body?.start ? new Date(String(req.body.start)) : null;
     const newEnd = req.body?.end ? new Date(String(req.body.end)) : null;
@@ -338,6 +394,9 @@ calendar.patch('/calendars/events/:eventId', authenticateToken, mutationLimit, a
           allDay: row.allDay, timezone: row.timezone,
           location: (patch.location as string | null) ?? row.location,
           roomId: row.roomId,
+          meetkaiRoomSlug: 'meetkaiRoomSlug' in patch ? (patch.meetkaiRoomSlug as string | null) : row.meetkaiRoomSlug,
+          meetkaiZoneId: 'meetkaiZoneId' in patch ? (patch.meetkaiZoneId as string | null) : row.meetkaiZoneId,
+          meetkaiPassword: 'meetkaiPassword' in patch ? (patch.meetkaiPassword as string | null) : row.meetkaiPassword,
           masterId: row.id, recurrenceId: occurrence,
           organizerId: row.organizerId,
           visibility: (patch.visibility as string) ?? row.visibility,
@@ -364,6 +423,9 @@ calendar.patch('/calendars/events/:eventId', authenticateToken, mutationLimit, a
             allDay: row.allDay, timezone: row.timezone,
             location: (patch.location as string | null) ?? row.location,
             roomId: row.roomId,
+            meetkaiRoomSlug: 'meetkaiRoomSlug' in patch ? (patch.meetkaiRoomSlug as string | null) : row.meetkaiRoomSlug,
+            meetkaiZoneId: 'meetkaiZoneId' in patch ? (patch.meetkaiZoneId as string | null) : row.meetkaiZoneId,
+            meetkaiPassword: 'meetkaiPassword' in patch ? (patch.meetkaiPassword as string | null) : row.meetkaiPassword,
             rrule: req.body?.rrule !== undefined ? normaliseRule(String(req.body.rrule)) : row.rrule,
             organizerId: row.organizerId,
             visibility: (patch.visibility as string) ?? row.visibility,
@@ -504,6 +566,30 @@ export async function roomBookable(prisma: PrismaClient, roomId: string, userId:
     if (wsRole !== 'admin') return `Ruang "${room.name}" hanya bisa dibooking admin`;
   }
   return null;
+}
+
+// Validates meetkaiRoomSlug/meetkaiZoneId the same way roomBookable above
+// validates roomId — Room.slug is globally unique (NOT per-org), so without
+// this any authenticated user in ANY org could point an event at another
+// org's room/zone by slug/id alone, and the auto-join sweep would then
+// force-move that org's people (or the password gate would fire) inside a
+// room the requester was never entitled to touch. Zone existence is checked
+// through zonesOfRoom, so a layerData-backed (Room Editor) room resolves
+// correctly rather than against the frozen legacy `zones` column.
+async function validMeetkaiZone(
+  prisma: PrismaClient,
+  organizationId: string | undefined,
+  roomSlug: string,
+  zoneId: string | null,
+): Promise<boolean> {
+  if (!organizationId) return false;
+  const room = await prisma.room.findUnique({
+    where: { slug: roomSlug },
+    select: { organizationId: true, zones: true, layerData: true },
+  });
+  if (!room || room.organizationId !== organizationId) return false;
+  if (!zoneId) return true;
+  return zonesOfRoom(room).some((z) => z.id === zoneId);
 }
 
 // Serialise every booking attempt for this room. hashtext() maps the room id

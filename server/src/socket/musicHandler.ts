@@ -113,6 +113,9 @@ function scheduleAdvance(io: Server, room: string, zoneId: string): void {
   if (!s.current || s.current.pausedAt !== null) return;
   const elapsedMs = Date.now() - s.current.startedAt;
   const remainingMs = Math.max(0, s.current.durationSec * 1000 - elapsedMs);
+  // [music-diag] TEMPORARY — diagnosing a report that songs get cut off
+  // before they finish. Remove once confirmed fixed.
+  console.log(`[music-diag] scheduleAdvance ${zoneId}: durationSec=${s.current.durationSec} elapsedMs=${elapsedMs} remainingMs=${remainingMs} -> advance in ${remainingMs + 500}ms`);
   // +500ms slack so the timer never fires a hair before the track actually
   // finishes client-side.
   s.advanceTimer = setTimeout(() => advance(io, room, zoneId), remainingMs + 500);
@@ -120,7 +123,9 @@ function scheduleAdvance(io: Server, room: string, zoneId: string): void {
 
 async function playNow(io: Server, room: string, zoneId: string, track: MusicTrack): Promise<void> {
   const s = getSession(room, zoneId);
-  const durationSec = (await getVideoDurationSec(track.videoId)) ?? FALLBACK_DURATION_SEC;
+  const lookedUp = await getVideoDurationSec(track.videoId);
+  const durationSec = lookedUp ?? FALLBACK_DURATION_SEC;
+  console.log(`[music-diag] playNow ${zoneId}: videoId=${track.videoId} lookedUpDurationSec=${lookedUp} -> using ${durationSec}s${lookedUp === null ? ' (FALLBACK)' : ''}`);
   s.current = { track, startedAt: Date.now(), pausedAt: null, durationSec };
   scheduleAdvance(io, room, zoneId);
   broadcastState(io, room, zoneId);
@@ -130,6 +135,7 @@ async function playNow(io: Server, room: string, zoneId: string, track: MusicTra
 function advance(io: Server, room: string, zoneId: string): void {
   const s = getSession(room, zoneId);
   const next = s.queue.shift();
+  console.log(`[music-diag] advance fired for ${zoneId}, next=${next ? next.videoId : 'none (queue empty)'}`);
   clearAdvanceTimer(s);
   if (!next) {
     s.current = null;
@@ -149,6 +155,7 @@ export async function handleMusicCommand(
   text: string,
 ): Promise<void> {
   const trimmed = text.trim();
+  console.log(`[music-diag] handleMusicCommand ${zoneId}: "${trimmed}" from ${senderName}`);
   const s = getSession(room, zoneId);
 
   if (trimmed === '!skip') {

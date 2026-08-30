@@ -39,6 +39,42 @@ State          : Zustand (gameStore)
 Rendering      : HTML5 Canvas — sprite/tileset rendering ditulis manual (bukan game engine)
 Real-time      : Socket.IO (WebSocket)
 Audio/Video    : WebRTC peer-to-peer murni (RTCPeerConnection langsung, tanpa SFU/mediasoup)
+
+## Batas React ↔ game loop (WAJIB dibaca sebelum menambah state)
+
+Dunia digambar di canvas 2D di dalam komponen React (`GameCanvas`). Itu artinya
+React dan game loop berbagi satu main thread, dan setiap re-render yang tidak
+perlu **memakan frame budget**. Enam penyebab "gerakan patah-patah" yang
+ditemukan pada 20 Agustus 2026 semuanya bentuk yang sama: nilai yang berubah
+pada laju gameplay dititipkan ke state React, lalu React dengan patuh me-render
+ulang pohon yang mahal.
+
+**Aturannya:**
+
+> Apa pun yang berubah lebih cepat dari ~2x per detik TIDAK BOLEH hidup di state
+> React, dan TIDAK BOLEH menjadi dependency dari render/effect apa pun.
+
+Konsekuensi praktisnya:
+
+1. **Posisi, arah, jarak, status bergerak** hidup di modul biasa di luar React —
+   `stores/livePosition.ts`, `stores/remotePositions.ts`. Canvas membacanya
+   imperatif tiap frame lewat ref. Jangan pindahkan kembali ke store.
+2. **Pilih field, jangan objek.** `useGameStore((s) => s.localPlayer)` ikut
+   re-render tiap tulisan posisi (10Hz). Pilih `s.localPlayer.name` dst.
+   Biayanya tidak terlihat di tempat penulisannya — itulah kenapa ada guard test.
+3. **React dipicu peristiwa, bukan nilai kontinu.** Kalau UI butuh nilai
+   kontinu, berlangganan ke bentuk yang sudah dikuantisasi (tier visibility,
+   boolean "sedang bicara"), bukan angkanya.
+4. **Setiap prop yang melewati `memo()` harus stabil.** Satu arrow inline
+   membatalkan barrier-nya sepenuhnya, tanpa peringatan apa pun.
+5. **Layer statis di-cache.** Floor plan (tile/furniture/zona) digambar sekali
+   per perubahan peta ke canvas offscreen, lalu di-blit. Jangan gambar ulang
+   per frame karena ada objek dinamis yang bergerak di atasnya.
+
+Aturan 2, 4, dan 5 ditegakkan oleh `tests/performanceGuards.test.ts` dan
+`tests/storeSubscriptions.test.ts` — kalau salah satu gagal, jangan diakali
+test-nya; nilai itu memang tidak boleh lewat sana.
+
 Backend        : Node.js + Express + Socket.IO
 Database       : PostgreSQL via Prisma ORM (users, rooms, tilemap/furniture/zones sebagai Json) + Redis untuk presence (fallback in-memory kalau Redis tidak ada)
 Auth           : JWT (jsonwebtoken) + bcrypt, middleware Express custom (bukan NextAuth)
@@ -78,7 +114,6 @@ meetkai/
 │   │   │   │   ├── EmoteWheel.tsx
 │   │   │   │   ├── AdminPanel.tsx
 │   │   │   │   ├── ParticipantPanel.tsx    # Panel kolaps: daftar peserta + status + thumbnail video (reuse remoteStreams)
-│   │   │   │   ├── NameModal.tsx
 │   │   │   │   └── ConnectionIndicator.tsx
 │   │   │   └── hud/
 │   │   │       ├── MicButton.tsx

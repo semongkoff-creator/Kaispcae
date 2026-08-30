@@ -1,7 +1,9 @@
 import { useEffect } from 'react';
-import { MicFill, MicMuteFill } from 'react-bootstrap-icons';
+import { Mic, MicFill, MicMuteFill } from 'react-bootstrap-icons';
 import { isTypingTarget } from '@/utils/hotkeys';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { DeviceCaret } from './DeviceCaret';
+import { useGameStore } from '@/stores/gameStore';
 
 interface MicButtonProps {
   muted: boolean;
@@ -9,6 +11,13 @@ interface MicButtonProps {
 }
 
 export function MicButton({ muted, onToggle }: MicButtonProps) {
+  // Isolated selector (not read in App.tsx — see that file's own comment on
+  // why localSpeaking was pulled out of the top-level component after a
+  // flicker diagnosis): this button re-renders on every speaking edge, but
+  // nothing above it does. Same defensive `&& !muted` VideoGrid's speaking
+  // selector uses, even though muted/speaking shouldn't overlap in practice.
+  const speaking = useGameStore((s) => s.localSpeaking) && !muted;
+
   // M key shortcut
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -25,28 +34,43 @@ export function MicButton({ muted, onToggle }: MicButtonProps) {
   }, [onToggle]);
 
   return (
-    <Tooltip
-      label={`Mikrofon (M) — ${muted ? 'Mati' : 'Aktif'}`}
-      detail="Nyalakan/matikan mikrofonmu. Orang lain di zone/meeting yang sama akan mendengarmu saat aktif."
-    >
-      <button
-        onClick={onToggle}
-        // "Ethereal Collaboration" — live/unmuted now reads as the primary
-        // solid-purple action state (same treatment ScreenShareButton already
-        // uses for "currently sharing"), not just a neutral glass icon. Muted
-        // keeps the glass surface with a red icon/ring — that part was already
-        // on-spec, untouched.
-        className={`relative flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-xl border shadow-lg transition-all hover:scale-105 cursor-pointer ${
-          muted
-            ? 'bg-white/90 dark:bg-gray-800/90 border-purple-200/60 dark:border-white/10 shadow-purple-500/10'
-            : 'bg-purple-600 border-purple-500 shadow-purple-500/30'
-        }`}
+    <div className="flex items-center">
+      <Tooltip
+        label={`Mikrofon (M) — ${muted ? 'Mati' : 'Aktif'}`}
+        detail="Nyalakan/matikan mikrofonmu. Orang lain di zone/meeting yang sama akan mendengarmu saat aktif."
       >
-        {muted ? <MicMuteFill className="text-red-500" size={16} /> : <MicFill className="text-white" size={16} />}
-        {muted && (
-          <div className="absolute inset-0 rounded-full border-2 border-red-500 animate-pulse" />
-        )}
-      </button>
-    </Tooltip>
+        <button
+          onClick={onToggle}
+          // Flat/borderless toolbar restyle — no per-button background pill
+          // any more (that's now the shared outer bar's job, see App.tsx),
+          // just a plain glyph plus a subtle hover tint like every other
+          // flat button in this bar. The three-state COLOR distinction this
+          // already had is kept exactly (muted=red, speaking=green) — only
+          // the *resting* (unmuted, not speaking) color changed, from the
+          // old glass-pill gray to the same plain dark gray/black every
+          // other flat icon in the bar uses.
+          className="relative flex items-center justify-center w-8 h-8 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+        >
+          {/* Switched back from the real mic.svg/mic_on.svg raster assets to
+              react-bootstrap-icons glyphs — a clearer, higher-res reference
+              screenshot showed thin OUTLINE icons throughout this bar, not
+              the assets' bolder solid-filled style. Outline (Mic) for the
+              neutral resting state, filled (MicFill/MicMuteFill) for the
+              two states actually worth calling attention to — same
+              "outline = neutral, filled = notable" split the asset pair
+              itself used, just with react-icons glyphs instead. Colors kept
+              exactly as the asset pack's own hex values (#6E6D72/#54D678),
+              not react-icons' default palette. */}
+          {muted ? (
+            <MicMuteFill size={14} className="text-red-500" />
+          ) : speaking ? (
+            <MicFill size={14} className="text-[#54D678]" />
+          ) : (
+            <Mic size={14} className="text-[#6E6D72]" />
+          )}
+        </button>
+      </Tooltip>
+      <DeviceCaret kind="mic" label="Mikrofon" />
+    </div>
   );
 }

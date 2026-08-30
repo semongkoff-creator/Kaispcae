@@ -76,11 +76,29 @@ async function invalidateSession(userId: string): Promise<void> {
 const REFRESH_THRESHOLD_SECONDS = 3 * 24 * 60 * 60; // 3 days
 
 // Login/register are brute-force targets — much tighter than the global
-// 100-req/min limiter applied to every other route.
-const authRateLimit = rateLimit(15 * 60 * 1000, 10); // 10 attempts / 15 min / IP
+// 100-req/min limiter applied to every other route. Split into two
+// independent limiters (each rateLimit() call gets its own Map — see that
+// function's own comment on why a shared instance was a bug) after a real
+// report: DCM's restricted-account rollout put several accounts behind one
+// shared office/NAT IP, and 10 login attempts/15min is exhausted the
+// moment ~10 different coworkers each try once around the same time —
+// "too many requests" for everyone else until the window resets, despite
+// every one of them using a correct, working password. registerRateLimit
+// stays tight since account creation is a rare, admin-driven action, not
+// something many real users do concurrently.
+const registerRateLimit = rateLimit(15 * 60 * 1000, 10); // 10 attempts / 15 min / IP
+// refundOnSuccess: the budget is for WRONG guesses. Counting correct ones too
+// is what turned "everybody please reload" into "nobody past the 30th can get
+// back in" for an office of ~89 people behind one NAT IP — every one of them
+// typing a password that works. A brute-forcer only produces failures, and
+// those still count in full, so the ceiling that matters is unchanged.
+//
+// 60 rather than 30 on top of that: the refund lands on 'finish', so a burst
+// arriving together still holds its slots briefly, all at once.
+const loginRateLimit = rateLimit(15 * 60 * 1000, 60, { refundOnSuccess: true });
 
 // POST /auth/register
-auth.post('/register', authRateLimit, validate(registerSchema), async (req, res: Response) => {
+auth.post('/register', registerRateLimit, validate(registerSchema), async (req, res: Response) => {
   try {
     const { email, password, displayName } = req.body;
     const prisma = getPrisma();
@@ -144,10 +162,10 @@ auth.post('/register', authRateLimit, validate(registerSchema), async (req, res:
 // Organization AND its founding admin User atomically. This is the only
 // self-serve way to get a new org today; OrgInvite (lib/orgInvite.ts)
 // only grows membership within an org that already exists. Deliberately
-// reuses authRateLimit (not a separate limiter) — this mints a new
+// reuses registerRateLimit (not a separate limiter) — this mints a new
 // tenant AND a new account in one request, at least as abuse-sensitive
 // as plain registration.
-auth.post('/create-organization', authRateLimit, validate(createOrganizationSchema), async (req, res: Response) => {
+auth.post('/create-organization', registerRateLimit, validate(createOrganizationSchema), async (req, res: Response) => {
   try {
     const { orgName, email, password, displayName } = req.body;
     const prisma = getPrisma();
@@ -245,12 +263,14 @@ auth.post('/create-organization', authRateLimit, validate(createOrganizationSche
 });
 
 // POST /auth/login
-auth.post('/login', authRateLimit, validate(loginSchema), async (req, res: Response) => {
+auth.post('/login', loginRateLimit, validate(loginSchema), async (req, res: Response) => {
   try {
     const { email, password } = req.body;
     const prisma = getPrisma();
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
@@ -292,13 +312,15 @@ auth.get('/me', authenticateToken, async (req: AuthRequest, res: Response) => {
     const user = await prisma.user.findUnique({
       where: { id: req.userId },
       select: {
-        id: true, email: true, displayName: true, avatarConfig: true, preferences: true,
+        id: true, email: true, displayName: true, fullName: true, avatarConfig: true, preferences: true,
         accountRole: true, workspaceRole: true, timezone: true, active: true,
         // Bug 1 — needed to preserve / adopt the single-session id below.
         currentSessionId: true,
         // QA #1/#6 — gates the first-run tutorial (App.tsx); null means this
         // account has never finished it.
         tutorialCompletedAt: true,
+        // DCM restricted accounts — see publicUser.ts's field comment.
+        restrictedToRoomId: true,
       },
     });
     if (!user) {
