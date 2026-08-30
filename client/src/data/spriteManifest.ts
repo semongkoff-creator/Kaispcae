@@ -1,6 +1,6 @@
 // Auto-generated from client/public/assets/characters/generator and premade/generator-premade.
 // Regenerate by re-listing those folders if assets are added/removed — see scripts referenced in
-// PROMPT_LANJUTKAN_VIRTUALMEET.md Tahap 2.
+// PROMPT_LANJUTKAN_KAISPACE.md Tahap 2.
 
 export const GENERATOR_BODIES: string[] = [
   "Body_32x32_01.png",

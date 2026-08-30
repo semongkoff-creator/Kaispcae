@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { getPlayers, setPlayers, updatePlayerPosition, setPlayerStopped } from '../server/src/store/roomStore';
 import { getLivePlayerMovement } from '../server/src/store/playerLiveState';
-import type { Avatar } from '@virtualmeet/shared';
+import type { Avatar } from '@kaispace/shared';
 
 let passed = 0;
 async function test(name: string, fn: () => Promise<void>) {
