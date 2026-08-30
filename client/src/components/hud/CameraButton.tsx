@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { CameraVideoOffFill } from 'react-bootstrap-icons';
+import { CameraVideo, CameraVideoOffFill } from 'react-bootstrap-icons';
 import { isTypingTarget } from '@/utils/hotkeys';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { DeviceCaret } from './DeviceCaret';
@@ -32,17 +32,18 @@ export function CameraButton({ enabled, onToggle }: CameraButtonProps) {
       >
         <button
           onClick={onToggle}
-          // Flat/borderless toolbar restyle (see MicButton's own comment) —
-          // no per-button background pill any more. camera.svg is already
-          // the same dark gray (#6E6D72) every other flat icon in this bar
-          // uses, so "on" needs no extra styling; "off" keeps its existing
-          // red icon (no background color to lose here — it was never
-          // colored by state, only "on" had the purple pill).
-          className="flex items-center justify-center w-9 h-9 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+          // Flat/borderless toolbar restyle (see MicButton's own comment).
+          className="flex items-center justify-center w-8 h-8 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
         >
-          {/* No "camera off" variant exists in the real asset set — kept the
-              existing red react-bootstrap-icons glyph for that state. */}
-          {enabled ? <img src="/assets/img/icons/camera.svg" width={15} height={15} alt="" /> : <CameraVideoOffFill className="text-red-500" size={15} />}
+          {/* CameraVideo (outline) instead of the camera.svg asset — see
+              MicButton's own comment on why this bar switched back to
+              react-icons outline glyphs. Same silhouette family as the
+              existing "off" icon (CameraVideoOffFill), just outline instead
+              of filled, colored to the asset pack's own gray rather than
+              react-icons' default. No outline "camera off" glyph swap
+              needed — off is meant to stand out, so it keeps its filled red
+              look unchanged. */}
+          {enabled ? <CameraVideo size={14} className="text-[#6E6D72]" /> : <CameraVideoOffFill className="text-red-500" size={14} />}
         </button>
       </Tooltip>
       <DeviceCaret kind="camera" label="Kamera" />

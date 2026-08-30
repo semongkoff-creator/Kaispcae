@@ -2722,10 +2722,11 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             outline on the reference screenshot, not real UI (confirmed by
             Screen Share also turning out to be gray/green, not blue, per
             the app's own mic.svg/mic_on.svg color pair — see
-            ScreenShareButton's own comment). Back to a plain neutral
-            hairline; the tightened gap/padding from that same pass stays,
-            since compactness itself wasn't in question. */}
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-3 py-2">
+            ScreenShareButton's own comment). Sized down further (gap-2->1.5,
+            px-3->2.5) after a clearer, uncropped reference screenshot showed
+            noticeably smaller/more delicate icon proportions than this pass
+            still had. */}
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-purple-200/60 dark:border-white/10 shadow-lg shadow-purple-500/10 rounded-full px-2.5 py-1.5">
           <MicButton muted={isMicMuted} onToggle={handleMicToggle} />
           <CameraButton enabled={isCameraOn} onToggle={handleCameraToggle} />
           <ScreenShareButton sharing={isScreenSharing} onToggle={handleScreenShareToggle} />
@@ -2741,7 +2742,7 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
           {/* Divider — separates the three call controls above (mic/camera/
               share) from the group/raise-hand/emoji cluster below, per the
               reference design. */}
-          <div className="w-px h-5 bg-gray-200 dark:bg-gray-600 shrink-0" />
+          <div className="w-px h-4 bg-gray-200 dark:bg-gray-600 shrink-0" />
           {/* Add Media — reuses AttachmentMenuButton (ChatPanel/MessengerApp's
               own Gambar/Video/Dokumen picker), not a new upload component.
               Its onFile is a placeholder: this toolbar has no single "active
@@ -2755,8 +2756,8 @@ function Game({ roomSlug, onLeave, onLogout, onPortalTravel, authDisplayName, au
             onFile={() => showAlert('Add Media belum tersambung ke tujuan manapun — placeholder sampai ada keputusan produk soal file ini dikirim ke mana.')}
             title="Add Media"
             detail="Kirim gambar, video, atau dokumen."
-            icon={<img src="/assets/img/icons/add_media.svg" width={15} height={15} alt="" />}
-            buttonClassName="flex items-center justify-center w-9 h-9 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+            icon={<img src="/assets/img/icons/add_media.svg" width={14} height={14} alt="" />}
+            buttonClassName="flex items-center justify-center w-8 h-8 rounded-lg transition-all hover:scale-105 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
           />
           {/* Raise Hand — moved here (after the group icon, before emoji)
               per the reference layout; same handler/behavior as before,

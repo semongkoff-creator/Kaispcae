@@ -36,12 +36,12 @@ export function ScreenShareButton({ sharing, onToggle }: ScreenShareButtonProps)
         // #6E6D72 / mic_on.svg #54D678 — see MicButton): gray at rest, green
         // while actively sharing, mirroring how Mic itself distinguishes
         // idle from active.
-        className={`relative flex items-center justify-center w-9 h-9 rounded-xl shadow-md transition-all hover:scale-105 hover:brightness-110 cursor-pointer ${
+        className={`relative flex items-center justify-center w-8 h-8 rounded-lg shadow-md transition-all hover:scale-105 hover:brightness-110 cursor-pointer ${
           sharing ? 'bg-[#54D678]' : 'bg-[#6E6D72]'
         }`}
       >
         {sharing ? (
-          <DisplayFill className="text-white" size={15} />
+          <DisplayFill className="text-white" size={14} />
         ) : (
           // share_screen.svg is two-tone by default (dark gray monitor body,
           // white arrow) — meant for a light background. brightness-0 invert
@@ -49,10 +49,10 @@ export function ScreenShareButton({ sharing, onToggle }: ScreenShareButtonProps)
           // "white icon on the filled square" (same filter trick used
           // elsewhere for icons that need forcing to white — see the
           // top-left pill's Status/My Seat buttons in App.tsx).
-          <img src="/assets/img/icons/share_screen.svg" width={15} height={15} alt="" className="brightness-0 invert" />
+          <img src="/assets/img/icons/share_screen.svg" width={14} height={14} alt="" className="brightness-0 invert" />
         )}
         {sharing && (
-          <div className="absolute inset-0 rounded-xl border-2 border-green-300 animate-pulse" />
+          <div className="absolute inset-0 rounded-lg border-2 border-green-300 animate-pulse" />
         )}
       </button>
     </Tooltip>
